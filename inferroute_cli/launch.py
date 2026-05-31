@@ -15,12 +15,50 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
+from pathlib import Path
 from typing import Iterable
 
 from .config import Credentials
 
 
 _DEFAULT_FLAGS = ["--dangerously-skip-permissions"]
+
+
+def _print_session_link(api_url: str) -> None:
+    """Print a clickable URL to view this session's traffic on the dashboard.
+
+    The session page at <site>/dashboard/session/[id] uses a `from-<unix_ms>`
+    slug — it aggregates every usage_records row since that timestamp. So
+    capturing "now" here gives the user a stable link they can revisit later
+    to see exactly the requests this `ir` invocation produced.
+
+    We also persist the URL to ~/.config/inferroute/last_session for retrieval
+    via `ir status` or shell history.
+    """
+    now_ms = int(time.time() * 1000)
+    # api.inferroute.ai → inferroute.ai (the dashboard sits on the apex domain)
+    site = api_url
+    for prefix in ("https://api.", "http://api."):
+        if site.startswith(prefix):
+            site = prefix.split(".", 1)[0] + "://" + site[len(prefix):]
+            break
+    url = f"{site.rstrip('/')}/dashboard/session/from-{now_ms}"
+
+    # Persist for later retrieval (e.g. `ir status`, or user copy-paste).
+    try:
+        target = Path.home() / ".config" / "inferroute" / "last_session"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(url + "\n")
+    except OSError:
+        pass
+
+    # Print to stderr so Claude Code's TUI screen-clear (on stdout) doesn't
+    # immediately wipe it. Most terminals keep stderr in scrollback.
+    sys.stderr.write(
+        f"\n  ➜ View this session at\n    \033[36m{url}\033[0m\n\n"
+    )
+    sys.stderr.flush()
 
 
 def _require_claude_binary() -> str:
@@ -70,6 +108,9 @@ def launch_through_inferroute(
     env["ANTHROPIC_BASE_URL"] = creds.api_url
     env["ANTHROPIC_AUTH_TOKEN"] = creds.api_key
     # NOTE: deliberately do NOT pop ANTHROPIC_API_KEY — see docstring.
+
+    # Print the dashboard link BEFORE handing the terminal to claude.
+    _print_session_link(creds.api_url)
 
     argv = [
         binary,

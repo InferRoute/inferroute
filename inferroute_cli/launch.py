@@ -42,14 +42,21 @@ def launch_through_inferroute(
 ) -> None:
     """Exec `claude` with inferroute env + --model pinned.
 
-    Uses ANTHROPIC_AUTH_TOKEN (Bearer) instead of ANTHROPIC_API_KEY so
-    Claude Code does NOT show its "Detected a custom API key, do you
-    want to use it?" safety prompt. The proxy at api.inferroute.ai
-    accepts both `Authorization: Bearer …` and `x-api-key: …`, so this
-    is purely a UX upgrade — same auth, no friction.
+    Auth strategy:
+      * ANTHROPIC_BASE_URL  → inferroute (so chat traffic routes here)
+      * ANTHROPIC_AUTH_TOKEN → inferroute key as Bearer (skips Claude Code's
+        "Detected a custom API key" safety prompt — that prompt only fires
+        when ANTHROPIC_API_KEY is set to a non-Anthropic value).
+      * ANTHROPIC_API_KEY    → LEFT UNTOUCHED. The user's existing Anthropic
+        subscription key, if set, stays in place so Claude Code's
+        first-party-only features (voice tap, etc.) keep working against
+        the actual Anthropic API.
 
-    We also clear any pre-existing ANTHROPIC_API_KEY in the subprocess
-    env to avoid the same prompt re-firing on the legacy variable.
+    The proxy at api.inferroute.ai accepts both `Authorization: Bearer …`
+    and `x-api-key: …`, so this hybrid setup is safe — the routed chat
+    path uses Bearer; anything Claude Code routes outside our base_url
+    (or anything that uses its own first-party-only auth path) can still
+    use the user's real Anthropic key.
     """
     if not creds.is_valid:
         sys.stderr.write(
@@ -62,7 +69,7 @@ def launch_through_inferroute(
     env = os.environ.copy()
     env["ANTHROPIC_BASE_URL"] = creds.api_url
     env["ANTHROPIC_AUTH_TOKEN"] = creds.api_key
-    env.pop("ANTHROPIC_API_KEY", None)
+    # NOTE: deliberately do NOT pop ANTHROPIC_API_KEY — see docstring.
 
     argv = [
         binary,

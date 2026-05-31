@@ -45,7 +45,10 @@ def _print_session_link(api_url: str) -> None:
             scheme = prefix.split("://", 1)[0]  # "https" or "http"
             site = scheme + "://" + site[len(prefix):]
             break
-    url = f"{site.rstrip('/')}/dashboard/session/from-{now_ms}"
+    # Note: it's `/session/...` not `/dashboard/session/...` — the
+    # (dashboard) route group in inferroute-site is parenthesised and
+    # therefore not part of the URL path (Next.js App Router convention).
+    url = f"{site.rstrip('/')}/session/from-{now_ms}"
 
     # Persist for later retrieval (e.g. `ir status`, or user copy-paste).
     try:

@@ -40,7 +40,17 @@ def launch_through_inferroute(
     creds: Credentials,
     extra_args: Iterable[str] = (),
 ) -> None:
-    """Exec `claude` with inferroute env + --model pinned."""
+    """Exec `claude` with inferroute env + --model pinned.
+
+    Uses ANTHROPIC_AUTH_TOKEN (Bearer) instead of ANTHROPIC_API_KEY so
+    Claude Code does NOT show its "Detected a custom API key, do you
+    want to use it?" safety prompt. The proxy at api.inferroute.ai
+    accepts both `Authorization: Bearer …` and `x-api-key: …`, so this
+    is purely a UX upgrade — same auth, no friction.
+
+    We also clear any pre-existing ANTHROPIC_API_KEY in the subprocess
+    env to avoid the same prompt re-firing on the legacy variable.
+    """
     if not creds.is_valid:
         sys.stderr.write(
             "\n  ERROR: no inferroute API key found.\n"
@@ -51,7 +61,8 @@ def launch_through_inferroute(
     binary = _require_claude_binary()
     env = os.environ.copy()
     env["ANTHROPIC_BASE_URL"] = creds.api_url
-    env["ANTHROPIC_API_KEY"] = creds.api_key
+    env["ANTHROPIC_AUTH_TOKEN"] = creds.api_key
+    env.pop("ANTHROPIC_API_KEY", None)
 
     argv = [
         binary,

@@ -37,11 +37,13 @@ def _print_session_link(api_url: str) -> None:
     via `ir status` or shell history.
     """
     now_ms = int(time.time() * 1000)
-    # api.inferroute.ai → inferroute.ai (the dashboard sits on the apex domain)
+    # api.inferroute.ai → inferroute.ai (the dashboard sits on the apex domain).
+    # Works for https://api.X and http://api.X; leaves anything else alone.
     site = api_url
     for prefix in ("https://api.", "http://api."):
         if site.startswith(prefix):
-            site = prefix.split(".", 1)[0] + "://" + site[len(prefix):]
+            scheme = prefix.split("://", 1)[0]  # "https" or "http"
+            site = scheme + "://" + site[len(prefix):]
             break
     url = f"{site.rstrip('/')}/dashboard/session/from-{now_ms}"
 

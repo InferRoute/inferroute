@@ -50,14 +50,21 @@ def cmd_gate(args: list[str]) -> int:
     fail_closed = "--fail-closed" in args
     quiet = "--quiet" in args or "-q" in args
     # --print-env: emit the economy execution env for the gated cycle, then exit 0.
-    # Lets a loop do:  eval "$(ir gate --print-env)"  before launching its cycle.
+    #   eval "$(ir gate --print-env)"           → export lines for the current shell
+    #   env $(ir gate --print-env --inline) …   → one-line KEY=val prefix for an inline
+    #                                             `env … claude` command (mirrors a loop's
+    #                                             existing `NATIVE_ENV="env -u …"` idiom)
     if "--print-env" in args:
         creds = config.load()
         if not creds.is_valid:
             sys.stderr.write("ir gate: no API key (run `ir login`)\n")
             return 2
-        print(f'export ANTHROPIC_BASE_URL="{creds.api_url.rstrip("/")}/economy"')
-        print(f'export ANTHROPIC_AUTH_TOKEN="{creds.api_key}"')
+        base = f"{creds.api_url.rstrip('/')}/economy"
+        if "--inline" in args:
+            print(f"ANTHROPIC_BASE_URL={base} ANTHROPIC_AUTH_TOKEN={creds.api_key}")
+        else:
+            print(f'export ANTHROPIC_BASE_URL="{base}"')
+            print(f'export ANTHROPIC_AUTH_TOKEN="{creds.api_key}"')
         return 0
 
     creds = config.load()

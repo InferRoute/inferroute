@@ -107,6 +107,7 @@ def launch_through_inferroute(
     model_id: str,
     creds: Credentials,
     extra_args: Iterable[str] = (),
+    permission_mode: str | None = None,
 ) -> None:
     """Exec `claude` with inferroute env + --model pinned.
 
@@ -147,9 +148,16 @@ def launch_through_inferroute(
     # Print the dashboard link BEFORE handing the terminal to claude.
     _print_session_link(creds.api_url)
 
+    # permission_mode (e.g. "plan") makes Claude Code propose before acting — the
+    # plan-approval IS the gate, so we drop --dangerously-skip-permissions (it would
+    # bypass the very gate we want). Otherwise keep the default skip-permissions.
+    if permission_mode:
+        flags = ["--permission-mode", permission_mode]
+    else:
+        flags = list(_DEFAULT_FLAGS)
     argv = [
         binary,
-        *_DEFAULT_FLAGS,
+        *flags,
         "--model", model_id,
         *list(extra_args),
     ]

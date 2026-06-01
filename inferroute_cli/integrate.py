@@ -25,52 +25,48 @@ def _build_prompt(api_url: str) -> str:
     URL; the agent reads the API key from the user's existing inferroute creds /
     env — we never paste the secret into the prompt."""
     return f"""\
-You wire THIS repo's autonomous-agent loop to inferroute's economy lane (cheap off-peak runs).
+Wire THIS repo's autonomous-agent loop to inferroute's economy lane (cheap off-peak runs).
+You are in PLAN MODE: research the repo, then present a concise implementation plan and STOP
+for approval. Do not edit files until the plan is approved.
 
 HARD RULES:
 - Use the installed `ir` CLI (it's on PATH — this agent was launched via it). Do NOT read or
-  import inferroute's source / Python package to reverse-engineer it — `ir` already wraps the
-  gate. Just call the command.
-- Claude Code CANNOT set arbitrary HTTP headers. Do NOT search for a way to send an `IR-Lane`
-  header — there is none. The economy lane is selected by the BASE URL (see Step 3).
-- Time-box discovery: if you haven't found a loop after a few greps, report what you saw and stop.
-- Never auto-commit. Show a diff and get y/n before writing any file. Keep responses short.
+  import inferroute's source / Python package to reverse-engineer it — `ir` already wraps it.
+- Claude Code CANNOT set arbitrary HTTP headers. Do NOT look for a way to send an `IR-Lane`
+  header — there is none. The economy lane is selected by the BASE URL (step 3).
+- Time-box discovery: a few greps, then plan. Keep the plan short and concrete (exact files,
+  exact lines, exact edits).
 
-STEP 1 — Find the loop (grep, don't overthink):
-The repeating driver: `run-loop.sh`, `while true`, cron, systemd `*.service`, or an existing
-pace/gate line (e.g. `pace-gate`). Name the file + line. That line is the seam.
+STEP 1 — Find the loop: the repeating driver (`run-loop.sh`, `while true`, cron, systemd
+`*.service`) and any existing pace/gate line (e.g. `pace-gate`). That line is the seam.
 
-STEP 2 — Insert the gate (show the diff, don't write yet). Use the `ir gate` command — it owns
-the poll + fail-open + jitter, exits 0=run / 1=skip (like `pace-gate`):
+STEP 2 — Gate the cycle with `ir gate` (it owns poll + fail-open + jitter; exit 0=run/1=skip):
 ```bash
 if ir gate; then <run one cycle>; else sleep 30; fi
 ```
-If there's an existing `pace-gate` line, COMPOSE rather than replace:
-`~/bin/pace-gate ... && ir gate && <run one cycle>`.
-IMPORTANT runtime-PATH check: the loop may run under systemd/cron with a stripped PATH where
-`ir` isn't visible. Resolve `command -v ir` now and use its ABSOLUTE path in the edit (e.g.
-`/home/<user>/.local/bin/ir gate`). Only if `ir` cannot be guaranteed at the loop's runtime,
-fall back to raw curl: `curl -fsS -m10 -H "Authorization: Bearer $IR_KEY" "$IR_API_URL/v1/gate"`
-+ `jq -r .go`. Prefer `ir gate`.
+Compose with an existing pace-gate rather than replace it: `pace-gate … && ir gate && <cycle>`.
+PATH note: if the loop runs under systemd/cron with a stripped PATH, use `ir`'s absolute path
+(`command -v ir`). Raw-curl fallback only if `ir` truly isn't reachable at loop runtime.
 
-STEP 3 — Make the discount apply (CRITICAL): the gated cycle's LLM calls must hit inferroute's
-ECONOMY base URL. Trace how this repo's cycle reaches a model today (it may run native Claude
-and even `unset ANTHROPIC_BASE_URL`). For gated cycles only, set the economy env — the easiest
-correct way is `ir gate --print-env` (emits the two exports below), or set them directly:
+STEP 3 — Make the discount apply: the gated cycle's LLM calls must hit the ECONOMY base URL.
+Find how this repo invokes the model TODAY and MIRROR its existing idiom — do NOT add export/
+tmux gymnastics. Most loops build an env-prefixed command string, e.g.
+`NATIVE_ENV="env -u ANTHROPIC_BASE_URL …"; CMD="$NATIVE_ENV claude …"`. The clean economy
+counterpart is one variable reused across roles, sourced from `ir`:
 ```bash
-export ANTHROPIC_BASE_URL="$IR_API_URL/economy"    # e.g. {api_url}/economy
-export ANTHROPIC_AUTH_TOKEN="$IR_KEY"
+IR_ECON="env $(ir gate --print-env --inline)"   # → env ANTHROPIC_BASE_URL={api_url}/economy ANTHROPIC_AUTH_TOKEN=…
+CMD="$IR_ECON claude …"                          # replaces the native env prefix
 ```
-The SDK appends `/v1/messages` → requests hit `/economy/v1/messages` → billed economy. State
-plainly where in the cycle that env must be set. If the cycle can't be pointed at inferroute,
-say so — don't pretend the discount works when it can't.
+(`ir gate --print-env --inline` resolves the key at runtime from the user's creds — never
+hardcode it.) If the cycle genuinely can't be pointed at inferroute, say so — don't pretend.
 
-STEP 4 — Model routing: leave invocations on `auto` (inferroute's router picks the tier per
-turn). If the loop has clear roles (manager/planner/executor/etc.), you MAY suggest per-role
-tier hints (trivial→cheap, heavy→premium) as hints, not hard pins. Orthogonal to the gate.
+STEP 4 — Model routing: leave invocations on `auto` (inferroute routes per turn). If the loop
+pins per-role models (e.g. opus/sonnet), note that economy will route them via inferroute; you
+MAY suggest per-role tier hints, as hints not hard pins. Orthogonal to the gate.
 
-STEP 5 — Apply: per file → show diff → y/n → write `<file>.bak` then edit → `bash -n` check.
-Then one short summary: files changed (+.bak), how to test one gated cycle, how to revert.
+STEP 5 — Present the PLAN: exact files + lines + edits, how to test one gated cycle, how to
+revert. Then stop for approval (plan mode). After approval, apply the edits and `bash -n` each
+changed script.
 """
 
 
@@ -99,9 +95,11 @@ def cmd_integrate(args: list[str]) -> int:
 
     prompt = _build_prompt(creds.api_url)
     print("⚡ Launching the inferroute integration agent (model: %s)…" % alias.short)
-    print("   It will scan this repo, propose gate edits, and ask before writing.\n")
-    # Interactive Claude Code session (NOT headless -p): the agent needs to ask for
-    # y/n confirmation per file. The prompt is passed as the initial positional arg.
-    # execvpe replaces the process, so this normally never returns.
-    launch_through_inferroute(alias.model_id, creds, extra_args=[prompt, *rest])
+    print("   Plan mode: it scans this repo, proposes a plan, and waits for your approval.\n")
+    # Launch in PLAN MODE — the agent researches and presents a plan before touching
+    # files; the plan-approval is the gate (replaces manual per-file y/n). The prompt
+    # is the initial positional arg. execvpe replaces the process, so this never returns.
+    launch_through_inferroute(
+        alias.model_id, creds, extra_args=[prompt, *rest], permission_mode="plan"
+    )
     return 0

@@ -24,6 +24,13 @@ from .config import Credentials
 
 _DEFAULT_FLAGS = ["--dangerously-skip-permissions"]
 
+# Model ids that mean "let the proxy route" rather than "pin this exact model".
+# When the user picks one of these (e.g. bare `ir`, `ir auto`) we deliberately
+# leave Claude Code's small/fast slot unpinned so its background chores route
+# cheaply alongside everything else. Anything NOT in this set is a specific
+# pin, and we mirror it into the haiku slot too (see launch_through_inferroute).
+_ROUTING_ALIAS_IDS = frozenset({"multi-model", "auto", "inferroute"})
+
 
 def _print_session_link(api_url: str) -> None:
     """Print a clickable URL to view this session's traffic on the dashboard.
@@ -134,15 +141,50 @@ def launch_through_inferroute(
         )
         sys.exit(2)
 
+    # Nested-session guard: if we're already inside a Claude Code session (an agent
+    # running `ir` via its Bash tool), launching `claude` would spawn a confusing
+    # nested sub-session. Refuse with guidance instead. Override with IR_ALLOW_NESTED=1
+    # for deliberate nested use. Read-only commands (ir gate, ir help) never reach here.
+    if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
+        sys.stderr.write(
+            "\n  ir: refusing to launch a nested Claude Code session (CLAUDECODE=1).\n"
+            "  You're already inside Claude Code. For research use `ir gate`, "
+            "`ir gate --print-env`, or `ir help`.\n"
+            "  To force a nested launch, set IR_ALLOW_NESTED=1.\n\n"
+        )
+        sys.exit(2)
+
     binary = _require_claude_binary()
     env = os.environ.copy()
-    env["ANTHROPIC_BASE_URL"] = creds.api_url
+    # Economy lane: when IR_LANE=economy (e.g. a deferred-loop gate, `ir gate` cycles),
+    # route to the /economy base path so the proxy bills this run at the discount.
+    # Otherwise the normal interactive base URL.
+    economy = env.get("IR_LANE", "").strip().lower() == "economy"
+    base_url = creds.api_url.rstrip("/") + "/economy" if economy else creds.api_url
+    env["ANTHROPIC_BASE_URL"] = base_url
     env["ANTHROPIC_AUTH_TOKEN"] = creds.api_key
     # NOTE: deliberately do NOT pop ANTHROPIC_API_KEY — see docstring.
 
-    # Economy lane banner (cosmetic) — show it before the dashboard link when the
-    # caller tagged this run economy (IR_LANE=economy, e.g. a deferred-loop gate).
-    if env.get("IR_LANE", "").strip().lower() == "economy":
+    # Pin the small/fast slot too. `--model` only pins Claude Code's MAIN
+    # model; CC keeps a separate "haiku" slot for background chores (session
+    # title generation, is-this-a-new-topic checks, quota/spinner summaries).
+    # That slot defaults to a `claude-haiku-*` id, which the proxy does NOT
+    # recognise as a configured model — so it falls through to the multi-model
+    # router and lands on whatever pool model is cheapest (e.g. Kimi). The user
+    # who typed `ir --model minimax` then sees surprise Kimi traffic in the
+    # session viewer. Mirroring the pinned id into the haiku slot makes those
+    # calls bypass the router and stay on the chosen model.
+    #
+    # Only for a SPECIFIC pin — in auto/multi-model mode we WANT the background
+    # slot to route cheaply like everything else, so leave it unset.
+    if model_id.lower() not in _ROUTING_ALIAS_IDS:
+        # ANTHROPIC_DEFAULT_HAIKU_MODEL is the current (CC v2.x) knob;
+        # ANTHROPIC_SMALL_FAST_MODEL is the legacy name older builds still read.
+        # Set both so the pin holds regardless of the user's CC version.
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = model_id
+        env["ANTHROPIC_SMALL_FAST_MODEL"] = model_id
+
+    if economy:
         _print_economy_banner()
 
     # Print the dashboard link BEFORE handing the terminal to claude.

@@ -26,47 +26,34 @@ def _build_prompt(api_url: str) -> str:
     env — we never paste the secret into the prompt."""
     return f"""\
 Wire THIS repo's autonomous-agent loop to inferroute's economy lane (cheap off-peak runs).
-You are in PLAN MODE: research the repo, then present a concise implementation plan and STOP
-for approval. Do not edit files until the plan is approved.
+You're in plan mode: research, then present ONE concise plan and stop. Be minimal and concrete.
 
-HARD RULES:
-- Use the installed `ir` CLI (it's on PATH — this agent was launched via it). Do NOT read or
-  import inferroute's source / Python package to reverse-engineer it — `ir` already wraps it.
-- Claude Code CANNOT set arbitrary HTTP headers. Do NOT look for a way to send an `IR-Lane`
-  header — there is none. The economy lane is selected by the BASE URL (step 3).
-- Time-box discovery: a few greps, then plan. Keep the plan short and concrete (exact files,
-  exact lines, exact edits).
+EFFICIENCY: this is a tiny task — grep + read a couple of files DIRECTLY. Do NOT spawn Explore
+or Task subagents; do NOT read the whole repo. Find the loop driver, read just it, then plan.
 
-STEP 1 — Find the loop: the repeating driver (`run-loop.sh`, `while true`, cron, systemd
-`*.service`) and any existing pace/gate line (e.g. `pace-gate`). That line is the seam.
+The `ir` CLI is installed (you were launched via it). Use it directly; do NOT read inferroute's
+source. For RESEARCH you may ONLY run: `ir help`, `ir gate`, `ir gate --print-env`. NEVER run
+bare `ir` or `ir --model …` — those LAUNCH a Claude session (a nested agent); they belong in the
+loop you're editing, not in your research. Two commands do everything:
+  • `ir gate`            → exit 0 = cheap window now, 1 = skip. Gates one cycle (like pace-gate).
+  • `IR_LANE=economy ir` → launches Claude Code on the economy lane; inferroute auto-routes the
+                          model per turn. This REPLACES a `claude --model …` call — the native
+                          models (opus/sonnet) do NOT exist on the economy backend, so DROP the
+                          `--model` pin and let `ir` auto-route. Keep flags like --effort. For a
+                          specific tier use `IR_LANE=economy ir --model kimi` (or glm).
 
-STEP 2 — Gate the cycle with `ir gate` (it owns poll + fail-open + jitter; exit 0=run/1=skip):
-```bash
-if ir gate; then <run one cycle>; else sleep 30; fi
-```
-Compose with an existing pace-gate rather than replace it: `pace-gate … && ir gate && <cycle>`.
-PATH note: if the loop runs under systemd/cron with a stripped PATH, use `ir`'s absolute path
-(`command -v ir`). Raw-curl fallback only if `ir` truly isn't reachable at loop runtime.
-
-STEP 3 — Make the discount apply: the gated cycle's LLM calls must hit the ECONOMY base URL.
-Find how this repo invokes the model TODAY and MIRROR its existing idiom — do NOT add export/
-tmux gymnastics. Most loops build an env-prefixed command string, e.g.
-`NATIVE_ENV="env -u ANTHROPIC_BASE_URL …"; CMD="$NATIVE_ENV claude …"`. The clean economy
-counterpart is one variable reused across roles, sourced from `ir`:
-```bash
-IR_ECON="env $(ir gate --print-env --inline)"   # → env ANTHROPIC_BASE_URL={api_url}/economy ANTHROPIC_AUTH_TOKEN=…
-CMD="$IR_ECON claude …"                          # replaces the native env prefix
-```
-(`ir gate --print-env --inline` resolves the key at runtime from the user's creds — never
-hardcode it.) If the cycle genuinely can't be pointed at inferroute, say so — don't pretend.
-
-STEP 4 — Model routing: leave invocations on `auto` (inferroute routes per turn). If the loop
-pins per-role models (e.g. opus/sonnet), note that economy will route them via inferroute; you
-MAY suggest per-role tier hints, as hints not hard pins. Orthogonal to the gate.
-
-STEP 5 — Present the PLAN: exact files + lines + edits, how to test one gated cycle, how to
-revert. Then stop for approval (plan mode). After approval, apply the edits and `bash -n` each
-changed script.
+Plan to:
+1. Find the loop's driver (run-loop.sh / while-true / cron / systemd / pace-gate line) and how it
+   invokes the model today (e.g. `claude --model opus --effort X …`, possibly behind an `env …` prefix).
+2. Gate each cycle: `if ir gate; then <cycle>; else sleep 30; fi` (compose with any existing
+   pace-gate: `pace-gate && ir gate && <cycle>`). If the loop runs under systemd/cron with a
+   stripped PATH, use ir's absolute path (`command -v ir`).
+3. Make the cycle run economy: replace its model invocation with `IR_LANE=economy ir --effort X …`
+   (bare `ir` auto-routes; or per-role `IR_LANE=economy ir --model kimi`/`glm` only if the loop
+   clearly separates roles). Drop the native `--model opus/sonnet` pin and any hand-rolled
+   ANTHROPIC_BASE_URL/token env — `ir` handles all of it.
+4. Present the plan: exact files + lines + edits, how to test one gated cycle, how to revert.
+   On approval, apply the edits and `bash -n` each changed script.
 """
 
 
@@ -96,10 +83,30 @@ def cmd_integrate(args: list[str]) -> int:
     prompt = _build_prompt(creds.api_url)
     print("⚡ Launching the inferroute integration agent (model: %s)…" % alias.short)
     print("   Plan mode: it scans this repo, proposes a plan, and waits for your approval.\n")
-    # Launch in PLAN MODE — the agent researches and presents a plan before touching
-    # files; the plan-approval is the gate (replaces manual per-file y/n). The prompt
-    # is the initial positional arg. execvpe replaces the process, so this never returns.
+    # Launch in PLAN MODE with the research tools PRE-APPROVED so the user is never
+    # interrupted with permission prompts on the way to the plan. Read-only + the two
+    # safe `ir` research commands only (NOT bare `ir`/`ir auto`, which would launch a
+    # nested session — also blocked by the CLAUDECODE guard in launch.py). The prompt
+    # is the first positional; --allowedTools is variadic so it goes last.
     launch_through_inferroute(
-        alias.model_id, creds, extra_args=[prompt, *rest], permission_mode="plan"
+        alias.model_id, creds,
+        extra_args=[
+            prompt, *rest,
+            # Block subagent spawning — it's a tiny task; Explore/Task subagents
+            # burn minutes + tokens and bloat context (slows Kimi). Grep+read directly.
+            "--disallowedTools", "Task",
+            "--allowedTools", *_RESEARCH_TOOLS,
+        ],
+        permission_mode="plan",
     )
     return 0
+
+
+# Read-only research tools pre-approved for the planning phase (no approval prompts).
+# Deliberately scoped: `ir gate`/`ir help` only — never bare `ir`/`ir auto` (nested launch).
+_RESEARCH_TOOLS = [
+    "Read", "Grep", "Glob",
+    "Bash(ir gate:*)", "Bash(ir help)", "Bash(ir --help)", "Bash(ir -h)",
+    "Bash(grep:*)", "Bash(rg:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(sed:*)",
+    "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)", "Bash(find:*)", "Bash(command:*)",
+]

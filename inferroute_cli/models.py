@@ -1,7 +1,15 @@
-"""Map short `ir <name>` aliases to inferroute model IDs.
+"""Friendly name → canonical inferroute model ID.
 
-Keep this list small and meaningful — `ir minimax` is the contract; the
-underlying model ID can change without breaking users' muscle memory.
+Used by `ir --model NAME` (and by the interactive `ir choose` picker) to let
+users type `minimax` instead of `MiniMax-M2.7`. The short name is the user-
+facing contract; the canonical model_id can change without breaking muscle
+memory.
+
+These are NOT subcommands. The supported forms are:
+    ir                              # auto (multi-model)
+    ir --model minimax              # short name → translated
+    ir --model MiniMax-M2.7         # canonical id passes through
+    ir --model claude-opus-4-8      # any other model id passes through too
 """
 
 from __future__ import annotations
@@ -11,14 +19,15 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ModelAlias:
-    short: str           # what the user types: ir <short>
-    model_id: str        # what we pass to claude --model
+    short: str           # what the user types as the --model value
+    model_id: str        # what we pass to claude --model on the wire
     label: str           # one-line description shown by `ir help` / `ir choose`
     tier: str            # "fast" | "balanced" | "smart"
 
     @property
     def help_line(self) -> str:
-        return f"  ir {self.short:11s} {self.label}"
+        # Kept for `ir choose` button labels; `ir help` formats its own table.
+        return f"  ir --model {self.short:<8} {self.label}"
 
 
 # Order matters — `ir choose` shows them top-to-bottom.

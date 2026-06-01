@@ -20,11 +20,47 @@ def _print_unknown(cmd: str) -> int:
     return 2
 
 
+def _extract_model_override(args: list[str]) -> tuple[str | None, list[str]]:
+    """Pull a user-supplied `--model X` or `--model=X` out of an argv slice.
+
+    Why: `ir` pins `--model <alias_id>` on the claude command line. If the user
+    also passes `--model`, claude ends up with two `--model` flags. Some versions
+    of claude take the last one, others may error. Either way it's fragile. We
+    strip the user-supplied one from passthrough and let the caller use it
+    instead of the alias's default — explicit user intent wins.
+
+    Returns (model_override or None, remaining_args). Does NOT mutate input.
+    Handles only the two common forms (`--model X` and `--model=X`). Short
+    forms like `-m` aren't claude conventions; add them here if they appear.
+    """
+    out: list[str] = []
+    override: str | None = None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--model" and i + 1 < len(args):
+            override = args[i + 1]
+            i += 2
+            continue
+        if a.startswith("--model="):
+            override = a.split("=", 1)[1]
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return override, out
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     # ── Bare `ir` → auto-route (same as `ir auto`) ─────────────────────
-    if not args:
+    # Also covers `ir --model foo`, `ir --effort high`, `ir --model=X --any-claude-flag`
+    # — anything where the first arg is a flag rather than a subcommand. In
+    # those cases there's no subcommand to dispatch on; we treat the whole
+    # argv as passthrough to claude and route via 'auto' unless the user
+    # supplied their own --model.
+    if not args or args[0].startswith("-"):
         creds = config.load()
         if not creds.is_valid:
             sys.stderr.write(
@@ -36,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
         if auto is None:
             sys.stderr.write("  internal error: 'auto' alias missing\n")
             return 1
-        launch.launch_through_inferroute(auto.model_id, creds)
+        user_model, passthrough = _extract_model_override(args)
+        model = user_model or auto.model_id
+        launch.launch_through_inferroute(model, creds, extra_args=passthrough)
         return 0  # never reached — exec replaces process
 
     cmd, rest = args[0], args[1:]
@@ -92,7 +130,12 @@ def main(argv: list[str] | None = None) -> int:
     alias = models.get(cmd)
     if alias is not None:
         creds = config.load()
-        launch.launch_through_inferroute(alias.model_id, creds, extra_args=rest)
+        # Honor user-supplied --model: if they typed `ir minimax --model X`,
+        # use X. Avoids emitting duplicate --model flags to claude (which is
+        # fragile depending on claude's argv parser).
+        user_model, passthrough = _extract_model_override(rest)
+        model = user_model or alias.model_id
+        launch.launch_through_inferroute(model, creds, extra_args=passthrough)
         return 0  # never reached
 
     return _print_unknown(cmd)

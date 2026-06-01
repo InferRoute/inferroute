@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from . import __version__, config, help as help_mod, launch, login as login_mod, models
+from . import __version__, config, help as help_mod, launch, login as login_mod, models  # noqa: F401
 
 
 def _print_unknown(cmd: str) -> int:
@@ -63,6 +63,25 @@ def main(argv: list[str] | None = None) -> int:
     if cmd == "choose":
         from . import choose as choose_mod
         return choose_mod.run()
+
+    if cmd == "gate":
+        from . import gate as gate_mod
+        return gate_mod.cmd_gate(rest)
+
+    if cmd in ("integrate-deferral-gate", "integrate"):
+        from . import integrate as integrate_mod
+        return integrate_mod.cmd_integrate(rest)
+
+    if cmd == "add":
+        # `ir add local-routing` — install the optional on-device daemon.
+        # Import lazily so the launcher cold-start stays cheap.
+        from . import add as add_mod
+        return add_mod.cmd_add(rest)
+
+    if cmd == "remove":
+        # Symmetric uninstall. `--purge` wipes model + logs too.
+        from . import remove as remove_mod
+        return remove_mod.cmd_remove(rest)
 
     if cmd == "anthropic":
         # Escape hatch — no env, no key check, no inferroute touch.

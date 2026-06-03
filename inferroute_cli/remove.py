@@ -28,6 +28,9 @@ from .add import (
     _LEGACY_MARKER_BEGIN,
     _LEGACY_MARKER_END,
     SHELL_RC_FILES,
+    SERVICE_NAME,
+    UNIT_MARKER,
+    DROPIN_NAME,
     _detect_shell,
 )
 
@@ -97,19 +100,41 @@ def _remove_recording(ns) -> int:
 # ----- service stop --------------------------------------------------------
 
 def _stop_systemd() -> None:
-    unit_path = Path.home() / ".config" / "systemd" / "user" / "inferroute.service"
-    if not unit_path.exists():
-        print("  [1/3] No systemd unit installed — skipping.")
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_path = unit_dir / SERVICE_NAME
+    dropin_dir = unit_dir / f"{SERVICE_NAME}.d"
+    dropin = dropin_dir / DROPIN_NAME
+
+    if not unit_path.exists() and not dropin.exists():
+        print("  [1/3] No recorder service installed — skipping.")
         return
+
+    # Stop + disable the daemon (recording off; traffic no longer flows through it).
     for cmd in (
-        ["systemctl", "--user", "stop", "inferroute.service"],
-        ["systemctl", "--user", "disable", "inferroute.service"],
+        ["systemctl", "--user", "stop", SERVICE_NAME],
+        ["systemctl", "--user", "disable", SERVICE_NAME],
     ):
         subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    unit_path.unlink()
+
+    # Always remove our drop-in (it only carries the record level).
+    if dropin.exists():
+        dropin.unlink()
+    if dropin_dir.exists() and not any(dropin_dir.iterdir()):
+        dropin_dir.rmdir()
+
+    # Only delete the BASE unit if WE created it (marker). A hand-crafted unit
+    # is left in place (disabled) — we never destroy config we didn't write.
+    if unit_path.exists() and UNIT_MARKER in unit_path.read_text():
+        unit_path.unlink()
+        print(f"  [1/3] Stopped + removed {unit_path}")
+    elif unit_path.exists():
+        print(f"  [1/3] Stopped {SERVICE_NAME}; left your hand-crafted unit "
+              f"in place (removed only the record-level drop-in).")
+    else:
+        print(f"  [1/3] Stopped {SERVICE_NAME}; removed the record-level drop-in.")
+
     subprocess.call(["systemctl", "--user", "daemon-reload"],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"  [1/3] Stopped + removed {unit_path}")
 
 
 def _stop_launchd() -> None:

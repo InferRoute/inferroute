@@ -35,6 +35,19 @@ from pathlib import Path
 
 LOCAL_BASE_URL = "http://localhost:5005"
 
+# The systemd user unit / launchd label for the recorder daemon. We use the
+# established name `inferroute-local.service` so this installer and any
+# pre-existing (hand-crafted) unit converge on one name — no second daemon, no
+# :5005 collision. The record LEVEL is applied via a drop-in (see below) rather
+# than baked into the base unit, so re-running `ir add recording` never clobbers
+# a richer hand-written unit.
+SERVICE_NAME = "inferroute-local.service"
+# Marker written into base units WE create, so `ir remove recording` only ever
+# deletes installer-created units and leaves hand-crafted ones in place.
+UNIT_MARKER = "# Managed-by: ir add recording"
+# Drop-in that carries just the record level. Layers on top of the base unit.
+DROPIN_NAME = "10-record-level.conf"
+
 # Shell rc files we know how to edit. Order = preference.
 SHELL_RC_FILES = {
     "zsh":  Path.home() / ".zshrc",
@@ -201,18 +214,26 @@ def _pip_install_local_extra() -> int:
 
 SYSTEMD_UNIT_TEMPLATE = """\
 [Unit]
-Description=inferroute local recorder daemon
+Description=inferroute-local daemon (Claude Code traffic recorder on :5005)
+{marker}
 After=network.target
 
 [Service]
 Type=simple
-Environment=INFERROUTE_RECORD_LEVEL={level}
 ExecStart={daemon_path} serve --port 5005
 Restart=on-failure
 RestartSec=3
 
 [Install]
 WantedBy=default.target
+"""
+
+DROPIN_TEMPLATE = """\
+# Written by `ir add recording`. Sets the record level without touching the
+# base unit, so a hand-crafted base unit is preserved. Remove via `ir remove
+# recording`.
+[Service]
+Environment=INFERROUTE_RECORD_LEVEL={level}
 """
 
 
@@ -233,20 +254,37 @@ def _install_systemd_unit(level: str) -> int:
         print("        ✗ `inferroute-daemon` not on PATH. Pip install may not have linked the script.")
         return 1
     unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_path = unit_dir / SERVICE_NAME
     unit_dir.mkdir(parents=True, exist_ok=True)
-    unit_path = unit_dir / "inferroute.service"
-    unit_path.write_text(SYSTEMD_UNIT_TEMPLATE.format(daemon_path=daemon_path, level=level))
-    for cmd in (
-        ["systemctl", "--user", "daemon-reload"],
-        ["systemctl", "--user", "enable", "inferroute.service"],
-        ["systemctl", "--user", "restart", "inferroute.service"],
-    ):
+
+    # Only write the base unit if there isn't one already — never overwrite a
+    # hand-crafted unit (e.g. one with a richer EnvironmentFile). The record
+    # level always goes in a drop-in, which layers on top of whatever base exists.
+    created_base = False
+    if not unit_path.exists():
+        unit_path.write_text(
+            SYSTEMD_UNIT_TEMPLATE.format(daemon_path=daemon_path, marker=UNIT_MARKER)
+        )
+        created_base = True
+    else:
+        print(f"  [2/3] Using existing unit {unit_path} (preserved).")
+
+    dropin_dir = unit_dir / f"{SERVICE_NAME}.d"
+    dropin_dir.mkdir(parents=True, exist_ok=True)
+    (dropin_dir / DROPIN_NAME).write_text(DROPIN_TEMPLATE.format(level=level))
+
+    cmds = [["systemctl", "--user", "daemon-reload"]]
+    if created_base:
+        cmds.append(["systemctl", "--user", "enable", SERVICE_NAME])
+    cmds.append(["systemctl", "--user", "restart", SERVICE_NAME])
+    for cmd in cmds:
         rc = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if rc != 0:
             print(f"        ✗ `{' '.join(cmd)}` failed (exit {rc}).")
             return rc
-    print(f"  [2/3] Recorder installed at {unit_path} (level={level})")
-    print(f"        Running on {LOCAL_BASE_URL} (systemctl --user status inferroute)")
+    where = "installed" if created_base else "updated"
+    print(f"  [2/3] Recorder {where} (level={level} via drop-in)")
+    print(f"        Running on {LOCAL_BASE_URL} (systemctl --user status {SERVICE_NAME})")
     return 0
 
 

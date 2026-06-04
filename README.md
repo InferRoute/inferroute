@@ -12,18 +12,20 @@ on-device recorder logs your choices privately (see [Local recording](#local-rec
 
 ```bash
 pipx install inferroute
-ir login
+ir setup
 ```
 
-That's it. `ir login` saves your API key to `~/.config/inferroute/credentials`
-(mode 600) and verifies it against the inferroute API. Update any time with
-`pipx upgrade inferroute`.
+That's it. `ir setup` walks you through it: log in with your key (saved to
+`~/.config/inferroute/credentials`, mode 600) and optionally turn on private
+on-device recording. Update any time with `pipx upgrade inferroute`.
 
-Sign up for a key at https://inferroute.ai if you don't have one.
+Sign up for a key at https://inferroute.ai if you don't have one. (Prefer the
+steps separately? `ir login` then `ir add recording` do the same thing.)
 
 ## Commands
 
 ```
+ir setup            first-time onboarding: log in + optionally enable recording
 ir                  open the model picker, then launch (same as `ir choose`)
 ir --model NAME     pin a model — short alias or canonical id; any claude flag passes through
 ir choose           interactive picker — pick a model, then launch

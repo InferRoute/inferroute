@@ -115,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         ns = ap.parse_args(rest)
         return login_mod.run(ns)
 
+    if cmd == "setup":
+        # One-shot guided onboarding: login + optional recording.
+        from . import setup as setup_mod
+        return setup_mod.run(rest)
+
     if cmd == "status":
         from . import status as status_mod
         return status_mod.run()

@@ -32,19 +32,23 @@ def _looks_like_key(key: str) -> bool:
 
 
 def _prompt_key(prompt: str) -> str | None:
-    """Read one API key from the terminal.
+    """Read one API key from the terminal with masked, live feedback.
 
-    Two problems this guards against:
+    We read one character at a time in cbreak mode and echo a mask glyph for
+    each one, so a paste shows up immediately as a run of dots — the user sees
+    that something registered — while the raw key never lands on screen. This
+    threads the needle between three failure modes:
 
-    1. A pasted blob that contains newlines. ``input()`` consumes only the
-       first line; the rest stays in the terminal's input queue and, once the
-       program exits, is handed straight to the shell and *executed*. We read
-       one line in canonical mode and then ``tcflush`` the input queue so any
-       trailing pasted lines are discarded, never reaching bash.
+    1. *No feedback at all* (full echo-off): newbies think the paste didn't
+       take. Here every character draws a ``•``.
 
-    2. The raw key being echoed across the screen. We turn echo off while
-       reading and print a masked confirmation afterwards, so the secret never
-       lands in the scrollback.
+    2. *Multi-line paste spilling into the shell*: a pasted blob with newlines
+       would, with ``input()``, leave its tail in the terminal queue to be run
+       by bash. We stop at the first newline and ``tcflush`` the rest, so it is
+       discarded, never executed.
+
+    3. *The secret in scrollback*: only mask glyphs are ever printed; the key
+       itself is not echoed.
 
     Returns the first whitespace-delimited token of the line (the key),
     ``""`` for an empty line, or ``None`` on EOF / Ctrl-C.
@@ -58,31 +62,71 @@ def _prompt_key(prompt: str) -> str | None:
         line = line.strip()
         return line.split()[0] if line else ""
 
+    import os
     import termios
+    import tty
 
     fd = stdin.fileno()
+    mask = "•" if (sys.stdout.encoding or "").lower().startswith("utf") else "*"
     sys.stdout.write(prompt)
     sys.stdout.flush()
 
+    buf: list[str] = []
+    cancelled = False
     old = termios.tcgetattr(fd)
     try:
-        new = termios.tcgetattr(fd)
-        new[3] = new[3] & ~termios.ECHO  # lflags: disable echo, keep canonical
-        termios.tcsetattr(fd, termios.TCSANOW, new)
-        line = stdin.readline()
-    except (KeyboardInterrupt, EOFError):
-        line = ""
+        # char-at-a-time, no echo; Ctrl-C still raises SIGINT. TCSANOW (not the
+        # default TCSAFLUSH) so a paste that lands the instant the prompt prints
+        # isn't discarded.
+        tty.setcbreak(fd, termios.TCSANOW)
+        try:
+            while True:
+                ch = os.read(fd, 1).decode("utf-8", "ignore")
+                if ch == "":  # EOF (Ctrl-D on an empty line → cancel)
+                    cancelled = not buf
+                    break
+                if ch in ("\n", "\r"):  # end of line
+                    break
+                if ch == "\x03":  # Ctrl-C
+                    cancelled = True
+                    break
+                if ch == "\x04":  # Ctrl-D
+                    if not buf:
+                        cancelled = True
+                        break
+                    continue
+                if ch in ("\x7f", "\b"):  # backspace / delete
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                if ch == "\x1b":  # swallow an escape/CSI seq (arrows, paste markers)
+                    if os.read(fd, 1).decode("utf-8", "ignore") == "[":
+                        while True:
+                            c2 = os.read(fd, 1).decode("utf-8", "ignore")
+                            if c2 == "" or "@" <= c2 <= "~":
+                                break
+                    continue
+                if not ch.isprintable():
+                    continue
+                buf.append(ch)
+                if len(buf) <= 80:  # echo a dot; cap so a huge paste can't flood
+                    sys.stdout.write(mask)
+                    sys.stdout.flush()
+        except KeyboardInterrupt:
+            cancelled = True
     finally:
-        # Drop anything still queued — the tail of a multi-line paste — before
-        # restoring the terminal, so it can never spill into the shell.
+        # Drop the tail of a multi-line paste before restoring the terminal,
+        # so it can never spill into the shell.
         termios.tcflush(fd, termios.TCIFLUSH)
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         sys.stdout.write("\n")
         sys.stdout.flush()
 
-    if not line:
+    if cancelled:
         return None
-    line = line.strip()
+    line = "".join(buf).strip()
     return line.split()[0] if line else ""
 
 

@@ -115,6 +115,10 @@ def main(argv: list[str] | None = None) -> int:
         ns = ap.parse_args(rest)
         return login_mod.run(ns)
 
+    if cmd == "logout":
+        from . import logout as logout_mod
+        return logout_mod.run(rest)
+
     if cmd == "setup":
         # One-shot guided onboarding: login + optional recording.
         from . import setup as setup_mod

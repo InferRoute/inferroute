@@ -38,6 +38,7 @@ def run(args=None) -> int:
     lines.append("")
     lines.append("Account")
     lines.append("  ir login       Save your inferroute API key (one-time)")
+    lines.append("  ir logout      Remove the saved inferroute API key")
     lines.append("  ir status      Personal usage + recent requests (TUI)")
     lines.append("")
     lines.append("Local recording (optional, fully private)")

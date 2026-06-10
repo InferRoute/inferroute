@@ -122,6 +122,10 @@ class Recorder:
 
         self.events_dir = self.base_dir / "events"
         self.blobs_dir = self.base_dir / "blobs"
+        # Per-session cumulative-cost files (`<sid>.cost`, full-precision USD)
+        # that the `ir` status line reads to show the REAL session cost — no
+        # network. See inferroute_cli.launch._strip_command.
+        self.sessions_dir = self.base_dir / "sessions"
 
         self._buf: list[str] = []
         self._lock = threading.Lock()
@@ -130,10 +134,14 @@ class Recorder:
         # Per-session last chosen model → lets us label provenance cheaply
         # (first sight = explicit, same = sticky, changed = switch).
         self._session_model: dict[str, str] = {}
+        # Per-session running cost total (USD), authoritative in-process; seeded
+        # from disk on first touch so it survives a daemon restart mid-session.
+        self._session_cost: dict[str, float] = {}
 
         if self.enabled:
             try:
                 self.events_dir.mkdir(parents=True, exist_ok=True)
+                self.sessions_dir.mkdir(parents=True, exist_ok=True)
                 if self.level == "full":
                     self.blobs_dir.mkdir(parents=True, exist_ok=True)
             except Exception as e:
@@ -243,11 +251,15 @@ class Recorder:
                     "tokens_out": usage.get("output_tokens"),
                     "cache_read_tokens": usage.get("cache_read_input_tokens"),
                     "cache_creation_tokens": usage.get("cache_creation_input_tokens"),
+                    # Server-computed real cost for this turn (USD), passed through
+                    # by the proxy from usage.cost. Same number the dashboard bills.
+                    "cost_usd": usage.get("cost"),
                     "stop_reason": stop_reason,
                     "error_kind": error_kind,
                     "response_block_hash": resp_hash,
                 }
             )
+            self._bump_session_cost(session_id, usage.get("cost"))
         except Exception as e:
             self._dropped += 1
             logger.debug(f"record_outcome skipped ({e})")
@@ -325,6 +337,43 @@ class Recorder:
         first = messages[0] if messages else {}
         basis = _block_bytes(first)[:500]
         return "ch_" + _sha256(basis)[:16]
+
+    def _bump_session_cost(self, session_id: str, cost_usd) -> None:
+        """Add this turn's USD cost to the session's running total and write it to
+        `<sessions>/<sid>.cost` (full-precision plain text) for the status line.
+
+        Authoritative in-process (`_session_cost`); seeded once from disk so a
+        mid-session daemon restart resumes the total instead of resetting it.
+        Best-effort and fail-soft — never raises into the request path. Only acts
+        on a real, positive float cost and a filename-safe session id.
+        """
+        if not self.enabled or not session_id:
+            return
+        if not isinstance(cost_usd, (int, float)) or isinstance(cost_usd, bool):
+            return
+        if cost_usd <= 0:
+            return
+        # session ids from ir are uuid hex; guard anyway so a weird header can't
+        # escape the sessions dir.
+        if not all(c.isalnum() or c in "_.-" for c in session_id):
+            return
+        try:
+            path = self.sessions_dir / f"{session_id}.cost"
+            with self._lock:
+                cur = self._session_cost.get(session_id)
+                if cur is None:
+                    try:
+                        cur = float(path.read_text().strip())
+                    except (OSError, ValueError):
+                        cur = 0.0
+                cur += float(cost_usd)
+                self._session_cost[session_id] = cur
+                self.sessions_dir.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".cost.tmp")
+                tmp.write_text(f"{cur:.6f}")
+                tmp.replace(path)
+        except Exception as e:
+            logger.debug(f"session cost bump skipped ({e})")
 
     def _provenance(self, session_id: str, chosen: str) -> str:
         last = self._session_model.get(session_id)

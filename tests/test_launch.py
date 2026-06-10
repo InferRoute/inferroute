@@ -67,10 +67,12 @@ def test_apply_autocompact_env_respects_user_override():
 # inline renderer scrolls it away; post-session printing is impossible (we execvp
 # claude). So the durable home for ir's session info — dashboard link AND the
 # relaunch hint — is CC's status line, injected via the per-invocation --settings
-# flag. The strip is two lines (CC supports multi-line statusLine output) with live
-# cost-so-far read from the session JSON CC pipes on stdin (verified 2026-06-10).
+# flag. The strip is two lines (CC supports multi-line statusLine output). Cost is
+# the REAL server-computed figure: the recorder daemon writes a per-session .cost
+# file and the status line reads it (NOT CC's own mis-priced cost.total_cost_usd).
 import json
 import subprocess
+from pathlib import Path
 
 from inferroute_cli.launch import (
     _session_url,
@@ -78,6 +80,7 @@ from inferroute_cli.launch import (
     _gate_strip_prefix,
     _native_strip_prefix,
     _model_for_statusline,
+    _strip_command,
 )
 
 
@@ -129,13 +132,13 @@ def test_model_for_statusline_extraction():
     assert _model_for_statusline([]) is None
 
 
-def test_statusline_command_renders_both_lines_and_ignores_stdin_without_cost():
+def test_statusline_command_renders_both_lines_and_ignores_stdin():
+    # No cost_file → static two-line strip; CC's piped session JSON is ignored.
     args = _product_strip_settings_args(_gate_strip_prefix(
         "https://api.inferroute.ai", "sess123", "moonshotai/Kimi-K2.6-TEE", False), [])
     assert args[0] == "--settings"
     cmd = json.loads(args[1])["statusLine"]["command"]  # must be valid JSON for CC
-    # No cost in the session JSON → strip is exactly the static two-line prefix.
-    out = _run_statusline(cmd, '{"session_id":"sess123"}')
+    out = _run_statusline(cmd, '{"cost":{"total_cost_usd":99.99}}')  # CC's number — ignored
     assert out.returncode == 0
     assert out.stderr == ""
     assert out.stdout == (
@@ -144,24 +147,31 @@ def test_statusline_command_renders_both_lines_and_ignores_stdin_without_cost():
     )
 
 
-def test_statusline_command_appends_live_cost_from_stdin():
-    args = _product_strip_settings_args(_gate_strip_prefix(
-        "https://api.inferroute.ai", "s", "moonshotai/Kimi-K2.6-TEE", False), [])
-    cmd = json.loads(args[1])["statusLine"]["command"]
-    # CC pipes the real session JSON shape: cost.total_cost_usd (verified in bundle).
-    out = _run_statusline(cmd, json.dumps({"cost": {"total_cost_usd": 0.4237}}))
+def test_statusline_appends_real_cost_from_daemon_file(tmp_path):
+    cost_file = tmp_path / "sess123.cost"
+    cost_file.write_text("0.423700")  # full-precision USD, as the recorder writes it
+    cmd = _strip_command("⚡ kimi · standard │ link\n↻ ir --model kimi", cost_file)["command"]
+    out = _run_statusline(cmd)
     assert out.returncode == 0
-    # Cost lands at the very end (last line), so width-clip drops it first.
-    assert out.stdout.endswith("↻ ir --model kimi │ $0.42")
+    # Cost lands at the very end (last line), printf-formatted to cents.
+    assert out.stdout == "⚡ kimi · standard │ link\n↻ ir --model kimi │ $0.42"
 
 
-def test_statusline_command_handles_empty_and_malformed_stdin():
-    args = _product_strip_settings_args("⚡ x · native\n↻ ir anthropic", [])
-    cmd = json.loads(args[1])["statusLine"]["command"]
-    for bad in ("", "not json", "{}", '{"cost": null}', '{"cost": {"total_cost_usd": 0}}'):
-        out = _run_statusline(cmd, bad)
-        assert out.returncode == 0, bad
-        assert out.stdout == "⚡ x · native\n↻ ir anthropic", bad  # no cost appended
+def test_statusline_no_cost_when_file_missing_empty_or_garbage(tmp_path):
+    prefix = "⚡ x · native\n↻ ir anthropic"
+    # missing file
+    cmd = _strip_command(prefix, tmp_path / "nope.cost")["command"]
+    out = _run_statusline(cmd)
+    assert out.returncode == 0 and out.stdout == prefix
+    # empty file → -s is false → no cost, still exits 0
+    empty = tmp_path / "e.cost"; empty.write_text("")
+    out = _run_statusline(_strip_command(prefix, empty)["command"])
+    assert out.returncode == 0 and out.stdout == prefix
+    # garbage content → printf can't format → guarded by `|| true`, still exits 0
+    junk = tmp_path / "j.cost"; junk.write_text("not-a-number")
+    out = _run_statusline(_strip_command(prefix, junk)["command"])
+    assert out.returncode == 0
+    assert out.stdout.startswith(prefix)  # never crashes the line
 
 
 def test_statusline_backs_off_when_user_passes_own_settings():

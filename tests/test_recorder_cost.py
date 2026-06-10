@@ -59,45 +59,56 @@ def test_nonstreaming_extract_json_carries_cost():
     assert usage["cost"] == 0.0009
 
 
-# --- recorder: per-session .cost file accumulates, seeds from disk, fail-soft ---
+# --- recorder.note_cost: per-session .cost file, decoupled from record_level ---
 
-def _rec(tmp_path):
-    return Recorder(tmp_path, level="metadata")
+def _rec(tmp_path, level="metadata"):
+    return Recorder(tmp_path, level=level)
 
 
-def test_session_cost_file_accumulates_across_turns(tmp_path):
+def test_note_cost_accumulates_across_turns(tmp_path):
     r = _rec(tmp_path)
     sid = "a" * 32
-    r.record_outcome(turn_id="t1", session_id=sid, status=200, ttft_ms=10, total_ms=20,
-                     usage={"input_tokens": 1, "cost": 0.10}, stop_reason="end_turn", served_model="kimi")
-    r.record_outcome(turn_id="t2", session_id=sid, status=200, ttft_ms=10, total_ms=20,
-                     usage={"input_tokens": 1, "cost": 0.05}, stop_reason="end_turn", served_model="kimi")
+    r.note_cost(sid, 0.10)
+    r.note_cost(sid, 0.05)
     cost_file = tmp_path / "sessions" / f"{sid}.cost"
     assert cost_file.is_file()
     assert abs(float(cost_file.read_text()) - 0.15) < 1e-9
 
 
-def test_session_cost_seeds_from_disk_on_fresh_recorder(tmp_path):
+def test_note_cost_works_with_recording_OFF(tmp_path):
+    # THE point of decoupling (option B): cost is a content-free number, so it is
+    # captured even when recording is fully off ("store nothing, still show price").
+    r = _rec(tmp_path, level="off")
+    assert not r.enabled  # corpus disabled...
+    sid = "f" * 32
+    r.note_cost(sid, 0.42)
+    cost_file = tmp_path / "sessions" / f"{sid}.cost"
+    assert cost_file.is_file()  # ...but the price still lands
+    assert abs(float(cost_file.read_text()) - 0.42) < 1e-9
+    # and no corpus was written
+    assert not (tmp_path / "events").exists() or not list((tmp_path / "events").glob("*.jsonl"))
+
+
+def test_note_cost_seeds_from_disk_on_fresh_recorder(tmp_path):
     sid = "b" * 32
     (tmp_path / "sessions").mkdir(parents=True)
     (tmp_path / "sessions" / f"{sid}.cost").write_text("1.000000")  # prior daemon run
     r = _rec(tmp_path)  # fresh process, empty in-memory total
-    r.record_outcome(turn_id="t", session_id=sid, status=200, ttft_ms=1, total_ms=1,
-                     usage={"cost": 0.25}, stop_reason="end_turn", served_model="kimi")
+    r.note_cost(sid, 0.25)
     assert abs(float((tmp_path / "sessions" / f"{sid}.cost").read_text()) - 1.25) < 1e-9
 
 
-def test_no_cost_file_when_cost_absent_or_zero(tmp_path):
+def test_note_cost_ignores_absent_zero_or_nonnumeric(tmp_path):
     r = _rec(tmp_path)
-    r.record_outcome(turn_id="t1", session_id="c" * 8, status=200, ttft_ms=1, total_ms=1,
-                     usage={"input_tokens": 5}, stop_reason="end_turn", served_model="kimi")  # no cost
-    r.record_outcome(turn_id="t2", session_id="d" * 8, status=200, ttft_ms=1, total_ms=1,
-                     usage={"cost": 0.0}, stop_reason="end_turn", served_model="kimi")  # zero
-    assert not (tmp_path / "sessions" / ("c" * 8 + ".cost")).exists()
-    assert not (tmp_path / "sessions" / ("d" * 8 + ".cost")).exists()
+    r.note_cost("c" * 8, None)
+    r.note_cost("d" * 8, 0.0)
+    r.note_cost("g" * 8, "nope")
+    r.note_cost("h" * 8, True)  # bool is an int subclass — must be ignored
+    assert list((tmp_path / "sessions").glob("*.cost")) == []
 
 
 def test_cost_usd_recorded_in_outcome_event(tmp_path):
+    # The outcome event still logs the per-turn cost when recording is enabled.
     r = _rec(tmp_path)
     r.record_outcome(turn_id="t", session_id="e" * 8, status=200, ttft_ms=1, total_ms=1,
                      usage={"cost": 0.0033}, stop_reason="end_turn", served_model="kimi")
@@ -109,10 +120,39 @@ def test_cost_usd_recorded_in_outcome_event(tmp_path):
     assert outcome["cost_usd"] == 0.0033
 
 
-def test_unsafe_session_id_does_not_escape_sessions_dir(tmp_path):
+def test_note_cost_unsafe_session_id_does_not_escape_sessions_dir(tmp_path):
     r = _rec(tmp_path)
-    # a path-traversal-y id must be refused (no file written), never raise
-    r.record_outcome(turn_id="t", session_id="../../etc/pwned", status=200, ttft_ms=1, total_ms=1,
-                     usage={"cost": 0.5}, stop_reason="end_turn", served_model="kimi")
+    r.note_cost("../../etc/pwned", 0.5)  # path-traversal id must be refused, never raise
     assert not (tmp_path.parent / "etc" / "pwned.cost").exists()
     assert list((tmp_path / "sessions").glob("*.cost")) == []
+
+
+# --- full daemon path: streaming response → cost file, even with recording off ---
+
+def test_proxy_records_cost_through_recording_stream_with_recording_off(tmp_path):
+    import asyncio
+    from inferroute_local.config import Config
+    from inferroute_local.proxy import InferrouteProxy
+
+    cfg = Config(record_dir=str(tmp_path), record_level="off")
+    proxy = InferrouteProxy(cfg)
+    sid = "z" * 32
+
+    async def fake_stream():
+        # a minimal Anthropic SSE stream carrying usage.cost on message_delta
+        yield b'event: message_start\ndata: {"type":"message_start","message":{"model":"kimi","usage":{"input_tokens":9}}}\n\n'
+        yield b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":16,"cost":0.0123,"cost_currency":"USD"}}\n\n'
+
+    async def drive():
+        agen = proxy._recording_stream(
+            fake_stream(), turn_id=None, session_id=sid, streaming=True,
+            chosen_model="kimi", status=200, start=0.0,
+        )
+        async for _ in agen:  # exhaust so the finally block runs
+            pass
+        await proxy.close()
+
+    asyncio.run(drive())
+    cost_file = tmp_path / "sessions" / f"{sid}.cost"
+    assert cost_file.is_file()
+    assert abs(float(cost_file.read_text()) - 0.0123) < 1e-9

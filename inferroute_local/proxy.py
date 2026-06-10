@@ -252,6 +252,28 @@ def _scan_sse_line(line: str, usage: dict) -> tuple[Optional[str], Optional[str]
     return _apply_obj(obj, usage)
 
 
+def _merge_usage(dst: dict, src) -> None:
+    """Merge an Anthropic ``usage`` object into ``dst``.
+
+    Keeps integer token counters AND the inferroute-added ``usage.cost`` (USD,
+    a float — the server-computed per-request cost; see
+    shared-docs/inferroute/goose-real-cost-display-spec.md) plus ``cost_currency``.
+    Bools are skipped (``bool`` is an ``int`` subclass) and everything else is
+    ignored, so a stray field can't poison the record.
+    """
+    if not isinstance(src, dict):
+        return
+    for k, v in src.items():
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, int):
+            dst[k] = v
+        elif k == "cost" and isinstance(v, float):
+            dst[k] = v
+        elif k == "cost_currency" and isinstance(v, str):
+            dst[k] = v
+
+
 def _apply_obj(obj: dict, usage: dict) -> tuple[Optional[str], Optional[str]]:
     t = obj.get("type")
     stop = None
@@ -259,14 +281,12 @@ def _apply_obj(obj: dict, usage: dict) -> tuple[Optional[str], Optional[str]]:
     if t == "message_start":
         msg = obj.get("message") or {}
         served = msg.get("model")
-        for k, v in (msg.get("usage") or {}).items():
-            if isinstance(v, int):
-                usage[k] = v
+        _merge_usage(usage, msg.get("usage"))
     elif t == "message_delta":
         stop = (obj.get("delta") or {}).get("stop_reason")
-        for k, v in (obj.get("usage") or {}).items():
-            if isinstance(v, int):
-                usage[k] = v
+        # inferroute emits the final usage.cost on message_delta (output_tokens
+        # are known only here), so this is where cost is captured for streams.
+        _merge_usage(usage, obj.get("usage"))
     return stop, served
 
 
@@ -279,9 +299,7 @@ def _extract_json(raw: bytes) -> tuple[dict, Optional[str], Optional[str]]:
         return usage, None, None
     if not isinstance(obj, dict):
         return usage, None, None
-    for k, v in (obj.get("usage") or {}).items():
-        if isinstance(v, int):
-            usage[k] = v
+    _merge_usage(usage, obj.get("usage"))
     return usage, obj.get("stop_reason"), obj.get("model")
 
 

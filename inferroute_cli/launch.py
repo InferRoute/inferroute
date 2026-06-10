@@ -153,52 +153,55 @@ def _model_for_statusline(extra_args: list[str]) -> str | None:
     return None
 
 
-def _strip_command(prefix: str) -> dict:
-    """A CC statusLine `command` dict that prints `prefix` + live session cost.
+def _record_sessions_dir() -> Path:
+    """Where the on-device recorder daemon writes per-session cost files.
 
-    The whole STATIC strip (model · lane │ link │ ↻ hint) is baked into `prefix`
-    at launch time — ir already knows all of it, so there's no reason to recompute
-    it each render. The only DYNAMIC bit is cost-so-far, which CC pipes on stdin
-    as JSON every render cycle (verified against CC 2.1.170: the statusLine input
-    object carries `cost.total_cost_usd`). The injected program reads just that
-    one field and appends ` │ $X.XX` to the end of `prefix`; cost lands last on
-    the final line, so it's the first thing CC's width-clip drops on a narrow
-    terminal — exactly the desired degradation order.
+    Mirrors inferroute_local.config.Config.record_dir resolution
+    (INFERROUTE_RECORD_DIR → INFERROUTE_LOG_DIR → ~/.inferroute) so the status
+    line reads the same path the daemon wrote.
+    """
+    base = os.environ.get("INFERROUTE_RECORD_DIR") or os.environ.get("INFERROUTE_LOG_DIR") or ""
+    return (Path(base) if base else Path.home() / ".inferroute") / "sessions"
 
-    Interpreter choice (no network, no temp files, FAST): prefer the absolute
-    path of ir's OWN python (`sys.executable`) — it's guaranteed to exist on disk
-    for the whole session and parses JSON without any shell/jq dependency. If that
-    isn't a usable python (frozen build), fall back to python3/python on PATH, and
-    if there's no python at all, drop cost and `printf` the static strip — the
-    product-critical part still works dependency-free.
+
+def _strip_command(prefix: str, cost_file: Path | None = None) -> dict:
+    """A CC statusLine `command` dict that prints the strip + real session cost.
+
+    The static strip (model · lane │ link │ ↻ hint) is known at launch, so it's a
+    plain `printf` of `prefix` — dependency-free, no per-render subprocess, and it
+    ignores the session JSON CC pipes on stdin.
+
+    Cost is the REAL inferroute figure, not CC's. We deliberately do NOT use CC's
+    `cost.total_cost_usd` from stdin: CC prices with its own built-in rates for the
+    model id, and our routed models (kimi/glm/… via the proxy) are far cheaper than
+    whatever CC assumes for a non-Anthropic id, so that number runs several times
+    high — exactly wrong on a cost-savings product. Instead, the on-device recorder
+    daemon captures the server-computed `usage.cost` off each response (the same
+    number the dashboard bills) and keeps a per-session running total in a tiny
+    local file (`<record_dir>/sessions/<session_id>.cost`, full-precision USD). The
+    status line just reads that file — local, no network — and printf-formats it to
+    cents. When the daemon isn't running (no file) the strip is simply the static
+    two lines; cost appears once the first turn settles. The `|| true` keeps the
+    command's exit status 0 even on a malformed/again-empty read, so CC still
+    renders the line (it only displays stdout when the command exits 0).
+
+    Cost lands last on the final line, so it's the first thing CC's width-clip drops.
     """
     import shlex
 
-    py = sys.executable
-    if not py or "python" not in os.path.basename(py).lower():
-        py = shutil.which("python3") or shutil.which("python")
-
-    if py:
-        # Reads cost off stdin JSON; on ANY error (empty stdin on first render,
-        # malformed JSON, missing field) it silently prints just the prefix.
-        prog = (
-            "import sys,json\n"
-            "p=sys.argv[1] if len(sys.argv)>1 else ''\n"
-            "c=''\n"
-            "try:\n"
-            "    v=(json.load(sys.stdin).get('cost') or {}).get('total_cost_usd')\n"
-            "    if isinstance(v,(int,float)) and v>0: c=' │ $%.2f'%v\n"
-            "except Exception: pass\n"
-            "sys.stdout.write(p+c)\n"
+    command = "printf '%s' " + shlex.quote(prefix)
+    if cost_file is not None:
+        cf = shlex.quote(str(cost_file))
+        command += (
+            f"; if [ -s {cf} ]; then "
+            f"printf ' │ $%.2f' \"$(cat {cf} 2>/dev/null)\" 2>/dev/null || true; fi"
         )
-        command = f"{shlex.quote(py)} -c {shlex.quote(prog)} {shlex.quote(prefix)}"
-    else:
-        # No python: static strip only (still two lines if `prefix` has a \n).
-        command = "printf '%s' " + shlex.quote(prefix)
     return {"type": "command", "command": command}
 
 
-def _product_strip_settings_args(prefix: str, extra_args: list[str]) -> list[str]:
+def _product_strip_settings_args(
+    prefix: str, extra_args: list[str], cost_file: Path | None = None
+) -> list[str]:
     """`['--settings', <json>]` pinning the product strip to CC's status line, or [].
 
     Claude Code's fullscreen TUI (alt-screen — the DEFAULT in CC 2.1.170, mode
@@ -225,7 +228,7 @@ def _product_strip_settings_args(prefix: str, extra_args: list[str]) -> list[str
     if _user_has_statusline():
         return []
 
-    settings = {"statusLine": _strip_command(prefix)}
+    settings = {"statusLine": _strip_command(prefix, cost_file)}
     return ["--settings", json.dumps(settings)]
 
 
@@ -481,13 +484,17 @@ def launch_through_inferroute(
     # agents that pass no allow-list don't stall on prompts. (See _resolve_flags.)
     extra = list(extra_args)
     flags = _resolve_flags(permission_mode, extra)
-    # Pin the product strip (model · lane │ link │ ↻ relaunch hint │ cost) to
-    # CC's status line so it stays visible for the whole session — the pre-launch
+    # Pin the product strip (line 1: model · lane │ link; line 2: ↻ relaunch hint)
+    # to CC's status line so it stays visible for the whole session — the pre-launch
     # banner above is hidden by CC's fullscreen TUI (the DEFAULT in 2.1.170) and
     # scrolls away in the inline renderer. No-ops if the user has their own
     # statusLine / --settings, or set IR_NO_STATUSLINE.
     prefix = _gate_strip_prefix(creds.api_url, session_id, model_id, economy)
-    status_args = _product_strip_settings_args(prefix, extra)
+    # The on-device recorder daemon (when running) writes this session's real
+    # cumulative cost here; the status line reads it. No-ops gracefully if the
+    # daemon isn't running (file never appears) — see _strip_command.
+    cost_file = _record_sessions_dir() / f"{session_id}.cost"
+    status_args = _product_strip_settings_args(prefix, extra, cost_file)
     argv = [
         binary,
         *flags,

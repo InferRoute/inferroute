@@ -171,6 +171,11 @@ class InferrouteProxy:
                 stop_reason = s or stop_reason
                 served = sv or served
                 blob = bytes((full or b"")[:cap])
+            # Capture the real session cost regardless of record_level (even
+            # "off") — it's a single content-free number, and it's the only thing
+            # that lets the status line show the true price. The rich outcome
+            # event below stays gated by record_level inside record_outcome.
+            self.recorder.note_cost(session_id, usage.get("cost"))
             try:
                 self.recorder.record_outcome(
                     turn_id=turn_id, session_id=session_id, status=status,

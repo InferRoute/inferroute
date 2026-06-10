@@ -87,7 +87,7 @@ def _print_session_link(api_url: str, session_id: str) -> None:
     (alt-screen, enabled via `/tui fullscreen` or CLAUDE_CODE_NO_FLICKER=1) hides
     everything printed before launch for the whole session, and even the inline
     renderer scrolls it off-screen as the conversation grows. The persistent copy
-    of this link lives in the status line — see `_statusline_settings_args`.
+    of this link lives in the status line — see `_product_strip_settings_args`.
     """
     url = _session_url(api_url, session_id)
 
@@ -134,18 +134,80 @@ def _user_has_statusline() -> bool:
     return False
 
 
-def _statusline_settings_args(
-    api_url: str,
-    session_id: str,
-    economy: bool,
-    extra_args: list[str],
-) -> list[str]:
-    """`['--settings', <json>]` pinning the session link to CC's status line, or [].
+def _model_for_statusline(extra_args: list[str]) -> str | None:
+    """The `--model X` value the user passed through (verbatim X), or None.
 
-    Claude Code's fullscreen TUI hides anything printed before launch, and the
-    inline renderer eventually scrolls it away — so the pre-launch banner alone
-    isn't a durable home for the dashboard link. A statusLine keeps it visible at
-    the bottom of the screen for the entire session, in BOTH render modes.
+    Only used by the NATIVE path for the strip header / relaunch hint — the gate
+    path already has its resolved model_id. Native passes args straight to
+    claude, so X is whatever claude understands (`sonnet`, `claude-opus-4-8`, …)
+    and we echo it back unchanged.
+    """
+    i = 0
+    while i < len(extra_args):
+        a = extra_args[i]
+        if a == "--model" and i + 1 < len(extra_args):
+            return extra_args[i + 1]
+        if a.startswith("--model="):
+            return a.split("=", 1)[1]
+        i += 1
+    return None
+
+
+def _strip_command(prefix: str) -> dict:
+    """A CC statusLine `command` dict that prints `prefix` + live session cost.
+
+    The whole STATIC strip (model · lane │ link │ ↻ hint) is baked into `prefix`
+    at launch time — ir already knows all of it, so there's no reason to recompute
+    it each render. The only DYNAMIC bit is cost-so-far, which CC pipes on stdin
+    as JSON every render cycle (verified against CC 2.1.170: the statusLine input
+    object carries `cost.total_cost_usd`). The injected program reads just that
+    one field and appends ` │ $X.XX` to the end of `prefix`; cost lands last on
+    the final line, so it's the first thing CC's width-clip drops on a narrow
+    terminal — exactly the desired degradation order.
+
+    Interpreter choice (no network, no temp files, FAST): prefer the absolute
+    path of ir's OWN python (`sys.executable`) — it's guaranteed to exist on disk
+    for the whole session and parses JSON without any shell/jq dependency. If that
+    isn't a usable python (frozen build), fall back to python3/python on PATH, and
+    if there's no python at all, drop cost and `printf` the static strip — the
+    product-critical part still works dependency-free.
+    """
+    import shlex
+
+    py = sys.executable
+    if not py or "python" not in os.path.basename(py).lower():
+        py = shutil.which("python3") or shutil.which("python")
+
+    if py:
+        # Reads cost off stdin JSON; on ANY error (empty stdin on first render,
+        # malformed JSON, missing field) it silently prints just the prefix.
+        prog = (
+            "import sys,json\n"
+            "p=sys.argv[1] if len(sys.argv)>1 else ''\n"
+            "c=''\n"
+            "try:\n"
+            "    v=(json.load(sys.stdin).get('cost') or {}).get('total_cost_usd')\n"
+            "    if isinstance(v,(int,float)) and v>0: c=' │ $%.2f'%v\n"
+            "except Exception: pass\n"
+            "sys.stdout.write(p+c)\n"
+        )
+        command = f"{shlex.quote(py)} -c {shlex.quote(prog)} {shlex.quote(prefix)}"
+    else:
+        # No python: static strip only (still two lines if `prefix` has a \n).
+        command = "printf '%s' " + shlex.quote(prefix)
+    return {"type": "command", "command": command}
+
+
+def _product_strip_settings_args(prefix: str, extra_args: list[str]) -> list[str]:
+    """`['--settings', <json>]` pinning the product strip to CC's status line, or [].
+
+    Claude Code's fullscreen TUI (alt-screen — the DEFAULT in CC 2.1.170, mode
+    `ant_default`) hides anything printed before launch, and the inline renderer
+    eventually scrolls it away. So neither the pre-launch banner nor a post-session
+    print (impossible anyway: we `execvp` claude and the ir process is replaced)
+    can durably surface ir's session info. A statusLine is rendered BY claude
+    INSIDE the TUI, so it survives fullscreen and stays pinned for the whole
+    session in BOTH render modes.
 
     We inject it via `--settings` (a per-invocation layer; no temp files, no
     polluting the user's repo with a .claude/settings.json). Because that layer
@@ -155,7 +217,6 @@ def _statusline_settings_args(
       * the user already has a statusLine configured (don't clobber it).
     """
     import json
-    import shlex
 
     if os.environ.get("IR_NO_STATUSLINE", "").strip().lower() in ("1", "true", "yes"):
         return []
@@ -164,16 +225,50 @@ def _statusline_settings_args(
     if _user_has_statusline():
         return []
 
-    url = _session_url(api_url, session_id)
-    tag = "⚡ inferroute economy" if economy else "inferroute"
-    line = f"{tag} · {url}"
-    # CC runs this command in a shell each render cycle and shows its stdout.
-    # printf ignores the session JSON piped on stdin; shlex.quote makes `line`
-    # a single safe shell token. os.execvpe passes the JSON as one argv element
-    # (no shell), so only the inner command needs shell-escaping.
-    command = "printf '%s' " + shlex.quote(line)
-    settings = {"statusLine": {"type": "command", "command": command}}
+    settings = {"statusLine": _strip_command(prefix)}
     return ["--settings", json.dumps(settings)]
+
+
+def _gate_strip_prefix(
+    api_url: str, session_id: str, model_id: str, economy: bool
+) -> str:
+    """Two-line product strip for the gate (inferroute) launch path.
+
+      line 1:  ⚡ <model> · <lane> │ <dashboard link>
+      line 2:  ↻ ir --model <model> [--economy]      (+ live cost appended)
+
+    The relaunch hint is the piece users were LOSING (the pre-launch banner that
+    carried it is hidden by the fullscreen TUI). We reverse-map the resolved
+    model_id back to the friendly short the user types (`kimi`, not
+    `moonshotai/Kimi-K2.6-TEE`); unknown ids fall through verbatim — still a valid
+    `ir --model <id>`. Two lines (CC supports them — it splits statusLine stdout
+    on \\n) keep the long link and the short hint from crowding each other at 80
+    cols; cost is appended last so it clips first.
+    """
+    from . import models
+
+    short = models.short_for_model_id(model_id) or model_id
+    lane = "economy" if economy else "standard"
+    url = _session_url(api_url, session_id)
+    hint = f"ir --model {short}" + (" --economy" if economy else "")
+    return f"⚡ {short} · {lane} │ {url}\n↻ {hint}"
+
+
+def _native_strip_prefix(extra_args: list[str]) -> str:
+    """Two-line product strip for the native (`ir anthropic`) launch path.
+
+      line 1:  ⚡ <model> · native
+      line 2:  ↻ ir anthropic [--model <model>]      (+ live cost appended)
+
+    No dashboard link here — native deliberately doesn't route through inferroute,
+    so there's no minted session to link to. The relaunch hint preserves the exact
+    way to start this same plain-claude config again (the lost piece). `<model>` is
+    the verbatim `--model` value the user passed, if any, else `claude`.
+    """
+    model = _model_for_statusline(extra_args)
+    head = model or "claude"
+    hint = "ir anthropic" + (f" --model {model}" if model else "")
+    return f"⚡ {head} · native\n↻ {hint}"
 
 
 def _print_economy_banner() -> None:
@@ -386,11 +481,13 @@ def launch_through_inferroute(
     # agents that pass no allow-list don't stall on prompts. (See _resolve_flags.)
     extra = list(extra_args)
     flags = _resolve_flags(permission_mode, extra)
-    # Pin the session link to CC's status line so it stays visible for the whole
-    # session (the pre-launch banner above is hidden by CC's fullscreen TUI and
-    # scrolls away in the inline renderer). No-ops if the user has their own
+    # Pin the product strip (model · lane │ link │ ↻ relaunch hint │ cost) to
+    # CC's status line so it stays visible for the whole session — the pre-launch
+    # banner above is hidden by CC's fullscreen TUI (the DEFAULT in 2.1.170) and
+    # scrolls away in the inline renderer. No-ops if the user has their own
     # statusLine / --settings, or set IR_NO_STATUSLINE.
-    status_args = _statusline_settings_args(creds.api_url, session_id, economy, extra)
+    prefix = _gate_strip_prefix(creds.api_url, session_id, model_id, economy)
+    status_args = _product_strip_settings_args(prefix, extra)
     argv = [
         binary,
         *flags,
@@ -407,7 +504,14 @@ def launch_native_anthropic(extra_args: Iterable[str] = ()) -> None:
 
     Whatever the user has set globally is what runs. If they're not
     authenticated, claude itself will tell them.
+
+    Still gets the product strip (sans dashboard link — native doesn't route
+    through inferroute, so there's no session to link). The relaunch hint here is
+    `ir anthropic [--model X]`, which is the piece a user otherwise loses under
+    the fullscreen TUI. Same backoff as the gate path.
     """
     binary = _require_claude_binary()
-    argv = [binary, *_DEFAULT_FLAGS, *list(extra_args)]
+    extra = list(extra_args)
+    status_args = _product_strip_settings_args(_native_strip_prefix(extra), extra)
+    argv = [binary, *_DEFAULT_FLAGS, *status_args, *extra]
     os.execvp(binary, argv)

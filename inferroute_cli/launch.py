@@ -235,43 +235,38 @@ def _product_strip_settings_args(
 def _gate_strip_prefix(
     api_url: str, session_id: str, model_id: str, economy: bool
 ) -> str:
-    """Two-line product strip for the gate (inferroute) launch path.
+    """One-line product strip for the gate (inferroute) launch path:
 
-      line 1:  ⚡ <model> · <lane> │ <dashboard link>
-      line 2:  ↻ ir --model <model> [--economy]      (+ live cost appended)
+        ⚡ <model> · <lane> │ <dashboard link>      (+ live cost appended)
 
-    The relaunch hint is the piece users were LOSING (the pre-launch banner that
-    carried it is hidden by the fullscreen TUI). We reverse-map the resolved
-    model_id back to the friendly short the user types (`kimi`, not
-    `moonshotai/Kimi-K2.6-TEE`); unknown ids fall through verbatim — still a valid
-    `ir --model <id>`. Two lines (CC supports them — it splits statusLine stdout
-    on \\n) keep the long link and the short hint from crowding each other at 80
-    cols; cost is appended last so it clips first.
+    Single line by design: a dedicated second line for a relaunch hint
+    (`↻ ir --model …`) wasn't worth the vertical space, and CC gives the
+    statusLine no terminal width, so the hint can't be right-pegged on this line
+    either. The model name in the header already implies how to relaunch. We
+    reverse-map the resolved model_id back to the friendly short (`kimi`, not
+    `moonshotai/Kimi-K2.6-TEE`) for that header; cost is appended last so it's the
+    first thing CC's width-clip drops on a narrow terminal.
     """
     from . import models
 
     short = models.short_for_model_id(model_id) or model_id
     lane = "economy" if economy else "standard"
     url = _session_url(api_url, session_id)
-    hint = f"ir --model {short}" + (" --economy" if economy else "")
-    return f"⚡ {short} · {lane} │ {url}\n↻ {hint}"
+    return f"⚡ {short} · {lane} │ {url}"
 
 
 def _native_strip_prefix(extra_args: list[str]) -> str:
-    """Two-line product strip for the native (`ir anthropic`) launch path.
+    """One-line product strip for the native (`ir anthropic`) launch path:
 
-      line 1:  ⚡ <model> · native
-      line 2:  ↻ ir anthropic [--model <model>]      (+ live cost appended)
+        ⚡ <model> · native
 
-    No dashboard link here — native deliberately doesn't route through inferroute,
-    so there's no minted session to link to. The relaunch hint preserves the exact
-    way to start this same plain-claude config again (the lost piece). `<model>` is
+    No dashboard link (native deliberately doesn't route through inferroute, so
+    there's no minted session) and no cost (no daemon in the path). `<model>` is
     the verbatim `--model` value the user passed, if any, else `claude`.
     """
     model = _model_for_statusline(extra_args)
     head = model or "claude"
-    hint = "ir anthropic" + (f" --model {model}" if model else "")
-    return f"⚡ {head} · native\n↻ {hint}"
+    return f"⚡ {head} · native"
 
 
 def _print_economy_banner() -> None:
@@ -484,10 +479,10 @@ def launch_through_inferroute(
     # agents that pass no allow-list don't stall on prompts. (See _resolve_flags.)
     extra = list(extra_args)
     flags = _resolve_flags(permission_mode, extra)
-    # Pin the product strip (line 1: model · lane │ link; line 2: ↻ relaunch hint)
-    # to CC's status line so it stays visible for the whole session — the pre-launch
-    # banner above is hidden by CC's fullscreen TUI (the DEFAULT in 2.1.170) and
-    # scrolls away in the inline renderer. No-ops if the user has their own
+    # Pin the product strip (⚡ model · lane │ link │ $cost) to CC's status line
+    # so it stays visible for the whole session — the pre-launch banner above is
+    # hidden by CC's fullscreen TUI (the DEFAULT in 2.1.170) and scrolls away in
+    # the inline renderer. No-ops if the user has their own
     # statusLine / --settings, or set IR_NO_STATUSLINE.
     prefix = _gate_strip_prefix(creds.api_url, session_id, model_id, economy)
     # The on-device recorder daemon (when running) writes this session's real

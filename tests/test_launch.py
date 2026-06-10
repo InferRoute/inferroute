@@ -97,32 +97,29 @@ def test_session_url_strips_api_subdomain():
     assert _session_url("https://example.test", "x") == "https://example.test/session/x"
 
 
-def test_gate_strip_prefix_two_lines_with_friendly_short_and_hint():
-    # Kimi's canonical id reverse-maps to the friendly short in the relaunch hint.
+def test_gate_strip_prefix_one_line_with_friendly_short():
+    # One line; Kimi's canonical id reverse-maps to the friendly short in the header.
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "sess123",
                                 "moonshotai/Kimi-K2.6-TEE", False)
-    line1, line2 = prefix.split("\n")
-    assert line1 == "⚡ kimi · standard │ https://inferroute.ai/session/sess123"
-    assert line2 == "↻ ir --model kimi"
+    assert "\n" not in prefix
+    assert prefix == "⚡ kimi · standard │ https://inferroute.ai/session/sess123"
 
 
-def test_gate_strip_prefix_economy_lane_and_hint():
+def test_gate_strip_prefix_economy_lane():
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "s", "MiniMax-M2.7", True)
-    line1, line2 = prefix.split("\n")
-    assert line1.startswith("⚡ minimax · economy │ ")
-    assert line2 == "↻ ir --model minimax --economy"
+    assert "\n" not in prefix
+    assert prefix.startswith("⚡ minimax · economy │ ")
 
 
 def test_gate_strip_prefix_unknown_model_passes_through_verbatim():
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "s", "claude-opus-4-8", False)
-    assert "⚡ claude-opus-4-8 · standard" in prefix
-    assert prefix.endswith("↻ ir --model claude-opus-4-8")
+    assert prefix.startswith("⚡ claude-opus-4-8 · standard │ ")
 
 
-def test_native_strip_prefix_with_and_without_model():
-    assert _native_strip_prefix(["--model", "sonnet", "hi"]) == "⚡ sonnet · native\n↻ ir anthropic --model sonnet"
-    assert _native_strip_prefix(["--model=opus"]) == "⚡ opus · native\n↻ ir anthropic --model opus"
-    assert _native_strip_prefix(["hello"]) == "⚡ claude · native\n↻ ir anthropic"
+def test_native_strip_prefix_one_line_with_and_without_model():
+    assert _native_strip_prefix(["--model", "sonnet", "hi"]) == "⚡ sonnet · native"
+    assert _native_strip_prefix(["--model=opus"]) == "⚡ opus · native"
+    assert _native_strip_prefix(["hello"]) == "⚡ claude · native"
 
 
 def test_model_for_statusline_extraction():
@@ -132,8 +129,8 @@ def test_model_for_statusline_extraction():
     assert _model_for_statusline([]) is None
 
 
-def test_statusline_command_renders_both_lines_and_ignores_stdin():
-    # No cost_file → static two-line strip; CC's piped session JSON is ignored.
+def test_statusline_command_renders_one_line_and_ignores_stdin():
+    # No cost_file → static one-line strip; CC's piped session JSON is ignored.
     args = _product_strip_settings_args(_gate_strip_prefix(
         "https://api.inferroute.ai", "sess123", "moonshotai/Kimi-K2.6-TEE", False), [])
     assert args[0] == "--settings"
@@ -141,24 +138,21 @@ def test_statusline_command_renders_both_lines_and_ignores_stdin():
     out = _run_statusline(cmd, '{"cost":{"total_cost_usd":99.99}}')  # CC's number — ignored
     assert out.returncode == 0
     assert out.stderr == ""
-    assert out.stdout == (
-        "⚡ kimi · standard │ https://inferroute.ai/session/sess123\n"
-        "↻ ir --model kimi"
-    )
+    assert out.stdout == "⚡ kimi · standard │ https://inferroute.ai/session/sess123"
 
 
 def test_statusline_appends_real_cost_from_daemon_file(tmp_path):
     cost_file = tmp_path / "sess123.cost"
     cost_file.write_text("0.423700")  # full-precision USD, as the recorder writes it
-    cmd = _strip_command("⚡ kimi · standard │ link\n↻ ir --model kimi", cost_file)["command"]
+    cmd = _strip_command("⚡ kimi · standard │ link", cost_file)["command"]
     out = _run_statusline(cmd)
     assert out.returncode == 0
-    # Cost lands at the very end (last line), printf-formatted to cents.
-    assert out.stdout == "⚡ kimi · standard │ link\n↻ ir --model kimi │ $0.42"
+    # Cost lands at the very end, printf-formatted to cents.
+    assert out.stdout == "⚡ kimi · standard │ link │ $0.42"
 
 
 def test_statusline_no_cost_when_file_missing_empty_or_garbage(tmp_path):
-    prefix = "⚡ x · native\n↻ ir anthropic"
+    prefix = "⚡ x · native"
     # missing file
     cmd = _strip_command(prefix, tmp_path / "nope.cost")["command"]
     out = _run_statusline(cmd)

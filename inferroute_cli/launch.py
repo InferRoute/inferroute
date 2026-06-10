@@ -53,18 +53,15 @@ def _recording_daemon_url() -> str | None:
         return None
 
 
-def _print_session_link(api_url: str, session_id: str) -> None:
-    """Print a clickable URL to view this session's traffic on the dashboard.
+def _session_url(api_url: str, session_id: str) -> str:
+    """Build the dashboard URL for this session from the API base URL.
 
     The session page at <site>/session/[id] is keyed by the per-launch
-    `session_id` we mint below and inject into every Claude Code request (via
+    `session_id` we mint at launch and inject into every Claude Code request (via
     ANTHROPIC_CUSTOM_HEADERS). The proxy tags each usage_records row with it, so
     the link shows exactly — and only — the requests this `ir` invocation
     produced, even when several `ir` sessions run concurrently. (Older links use
     a `from-<unix_ms>` timestamp-window slug; the dashboard still accepts those.)
-
-    We also persist the URL to ~/.config/inferroute/last_session for retrieval
-    via `ir status` or shell history.
     """
     # api.inferroute.ai → inferroute.ai (the dashboard sits on the apex domain).
     # Works for https://api.X and http://api.X; leaves anything else alone.
@@ -77,7 +74,22 @@ def _print_session_link(api_url: str, session_id: str) -> None:
     # Note: it's `/session/...` not `/dashboard/session/...` — the
     # (dashboard) route group in inferroute-site is parenthesised and
     # therefore not part of the URL path (Next.js App Router convention).
-    url = f"{site.rstrip('/')}/session/{session_id}"
+    return f"{site.rstrip('/')}/session/{session_id}"
+
+
+def _print_session_link(api_url: str, session_id: str) -> None:
+    """Print a clickable URL to view this session's traffic on the dashboard.
+
+    Also persist the URL to ~/.config/inferroute/last_session for retrieval via
+    `ir status` or shell history.
+
+    NOTE: this pre-launch print is NOT durable. Claude Code's fullscreen TUI
+    (alt-screen, enabled via `/tui fullscreen` or CLAUDE_CODE_NO_FLICKER=1) hides
+    everything printed before launch for the whole session, and even the inline
+    renderer scrolls it off-screen as the conversation grows. The persistent copy
+    of this link lives in the status line — see `_statusline_settings_args`.
+    """
+    url = _session_url(api_url, session_id)
 
     # Persist for later retrieval (e.g. `ir status`, or user copy-paste).
     try:
@@ -93,6 +105,75 @@ def _print_session_link(api_url: str, session_id: str) -> None:
         f"\n  ➜ View this session at\n    \033[36m{url}\033[0m\n\n"
     )
     sys.stderr.flush()
+
+
+def _user_has_statusline() -> bool:
+    """True if the user already configures a statusLine we'd otherwise clobber.
+
+    Our injected statusLine arrives via the `--settings` CLI flag, which is a
+    higher-precedence layer than user/project/local settings.json — so it would
+    REPLACE any statusLine the user defined. To avoid stomping their setup we
+    check the settings files they could have set one in and back off if so.
+    """
+    import json
+
+    candidates = [
+        Path.home() / ".claude" / "settings.json",
+        Path.home() / ".claude" / "settings.local.json",
+        Path.cwd() / ".claude" / "settings.json",
+        Path.cwd() / ".claude" / "settings.local.json",
+    ]
+    for p in candidates:
+        try:
+            if p.is_file():
+                data = json.loads(p.read_text())
+                if isinstance(data, dict) and data.get("statusLine"):
+                    return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _statusline_settings_args(
+    api_url: str,
+    session_id: str,
+    economy: bool,
+    extra_args: list[str],
+) -> list[str]:
+    """`['--settings', <json>]` pinning the session link to CC's status line, or [].
+
+    Claude Code's fullscreen TUI hides anything printed before launch, and the
+    inline renderer eventually scrolls it away — so the pre-launch banner alone
+    isn't a durable home for the dashboard link. A statusLine keeps it visible at
+    the bottom of the screen for the entire session, in BOTH render modes.
+
+    We inject it via `--settings` (a per-invocation layer; no temp files, no
+    polluting the user's repo with a .claude/settings.json). Because that layer
+    overrides the user's own statusLine, we back off when:
+      * IR_NO_STATUSLINE is set (explicit opt-out),
+      * the user passed their own --settings (respect it), or
+      * the user already has a statusLine configured (don't clobber it).
+    """
+    import json
+    import shlex
+
+    if os.environ.get("IR_NO_STATUSLINE", "").strip().lower() in ("1", "true", "yes"):
+        return []
+    if any(a == "--settings" or a.startswith("--settings=") for a in extra_args):
+        return []
+    if _user_has_statusline():
+        return []
+
+    url = _session_url(api_url, session_id)
+    tag = "⚡ inferroute economy" if economy else "inferroute"
+    line = f"{tag} · {url}"
+    # CC runs this command in a shell each render cycle and shows its stdout.
+    # printf ignores the session JSON piped on stdin; shlex.quote makes `line`
+    # a single safe shell token. os.execvpe passes the JSON as one argv element
+    # (no shell), so only the inner command needs shell-escaping.
+    command = "printf '%s' " + shlex.quote(line)
+    settings = {"statusLine": {"type": "command", "command": command}}
+    return ["--settings", json.dumps(settings)]
 
 
 def _print_economy_banner() -> None:
@@ -305,10 +386,16 @@ def launch_through_inferroute(
     # agents that pass no allow-list don't stall on prompts. (See _resolve_flags.)
     extra = list(extra_args)
     flags = _resolve_flags(permission_mode, extra)
+    # Pin the session link to CC's status line so it stays visible for the whole
+    # session (the pre-launch banner above is hidden by CC's fullscreen TUI and
+    # scrolls away in the inline renderer). No-ops if the user has their own
+    # statusLine / --settings, or set IR_NO_STATUSLINE.
+    status_args = _statusline_settings_args(creds.api_url, session_id, economy, extra)
     argv = [
         binary,
         *flags,
         "--model", model_id,
+        *status_args,
         *extra,
     ]
     # execvpe replaces the current process — claude inherits our terminal.

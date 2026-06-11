@@ -198,47 +198,53 @@ def _ago(ts: float) -> str:
     return f"{int(d // 86400)}d ago"
 
 
-def _pick(sessions: list[Session]) -> str | None:
-    """Full-screen picker; returns the chosen session id, or None if quit."""
+_GREEN, _INK, _MUTE, _DIM = "#37E59B", "#FAFAFA", "#8E8E98", "#5A5A63"
+
+
+def _row_markup(s: Session) -> str:
+    if s.is_ir:
+        from . import models
+        short = models.short_for_model_id(s.model) if s.model else None
+        bits = [short or (s.model or "inferroute")]
+        if s.lane:
+            bits.append(s.lane)
+        if s.cost_usd:
+            bits.append(f"${s.cost_usd:.2f}")
+        line2 = f"[{_GREEN}]⚡ {'  ·  '.join(bits)}[/]   [{_MUTE}]{_ago(s.mtime)}[/]"
+        if s.branch:
+            line2 += f"   [{_MUTE}]{s.branch}[/]"
+        return f"[b {_INK}]{s.title}[/]\n{line2}"
+    line2 = f"[{_DIM}]○ native claude[/]   [{_MUTE}]{_ago(s.mtime)}[/]"
+    if s.branch:
+        line2 += f"   [{_MUTE}]{s.branch}[/]"
+    return f"[{_INK}]{s.title}[/]\n{line2}"
+
+
+def _build_resume_app(sessions: list[Session]):
+    """Construct the resume picker App for `sessions`. Module-level (not nested in
+    _pick) so it's exercisable under textual's headless test pilot."""
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.containers import Vertical
     from textual.widgets import ListItem, ListView, Static
 
-    GREEN, INK, MUTE, DIM = "#37E59B", "#FAFAFA", "#8E8E98", "#5A5A63"
-
-    def row(s: Session) -> str:
-        if s.is_ir:
-            bits = []
-            from . import models
-            short = models.short_for_model_id(s.model) if s.model else None
-            bits.append(short or (s.model or "inferroute"))
-            if s.lane:
-                bits.append(s.lane)
-            if s.cost_usd:
-                bits.append(f"${s.cost_usd:.2f}")
-            meta = "  ·  ".join(bits)
-            line2 = f"[{GREEN}]⚡ {meta}[/]   [{MUTE}]{_ago(s.mtime)}[/]"
-            if s.branch:
-                line2 += f"   [{MUTE}]{s.branch}[/]"
-            return f"[b {INK}]{s.title}[/]\n{line2}"
-        line2 = f"[{DIM}]○ native claude[/]   [{MUTE}]{_ago(s.mtime)}[/]"
-        if s.branch:
-            line2 += f"   [{MUTE}]{s.branch}[/]"
-        return f"[{INK}]{s.title}[/]\n{line2}"
-
     class ResumeApp(App):
+        # The panel is a fixed share of the screen and the ListView takes the
+        # remaining space (height: 1fr) — a BOUNDED, scrollable viewport. With
+        # `height: auto` the list grew to fit every item, so moving the cursor
+        # past the fold never scrolled; 1fr lets ListView auto-scroll the
+        # highlighted row into view.
         CSS = f"""
         Screen {{ align: center middle; background: #0A0A0C; }}
-        #panel {{ width: 92; height: auto; max-height: 90%; padding: 1 2;
+        #panel {{ width: 92; height: 85%; padding: 1 2;
                   border: round #2A2A30; background: #101014; }}
-        #head {{ width: 100%; color: {INK}; text-style: bold; padding-bottom: 1; }}
-        ListView {{ height: auto; background: transparent; }}
+        #head {{ width: 100%; height: auto; color: {_INK}; text-style: bold; padding-bottom: 1; }}
+        ListView {{ height: 1fr; background: transparent; }}
         ListItem {{ padding: 0 2; margin-bottom: 1; background: #16161B; border: round #16161B; }}
         ListItem:hover {{ border: round #34343C; }}
-        ListView > ListItem.-highlight {{ background: {GREEN} 12%; border: round {GREEN}; }}
+        ListView > ListItem.-highlight {{ background: {_GREEN} 12%; border: round {_GREEN}; }}
         ListItem > Static {{ width: 100%; }}
-        #hint {{ width: 100%; color: {MUTE}; padding-top: 1; }}
+        #hint {{ width: 100%; height: auto; color: {_MUTE}; padding-top: 1; }}
         """
         BINDINGS = [
             Binding("q", "quit", "quit"),
@@ -256,11 +262,12 @@ def _pick(sessions: list[Session]) -> str | None:
             n_ir = sum(1 for s in sessions if s.is_ir)
             with Vertical(id="panel"):
                 yield Static(
-                    f"[b {GREEN}]inferroute[/]  resume a session   "
-                    f"[{MUTE}]· {n_ir} inferroute · {len(sessions) - n_ir} native[/]",
+                    f"[b {_GREEN}]inferroute[/]  resume a session   "
+                    f"[{_MUTE}]· {n_ir} inferroute · {len(sessions) - n_ir} native[/]",
                     id="head",
                 )
-                items = [ListItem(Static(row(s)), id=f"s_{i}") for i, s in enumerate(sessions)]
+                items = [ListItem(Static(_row_markup(s)), id=f"s_{i}")
+                         for i, s in enumerate(sessions)]
                 yield ListView(*items, id="picker")
                 yield Static("[b]↑/↓[/] move   [b]enter[/] resume   [b]q[/] quit", id="hint")
 
@@ -288,7 +295,12 @@ def _pick(sessions: list[Session]) -> str | None:
                 self.chosen = sessions[int(item_id[2:])].id
             self.exit()
 
-    app = ResumeApp()
+    return ResumeApp()
+
+
+def _pick(sessions: list[Session]) -> str | None:
+    """Full-screen picker; returns the chosen session id, or None if quit."""
+    app = _build_resume_app(sessions)
     app.run()
     return app.chosen
 

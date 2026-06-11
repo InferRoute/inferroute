@@ -102,3 +102,41 @@ def test_empty_or_missing_project_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
     assert resume.list_sessions("/nowhere/at/all") == []
     assert resume.newest("/nowhere/at/all") is None
+
+
+# ── menu scrolls as the cursor moves (the bug: ListView was height:auto) ──────
+
+def _mk(n):
+    return [resume.Session(id=f"s{i}", title=f"Session {i}", mtime=float(1000 - i),
+                           branch="main", is_ir=(i % 2 == 0),
+                           model="moonshotai/Kimi-K2.6-TEE" if i % 2 == 0 else None,
+                           lane="standard" if i % 2 == 0 else None,
+                           cost_usd=0.12 if i % 2 == 0 else None)
+            for i in range(n)]
+
+
+def test_menu_scrolls_when_moving_past_the_fold():
+    import asyncio
+
+    async def drive():
+        app = resume._build_resume_app(_mk(40))   # far more than fit on screen
+        async with app.run_test(size=(100, 24)) as pilot:
+            lv = app.query_one("#picker")
+            assert lv.scroll_offset.y == 0          # starts at top
+            await pilot.press(*(["down"] * 25))     # walk past the visible fold
+            assert lv.index == 25                   # highlight advanced
+            assert lv.scroll_offset.y > 0           # ...and the list scrolled to follow
+
+    asyncio.run(drive())
+
+
+def test_menu_enter_returns_chosen_session_id():
+    import asyncio
+
+    async def drive():
+        app = resume._build_resume_app(_mk(40))
+        async with app.run_test(size=(100, 24)) as pilot:
+            await pilot.press("down", "down", "enter")  # pick the 3rd row
+            return app.chosen
+
+    assert asyncio.run(drive()) == "s2"

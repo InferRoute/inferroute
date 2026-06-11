@@ -95,6 +95,19 @@ def _persist_session_link(api_url: str, session_id: str) -> None:
         pass
 
 
+def _new_session_id() -> str:
+    """A fresh session id for a launch.
+
+    MUST be a canonical hyphenated UUID (8-4-4-4-12). We pass it to
+    `claude --session-id`, which validates it as a UUID and REJECTS a bare 32-char
+    hex string ("Error: Invalid session ID. Must be a valid UUID."). It's also the
+    `x-inferroute-session` tag, the dashboard slug, and the cost-file name — all of
+    which are happy with the hyphenated form, and it matches Claude Code's own
+    session-id format (so transcripts line up for resume).
+    """
+    return str(uuid.uuid4())
+
+
 def _last_model_file() -> Path:
     return Path.home() / ".config" / "inferroute" / "last_model"
 
@@ -532,7 +545,7 @@ def launch_through_inferroute(
     # clobbering it.
     resuming = session_id is not None
     if session_id is None:
-        session_id = uuid.uuid4().hex
+        session_id = _new_session_id()
     _headers = []
     _existing = env.get("ANTHROPIC_CUSTOM_HEADERS", "").strip()
     if _existing:

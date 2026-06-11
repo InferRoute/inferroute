@@ -221,3 +221,17 @@ def test_is_resume_detection():
     assert not _is_resume([])
     assert not _is_resume(["--model", "kimi", "say hi"])
     assert not _is_resume(["--resume-foo"])           # not a real resume flag
+
+
+# --- minted session id must be a valid UUID (claude --session-id rejects hex) ---
+import uuid as _uuid
+from inferroute_cli.launch import _new_session_id
+
+
+def test_new_session_id_is_a_valid_hyphenated_uuid():
+    sid = _new_session_id()
+    # claude --session-id validates this as a UUID; a bare .hex (no hyphens) is
+    # rejected with "Invalid session ID. Must be a valid UUID."
+    assert _uuid.UUID(sid)          # parses as a UUID (raises otherwise)
+    assert sid.count("-") == 4      # canonical 8-4-4-4-12 form
+    assert _new_session_id() != sid # fresh each call

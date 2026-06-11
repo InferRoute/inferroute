@@ -17,19 +17,20 @@ ir cowork
 ```
 
 This will:
-1. install the goose CLI if it isn't already present (or you can grab the
-   desktop app from <https://block.github.io/goose/>);
+1. install the **Goose Desktop app** if it isn't already present (Homebrew cask
+   on macOS, else it opens <https://block.github.io/goose/> to download it);
 2. point goose at InferRoute — provider `anthropic`, your saved key, and routing
    through your on-device recorder daemon if it's running (`ir add recording`),
    otherwise straight to the cloud;
-3. launch the **desktop app** if it's installed, otherwise the goose CLI.
+3. launch the **desktop app**.
+
+Cowork is **desktop-only** — it never installs or runs the goose CLI.
 
 You'll also be offered Cowork at the end of `ir setup`.
 
 | command | what it does |
 |---|---|
-| `ir cowork` | wire goose to InferRoute and launch it |
-| `ir cowork --cli` | force the goose CLI even if the desktop is installed |
+| `ir cowork` | wire goose to InferRoute and launch the desktop app |
 | `ir cowork --configure-only` | wire it up, don't launch |
 | `ir cowork --model NAME` | pin a model (short alias like `kimi`/`glm`, or a canonical id) |
 
@@ -76,8 +77,7 @@ On Linux, also set `GOOSE_DISABLE_KEYRING=true` (e.g. in
 
 ## Notes
 
-- **Updates:** the goose CLI is a pinned binary — update it on your schedule with
-  `goose update`. The desktop app auto-updates; `ir cowork` re-asserts the config
+- **Updates:** the desktop app auto-updates; `ir cowork` re-asserts the config
   each launch, so that's handled.
 - **Cost display:** goose's in-app cost readout depends on
   [block/goose#9719](https://github.com/block/goose/pull/9719); until it merges,

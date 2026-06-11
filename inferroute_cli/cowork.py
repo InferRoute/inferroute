@@ -34,8 +34,10 @@ GOOSE_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
 CONFIG_FILE = GOOSE_DIR / "config.yaml"
 SECRETS_FILE = GOOSE_DIR / "secrets.yaml"
 CLIENT_TAG = "cowork"
-GOOSE_INSTALL_URL = "https://github.com/block/goose/releases/download/stable/download_cli.sh"
 GOOSE_DESKTOP_DOWNLOAD = "https://block.github.io/goose/"
+# Homebrew cask for Goose Desktop on macOS (best-effort auto-install; we fall
+# back to the download page if brew is absent or the cask name is off).
+GOOSE_BREW_CASK = "block-goose"
 
 
 # ── small YAML helpers (PyYAML) ──────────────────────────────────────────────
@@ -93,31 +95,51 @@ def _anthropic_host(creds: config.Credentials) -> str:
         return creds.api_url
 
 
-def _goose_cli() -> str | None:
-    return shutil.which("goose") or next(
-        (str(p) for p in [Path.home() / ".local" / "bin" / "goose"] if p.exists()), None
-    )
-
-
 def _goose_desktop() -> str | None:
-    """Path to the goose Desktop binary for this platform, or None."""
+    """Path to the Goose **Desktop** app/binary for this platform, or None.
+
+    cowork is desktop-only — we never touch the goose CLI. On macOS we return the
+    `.app` bundle path (launched via `open`); elsewhere the executable.
+    """
     home = Path.home()
-    candidates: list[Path] = []
     if sys.platform == "darwin":
-        candidates = [Path("/Applications/Goose.app/Contents/MacOS/Goose")]
-    elif sys.platform.startswith("win"):
+        for app in (Path("/Applications/Goose.app"), home / "Applications" / "Goose.app"):
+            if app.exists():
+                return str(app)
+        return None
+    if sys.platform.startswith("win"):
         la = os.environ.get("LOCALAPPDATA", "")
-        if la:
-            candidates = [Path(la) / "Programs" / "goose" / "Goose.exe"]
-    else:  # linux
-        candidates = [
-            home / ".local" / "opt" / "goose" / "Goose",
-            Path("/usr/lib/goose/Goose"),
-        ]
-        w = shutil.which("Goose") or shutil.which("goose-desktop")
-        if w:
-            candidates.insert(0, Path(w))
-    return next((str(p) for p in candidates if p.exists()), None)
+        cands = [Path(la) / "Programs" / "goose" / "Goose.exe"] if la else []
+        return next((str(p) for p in cands if p.exists()), None)
+    # linux
+    cands = [home / ".local" / "opt" / "goose" / "Goose", Path("/usr/lib/goose/Goose")]
+    w = shutil.which("Goose") or shutil.which("goose-desktop")
+    if w:
+        cands.insert(0, Path(w))
+    return next((str(p) for p in cands if p.exists()), None)
+
+
+def _launch_desktop(app: str, env: dict) -> bool:
+    """Launch the Goose Desktop app. Returns True if it started.
+
+    macOS GUI apps don't inherit our shell env, so we pass GOOSE_DISABLE_KEYRING
+    through `open --env` (goose then reads secrets.yaml instead of the keyring).
+    """
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", "--env", "GOOSE_DISABLE_KEYRING=true", app],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        elif sys.platform.startswith("win"):
+            subprocess.Popen([app], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:  # linux — chrome-sandbox isn't setuid in a user-local install
+            subprocess.Popen([app, "--no-sandbox"], env=env, start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        print(f"  ✗ couldn't launch Goose Desktop ({e}).")
+        return False
 
 
 # ── configure (idempotent, re-asserted every launch) ─────────────────────────
@@ -159,59 +181,73 @@ def _launch_env() -> dict:
     return env
 
 
-def _install_goose_cli(assume_yes: bool) -> bool:
-    if _goose_cli():
-        return True
-    print("\n  goose isn't installed yet.")
-    if not assume_yes:
-        resp = input("  Install the goose CLI now (open-source, ~from block/goose)? [Y/n] ").strip().lower()
-        if resp in ("n", "no"):
-            return False
-    print("  Installing goose…")
-    try:
-        rc = subprocess.call(
-            f"curl -fsSL {GOOSE_INSTALL_URL} | CONFIGURE=false bash",
-            shell=True,
-        )
-    except Exception as e:  # pragma: no cover
-        print(f"  ✗ install failed: {e}")
-        return False
-    if rc != 0 or not _goose_cli():
-        print("  ✗ goose install didn't complete. Install it manually: https://block.github.io/goose/")
-        return False
-    return True
+def _ensure_desktop(assume_yes: bool) -> str | None:
+    """Return the Goose Desktop path, installing it if needed. Desktop-ONLY —
+    cowork never installs or launches the goose CLI.
+
+    macOS with Homebrew: offer `brew install --cask block-goose` (best-effort).
+    Otherwise (or on failure): point to the official download. Returns the app
+    path once present, else None.
+    """
+    d = _goose_desktop()
+    if d:
+        return d
+
+    print("\n  Goose Desktop isn't installed.")
+    if sys.platform == "darwin" and shutil.which("brew"):
+        go = assume_yes or input(
+            f"  Install it now with Homebrew (brew install --cask {GOOSE_BREW_CASK})? [Y/n] "
+        ).strip().lower() not in ("n", "no")
+        if go:
+            print("  Installing Goose Desktop…")
+            try:
+                subprocess.call(["brew", "install", "--cask", GOOSE_BREW_CASK])
+            except Exception as e:  # pragma: no cover
+                print(f"  ✗ brew install failed: {e}")
+            d = _goose_desktop()
+            if d:
+                return d
+            print("  ✗ Homebrew didn't complete the install.")
+
+    print(f"  Get the desktop app:  {GOOSE_DESKTOP_DOWNLOAD}")
+    if sys.platform == "darwin":
+        try:
+            subprocess.call(["open", GOOSE_DESKTOP_DOWNLOAD])  # open the download page
+        except Exception:
+            pass
+    return None
 
 
 # ── commands ─────────────────────────────────────────────────────────────────
 def setup_cowork() -> int:
-    """Called from `ir setup`: install (if the user wants) + configure, no launch."""
+    """Called from `ir setup`: configure + point at the desktop app (no launch)."""
     creds = config.load()
     if not creds.is_valid:
         print("  Skipping cowork — log in first (`ir login`).")
         return 0
-    _install_goose_cli(assume_yes=False)
     host = configure(creds)
     routed = "the on-device recorder" if "localhost" in host else "InferRoute"
     print(f"\n  ✓ Cowork is wired to {routed}.")
     if _goose_desktop():
-        print("      Launch the desktop app anytime, or run:  ir cowork")
+        print("      Launch the Goose Desktop app anytime, or run:  ir cowork")
     else:
-        print(f"      Get the desktop app:  {GOOSE_DESKTOP_DOWNLOAD}")
-        print("      Or use it in the terminal now:  ir cowork")
+        print(f"      Get the Goose Desktop app:  {GOOSE_DESKTOP_DOWNLOAD}")
+        print("      Then run:  ir cowork")
     return 0
 
 
 def cmd_cowork(rest: list[str]) -> int:
-    """`ir cowork [--cli] [--configure-only] [--model NAME] [-- <goose args>]`."""
+    """`ir cowork [--configure-only] [--model NAME]`.
+
+    Desktop-only: wires goose to InferRoute and launches the Goose **Desktop**
+    app, installing it if needed. cowork never installs or runs the goose CLI.
+    """
     import argparse
 
     ap = argparse.ArgumentParser(prog="ir cowork", add_help=True)
-    ap.add_argument("--cli", action="store_true", help="run the goose CLI even if the desktop is installed")
     ap.add_argument("--configure-only", action="store_true", help="wire goose to InferRoute, don't launch")
     ap.add_argument("--model", default=None, help="model to pin (default: kimi)")
-    ns, passthrough = ap.parse_known_args(rest)
-    if passthrough and passthrough[0] == "--":
-        passthrough = passthrough[1:]
+    ns, _ = ap.parse_known_args(rest)
 
     creds = config.load()
     if not creds.is_valid:
@@ -234,26 +270,10 @@ def cmd_cowork(rest: list[str]) -> int:
         print(f"  ✓ goose wired to InferRoute ({host}).")
         return 0
 
-    # Launch: prefer the desktop (the point-and-click experience) unless --cli.
-    desktop = None if ns.cli else _goose_desktop()
-    env = _launch_env()
-    if desktop:
-        print(f"  Launching goose desktop (InferRoute · {host})…")
-        args = [desktop]
-        if not (sys.platform == "darwin" or sys.platform.startswith("win")):
-            args.append("--no-sandbox")  # chrome-sandbox isn't setuid in a user-local install
-        try:
-            subprocess.Popen(args, env=env, start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return 0
-        except Exception as e:
-            print(f"  ✗ couldn't launch the desktop ({e}); falling back to the CLI.")
+    desktop = _ensure_desktop(assume_yes=False)
+    if not desktop:
+        print("\n  Cowork uses the Goose Desktop app — install it (above), then run `ir cowork` again.")
+        return 1
 
-    goose = _goose_cli()
-    if not goose:
-        if not _install_goose_cli(assume_yes=False):
-            return 1
-        goose = _goose_cli()
-    print(f"  Launching goose (InferRoute · {host})…")
-    os.execvpe(goose, [goose, *passthrough], env)
-    return 0  # never reached
+    print(f"  Launching Goose Desktop (InferRoute · {host})…")
+    return 0 if _launch_desktop(desktop, _launch_env()) else 1

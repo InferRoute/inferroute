@@ -264,6 +264,41 @@ def _record_sessions_dir() -> Path:
     return (Path(base) if base else Path.home() / ".inferroute") / "sessions"
 
 
+def _record_base_dir() -> Path:
+    """The recorder base dir (INFERROUTE_RECORD_DIR → INFERROUTE_LOG_DIR →
+    ~/.inferroute), matching inferroute_local.config so the daemon, the ingest
+    hook, and wire capture all agree on one location."""
+    base = os.environ.get("INFERROUTE_RECORD_DIR") or os.environ.get("INFERROUTE_LOG_DIR") or ""
+    return Path(base) if base else Path.home() / ".inferroute"
+
+
+def _apply_wire_capture_env(env: dict, session_id: str) -> None:
+    """Opt-in (IR_CAPTURE_WIRE=1): point Claude Code's OTEL raw-API-body logging
+    at a per-session scratch dir so the SessionEnd ingest can mine the wire delta
+    — the `system` prompt hash + `tools` list that native transcripts omit — then
+    delete it (see inferroute_local/wire.py: mine_and_consume).
+
+    Per-process only: set on the spawned `claude`'s env, NEVER global, so native
+    `claude` is untouched. DEFAULT OFF because enabling telemetry changes CC's
+    observability surface and the `file:` raw-body format must be verified against
+    your CC version first (then this can be flipped default-on). Metrics/logs
+    exporters are pinned to `none` so CC never dials a collector — only the local
+    file sink is used, and the ingest deletes it ("leaves nothing behind").
+    """
+    flag = os.environ.get("IR_CAPTURE_WIRE", "").strip().lower()
+    if flag not in ("1", "true", "yes", "on"):
+        return
+    sdir = _record_base_dir() / "wire" / session_id
+    try:
+        sdir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+    env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
+    env["OTEL_LOG_RAW_API_BODIES"] = f"file:{sdir}"
+    env.setdefault("OTEL_METRICS_EXPORTER", "none")
+    env.setdefault("OTEL_LOGS_EXPORTER", "none")
+
+
 def _strip_command(prefix: str, cost_file: Path | None = None) -> dict:
     """A CC statusLine `command` dict that prints the strip + real session cost.
 
@@ -333,11 +368,16 @@ def _product_strip_settings_args(
 
 
 def _gate_strip_prefix(
-    api_url: str, session_id: str, model_id: str, economy: bool
+    api_url: str, session_id: str, model_id: str, economy: bool,
+    economy_loop: bool = False,
 ) -> str:
     """One-line product strip for the gate (inferroute) launch path:
 
         ⚡ <model> · <lane> │ <dashboard link>      (+ live cost appended)
+
+    `<lane>` is `standard`, `economy`, or `economy·loop` (the patient goal-loop
+    variant) so the user can see at a glance that a night batch is on the
+    yielding lane.
 
     Single line by design: a dedicated second line for a relaunch hint
     (`↻ ir --model …`) wasn't worth the vertical space, and CC gives the
@@ -350,7 +390,7 @@ def _gate_strip_prefix(
     from . import models
 
     short = models.short_for_model_id(model_id) or model_id
-    lane = "economy" if economy else "standard"
+    lane = "economy·loop" if economy_loop else ("economy" if economy else "standard")
     url = _session_url(api_url, session_id)
     return f"⚡ {short} · {lane} │ {url}"
 
@@ -369,27 +409,42 @@ def _native_strip_prefix(extra_args: list[str]) -> str:
     return f"⚡ {head} · native"
 
 
-def _print_economy_banner() -> None:
+def _print_economy_banner(economy_loop: bool = False) -> None:
     """Print a green 'economy lane' banner when this launch is tagged economy.
 
-    Fires when IR_LANE=economy is in the environment (set by a deferred-loop gate
-    snippet, or by `ir` itself in an economy context). Purely cosmetic — the actual
-    discount is decided server-side at serve time. Goes to stderr so Claude Code's
-    stdout screen-clear doesn't wipe it.
+    Fires when IR_LANE=economy(-loop) is in the environment (set by `ir --economy`/
+    `ir --economy-loop`, a deferred-loop gate snippet, or `ir` itself in an economy
+    context). Purely cosmetic — the actual discount is decided server-side at serve
+    time. Goes to stderr so Claude Code's stdout screen-clear doesn't wipe it.
+
+    The `economy_loop` variant makes clear this is the PATIENT lane: it draws only
+    spare compute and yields to live traffic, so the user can tell a night batch is
+    running politely rather than contending with prod.
     """
     g = "\033[38;5;42m"   # lime-green
     d = "\033[38;5;28m"   # darker green (border)
     b = "\033[1m"
     r = "\033[0m"
-    lines = [
-        "",
-        f"{d}  ╭────────────────────────────────────────────────╮{r}",
-        f"{d}  │{r}  {b}{g}⚡ ECONOMY LANE{r}  ·  running on cheap off-peak     {d}│{r}",
-        f"{d}  │{r}     compute. This run is {b}{g}discounted{r}.            {d}│{r}",
-        f"{d}  │{r}     {g}Savings show up in your session view.{r}      {d}│{r}",
-        f"{d}  ╰────────────────────────────────────────────────╯{r}",
-        "",
-    ]
+    if economy_loop:
+        lines = [
+            "",
+            f"{d}  ╭────────────────────────────────────────────────╮{r}",
+            f"{d}  │{r}  {b}{g}⚡ ECONOMY · GOAL LOOP{r}  ·  patient consumer  {d}│{r}",
+            f"{d}  │{r}     {g}draws only spare compute and yields to{r}     {d}│{r}",
+            f"{d}  │{r}     {g}live traffic. Discount applies when idle.{r}  {d}│{r}",
+            f"{d}  ╰────────────────────────────────────────────────╯{r}",
+            "",
+        ]
+    else:
+        lines = [
+            "",
+            f"{d}  ╭────────────────────────────────────────────────╮{r}",
+            f"{d}  │{r}  {b}{g}⚡ ECONOMY LANE{r}  ·  running on cheap off-peak     {d}│{r}",
+            f"{d}  │{r}     compute. This run is {b}{g}discounted{r}.            {d}│{r}",
+            f"{d}  │{r}     {g}Savings show up in your session view.{r}      {d}│{r}",
+            f"{d}  ╰────────────────────────────────────────────────╯{r}",
+            "",
+        ]
     sys.stderr.write("\n".join(lines) + "\n")
     sys.stderr.flush()
 
@@ -504,7 +559,15 @@ def launch_through_inferroute(
     # Economy lane: when IR_LANE=economy (e.g. a deferred-loop gate, `ir gate` cycles),
     # route to the /economy base path so the proxy bills this run at the discount.
     # Otherwise the normal interactive base URL.
-    economy = env.get("IR_LANE", "").strip().lower() == "economy"
+    #
+    # IR_LANE=economy-loop is the patient goal-loop variant (`ir --economy-loop`): same
+    # economy routing, but it opens WITHOUT an open-gate grant and carries an
+    # `ir-mode: goal-loop` tag so the backend can gate each /goal iteration from within
+    # (deferred — see goal-loop-economy-session-spec.md §5/§6). It IS an economy session
+    # for base-URL / banner / billing-intent purposes, so `economy` covers both.
+    lane = env.get("IR_LANE", "").strip().lower()
+    economy_loop = lane == "economy-loop"
+    economy = lane in ("economy", "economy-loop")
     # Base URL selection:
     #   • Economy lane → cloud /economy path so the proxy bills at the discount.
     #     Bypasses the local daemon (a long-lived service can't see this launch's
@@ -559,28 +622,48 @@ def launch_through_inferroute(
     # (cc-proxy-prod app.py), so this header makes the discount apply to every turn.
     if economy:
         _headers.append("ir-lane: economy")
-        # Present a single-use admission grant so the proxy ACCEPTS this session into economy — the
-        # discount is grant-gated, not just tag-gated. Use a pre-issued IR_GRANT (e.g. a deferred
-        # loop's `ir gate --print-grant`) if set, else grab one now by polling the gate right before
-        # exec (freshest grant → best margin against CC cold start). No grant (red / at cap /
-        # unreachable) → the run simply bills at the standard rate.
-        _grant = env.get("IR_GRANT", "").strip()
-        if not _grant:
-            try:
-                from .gate import grab_grant
-                _grant = grab_grant(creds) or ""
-            except Exception:
-                _grant = ""
-        if _grant:
-            _headers.append(f"ir-grant: {_grant}")
+        if economy_loop:
+            # Patient goal-loop consumer. Two deliberate differences from plain economy:
+            #   (a) Tag the mode so the backend can recognise a per-iteration consumer and
+            #       gate each /goal turn (the real, deferred work — §6 of the spec).
+            #   (b) Do NOT grab an open-gate grant. A goal loop opens immediately on accept
+            #       and is meant to be economy-gated turn-by-turn from within; grabbing one
+            #       grant at open would either stall the launch (waiting for green) or lock
+            #       the whole night to standard rate if the gate was red at the instant it
+            #       fired. Until the backend gating lands it just runs as an ungated,
+            #       economy-tagged session (no regression). A pre-supplied IR_GRANT is still
+            #       honored for symmetry.
+            _headers.append("ir-mode: goal-loop")
+            _grant = env.get("IR_GRANT", "").strip()
+            if _grant:
+                _headers.append(f"ir-grant: {_grant}")
+        else:
+            # Present a single-use admission grant so the proxy ACCEPTS this session into economy — the
+            # discount is grant-gated, not just tag-gated. Use a pre-issued IR_GRANT (e.g. a deferred
+            # loop's `ir gate --print-grant`) if set, else grab one now by polling the gate right before
+            # exec (freshest grant → best margin against CC cold start). No grant (red / at cap /
+            # unreachable) → the run simply bills at the standard rate.
+            _grant = env.get("IR_GRANT", "").strip()
+            if not _grant:
+                try:
+                    from .gate import grab_grant
+                    _grant = grab_grant(creds) or ""
+                except Exception:
+                    _grant = ""
+            if _grant:
+                _headers.append(f"ir-grant: {_grant}")
     env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(_headers)
 
     # CC native auto-compact for custom model ids (see _auto_compact_window);
     # without this, long ir sessions never compact and hard-overflow the context.
     _apply_autocompact_env(env, model_id)
 
+    # Opt-in wire capture (IR_CAPTURE_WIRE=1): per-process OTEL raw-body sink the
+    # SessionEnd ingest mines (system hash + tools) then deletes. No-op by default.
+    _apply_wire_capture_env(env, session_id)
+
     if economy:
-        _print_economy_banner()
+        _print_economy_banner(economy_loop)
 
     # Persist the dashboard link for `ir status` / copy-paste. It's shown to the
     # user via the status line (pinned for the whole session), not printed here.
@@ -595,7 +678,11 @@ def launch_through_inferroute(
     # plain-claude ones and resume them on their original model. (Resumes reuse an
     # existing id, already indexed, so only fresh launches add an entry.)
     if not resuming:
-        _record_launch(session_id, model_id, "economy" if economy else "standard")
+        _record_launch(
+            session_id,
+            model_id,
+            "economy-loop" if economy_loop else ("economy" if economy else "standard"),
+        )
 
     # A caller-supplied --permission-mode (the `permission_mode` param OR a passthrough
     # --permission-mode on the CLI) means the caller governs permissions, so we must NOT
@@ -609,7 +696,7 @@ def launch_through_inferroute(
     # hidden by CC's fullscreen TUI (the DEFAULT in 2.1.170) and scrolls away in
     # the inline renderer. No-ops if the user has their own
     # statusLine / --settings, or set IR_NO_STATUSLINE.
-    prefix = _gate_strip_prefix(creds.api_url, session_id, model_id, economy)
+    prefix = _gate_strip_prefix(creds.api_url, session_id, model_id, economy, economy_loop)
     # The on-device recorder daemon (when running) writes this session's real
     # cumulative cost here; the status line reads it. No-ops gracefully if the
     # daemon isn't running (file never appears) — see _strip_command.

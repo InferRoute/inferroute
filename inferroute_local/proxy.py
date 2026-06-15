@@ -49,6 +49,13 @@ class InferrouteProxy:
         )
         # Prune expired raw blobs once at startup (best-effort, cheap).
         self.recorder.gc()
+        # Sweep any wire-capture scratch from sessions that ended without an
+        # ingest, so OTEL raw bodies never linger (best-effort).
+        try:
+            from . import wire
+            wire.gc(base_dir)
+        except Exception:
+            pass
 
     async def close(self):
         await self._client.aclose()

@@ -46,6 +46,22 @@ def cmd_remove(rest: list[str]) -> int:
     return _remove_recording(ns)
 
 
+def _undo_cc_hook() -> None:
+    """Remove the Claude Code SessionEnd ingest hook from settings.json."""
+    try:
+        from . import cc_hook
+        status = cc_hook.remove()
+    except Exception as e:
+        print(f"  [2/3] Could not edit Claude Code settings to remove the hook ({e}).")
+        return
+    if status == "removed":
+        print("  [2/3] Removed the Claude Code SessionEnd ingest hook.")
+    elif status == "absent":
+        print("  [2/3] No Claude Code ingest hook to remove.")
+    else:
+        print(f"  [2/3] SessionEnd hook: {status}")
+
+
 def _remove_recording(ns) -> int:
     print()
     print("  Removing recording")
@@ -60,8 +76,11 @@ def _remove_recording(ns) -> int:
     else:
         print(f"  [1/3] Platform {sysname}: no auto-managed service to stop.")
 
-    # Step 2: remove the shell rc block.
+    # Step 2: remove the shell rc block (strips any legacy global ANTHROPIC_BASE_URL).
     _undo_shell_rc()
+
+    # Step 2b: remove the Claude Code SessionEnd ingest hook.
+    _undo_cc_hook()
 
     # Step 3: optional purge of recorded data + any legacy artifacts.
     if ns.purge:
@@ -70,6 +89,9 @@ def _remove_recording(ns) -> int:
             Path.home() / ".inferroute" / "events",
             Path.home() / ".inferroute" / "blobs",
             Path.home() / ".inferroute" / "derived",
+            Path.home() / ".inferroute" / "ingested",        # transcript ingest markers
+            Path.home() / ".inferroute" / "wire",            # OTEL wire scratch
+            Path.home() / ".inferroute" / "sessions",        # per-session cost files
             Path.home() / ".inferroute" / "logs",            # legacy decision logs
             Path.home() / ".inferroute" / "models",          # legacy classifier
         ]:

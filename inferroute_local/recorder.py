@@ -324,6 +324,29 @@ class Recorder:
             self._dropped += 1
             logger.debug(f"record_signal skipped ({e})")
 
+    def record_turn(self, fields: dict) -> None:
+        """Record one native-transcript turn — the metadata DELTA over the CC
+        transcript spine (see ingest.py). NEVER stores a blob: the content
+        already lives in ~/.claude/projects, so even at level "full" this path
+        writes no payload, only the joinable metadata. `fields` carries the
+        turn's own timestamp (ts/iso) from the transcript, not ingest time.
+        Best-effort; never raises."""
+        if not self.enabled:
+            return
+        try:
+            _, ingested_iso = _now()
+            event = {
+                "schema_version": 1,
+                "kind": "turn",
+                "id": uuid.uuid4().hex,
+                "ingested_iso": ingested_iso,
+                **fields,
+            }
+            self._emit(event)
+        except Exception as e:
+            self._dropped += 1
+            logger.debug(f"record_turn skipped ({e})")
+
     def flush(self) -> None:
         if not self.enabled:
             return

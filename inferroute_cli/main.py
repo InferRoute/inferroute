@@ -77,10 +77,20 @@ def main(argv: list[str] | None = None) -> int:
     import os
     args = list(sys.argv[1:] if argv is None else argv)
 
+    # `--economy-loop` (clean first-class form) selects the patient goal-loop economy lane —
+    # equivalent to `IR_LANE=economy-loop ir …`. Like `--economy` it routes to the economy
+    # base path, but it opens WITHOUT grabbing a launch-time admission grant and tags the
+    # session `ir-mode: goal-loop` so the backend can gate each /goal iteration from within
+    # (deferred — see shared-docs/inferroute/goal-loop-economy-session-spec.md §5/§6). Check
+    # this BEFORE `--economy`: the tokens are distinct, but keeping it first makes the intent
+    # clear and avoids any future overlap. Consume it (don't pass through to claude).
+    if "--economy-loop" in args or "--econ-loop" in args:
+        args = [a for a in args if a not in ("--economy-loop", "--econ-loop")]
+        os.environ["IR_LANE"] = "economy-loop"
     # `--economy` (clean first-class form) selects the economy lane — equivalent to the
     # `IR_LANE=economy ir …` env prefix but far less error-prone. Consume it here (so it's
     # not passed through to claude) and set IR_LANE, which launch.py already honors.
-    if "--economy" in args or "--econ" in args:
+    elif "--economy" in args or "--econ" in args:
         args = [a for a in args if a not in ("--economy", "--econ")]
         os.environ["IR_LANE"] = "economy"
 

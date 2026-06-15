@@ -235,3 +235,119 @@ def test_new_session_id_is_a_valid_hyphenated_uuid():
     assert _uuid.UUID(sid)          # parses as a UUID (raises otherwise)
     assert sid.count("-") == 4      # canonical 8-4-4-4-12 form
     assert _new_session_id() != sid # fresh each call
+
+
+# --- goal-loop economy session (`ir --economy-loop` / IR_LANE=economy-loop) ---
+# The patient per-iteration economy mode. It routes like economy (base URL + ir-lane
+# header) but, unlike plain economy, (a) does NOT grab an open-gate grant at launch and
+# (b) tags the session `ir-mode: goal-loop` so the backend can gate each /goal turn from
+# within (deferred). See shared-docs/inferroute/goal-loop-economy-session-spec.md §5.
+import os as _os
+
+from inferroute_cli import gate as _gate_mod
+from inferroute_cli import launch as _launch_mod
+from inferroute_cli.config import Credentials
+from inferroute_cli.main import main as _ir_main
+
+
+def _headers_from_env(env: dict) -> dict:
+    """Parse the newline-joined ANTHROPIC_CUSTOM_HEADERS into a {name: value} dict."""
+    out: dict[str, str] = {}
+    for line in env.get("ANTHROPIC_CUSTOM_HEADERS", "").split("\n"):
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _capture_launch(monkeypatch, tmp_path, *, lane=None, ir_grant=None):
+    """Run launch_through_inferroute with execvpe + the claude binary + gate stubbed,
+    returning (captured_env, grab_calls). grab_calls counts open-gate grant polls."""
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)           # config writes → tmp
+    monkeypatch.setattr(_launch_mod, "_require_claude_binary", lambda: "claude")
+    monkeypatch.delenv("CLAUDECODE", raising=False)                       # not nested
+    monkeypatch.delenv("IR_NO_STATUSLINE", raising=False)
+    if lane is None:
+        monkeypatch.delenv("IR_LANE", raising=False)
+    else:
+        monkeypatch.setenv("IR_LANE", lane)
+    if ir_grant is None:
+        monkeypatch.delenv("IR_GRANT", raising=False)
+    else:
+        monkeypatch.setenv("IR_GRANT", ir_grant)
+
+    grab_calls = {"n": 0}
+
+    def _fake_grab(creds, timeout=10.0):
+        grab_calls["n"] += 1
+        return "GRABBED-AT-OPEN"
+
+    monkeypatch.setattr(_gate_mod, "grab_grant", _fake_grab)
+
+    captured = {}
+
+    def _fake_execvpe(binary, argv, env):
+        captured["env"] = env
+        captured["argv"] = argv
+
+    monkeypatch.setattr("os.execvpe", _fake_execvpe)
+
+    creds = Credentials(api_url="https://api.inferroute.ai", api_key="k")
+    _launch_mod.launch_through_inferroute("moonshotai/Kimi-K2.6-TEE", creds)
+    return captured["env"], grab_calls["n"]
+
+
+def test_economy_loop_tags_mode_and_skips_open_gate(monkeypatch, tmp_path):
+    env, grab_n = _capture_launch(monkeypatch, tmp_path, lane="economy-loop")
+    # routes economy
+    assert env["ANTHROPIC_BASE_URL"] == "https://api.inferroute.ai/economy"
+    hdrs = _headers_from_env(env)
+    assert hdrs.get("ir-lane") == "economy"
+    assert hdrs.get("ir-mode") == "goal-loop"
+    # (a) no open-gate grant grabbed, and none injected
+    assert grab_n == 0
+    assert "ir-grant" not in hdrs
+
+
+def test_economy_loop_honors_presupplied_grant(monkeypatch, tmp_path):
+    env, grab_n = _capture_launch(monkeypatch, tmp_path, lane="economy-loop",
+                                  ir_grant="PRESET-GRANT")
+    hdrs = _headers_from_env(env)
+    assert hdrs.get("ir-mode") == "goal-loop"
+    assert grab_n == 0                              # still never polls the gate at open
+    assert hdrs.get("ir-grant") == "PRESET-GRANT"  # but honors a pre-issued grant
+
+
+def test_plain_economy_grabs_grant_and_has_no_mode_tag(monkeypatch, tmp_path):
+    env, grab_n = _capture_launch(monkeypatch, tmp_path, lane="economy")
+    hdrs = _headers_from_env(env)
+    assert hdrs.get("ir-lane") == "economy"
+    assert "ir-mode" not in hdrs                    # mode tag is loop-only
+    assert grab_n == 1                              # plain economy DOES grab at open
+    assert hdrs.get("ir-grant") == "GRABBED-AT-OPEN"
+
+
+def test_economy_loop_strip_lane_label():
+    prefix = _gate_strip_prefix("https://api.inferroute.ai", "s", "moonshotai/Kimi-K2.6-TEE",
+                                True, True)
+    assert prefix.startswith("⚡ kimi · economy·loop │ ")
+
+
+def test_main_consumes_economy_loop_flag(monkeypatch):
+    # `ir --economy-loop --model kimi -p hi` sets IR_LANE=economy-loop, strips the flag,
+    # and does NOT pass it through to claude.
+    monkeypatch.setenv("IR_LANE", "")  # tracked → restored on teardown
+    captured = {}
+
+    def _fake_launch(model_id, creds, extra_args=(), **kw):
+        captured["model"] = model_id
+        captured["extra"] = list(extra_args)
+
+    monkeypatch.setattr("inferroute_cli.launch.launch_through_inferroute", _fake_launch)
+    monkeypatch.setattr("inferroute_cli.config.load",
+                        lambda: Credentials(api_url="https://api.inferroute.ai", api_key="k"))
+    rc = _ir_main(["--economy-loop", "--model", "kimi", "-p", "hi"])
+    assert rc == 0
+    assert _os.environ["IR_LANE"] == "economy-loop"
+    assert "--economy-loop" not in captured["extra"]
+    assert captured["extra"] == ["-p", "hi"]

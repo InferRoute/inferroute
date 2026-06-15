@@ -15,9 +15,13 @@ What this does, in order:
   2. Install the `[local]` deps (fastapi, uvicorn) if missing.
   3. Install a systemd user unit (Linux) / launchd plist (macOS) that runs the
      recorder daemon, with the chosen record level baked in, and start it.
-  4. Append `ANTHROPIC_BASE_URL=http://localhost:5005` to the user's shell rc so
-     plain `claude` also flows through the recorder. `--no-shell-edit` prints the
-     line instead.
+  4. (Intentionally NOT done.) We never touch your shell rc. Native `claude` must
+     always reach Anthropic directly — even if the daemon is down — so we never
+     write a global `ANTHROPIC_BASE_URL`. The `ir` launcher injects the recorder
+     base URL into ONLY the processes it spawns (see launch.py), never the global
+     shell. `--no-shell-edit` is accepted for back-compat but is now the only
+     behavior. `ir remove recording` still strips any legacy shell block a prior
+     version (or a hand edit) left behind.
 
 There is NO classifier and NO routing — the daemon is a pure pass-through
 recorder. See shared-docs/inferroute/local-decision-recorder-spec.md.
@@ -79,7 +83,8 @@ def cmd_add(rest: list[str]) -> int:
     )
     ap.add_argument(
         "--no-shell-edit", action="store_true",
-        help="Don't modify your shell rc; print the env-var line instead.",
+        help="(deprecated, no-op) the shell rc is never modified now — kept so "
+             "older invocations don't error.",
     )
     ap.add_argument(
         "--no-service", action="store_true",
@@ -142,16 +147,37 @@ def _add_recording(ns) -> int:
             print("        ✗ Service install failed. You can run the daemon manually:")
             print(f"          INFERROUTE_RECORD_LEVEL={level} inferroute-daemon")
 
-    # Step 3: shell rc edit.
-    if ns.no_shell_edit:
-        _print_env_var_block()
-    else:
-        rc = _edit_shell_rc()
-        if rc != 0:
-            _print_env_var_block()
+    # Step 3: install the Claude Code SessionEnd hook — the content-recorder path.
+    # It ingests each finished session's transcript out of band (no proxy, no
+    # request-path cost). Cost-only (level=off) records no corpus, so there's
+    # nothing to ingest → skip the hook there.
+    if level != "off":
+        _install_ingest_hook()
+
+    # Step 4: shell rc — deliberately NOT edited. Native `claude` stays pointed at
+    # Anthropic; the `ir` launcher injects the recorder base URL per-process. This
+    # is the core safety property of the redesign (no global ANTHROPIC_BASE_URL).
+    _print_no_shell_edit_note()
 
     _print_done_banner(level)
     return 0
+
+
+def _install_ingest_hook() -> None:
+    """Install the Claude Code SessionEnd transcript-ingest hook (idempotent)."""
+    try:
+        from . import cc_hook
+        status = cc_hook.install()
+    except Exception as e:
+        print(f"  [hook] Could not install the SessionEnd hook ({e}).")
+        print(f"         You can add it later by re-running `ir add recording`.")
+        return
+    msg = {
+        "installed": "Installed Claude Code SessionEnd hook (records each session).",
+        "updated": "Refreshed the Claude Code SessionEnd hook.",
+        "exists": "Claude Code SessionEnd hook already present.",
+    }.get(status, f"SessionEnd hook: {status}")
+    print(f"  [hook] {msg}")
 
 
 def _prompt_level(skip_prompt: bool) -> str:
@@ -229,7 +255,13 @@ SYSTEMD_UNIT_TEMPLATE = """\
 [Unit]
 Description=inferroute-local daemon (Claude Code traffic recorder on :5005)
 {marker}
-After=network.target
+After=network-online.target
+Wants=network-online.target
+# Crash-loop guard: give up after 5 failed starts in 60s instead of restarting
+# forever (the henry-ft 266k-restarts failure). A clean exit-3 "deps missing"
+# from the daemon also trips this, so a broken install fails fast and visibly.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -270,17 +302,26 @@ def _install_systemd_unit(level: str) -> int:
     unit_path = unit_dir / SERVICE_NAME
     unit_dir.mkdir(parents=True, exist_ok=True)
 
-    # Only write the base unit if there isn't one already — never overwrite a
-    # hand-crafted unit (e.g. one with a richer EnvironmentFile). The record
-    # level always goes in a drop-in, which layers on top of whatever base exists.
-    created_base = False
-    if not unit_path.exists():
-        unit_path.write_text(
-            SYSTEMD_UNIT_TEMPLATE.format(daemon_path=daemon_path, marker=UNIT_MARKER)
-        )
+    # Unit-writing policy:
+    #   • no unit yet            → write ours (marked).
+    #   • OUR managed unit        → REGENERATE it, so a stale/broken ExecStart
+    #     (e.g. an old `serve` template) is fixed on upgrade instead of being
+    #     preserved forever (the bug that crash-looped henry-ft 266k times).
+    #   • hand-crafted (no marker)→ never touch it. The record level rides in a
+    #     drop-in that layers on top of whatever base exists.
+    desired = SYSTEMD_UNIT_TEMPLATE.format(daemon_path=daemon_path, marker=UNIT_MARKER)
+    existing = unit_path.read_text() if unit_path.exists() else None
+    created_base = False  # True ⇒ we should (re-)enable the unit below
+    if existing is None:
+        unit_path.write_text(desired)
         created_base = True
+    elif UNIT_MARKER in existing:
+        if existing != desired:
+            unit_path.write_text(desired)
+            print(f"  [2/3] Regenerated managed unit {unit_path} (was stale).")
+        created_base = True  # ours → safe (idempotent) to ensure enabled
     else:
-        print(f"  [2/3] Using existing unit {unit_path} (preserved).")
+        print(f"  [2/3] Using existing hand-crafted unit {unit_path} (preserved).")
 
     dropin_dir = unit_dir / f"{SERVICE_NAME}.d"
     dropin_dir.mkdir(parents=True, exist_ok=True)
@@ -344,32 +385,15 @@ def _which(name: str) -> str | None:
 
 
 # ----- Step 3 helpers (shell rc) ---------------------------------------------
-
-def _edit_shell_rc() -> int:
-    shell_name = _detect_shell()
-    rc_path = SHELL_RC_FILES.get(shell_name)
-    if rc_path is None:
-        print(f"  [3/3] Shell '{shell_name}' not auto-supported; printing env line:")
-        _print_env_var_block()
-        return 1
-
-    current = rc_path.read_text() if rc_path.exists() else ""
-    if SHELL_EDIT_MARKER_BEGIN in current or _LEGACY_MARKER_BEGIN in current:
-        print(f"  [3/3] Shell rc already points at the local daemon — leaving as-is.")
-        print(f"        ({rc_path})")
-        return 0
-
-    block = (
-        f"\n{SHELL_EDIT_MARKER_BEGIN}\n"
-        f"export ANTHROPIC_BASE_URL={LOCAL_BASE_URL}\n"
-        f"{SHELL_EDIT_MARKER_END}\n"
-    )
-    rc_path.parent.mkdir(parents=True, exist_ok=True)
-    with rc_path.open("a", encoding="utf-8") as f:
-        f.write(block)
-    print(f"  [3/3] Appended ANTHROPIC_BASE_URL to {rc_path}")
-    print(f"        Open a new shell or run: source {rc_path}")
-    return 0
+#
+# We DO NOT write the shell rc anymore. Writing a global
+# `export ANTHROPIC_BASE_URL=http://localhost:5005` made EVERY `claude` depend on
+# the daemon being up — when it wasn't (crash loop, upgrade, port conflict),
+# native Claude Code broke with no fallback. The `ir` launcher injects the base
+# URL per-process instead (launch.py), so native `claude` is never endangered.
+#
+# `_detect_shell` and `SHELL_RC_FILES` are retained because `ir remove recording`
+# still uses them to STRIP any legacy block a prior version (or hand edit) wrote.
 
 
 def _detect_shell() -> str:
@@ -377,12 +401,10 @@ def _detect_shell() -> str:
     return Path(shell).name or "bash"
 
 
-def _print_env_var_block() -> None:
-    print()
-    print("        Add this to your shell rc to point Claude Code at the local recorder:")
-    print()
-    print(f"            export ANTHROPIC_BASE_URL={LOCAL_BASE_URL}")
-    print()
+def _print_no_shell_edit_note() -> None:
+    print("  [3/3] Shell rc: left untouched (by design).")
+    print("        Native `claude` keeps talking to Anthropic directly; only `ir`")
+    print("        launches flow through the recorder (per-process, never global).")
 
 
 def _print_done_banner(level: str) -> None:

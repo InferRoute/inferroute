@@ -10,14 +10,38 @@ from pathlib import Path
 
 import click
 import httpx
-import uvicorn
 
 from . import credentials
 from .config import Config
-from .server import create_app
+
+# NOTE: `uvicorn` and `.server` (which imports fastapi) are imported lazily
+# inside the commands that need them — see `_require_local_extra()`. They live
+# in the optional [local] extra; importing them at module load would make the
+# `inferroute-daemon` console script crash-loop with an ImportError when the
+# extra isn't installed (the henry-ft failure). `click`/`httpx` are core deps.
 
 # Where the user creates / manages keys
 KEYS_URL = "https://inferroute.ai/dashboard/api-keys"
+
+
+def _require_local_extra():
+    """Import the recorder daemon's optional deps, or exit cleanly with guidance.
+
+    Returns (uvicorn_module, create_app_callable). On a missing [local] extra it
+    prints a one-line fix and raises SystemExit(3) — a clean, non-looping exit so
+    a systemd unit fails fast (paired with StartLimit) instead of crash-looping
+    on a raw ImportError traceback."""
+    try:
+        import uvicorn
+        from .server import create_app
+        return uvicorn, create_app
+    except ImportError as e:
+        click.echo(
+            "Recorder deps are not installed (%s).\n"
+            "  Fix: pip install 'inferroute[local]'   (adds fastapi + uvicorn)" % e,
+            err=True,
+        )
+        raise SystemExit(3)
 
 
 @click.group(invoke_without_command=True)
@@ -31,6 +55,8 @@ def main(ctx, host, port, server_url, api_key, debug):
     """Run the inferroute local proxy daemon (default) or a subcommand."""
     if ctx.invoked_subcommand is not None:
         return
+
+    uvicorn, create_app = _require_local_extra()
 
     logging.basicConfig(
         level=logging.DEBUG if debug else logging.INFO,
@@ -120,63 +146,7 @@ def status():
     click.echo(f"server URL:     {server_url}")
     click.echo(f"server status:  {server}")
     click.echo(f"api key:        {'set' if config.inferroute_api_key else 'MISSING'}")
-    click.echo(f"minimax model:  {config.minimax_model}")
-    if config.kimi_model:
-        click.echo(f"kimi model:     {config.kimi_model} (legacy)")
-    if config.glm_model:
-        click.echo(f"glm model:      {config.glm_model} (legacy)")
-
-
-@main.command()
-@click.option("--watch", is_flag=True, help="Refresh every 2s")
-@click.option("--reset", is_flag=True, help="Clear all counters before reporting")
-def stats(watch, reset):
-    """Show routing-decision counters from the running daemon."""
-    config = Config.from_env()
-    url = f"http://{config.host}:{config.port}/stats"
-    if reset:
-        try:
-            httpx.get(url, params={"reset": 1}, timeout=2)
-            click.echo("Counters reset.")
-        except Exception as e:
-            click.echo(f"Could not reach daemon: {e}", err=True); return
-
-    import time as _t
-    while True:
-        try:
-            data = httpx.get(url, timeout=2).json()
-        except Exception as e:
-            click.echo(f"Could not reach daemon: {e}", err=True); return
-        click.clear() if watch else None
-        click.echo(f"uptime: {data['uptime_seconds']:.0f}s   total: {data['total_requests']}   rate: {data['rate_per_min']}/min")
-        click.echo("─" * 60)
-        if not data["by_route"]:
-            click.echo("  (no requests yet — send one through the daemon to see stats)")
-        for route, info in sorted(data["by_route"].items(), key=lambda kv: -kv[1]["total"]):
-            click.echo(f"  {route:20s} {info['total']:5d}")
-            for reason, n in sorted(info["by_reason"].items(), key=lambda kv: -kv[1]):
-                click.echo(f"      {reason:30s} {n}")
-        comp = data.get("compression") or {}
-        if comp.get("requests_compressed"):
-            click.echo("─" * 60)
-            click.echo(
-                f"  compression: {comp['tokens_before']:,} → {comp['tokens_after']:,} tokens "
-                f"(saved {comp['tokens_saved']:,} / {comp['reduction_ratio']*100:.1f}%) "
-                f"over {comp['requests_compressed']:,} reqs"
-            )
-            by = comp.get("saved_by_route") or {}
-            if by:
-                click.echo("      saved by route: " + "  ".join(
-                    f"{r}={n:,}" for r, n in sorted(by.items(), key=lambda kv: -kv[1])
-                ))
-        if data.get("recent"):
-            click.echo("\n  Last 20 decisions:")
-            for r in data["recent"]:
-                ts = _t.strftime("%H:%M:%S", _t.localtime(r["ts"]))
-                click.echo(f"    {ts}  {r['route']:18s} {r['reason']:25s} files={r['files']} ratio={r['context_ratio']}")
-        if not watch:
-            return
-        _t.sleep(2)
+    click.echo(f"recording:      {config.record_level}")
 
 
 @main.command(name="install-service")
@@ -192,21 +162,26 @@ def install_service(port, enable, start):
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit_path = unit_dir / "inferroute-local.service"
-    binary = shutil.which("inferroute") or str(Path.home() / ".local/bin/inferroute")
+    # The daemon binary is `inferroute-daemon` (this CLI). `inferroute` is NOT a
+    # console script — resolving it would write a broken ExecStart.
+    binary = shutil.which("inferroute-daemon") or str(Path.home() / ".local/bin/inferroute-daemon")
     unit_path.write_text(f"""[Unit]
-Description=inferroute-local daemon (Claude Code proxy on :{port})
+Description=inferroute-local daemon (Claude Code traffic recorder on :{port})
 After=network-online.target
 Wants=network-online.target
+# Crash-loop guard: stop after 5 failed starts in 60s instead of looping forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart={binary}
+ExecStart={binary} --port {port}
 Environment=INFERROUTE_HOST=127.0.0.1
 Environment=INFERROUTE_PORT={port}
 # INFERROUTE_API_KEY is read from ~/.inferroute/credentials.json by default;
 # uncomment + set here if you'd rather pin it explicitly.
 #Environment=INFERROUTE_API_KEY=inf_xxx
-Restart=always
+Restart=on-failure
 RestartSec=3
 StandardOutput=journal
 StandardError=journal
@@ -231,25 +206,174 @@ WantedBy=default.target
 
 @main.command()
 def doctor():
-    """Diagnose common configuration issues."""
+    """Diagnose common configuration issues.
+
+    Validates credentials, server reachability, AND the systemd unit itself —
+    the latter is what the original `serve`/crash-loop incident slipped past,
+    because the old doctor only checked the API key."""
     config = Config.from_env()
     if not config.inferroute_api_key:
         config.inferroute_api_key = credentials.get_api_key()
 
-    problems = []
+    problems: list[str] = []
+    warnings: list[str] = []
+
     if not config.inferroute_api_key:
         problems.append("No INFERROUTE_API_KEY env or saved token. Run `inferroute login`.")
     try:
-        httpx.get(f"{config.inferroute_base_url if hasattr(config,'inferroute_base_url') else config.inferroute_server_url}/", timeout=3)
+        httpx.get(f"{config.inferroute_server_url}/", timeout=3)
     except Exception as e:
         problems.append(f"inferroute-server unreachable: {e}")
-    try:
-        httpx.get(f"{config.anthropic_base_url}/v1/models", timeout=3)
-    except Exception:
-        pass  # Anthropic doesn't expose /v1/models; fine
 
+    # Recorder deps present? (the henry-ft ImportError crash-loop)
+    try:
+        import fastapi  # noqa: F401
+        import uvicorn  # noqa: F401
+    except ImportError as e:
+        problems.append(f"Recorder deps missing ({e}). Run: pip install 'inferroute[local]'.")
+
+    # Validate the systemd user unit on Linux.
+    problems_unit, warnings_unit = _check_systemd_unit()
+    problems.extend(problems_unit)
+    warnings.extend(warnings_unit)
+
+    for w in warnings:
+        click.echo(f"  ⚠ {w}")
     if problems:
         for p in problems:
             click.echo(f"  ✗ {p}")
         sys.exit(1)
     click.echo("All checks passed.")
+
+
+def _check_systemd_unit() -> tuple[list[str], list[str]]:
+    """Inspect ~/.config/systemd/user/inferroute-local.service and the running
+    service. Returns (problems, warnings). No-op (empty) off Linux."""
+    import platform
+    if platform.system() != "Linux":
+        return [], []
+
+    problems: list[str] = []
+    warnings: list[str] = []
+    unit = Path.home() / ".config" / "systemd" / "user" / "inferroute-local.service"
+    if not unit.exists():
+        warnings.append(
+            "No systemd unit (inferroute-local.service). The daemon won't "
+            "auto-start; run `ir add recording` or `inferroute-daemon install-service`."
+        )
+        return problems, warnings
+
+    text = unit.read_text(errors="replace")
+    execstart = ""
+    for line in text.splitlines():
+        if line.strip().startswith("ExecStart="):
+            execstart = line.split("=", 1)[1].strip()
+            break
+    if not execstart:
+        problems.append(f"Unit {unit} has no ExecStart.")
+    else:
+        # The classic break: a `serve` subcommand that the daemon CLI doesn't have.
+        if " serve" in f" {execstart} ":
+            problems.append(
+                f"Unit ExecStart uses a nonexistent `serve` subcommand: "
+                f"`{execstart}`. Re-run `ir add recording` to regenerate it."
+            )
+        bin_path = execstart.split()[0]
+        base = Path(bin_path).name
+        if base not in ("inferroute-daemon",):
+            warnings.append(
+                f"Unit ExecStart runs `{base}`, expected `inferroute-daemon`: `{execstart}`."
+            )
+        elif not Path(bin_path).exists() and shutil.which(base) is None:
+            problems.append(f"Unit ExecStart binary not found: `{bin_path}`.")
+
+    # Live state: catch a crash loop even if the unit text looks fine.
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show", "inferroute-local.service",
+             "-p", "ActiveState", "-p", "SubState", "-p", "NRestarts", "-p", "ExecMainStatus"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        props = dict(
+            line.split("=", 1) for line in out.splitlines() if "=" in line
+        )
+        sub = props.get("SubState", "")
+        nrestarts = int(props.get("NRestarts", "0") or 0)
+        if sub in ("auto-restart", "failed") or props.get("ActiveState") == "failed":
+            problems.append(
+                f"Daemon is {props.get('ActiveState','?')}/{sub} "
+                f"(NRestarts={nrestarts}, last exit={props.get('ExecMainStatus','?')}). "
+                f"Check: journalctl --user -u inferroute-local -n 30"
+            )
+        elif nrestarts >= 20:
+            warnings.append(f"Daemon has restarted {nrestarts} times — possible instability.")
+    except Exception:
+        pass  # systemctl absent / no user bus — unit-file checks above still ran.
+
+    return problems, warnings
+
+
+@main.command()
+@click.argument("transcript_path", required=False)
+@click.option("--stdin", "from_stdin", is_flag=True,
+              help="Read the Claude Code hook JSON from stdin and use its "
+                   "transcript_path (this is how the SessionEnd hook calls it).")
+@click.option("--force", is_flag=True, help="Re-ingest from the start, ignoring the progress marker.")
+@click.option("--quiet", is_flag=True, help="Print nothing (hook mode).")
+def ingest(transcript_path, from_stdin, force, quiet):
+    """Ingest a Claude Code transcript into the local corpus as metadata turns.
+
+    The out-of-band content recorder: reads a ~/.claude/projects/**/*.jsonl
+    transcript and records inferroute's metadata DELTA (one turn per assistant
+    message), never duplicating the transcript content. Idempotent and dep-light
+    (no fastapi/uvicorn needed). NEVER blocks Claude Code — always exits 0, even
+    on error, so a recorder problem can't wedge a session's SessionEnd hook.
+    """
+    import json as _json
+    from pathlib import Path as _Path
+    from . import ingest as _ingest
+    from .recorder import Recorder
+
+    try:
+        if from_stdin:
+            raw = sys.stdin.read()
+            try:
+                payload = _json.loads(raw) if raw.strip() else {}
+            except Exception:
+                payload = {}
+            transcript_path = (
+                _ingest.transcript_path_from_hook_payload(payload) or transcript_path
+            )
+        if not transcript_path:
+            if not quiet:
+                click.echo("No transcript path (pass a path or --stdin).", err=True)
+            return  # exit 0 — the hook must not fail
+        cfg = Config.from_env()
+        base = _Path(cfg.record_dir) if cfg.record_dir else _Path.home() / ".inferroute"
+        rec = Recorder(
+            base, level=cfg.record_level,
+            ttl_days=cfg.record_ttl_days, blob_cap_bytes=cfg.record_blob_cap_bytes,
+        )
+        wire = _load_wire(base, transcript_path)
+        summary = _ingest.ingest_transcript(
+            _Path(transcript_path), rec, wire=wire, force=force,
+        )
+        rec.flush()
+        if not quiet:
+            click.echo(_json.dumps(summary))
+    except Exception as e:
+        if not quiet:
+            click.echo(f"ingest error (ignored): {e}", err=True)
+        # Swallow: never break Claude Code's SessionEnd.
+
+
+def _load_wire(base, transcript_path):
+    """Mine the per-session OTEL raw-bodies file for the wire delta (system-prompt
+    hash + tool list), then DELETE it so nothing is left behind. Returns a dict
+    keyed by request_id (plus a `_session` fallback), or None. Implemented in
+    wire.py; absent/empty wire is the normal case (pure-native sessions)."""
+    try:
+        from .wire import mine_and_consume
+        return mine_and_consume(base, transcript_path)
+    except Exception:
+        return None

@@ -1,4 +1,10 @@
-"""FastAPI server — listens on port 5005, intercepts Claude Code traffic."""
+"""FastAPI server — listens on port 5005, intercepts Claude Code traffic.
+
+Pure pass-through recorder: forwards /v1/messages to the inferroute cloud and
+records the choice/outcome locally. /v1/models is a transparent passthrough so
+Claude Code can discover models. /inferroute/signal accepts explicit human
+satisfaction signals. There is no routing, classifier, or stats surface here.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +12,12 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import Config
-from .proxy import InferrouteProxy
+from .proxy import InferrouteProxy, _forward_headers
 
 logger = logging.getLogger("inferroute_local")
 
@@ -20,8 +27,6 @@ def create_app(config: Config) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        from . import stats as _stats
-        _stats.load_persisted()  # restore cumulative compression savings
         logger.info(
             f"inferroute-local listening on {config.host}:{config.port} "
             f"→ {config.inferroute_server_url} "
@@ -90,26 +95,21 @@ def create_app(config: Config) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "service": "inferroute-local"}
-
-    @app.get("/stats")
-    async def stats(reset: int = 0):
-        from . import stats as _stats
-        if reset:
-            _stats.reset()
-            return {"reset": True}
-        return _stats.snapshot()
+        return {"status": "ok", "service": "inferroute-local", "recording": config.record_level}
 
     @app.get("/v1/models")
-    async def models():
-        """Pass-through: Claude Code polls this to discover models."""
-        return {
-            "object": "list",
-            "data": [
-                {"id": "claude-opus-4-5-20251101", "object": "model"},
-                {"id": "claude-sonnet-4-5-20251101", "object": "model"},
-                {"id": "claude-haiku-4-5-20251001", "object": "model"},
-            ],
-        }
+    async def models(request: Request):
+        """Transparent passthrough so Claude Code can discover models from the
+        inferroute cloud (it forwards the same auth headers). Fail-soft: on any
+        upstream error, return an empty list rather than a hard failure."""
+        url = f"{config.inferroute_server_url}/v1/models"
+        headers = _forward_headers(dict(request.headers))
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(url, headers=headers)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            logger.debug(f"/v1/models passthrough failed ({e})")
+            return JSONResponse(content={"object": "list", "data": []}, status_code=200)
 
     return app

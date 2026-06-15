@@ -351,3 +351,22 @@ def test_main_consumes_economy_loop_flag(monkeypatch):
     assert _os.environ["IR_LANE"] == "economy-loop"
     assert "--economy-loop" not in captured["extra"]
     assert captured["extra"] == ["-p", "hi"]
+
+
+def test_is_premium_anthropic_auto_route_decision():
+    """sonnet/opus pins → NATIVE path (user's Anthropic creds, no proxy routing);
+    everything else → routed through inferroute as normal. Prevents the proxy from
+    substituting a premium model to a depleted tier-2 (sonnet→MiniMax 402)."""
+    from inferroute_cli.main import _is_premium_anthropic
+    # premium → native
+    assert _is_premium_anthropic("sonnet")
+    assert _is_premium_anthropic("opus")
+    assert _is_premium_anthropic("claude-sonnet-4-6")
+    assert _is_premium_anthropic("claude-opus-4-8")
+    assert _is_premium_anthropic("Sonnet")          # case-insensitive
+    # NOT premium → routed (economy/other models, haiku background, empty)
+    assert not _is_premium_anthropic("kimi")
+    assert not _is_premium_anthropic("moonshotai/Kimi-K2.6-TEE")
+    assert not _is_premium_anthropic("haiku")
+    assert not _is_premium_anthropic("claude-haiku-4-5")
+    assert not _is_premium_anthropic("")

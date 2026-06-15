@@ -73,6 +73,19 @@ def _resolve_model_name(name: str) -> str:
     return alias.model_id if alias is not None else name
 
 
+def _is_premium_anthropic(model: str) -> bool:
+    """True for a pinned premium Anthropic model (sonnet / opus).
+
+    These auto-route to the NATIVE path (`ir anthropic` — the user's own Anthropic
+    credentials, no inferroute routing). The proxy doesn't serve premium Anthropic
+    models; routing one through it substitutes a tier-2 alternate (e.g. a depleted
+    MiniMax account → 402, see SONNET-402-HANDOFF.md). `haiku` is excluded — it is
+    a cheap background model, served normally.
+    """
+    m = (model or "").lower()
+    return ("sonnet" in m or "opus" in m) and "haiku" not in m
+
+
 def main(argv: list[str] | None = None) -> int:
     import os
     args = list(sys.argv[1:] if argv is None else argv)
@@ -121,6 +134,18 @@ def main(argv: list[str] | None = None) -> int:
             from . import resume as resume_mod
             return resume_mod.handle(passthrough, model_override=user_model)
         if user_model is not None:
+            # Premium Anthropic pins (sonnet/opus) auto-route to the NATIVE path
+            # — the user's own Anthropic creds, no proxy routing. The proxy can't
+            # serve premium models and would substitute them (sonnet → depleted
+            # tier-2 MiniMax → 402). For real sonnet, native is the only correct
+            # path; routing it was the bug. See SONNET-402-HANDOFF.md.
+            if _is_premium_anthropic(user_model):
+                sys.stderr.write(
+                    f"  → {user_model} is a premium Anthropic model; running "
+                    f"natively (your Anthropic credentials, not routed).\n"
+                )
+                launch.launch_native_anthropic(extra_args=args)
+                return 0  # never reached — exec replaces process
             # Explicit pin: `ir --model X [claude flags]` → launch directly.
             creds = config.load()
             if not creds.is_valid:

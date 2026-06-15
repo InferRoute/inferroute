@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from inferroute_local import pricing, wire
+from inferroute_local import wire
 from inferroute_local.ingest import ingest_transcript
 from inferroute_local.recorder import Recorder
 
@@ -80,22 +80,22 @@ def test_ingest_off_records_nothing(tmp_path):
     assert not (tmp_path / "corpus" / "events").exists()
 
 
-# ----- pricing (read-time estimate, never stored) ----------------------------
+# ----- outcome request_id (per-turn cost join) -------------------------------
 
-def test_pricing_math_native_model():
-    est = pricing.estimate_cost({
-        "served_model": "claude-opus-4-7", "iso": "2026-06-01T00:00:00Z",
-        "tokens_in": 10000, "tokens_out": 2000,
-        "cache_read_tokens": 50000, "cache_creation_tokens": 1000,
-    })
-    assert est["is_estimate"] is True
-    assert est["cost_usd"] == round((10000*15 + 2000*75 + 50000*1.5 + 1000*18.75)/1e6, 6)
-
-
-def test_pricing_unknown_model_returns_none():
-    # Routed open-weights models get real server cost, not an estimate.
-    assert pricing.estimate_cost({"served_model": "moonshotai/Kimi-K2.6-TEE",
-                                  "tokens_in": 100, "tokens_out": 10}) is None
+def test_outcome_records_request_id(tmp_path):
+    rec = Recorder(tmp_path / "corpus", level="metadata")
+    tid = rec.record_choice(body={"model": "x", "messages": []}, headers={"x-inferroute-session": "s1"})
+    rec.record_outcome(
+        turn_id=tid, session_id="s1", status=200, ttft_ms=10, total_ms=20,
+        usage={"cost": 0.01}, stop_reason="end_turn", served_model="x",
+        request_id="req_abc",
+    )
+    rec.flush()
+    events = (tmp_path / "corpus" / "events").glob("events-*.jsonl")
+    out = [json.loads(l) for f in events for l in f.read_text().splitlines()
+           if '"outcome"' in l]
+    assert out and out[0]["request_id"] == "req_abc"
+    assert out[0]["cost_usd"] == 0.01
 
 
 # ----- wire mining (mine then delete) ----------------------------------------

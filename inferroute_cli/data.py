@@ -125,17 +125,14 @@ def _show() -> int:
 
 
 def _cost() -> int:
-    """Per-session cost view, derived at READ TIME — never stored.
+    """Per-session inferroute cost — the REAL amount inferroute billed.
 
-    Two distinct columns, by provenance (we never blend a guess into a fact):
-      • measured   — real per-turn cost the SERVER reported (daemon outcome
-                     events, usage.cost). Authoritative for routed turns.
-      • estimated  — derived from recorded token counts × a dated price table
-                     (pricing.py) for turns with no server cost (native Claude).
-    `best` prefers measured when present, else estimated.
+    The only cost inferroute tracks is its own: the server-reported `usage.cost`
+    on ROUTED turns (captured by the daemon as outcome events). Native Claude
+    turns aren't served by inferroute, so they carry no inferroute cost — we do
+    NOT estimate them against anyone else's price list. Nothing is computed from
+    a local price table.
     """
-    from inferroute_local import pricing  # stdlib-only; lazy to keep `ir data` light
-
     base = _base()
     events_dir = base / "events"
     if not events_dir.exists():
@@ -143,13 +140,9 @@ def _cost() -> int:
         return 0
 
     sess: dict[str, dict] = {}
-    price_table = None
-    unknown_models: set[str] = set()
 
     def _s(sid: str) -> dict:
-        return sess.setdefault(
-            sid, {"turns": 0, "est": 0.0, "measured": 0.0, "models": set()}
-        )
+        return sess.setdefault(sid, {"turns": 0, "cost": 0.0, "models": set()})
 
     for f in sorted(events_dir.glob("events-*.jsonl")):
         try:
@@ -170,49 +163,31 @@ def _cost() -> int:
                 rec["turns"] += 1
                 if ev.get("served_model"):
                     rec["models"].add(ev["served_model"])
-                est = pricing.estimate_cost(ev)
-                if est:
-                    rec["est"] += est["cost_usd"]
-                    price_table = price_table or est["price_table"]
-                elif ev.get("served_model"):
-                    unknown_models.add(ev["served_model"])
             elif kind == "outcome":
                 c = ev.get("cost_usd")
                 if isinstance(c, (int, float)) and not isinstance(c, bool) and c > 0:
-                    _s(sid)["measured"] += float(c)
+                    _s(sid)["cost"] += float(c)
 
     if not sess:
         print(f"\n  No turns or outcomes recorded yet at {base}.\n")
         return 0
 
-    def best(rec: dict) -> float:
-        return rec["measured"] if rec["measured"] > 0 else rec["est"]
+    rows = sorted(sess.items(), key=lambda kv: -kv[1]["cost"])
+    total = sum(r["cost"] for _, r in rows)
 
-    rows = sorted(sess.items(), key=lambda kv: -best(kv[1]))
-    tot_m = sum(r["measured"] for _, r in rows)
-    tot_e = sum(r["est"] for _, r in rows)
-    tot_b = sum(best(r) for _, r in rows)
-
-    print(f"\n  Cost by session — {base}")
-    print("  measured = real server cost (routed turns); estimated = tokens × dated")
-    print("  price table (native turns). Estimates are NOT stored — recomputed here.\n")
-    print(f"    {'session':<22} {'turns':>5} {'measured$':>11} {'est$':>10}  models")
-    print(f"    {'-'*22} {'-'*5} {'-'*11} {'-'*10}  {'-'*6}")
+    print(f"\n  inferroute cost by session — {base}")
+    print("  cost = what inferroute billed (routed turns, real server usage.cost).")
+    print("  Native Claude turns aren't served by inferroute → no inferroute cost.\n")
+    print(f"    {'session':<24} {'turns':>5} {'cost (inferroute)':>18}  models")
+    print(f"    {'-'*24} {'-'*5} {'-'*18}  {'-'*6}")
     for sid, rec in rows[:50]:
         models = ",".join(sorted(rec["models"]))[:40] or "-"
-        print(f"    {sid[:22]:<22} {rec['turns']:>5} {rec['measured']:>11.4f} "
-              f"{rec['est']:>10.4f}  {models}")
+        print(f"    {sid[:24]:<24} {rec['turns']:>5} {rec['cost']:>17.4f}$  {models}")
     if len(rows) > 50:
         print(f"    … and {len(rows) - 50} more sessions")
-    print(f"    {'-'*22} {'-'*5} {'-'*11} {'-'*10}")
-    print(f"    {'TOTAL':<22} {'':>5} {tot_m:>11.4f} {tot_e:>10.4f}")
-    print(f"\n    best estimate of total spend: ${tot_b:.4f} "
-          f"(prefers measured, falls back to estimated)")
-    if price_table:
-        print(f"    price table: {price_table}")
-    if unknown_models:
-        print(f"    no price entry (estimate skipped) for: {', '.join(sorted(unknown_models))}")
-    print("    ⚠ estimated rates are placeholders — verify inferroute_local/pricing.py\n")
+    print(f"    {'-'*24} {'-'*5} {'-'*18}")
+    print(f"    {'TOTAL':<24} {'':>5} {total:>17.4f}$")
+    print()
     return 0
 
 

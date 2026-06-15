@@ -12,11 +12,12 @@ Invoked OUT of the request hot path by the Claude Code ``SessionEnd`` hook
 (appended) transcript only contributes its new turns on re-ingest, tracked by a
 per-transcript line-count marker under ``<base>/ingested/``.
 
-Cost is deliberately NOT computed here. We persist measured token inputs only;
-estimated cost is a recomputable read-time view (``ir data cost``) against a
-dated price table, and real cost for routed turns comes from the daemon's
-server ``usage.cost``. We never solidify a self-computed cost estimate into the
-corpus. See shared-docs/inferroute/local-decision-recorder-spec.md.
+Cost is not recorded here. The only cost inferroute tracks is what it actually
+billed — the server-reported ``usage.cost`` on ROUTED turns (captured by the
+daemon as outcome events, joinable to a turn by ``request_id``). Native Claude
+turns aren't served by inferroute, so they carry no inferroute cost; we do not
+estimate them against any external price list. Token counts are still recorded
+as useful spine metadata. See shared-docs/inferroute/local-decision-recorder-spec.md.
 """
 from __future__ import annotations
 

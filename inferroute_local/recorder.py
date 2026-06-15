@@ -249,8 +249,14 @@ class Recorder:
         served_model: str,
         error_kind: Optional[str] = None,
         response_bytes: Optional[bytes] = None,
+        request_id: Optional[str] = None,
     ) -> None:
-        """Record what happened when a choice's turn ran. Best-effort."""
+        """Record what happened when a choice's turn ran. Best-effort.
+
+        `request_id` is the Anthropic response request-id, which equals the
+        transcript's `requestId` — so the real (server-billed) cost on this
+        outcome can be joined to the exact ingested transcript turn, not just the
+        session."""
         if not self.enabled or turn_id is None:
             return
         try:
@@ -265,6 +271,7 @@ class Recorder:
                     "kind": "outcome",
                     "id": uuid.uuid4().hex,
                     "ref": turn_id,
+                    "request_id": request_id,
                     "session_id": session_id,
                     "ts": ts,
                     "iso": iso,

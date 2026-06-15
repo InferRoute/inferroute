@@ -91,7 +91,7 @@ class InferrouteProxy:
                 turn_id=turn_id, session_id=session_id, status=502,
                 ttft_ms=None, total_ms=(time.monotonic() - start) * 1000,
                 usage={}, stop_reason=None, served_model=chosen_model,
-                error_kind=type(e).__name__,
+                error_kind=type(e).__name__, request_id=None,
             )
             return self._inject_error(
                 streaming,
@@ -99,10 +99,18 @@ class InferrouteProxy:
                 "or run `ir status`.",
             )
 
+        # The Anthropic response request-id equals the transcript's `requestId`,
+        # so recording it lets offline analysis join daemon cost to a SPECIFIC
+        # transcript turn (not just the session). See _stream's header keep-list.
+        request_id = (
+            resp_headers.get("anthropic-request-id")
+            or resp_headers.get("request-id")
+            or resp_headers.get("x-request-id")
+        )
         wrapped = self._recording_stream(
             stream, turn_id=turn_id, session_id=session_id,
             streaming=streaming, chosen_model=chosen_model,
-            status=status, start=start,
+            status=status, start=start, request_id=request_id,
         )
         return status, resp_headers, wrapped
 
@@ -154,6 +162,7 @@ class InferrouteProxy:
         chosen_model: str,
         status: int,
         start: float,
+        request_id: Optional[str] = None,
     ) -> AsyncIterator[bytes]:
         """Yield the upstream bytes unchanged while observing first-byte time,
         total time, usage, stop_reason, and (full mode) a capped response blob.
@@ -213,7 +222,7 @@ class InferrouteProxy:
                     turn_id=turn_id, session_id=session_id, status=status,
                     ttft_ms=ttft_ms, total_ms=total_ms, usage=usage,
                     stop_reason=stop_reason, served_model=served or chosen_model,
-                    response_bytes=blob,
+                    response_bytes=blob, request_id=request_id,
                 )
             except Exception as e:
                 logger.debug(f"outcome record skipped ({e})")
@@ -232,7 +241,7 @@ class InferrouteProxy:
             k: v for k, v in response.headers.items()
             if k.lower() in {
                 "content-type", "x-request-id", "anthropic-version",
-                "request-id", "transfer-encoding",
+                "request-id", "anthropic-request-id", "transfer-encoding",
             }
         }
 

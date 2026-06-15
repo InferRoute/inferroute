@@ -71,11 +71,13 @@ So the recorder no longer needs the proxy for content:
   at level `metadata`, **never a blob** (content stays in the transcript; zero
   duplication). Idempotent via a per-transcript line marker. Dep-light: runs even
   without `[local]` and even when the daemon is down.
-- **Cost** follows a strict rule: **persist only numbers a system reported.**
-  Routed turns keep the real server `usage.cost` (daemon). Native-turn cost is a
-  **read-time estimate** (`ir data cost`) from recorded tokens × a *dated* price
-  table (`pricing.py`), flagged `is_estimate` and recomputable — we never solidify
-  a self-computed estimate into the corpus.
+- **Cost is inferroute-only.** The only cost tracked is what inferroute actually
+  billed — the server-reported `usage.cost` on ROUTED turns (daemon outcome
+  events). `ir data cost` reports that, per session. Native Claude turns aren't
+  served by inferroute, so they carry no inferroute cost; we do **not** estimate
+  them against any external (e.g. Anthropic) price list. Outcome events carry the
+  `request_id` (== the transcript `requestId`), so real cost joins to a specific
+  ingested turn, not just the session.
 - **Wire delta** (system hash + tool list) is **opt-in** (`IR_CAPTURE_WIRE=1`):
   the launcher points CC's per-process OTEL `OTEL_LOG_RAW_API_BODIES=file:` sink
   at a scratch dir; ingest mines the delta then **deletes** it ("nothing left
@@ -88,9 +90,5 @@ the hardcoded `/v1/models` list) was removed; `/v1/models` is now a real upstrea
 passthrough.
 
 ## Remaining follow-up
-- `outcome` events don't carry the Anthropic `request_id`, so daemon cost can't
-  yet be joined to a transcript turn at request granularity (session-level only).
-  Threading `x-request-id` into `record_outcome` would enable a per-turn join.
-- The `pricing.py` rates are placeholders — verify against anthropic.com/pricing.
 - Verify CC's `OTEL_LOG_RAW_API_BODIES=file:` format, then consider default-on
   wire capture.

@@ -294,9 +294,11 @@ def _install_user_service(level: str) -> int:
 
 
 def _install_systemd_unit(level: str) -> int:
-    daemon_path = _which("inferroute-daemon")
-    if daemon_path is None:
-        print("        ✗ `inferroute-daemon` not on PATH. Pip install may not have linked the script.")
+    # Fall back to the conventional path: a non-interactive/systemd environment
+    # often lacks ~/.local/bin on PATH, but that's where the console script lives.
+    daemon_path = _which("inferroute-daemon") or str(Path.home() / ".local/bin/inferroute-daemon")
+    if not Path(daemon_path).exists() and _which("inferroute-daemon") is None:
+        print("        ✗ `inferroute-daemon` not found (PATH or ~/.local/bin). Pip install may not have linked the script.")
         return 1
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_path = unit_dir / SERVICE_NAME
@@ -343,9 +345,9 @@ def _install_systemd_unit(level: str) -> int:
 
 
 def _install_launchd_plist(level: str) -> int:
-    daemon_path = _which("inferroute-daemon")
-    if daemon_path is None:
-        print("        ✗ `inferroute-daemon` not on PATH.")
+    daemon_path = _which("inferroute-daemon") or str(Path.home() / ".local/bin/inferroute-daemon")
+    if not Path(daemon_path).exists() and _which("inferroute-daemon") is None:
+        print("        ✗ `inferroute-daemon` not found (PATH or ~/.local/bin).")
         return 1
     plist_dir = Path.home() / "Library" / "LaunchAgents"
     plist_dir.mkdir(parents=True, exist_ok=True)

@@ -484,11 +484,19 @@ def _auto_compact_window(model_id: str) -> int:
     CC has no built-in window for our custom model ids (e.g. "moonshotai/Kimi-K2.6-TEE")
     so its auto-compact never fires — long ir sessions grow unbounded and hard-overflow
     instead of compacting (verified 2026-06-09). Setting CLAUDE_CODE_AUTO_COMPACT_WINDOW
-    makes it fire at ~92% of this. Conservative/safe-leaning (proxy compression buffers a
-    slight over-estimate; compacting a little early >> never)."""
+    makes it fire at ~92% of this.
+
+    2026-06-16: lowered the 200K-class windows to 180K. The proxy's Headroom tool-output
+    compression makes the backend report SMALLER input_tokens, so CC sizes its context
+    bar from the compressed count and the 92% trigger latches LATE (or never) — a Kimi
+    session grew to ~322K before hard-overflowing on a GLM (202K) fallback. A lower window
+    gives the trigger earlier headroom against that masking. NOTE: the deeper fix is to
+    stop the compression from masking CC's count (report the uncompressed size to CC for
+    the context bar while still billing on the compressed count) — proxy-side follow-up.
+    Per-model windows are safe under the Kimi→GLM fallback: 180K < GLM's 202K limit too."""
     m=(model_id or "").lower()
     if "deepseek" in m: return 120_000
-    if "kimi" in m or "glm" in m or "minimax" in m: return 200_000
+    if "kimi" in m or "glm" in m or "minimax" in m: return 180_000
     return 150_000
 
 

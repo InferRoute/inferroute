@@ -42,9 +42,11 @@ from inferroute_cli.launch import _auto_compact_window, _apply_autocompact_env
 
 
 def test_auto_compact_window_per_model():
-    assert _auto_compact_window("moonshotai/Kimi-K2.6-TEE") == 200_000
-    assert _auto_compact_window("zai-org/GLM-5.1-TEE") == 200_000
-    assert _auto_compact_window("minimax/minimax-m2.5") == 200_000
+    # 2026-06-16: 200K-class lowered to 180K so CC's auto-compact fires earlier
+    # despite the proxy's compression masking the reported context count.
+    assert _auto_compact_window("moonshotai/Kimi-K2.6-TEE") == 180_000
+    assert _auto_compact_window("zai-org/GLM-5.1-TEE") == 180_000
+    assert _auto_compact_window("minimax/minimax-m2.5") == 180_000
     assert _auto_compact_window("deepseek-ai/DeepSeek-V3.2") == 120_000
     assert _auto_compact_window("some/unknown-model") == 150_000
     assert _auto_compact_window("") == 150_000  # never crashes on empty
@@ -53,7 +55,7 @@ def test_auto_compact_window_per_model():
 def test_apply_autocompact_env_sets_when_absent():
     env = {}
     _apply_autocompact_env(env, "moonshotai/Kimi-K2.6-TEE")
-    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "200000"
+    assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "180000"
 
 
 def test_apply_autocompact_env_respects_user_override():

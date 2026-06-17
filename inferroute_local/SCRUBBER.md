@@ -137,7 +137,7 @@ blocks) so memory stays bounded.
 - This is **best-effort secret-hiding, not anonymization and not a privacy
   guarantee.** It can miss secrets embedded in free text or in novel formats.
   Do **not** market it as "true privacy."
-- **PII is OFF by default** on purpose. For the repo-scoped night-shift use case
+- **PII is OFF by default** on purpose. For the repo-scoped goal-loop use case
   you mostly need to hide *secrets*; turning on PII redaction is a v2 concern
   that only matters once you expand beyond code into runtime logs. The PII layer
   that exists is intentionally simple (regex + Luhn), not a real anonymizer.

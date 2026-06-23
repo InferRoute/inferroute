@@ -107,6 +107,18 @@ def main(argv: list[str] | None = None) -> int:
         args = [a for a in args if a not in ("--economy", "--econ")]
         os.environ["IR_LANE"] = "economy"
 
+    # Refresh the model catalog (list + prices) from the backend for model-facing
+    # invocations (launch / picker / help). Cached + fail-soft, short timeout — never
+    # blocks; if the backend is slow/down, models.py uses the cache, then the bundled
+    # defaults. Skipped for non-model subcommands (data/add/login/…).
+    _first = args[0] if args else ""
+    if (not args) or _first.startswith("-") or _first in ("help", "choose"):
+        try:
+            from . import catalog
+            catalog.refresh(config.load().api_url)
+        except Exception:
+            pass
+
     # ── Global help / version — honored as the FIRST token, dashed or not.
     # Must run before the bare-flag picker branch below, which would otherwise
     # treat a leading `--help`/`--version` as "flags, no model" and open the

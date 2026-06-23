@@ -195,9 +195,11 @@ class ChooseApp(App):
                     yield Static("choose a model · USD per 1M tokens", id="tagline")
             yield Static("─" * 76, id="divider")
             items = []
-            for short, badge, color, name, desc in _options():
+            for i, (short, badge, color, name, desc) in enumerate(_options()):
                 body = _row_markup(badge, color, name, desc, _price_markup(short))
-                items.append(ListItem(Static(body), id=short))
+                # Textual widget ids forbid '.' (versioned shorts like kimi-k2.6 have
+                # one), so use a positional id and carry the real short on `name`.
+                items.append(ListItem(Static(body), id=f"opt{i}", name=short))
             yield ListView(*items, id="picker")
             yield Static("[b]↑/↓[/] move    [b]enter[/] select    [b]q[/] quit", id="hint")
 
@@ -216,14 +218,15 @@ class ChooseApp(App):
     def action_select(self) -> None:
         lv = self.query_one("#picker", ListView)
         if lv.highlighted_child is not None:
-            self._choose(lv.highlighted_child.id)
+            self._choose(lv.highlighted_child.name)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         # Fires on Enter or mouse click on a row.
-        self._choose(event.item.id)
+        self._choose(event.item.name)
 
     def _choose(self, short: str | None) -> None:
-        # ListItem ids are alias shorts (or the _ANTHROPIC sentinel).
+        # The real alias short (or the _ANTHROPIC sentinel) rides on ListItem.name
+        # (the id is positional, since versioned shorts contain dots).
         self.selected_short = short
         self.exit()
 

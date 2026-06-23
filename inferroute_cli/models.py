@@ -188,3 +188,33 @@ def short_for_model_id(model_id: str) -> str | None:
 
 def by_tier(tier: str) -> list[ModelAlias]:
     return [a for a in all_aliases() if a.tier == tier]
+
+
+# Bundled `ir choose` picker subset (offline / no cache). Mirrors the catalog rows
+# that carry a `picker` block. choose.py maps `accent` → its rich color and appends
+# the native-Anthropic escape hatch locally.
+_BUNDLED_PICKER = [
+    {"short": "minimax",    "name": "MiniMax M2.7", "desc": "get something usable — cheap, fast iteration", "badge": "FAST",     "accent": "amber"},
+    {"short": "minimax-m3", "name": "MiniMax M3",   "desc": "newer MiniMax — multimodal, 1M context, fast", "badge": "FLAGSHIP", "accent": "blue"},
+    {"short": "kimi",       "name": "Kimi K2.6",    "desc": "strong reasoning, thinks before acting",       "badge": "BALANCED", "accent": "green"},
+    {"short": "glm",        "name": "GLM-5.1",      "desc": "solid general-purpose alternative",            "badge": "BALANCED", "accent": "green"},
+]
+
+
+def picker_options() -> list[dict]:
+    """The `ir choose` options — from the backend catalog (rows carrying a `picker`
+    block, in catalog order) when available, else the bundled subset. Each dict:
+    {short, name, desc, badge, accent}. Excludes the native escape hatch, which
+    choose.py appends locally."""
+    from . import catalog
+    rows = catalog.load()
+    if rows:
+        out = [
+            {"short": m["short"], "name": p.get("name", m["short"]),
+             "desc": p.get("desc", ""), "badge": p.get("badge", ""),
+             "accent": p.get("accent", "green")}
+            for m in rows if (p := m.get("picker"))
+        ]
+        if out:
+            return out
+    return [dict(o) for o in _BUNDLED_PICKER]

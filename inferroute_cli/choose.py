@@ -51,16 +51,26 @@ _MARK = "●━━┓\n   ┗━━"
 # handled specially in run() rather than via models.get().
 _ANTHROPIC = "anthropic"
 
-# (option id, tier badge, accent color, display name, one-line description),
-# in display order. Every id except _ANTHROPIC is a real alias short from
-# models.ALIASES — its price is pulled from there.
-_OPTIONS = [
-    ("minimax",    "FAST",      _AMBER,  "MiniMax M2.7",     "get something usable — cheap, fast iteration"),
-    ("minimax-m3", "FLAGSHIP",  _BLUE,   "MiniMax M3",       "newer MiniMax — multimodal, 1M context, fast"),
-    ("kimi",       "BALANCED",  _GREEN,  "Kimi K2.6",        "strong reasoning, thinks before acting"),
-    ("glm",        "BALANCED",  _GREEN,  "GLM-5.1",          "solid general-purpose alternative"),
-    (_ANTHROPIC,   "ANTHROPIC", _VIOLET, "Native Anthropic", "your own Claude subscription — no routing"),
-]
+# Catalog accent keys → the rich hex colors above. Unknown keys fall back to green.
+_ACCENTS = {"amber": _AMBER, "blue": _BLUE, "green": _GREEN, "violet": _VIOLET}
+
+
+def _options() -> list[tuple]:
+    """The picker rows: (option id, tier badge, accent color, display name, desc).
+
+    The routed models + their names/badges/accents come from the BACKEND catalog
+    (models.picker_options(), cached locally — see catalog.py), so the offered list
+    stays current without an `ir` release; prices are pulled per-row from the same
+    catalog in _price_markup(). The native-Anthropic escape hatch is appended here
+    (it's not a catalog model — `ir anthropic` runs plain claude, no routing).
+    """
+    rows = [
+        (o["short"], o["badge"], _ACCENTS.get(o["accent"], _GREEN), o["name"], o["desc"])
+        for o in models.picker_options()
+    ]
+    rows.append((_ANTHROPIC, "ANTHROPIC", _VIOLET, "Native Anthropic",
+                 "your own Claude subscription — no routing"))
+    return rows
 
 
 def _price_markup(short: str) -> str:
@@ -185,7 +195,7 @@ class ChooseApp(App):
                     yield Static("choose a model · USD per 1M tokens", id="tagline")
             yield Static("─" * 76, id="divider")
             items = []
-            for short, badge, color, name, desc in _OPTIONS:
+            for short, badge, color, name, desc in _options():
                 body = _row_markup(badge, color, name, desc, _price_markup(short))
                 items.append(ListItem(Static(body), id=short))
             yield ListView(*items, id="picker")

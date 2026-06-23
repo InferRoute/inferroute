@@ -392,9 +392,12 @@ def _product_strip_settings_args(
             assert isinstance(data, dict)
         except (ValueError, TypeError, AssertionError):
             return []  # malformed/unexpected — leave the caller's --settings alone
-        if data.get("statusLine"):
-            return []  # caller set their own — respect it
-        data["statusLine"] = strip
+        # Quiet CC's claude.ai-connector startup warning: routed sessions use an
+        # inferroute Bearer token, so org connectors can't load and CC warns each
+        # launch. We never use them here. setdefault → respect a caller override.
+        data.setdefault("disableClaudeAiConnectors", True)
+        if not data.get("statusLine"):
+            data["statusLine"] = strip  # respect a caller's own statusLine if set
         merged = json.dumps(data)
         if vi is not None:
             extra_args[vi] = merged
@@ -402,7 +405,7 @@ def _product_strip_settings_args(
             extra_args[i] = "--settings=" + merged
         return []  # merged in place; no separate flag
 
-    return ["--settings", json.dumps({"statusLine": strip})]
+    return ["--settings", json.dumps({"statusLine": strip, "disableClaudeAiConnectors": True})]
 
 
 def _gate_strip_prefix(

@@ -345,7 +345,7 @@ def _strip_command(prefix: str, cost_file: Path | None = None,
 
 def _product_strip_settings_args(
     prefix: str, extra_args: list[str], cost_file: Path | None = None,
-    cache_file: Path | None = None,
+    cache_file: Path | None = None, disable_connectors: bool = False,
 ) -> list[str]:
     """`['--settings', <json>]` pinning the product strip to CC's status line, or [].
 
@@ -392,10 +392,13 @@ def _product_strip_settings_args(
             assert isinstance(data, dict)
         except (ValueError, TypeError, AssertionError):
             return []  # malformed/unexpected — leave the caller's --settings alone
-        # Quiet CC's claude.ai-connector startup warning: routed sessions use an
-        # inferroute Bearer token, so org connectors can't load and CC warns each
-        # launch. We never use them here. setdefault → respect a caller override.
-        data.setdefault("disableClaudeAiConnectors", True)
+        # ROUTED sessions only: quiet CC's claude.ai-connector startup warning. They
+        # use an inferroute Bearer token, so org connectors can't load and CC warns
+        # each launch — we never use them. NOT set on native (`ir anthropic`), which
+        # uses the user's own creds and CAN use org connectors. setdefault → respect
+        # a caller override.
+        if disable_connectors:
+            data.setdefault("disableClaudeAiConnectors", True)
         if not data.get("statusLine"):
             data["statusLine"] = strip  # respect a caller's own statusLine if set
         merged = json.dumps(data)
@@ -405,7 +408,10 @@ def _product_strip_settings_args(
             extra_args[i] = "--settings=" + merged
         return []  # merged in place; no separate flag
 
-    return ["--settings", json.dumps({"statusLine": strip, "disableClaudeAiConnectors": True})]
+    settings = {"statusLine": strip}
+    if disable_connectors:
+        settings["disableClaudeAiConnectors"] = True
+    return ["--settings", json.dumps(settings)]
 
 
 def _gate_strip_prefix(
@@ -751,7 +757,8 @@ def launch_through_inferroute(
     # daemon isn't running (file never appears) — see _strip_command.
     cost_file = _record_sessions_dir() / f"{session_id}.cost"
     cache_file = _record_sessions_dir() / f"{session_id}.cache"
-    status_args = _product_strip_settings_args(prefix, extra, cost_file, cache_file)
+    status_args = _product_strip_settings_args(
+        prefix, extra, cost_file, cache_file, disable_connectors=True)
     # On a fresh launch, force claude's session id to equal our session_id so the
     # transcript, the dashboard link, and the cost file share one id (the basis
     # for cumulative resume). Skip when resuming (extra already has `--resume

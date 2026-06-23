@@ -66,3 +66,6 @@ Issues = "https://github.com/InferRoute/inferroute/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["inferroute_cli", "inferroute_local"]
+# Generated offline catalog snapshot (model list/prices/aliases) — the ir offline
+# fallback. Force-include so a wheel always ships it even if build hygiene changes.
+force-include = { "inferroute_cli/catalog_bundled.json" = "inferroute_cli/catalog_bundled.json" }

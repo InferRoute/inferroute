@@ -18,21 +18,14 @@ never decides. (Cloud-side fallbacks still apply upstream.)
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Price:
-    """Published USD price per 1,000,000 tokens.
-
-    Three buckets, matching what the dashboard/pricing page surface:
-      * input      — fresh prompt tokens
-      * cache_read — tokens served from a prior prompt cache (much cheaper)
-      * output     — generated tokens
-
-    These are display values for the `ir choose` picker; the authoritative
-    billing rates live server-side. Keep them in sync with
-    inferroute-site/src/lib/constants.ts (CURRENT_RATE).
-    """
+    """USD price per 1,000,000 tokens (input / cache_read / output), as surfaced by
+    the picker. These are the authoritative rates from the backend catalog — this
+    module no longer carries its own price table."""
     input: float
     cache_read: float
     output: float
@@ -40,116 +33,83 @@ class Price:
 
 @dataclass(frozen=True)
 class ModelAlias:
-    short: str           # what the user types as the --model value
-    model_id: str        # what we pass to claude --model on the wire
+    short: str           # what the user types as the --model value (versioned)
+    model_id: str        # the clean id we pass to claude --model (CC shows it)
     label: str           # one-line description shown by `ir help` / `ir choose`
     tier: str            # "fast" | "balanced" | "smart"
     price: Price | None = None  # $/1M tokens; None = priced on your own plan
+    aliases: tuple = ()  # legacy/bare shorts that also resolve here (e.g. "kimi")
 
     @property
     def help_line(self) -> str:
         # Kept for `ir choose` button labels; `ir help` formats its own table.
-        return f"  ir --model {self.short:<8} {self.label}"
+        return f"  ir --model {self.short:<14} {self.label}"
 
 
-# Order matters — `ir choose` shows them top-to-bottom.
-#
-# Prices are USD per 1M tokens (input / cache_read / output). The MiniMax M2.7,
-# Kimi K2.6 and GLM-5.1 rows mirror inferroute-site CURRENT_RATE exactly. The
-# newer/alternate models (M3, Kimi K2.5, DeepSeek V3.2) aren't on the public
-# pricing page yet — their numbers below are provisional placeholders and should
-# be reconciled once published.
-# BUNDLED FALLBACK ONLY. The live list + prices come from the backend catalog
-# (catalog.py → GET /pricing), refreshed at launch. These are used when the backend
-# is unreachable and there's no cache yet (first run / offline). Order = picker order.
-# Versioned shorts only (no bare kimi/glm/minimax — those are hidden back-compat
-# aliases, see _HIDDEN_ALIASES). model_id is the CLEAN user-facing id (no -TEE /
-# provider prefix); the proxy normalizes it to the Chutes "…-TEE" id for routing.
-_BUNDLED: list[ModelAlias] = [
-    ModelAlias(short="minimax-m2.7", model_id="MiniMax-M2.7",
-               label="MiniMax M2.7 — cheaper/smaller direct-sub model", tier="fast",
-               price=Price(input=0.18, cache_read=0.036, output=0.90)),
-    ModelAlias(short="minimax-m3", model_id="MiniMax-M3",
-               label="MiniMax M3 — newer/stronger flagship", tier="balanced",
-               price=Price(input=0.30, cache_read=0.060, output=1.50)),
-    ModelAlias(short="kimi-k2.6", model_id="Kimi-K2.6",
-               label="Kimi K2.6 — strong reasoning, thinks before acting", tier="balanced",
-               price=Price(input=0.49, cache_read=0.099, output=2.40)),
-    ModelAlias(short="glm-5.1", model_id="GLM-5.1",
-               label="GLM-5.1 — solid general-purpose alternative", tier="balanced",
-               price=Price(input=0.69, cache_read=0.139, output=1.80)),
-    ModelAlias(short="kimi-k2.5", model_id="Kimi-K2.5",
-               label="Kimi K2.5 — prior-gen Kimi, alternate when K2.6 is busy", tier="balanced",
-               price=Price(input=0.29, cache_read=0.059, output=1.40)),
-    ModelAlias(short="deepseek-v3.2", model_id="DeepSeek-V3.2",
-               label="DeepSeek V3.2 — strong coding/reasoning, separate capacity", tier="balanced",
-               price=Price(input=0.69, cache_read=0.139, output=0.69)),
-]
-
-# Bare versionless shorts → versioned canonical. Kept ONLY so existing muscle memory
-# and scripts (`ir --model kimi`) keep working; never displayed in the picker/help
-# (those show only the versioned shorts). Resolved silently in get().
-_HIDDEN_ALIASES = {
-    "minimax": "minimax-m2.7",
-    "kimi": "kimi-k2.6",
-    "glm": "glm-5.1",
-    "deepseek": "deepseek-v3.2",
-    "kimi-2.5": "kimi-k2.5",  # prior short form
-}
-
+# This module holds NO model data of its own — list, prices, picker metadata and
+# bare-name aliases ALL come from the backend catalog (catalog.py → GET /pricing),
+# cached locally and refreshed at launch. The only offline fallback is a GENERATED
+# snapshot of that same catalog, committed as catalog_bundled.json (written by the
+# proxy's gen_pricing_card.py), so nothing here drifts from the backend.
 
 _RESOLVED: list[ModelAlias] | None = None  # memoized per process
 
 
-def _from_catalog() -> list[ModelAlias] | None:
-    """ModelAliases built from the backend catalog cache (catalog.py), or None.
-
-    The picker's display Price uses the STANDARD (on-demand) lane — the default a
-    manual `ir` session is billed at. (The economy lane is the discounted deferred
-    price; we don't want to understate the headline number.)
-    """
-    from . import catalog
-    rows = catalog.load()
-    if not rows:
+def _bundled_rows() -> list[dict] | None:
+    """The generated offline catalog snapshot shipped in the package, or None."""
+    import json
+    try:
+        rows = json.loads((Path(__file__).parent / "catalog_bundled.json").read_text()).get("models")
+        return rows if isinstance(rows, list) and rows else None
+    except Exception:
         return None
-    out: list[ModelAlias] = []
-    for m in rows:
-        try:
-            std = m.get("standard") or {}
-            price = (Price(input=std["input"], cache_read=std["cached"], output=std["output"])
-                     if std else None)
-            out.append(ModelAlias(short=m["short"], model_id=m["model_id"],
-                                   label=m["label"], tier=m.get("tier", "balanced"),
-                                   price=price))
-        except (KeyError, TypeError):
-            continue
-    return out or None
+
+
+def _rows() -> list[dict]:
+    """Catalog rows: the user's fresh cache (backend) if present, else the bundled
+    snapshot. Empty only if both are missing (shouldn't happen — snapshot ships)."""
+    from . import catalog
+    return catalog.load() or _bundled_rows() or []
+
+
+def _to_alias(m: dict) -> ModelAlias:
+    """Build a ModelAlias from a catalog row. Display Price = STANDARD (on-demand)
+    lane — what a manual `ir` session bills at (economy is the deferred discount)."""
+    std = m.get("standard") or {}
+    price = (Price(input=std["input"], cache_read=std["cached"], output=std["output"])
+             if std else None)
+    return ModelAlias(short=m["short"], model_id=m["model_id"],
+                      label=m.get("label", m["short"]), tier=m.get("tier", "balanced"),
+                      price=price, aliases=tuple(m.get("aliases") or ()))
 
 
 def all_aliases() -> list[ModelAlias]:
-    """The offered models — from the backend catalog when available, else bundled."""
+    """The offered models (versioned shorts), sourced from the catalog/snapshot."""
     global _RESOLVED
     if _RESOLVED is None:
-        _RESOLVED = _from_catalog() or list(_BUNDLED)
+        out: list[ModelAlias] = []
+        for m in _rows():
+            try:
+                out.append(_to_alias(m))
+            except (KeyError, TypeError):
+                continue
+        _RESOLVED = out
     return list(_RESOLVED)
 
 
 def get(short: str) -> ModelAlias | None:
+    """Resolve a short — or any of its catalog-declared aliases (e.g. bare `kimi`
+    → kimi-k2.6) — to its ModelAlias."""
     short = short.lower().strip()
-    short = _HIDDEN_ALIASES.get(short, short)  # bare kimi/glm/minimax → versioned
     for a in all_aliases():
-        if a.short == short:
+        if a.short == short or short in a.aliases:
             return a
     return None
 
 
 def short_for_model_id(model_id: str) -> str | None:
-    """Reverse of `_resolve_model_name`: canonical model_id → friendly short.
-
-    Returns the FIRST alias whose model_id matches (catalog/bundled order), so
-    `MiniMax-M2.7` maps back to bare `minimax`. None for ids we don't alias
-    (callers fall back to the id verbatim — a valid `ir --model <id>` value).
-    """
+    """canonical model_id → friendly short (first match in catalog order). None for
+    ids we don't alias (callers fall back to the id verbatim)."""
     if not model_id:
         return None
     for a in all_aliases():
@@ -162,31 +122,15 @@ def by_tier(tier: str) -> list[ModelAlias]:
     return [a for a in all_aliases() if a.tier == tier]
 
 
-# Bundled `ir choose` picker subset (offline / no cache). Mirrors the catalog rows
-# that carry a `picker` block. choose.py maps `accent` → its rich color and appends
-# the native-Anthropic escape hatch locally.
-_BUNDLED_PICKER = [
-    {"short": "minimax-m2.7", "name": "MiniMax M2.7", "desc": "get something usable — cheap, fast iteration", "badge": "FAST",     "accent": "amber"},
-    {"short": "minimax-m3",   "name": "MiniMax M3",   "desc": "newer MiniMax — multimodal, 1M context, fast", "badge": "FLAGSHIP", "accent": "blue"},
-    {"short": "kimi-k2.6",    "name": "Kimi K2.6",    "desc": "strong reasoning, thinks before acting",       "badge": "BALANCED", "accent": "green"},
-    {"short": "glm-5.1",      "name": "GLM-5.1",      "desc": "solid general-purpose alternative",            "badge": "BALANCED", "accent": "green"},
-]
-
-
 def picker_options() -> list[dict]:
-    """The `ir choose` options — from the backend catalog (rows carrying a `picker`
-    block, in catalog order) when available, else the bundled subset. Each dict:
-    {short, name, desc, badge, accent}. Excludes the native escape hatch, which
-    choose.py appends locally."""
-    from . import catalog
-    rows = catalog.load()
-    if rows:
-        out = [
-            {"short": m["short"], "name": p.get("name", m["short"]),
-             "desc": p.get("desc", ""), "badge": p.get("badge", ""),
-             "accent": p.get("accent", "green")}
-            for m in rows if (p := m.get("picker"))
-        ]
-        if out:
-            return out
-    return [dict(o) for o in _BUNDLED_PICKER]
+    """The `ir choose` options — catalog rows carrying a `picker` block, in catalog
+    order. Each: {short, name, desc, badge, accent}. Excludes the native escape
+    hatch (choose.py appends it locally)."""
+    out = []
+    for m in _rows():
+        p = m.get("picker")
+        if p:
+            out.append({"short": m["short"], "name": p.get("name", m["short"]),
+                        "desc": p.get("desc", ""), "badge": p.get("badge", ""),
+                        "accent": p.get("accent", "green")})
+    return out

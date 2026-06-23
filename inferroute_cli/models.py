@@ -59,7 +59,10 @@ class ModelAlias:
 # newer/alternate models (M3, Kimi K2.5, DeepSeek V3.2) aren't on the public
 # pricing page yet — their numbers below are provisional placeholders and should
 # be reconciled once published.
-ALIASES: list[ModelAlias] = [
+# BUNDLED FALLBACK ONLY. The live list + prices come from the backend catalog
+# (catalog.py → GET /pricing), refreshed at launch. These are used when the backend
+# is unreachable and there's no cache yet (first run / offline). Order = picker order.
+_BUNDLED: list[ModelAlias] = [
     ModelAlias(
         short="minimax",
         # Bare `minimax` stays pinned to M2.7 for backward-compat (muscle
@@ -124,9 +127,45 @@ ALIASES: list[ModelAlias] = [
 ]
 
 
+_RESOLVED: list[ModelAlias] | None = None  # memoized per process
+
+
+def _from_catalog() -> list[ModelAlias] | None:
+    """ModelAliases built from the backend catalog cache (catalog.py), or None.
+
+    The picker's display Price uses the STANDARD (on-demand) lane — the default a
+    manual `ir` session is billed at. (The economy lane is the discounted deferred
+    price; we don't want to understate the headline number.)
+    """
+    from . import catalog
+    rows = catalog.load()
+    if not rows:
+        return None
+    out: list[ModelAlias] = []
+    for m in rows:
+        try:
+            std = m.get("standard") or {}
+            price = (Price(input=std["input"], cache_read=std["cached"], output=std["output"])
+                     if std else None)
+            out.append(ModelAlias(short=m["short"], model_id=m["model_id"],
+                                   label=m["label"], tier=m.get("tier", "balanced"),
+                                   price=price))
+        except (KeyError, TypeError):
+            continue
+    return out or None
+
+
+def all_aliases() -> list[ModelAlias]:
+    """The offered models — from the backend catalog when available, else bundled."""
+    global _RESOLVED
+    if _RESOLVED is None:
+        _RESOLVED = _from_catalog() or list(_BUNDLED)
+    return list(_RESOLVED)
+
+
 def get(short: str) -> ModelAlias | None:
     short = short.lower().strip()
-    for a in ALIASES:
+    for a in all_aliases():
         if a.short == short:
             return a
     return None
@@ -135,25 +174,17 @@ def get(short: str) -> ModelAlias | None:
 def short_for_model_id(model_id: str) -> str | None:
     """Reverse of `_resolve_model_name`: canonical model_id → friendly short.
 
-    Used to render the relaunch hint (`ir --model kimi`) from the resolved
-    model_id that reaches `launch.py` — by then the short name the user typed is
-    gone. Returns the FIRST alias whose model_id matches (ALIASES order), so
-    `MiniMax-M2.7` maps back to bare `minimax` rather than `minimax-m2.7`.
-    Returns None for ids we don't alias (callers fall back to the id verbatim,
-    which is itself a valid `ir --model <id>` value since unknown names pass
-    through).
+    Returns the FIRST alias whose model_id matches (catalog/bundled order), so
+    `MiniMax-M2.7` maps back to bare `minimax`. None for ids we don't alias
+    (callers fall back to the id verbatim — a valid `ir --model <id>` value).
     """
     if not model_id:
         return None
-    for a in ALIASES:
+    for a in all_aliases():
         if a.model_id == model_id:
             return a.short
     return None
 
 
-def all_aliases() -> list[ModelAlias]:
-    return list(ALIASES)
-
-
 def by_tier(tier: str) -> list[ModelAlias]:
-    return [a for a in ALIASES if a.tier == tier]
+    return [a for a in all_aliases() if a.tier == tier]

@@ -217,6 +217,9 @@ class InferrouteProxy:
             # that lets the status line show the true price. The rich outcome
             # event below stays gated by record_level inside record_outcome.
             self.recorder.note_cost(session_id, usage.get("cost"))
+            # Same always-on path: running cache-hit % for the status line.
+            self.recorder.note_cache(
+                session_id, usage.get("input_tokens"), usage.get("cache_read_input_tokens"))
             try:
                 self.recorder.record_outcome(
                     turn_id=turn_id, session_id=session_id, status=status,

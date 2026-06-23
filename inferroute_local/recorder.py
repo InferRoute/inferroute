@@ -162,6 +162,10 @@ class Recorder:
         # Per-session running cost total (USD), authoritative in-process; seeded
         # from disk on first touch so it survives a daemon restart mid-session.
         self._session_cost: dict[str, float] = {}
+        # Per-session cumulative (fresh_input, cache_read) token totals → the status
+        # line shows the cache-hit % climbing through a session (explains the cost
+        # curve). In-process; not seeded from disk (a restart just resumes counting).
+        self._session_cache: dict[str, tuple[int, int]] = {}
 
         if self.enabled:
             try:
@@ -438,6 +442,37 @@ class Recorder:
                 tmp.replace(path)
         except Exception as e:
             logger.debug(f"session cost bump skipped ({e})")
+
+    def note_cache(self, session_id: str, input_tokens, cache_read_tokens) -> None:
+        """Accumulate this session's fresh-input vs cache-read tokens and write the
+        running cache-hit % to `<sessions>/<sid>.cache` (integer percent) for the
+        status line. Same always-on rationale as note_cost (content-free number,
+        independent of record_level) and tracked separately from cost because a
+        fully-cached turn can cost ~$0 yet still move the ratio. Fail-soft."""
+        if not session_id or not all(c.isalnum() or c in "_.-" for c in session_id):
+            return
+        try:
+            fin = int(input_tokens or 0)
+            cr = int(cache_read_tokens or 0)
+        except (TypeError, ValueError):
+            return
+        if fin <= 0 and cr <= 0:
+            return
+        try:
+            with self._lock:
+                pin, pcr = self._session_cache.get(session_id, (0, 0))
+                pin += fin
+                pcr += cr
+                self._session_cache[session_id] = (pin, pcr)
+                total = pin + pcr
+                pct = round(100 * pcr / total) if total else 0
+                self.sessions_dir.mkdir(parents=True, exist_ok=True)
+                path = self.sessions_dir / f"{session_id}.cache"
+                tmp = path.with_suffix(".cache.tmp")
+                tmp.write_text(str(pct))
+                tmp.replace(path)
+        except Exception as e:
+            logger.debug(f"session cache bump skipped ({e})")
 
     def _provenance(self, session_id: str, chosen: str) -> str:
         last = self._session_model.get(session_id)

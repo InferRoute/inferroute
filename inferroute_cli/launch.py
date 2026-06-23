@@ -299,7 +299,8 @@ def _apply_wire_capture_env(env: dict, session_id: str) -> None:
     env.setdefault("OTEL_LOGS_EXPORTER", "none")
 
 
-def _strip_command(prefix: str, cost_file: Path | None = None) -> dict:
+def _strip_command(prefix: str, cost_file: Path | None = None,
+                   cache_file: Path | None = None) -> dict:
     """A CC statusLine `command` dict that prints the strip + real session cost.
 
     The static strip (model · lane │ link │ ↻ hint) is known at launch, so it's a
@@ -331,11 +332,20 @@ def _strip_command(prefix: str, cost_file: Path | None = None) -> dict:
             f"; if [ -s {cf} ]; then "
             f"printf ' │ $%.2f' \"$(cat {cf} 2>/dev/null)\" 2>/dev/null || true; fi"
         )
+    # Running cache-hit % (climbs through the session — explains the cost curve).
+    # Written by the recorder daemon's note_cache; absent until the first turn.
+    if cache_file is not None:
+        kf = shlex.quote(str(cache_file))
+        command += (
+            f"; if [ -s {kf} ]; then "
+            f"printf ' · %s%% cached' \"$(cat {kf} 2>/dev/null)\" 2>/dev/null || true; fi"
+        )
     return {"type": "command", "command": command}
 
 
 def _product_strip_settings_args(
-    prefix: str, extra_args: list[str], cost_file: Path | None = None
+    prefix: str, extra_args: list[str], cost_file: Path | None = None,
+    cache_file: Path | None = None,
 ) -> list[str]:
     """`['--settings', <json>]` pinning the product strip to CC's status line, or [].
 
@@ -367,7 +377,7 @@ def _product_strip_settings_args(
         return []
     if _user_has_statusline():
         return []
-    strip = _strip_command(prefix, cost_file)
+    strip = _strip_command(prefix, cost_file, cache_file)
 
     # Merge into a caller-provided --settings (--settings X | --settings=X).
     for i, a in enumerate(extra_args):
@@ -737,7 +747,8 @@ def launch_through_inferroute(
     # cumulative cost here; the status line reads it. No-ops gracefully if the
     # daemon isn't running (file never appears) — see _strip_command.
     cost_file = _record_sessions_dir() / f"{session_id}.cost"
-    status_args = _product_strip_settings_args(prefix, extra, cost_file)
+    cache_file = _record_sessions_dir() / f"{session_id}.cache"
+    status_args = _product_strip_settings_args(prefix, extra, cost_file, cache_file)
     # On a fresh launch, force claude's session id to equal our session_id so the
     # transcript, the dashboard link, and the cost file share one id (the basis
     # for cumulative resume). Skip when resuming (extra already has `--resume

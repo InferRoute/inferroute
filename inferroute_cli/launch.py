@@ -348,23 +348,51 @@ def _product_strip_settings_args(
     session in BOTH render modes.
 
     We inject it via `--settings` (a per-invocation layer; no temp files, no
-    polluting the user's repo with a .claude/settings.json). Because that layer
-    overrides the user's own statusLine, we back off when:
+    polluting the user's repo with a .claude/settings.json). When the caller ALSO
+    passes `--settings` for other reasons (e.g. the steward morning digest sets
+    `{"tui":...}`), we MERGE our statusLine into that value in place rather than
+    abdicating — otherwise an interactive session that happens to set --settings
+    loses the cost/strip line. We back off only when:
       * IR_NO_STATUSLINE is set (explicit opt-out),
-      * the user passed their own --settings (respect it), or
-      * the user already has a statusLine configured (don't clobber it).
+      * the caller's --settings already defines a statusLine (respect it), or it's
+        malformed (don't touch), or
+      * the user already has a statusLine in their settings files.
+
+    Mutates extra_args in place when merging; returns ['--settings', json] only when
+    the caller passed none.
     """
     import json
 
     if os.environ.get("IR_NO_STATUSLINE", "").strip().lower() in ("1", "true", "yes"):
         return []
-    if any(a == "--settings" or a.startswith("--settings=") for a in extra_args):
-        return []
     if _user_has_statusline():
         return []
+    strip = _strip_command(prefix, cost_file)
 
-    settings = {"statusLine": _strip_command(prefix, cost_file)}
-    return ["--settings", json.dumps(settings)]
+    # Merge into a caller-provided --settings (--settings X | --settings=X).
+    for i, a in enumerate(extra_args):
+        if a == "--settings" and i + 1 < len(extra_args):
+            raw, vi = extra_args[i + 1], i + 1
+        elif a.startswith("--settings="):
+            raw, vi = a.split("=", 1)[1], None
+        else:
+            continue
+        try:
+            data = json.loads(raw)
+            assert isinstance(data, dict)
+        except (ValueError, TypeError, AssertionError):
+            return []  # malformed/unexpected — leave the caller's --settings alone
+        if data.get("statusLine"):
+            return []  # caller set their own — respect it
+        data["statusLine"] = strip
+        merged = json.dumps(data)
+        if vi is not None:
+            extra_args[vi] = merged
+        else:
+            extra_args[i] = "--settings=" + merged
+        return []  # merged in place; no separate flag
+
+    return ["--settings", json.dumps({"statusLine": strip})]
 
 
 def _gate_strip_prefix(

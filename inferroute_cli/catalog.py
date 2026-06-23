@@ -10,8 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.request
 from pathlib import Path
+
+# The catalog (model list + prices) changes rarely — only when we regenerate +
+# redeploy. So cache it and only hit the network when the cache is older than the
+# TTL, keeping `ir choose` / launch instant on the common path. Override with
+# INFERROUTE_CATALOG_TTL (seconds); 0 forces a refresh every launch.
+DEFAULT_TTL = float(os.environ.get("INFERROUTE_CATALOG_TTL", "21600"))  # 6h
 
 
 def _cache_path() -> Path:
@@ -20,12 +27,26 @@ def _cache_path() -> Path:
     return (Path(base) if base else Path.home() / ".inferroute") / "catalog.json"
 
 
-def refresh(api_url: str, timeout: float = 0.6) -> bool:
-    """Fetch the catalog from ``{api_url}/pricing`` and cache it. Returns True on a
-    successful refresh; fail-soft (False) on any network/parse error — the caller
-    keeps using whatever is cached (or the bundled fallback)."""
+def _cache_age() -> float:
+    """Seconds since the cache was last written; +inf if there's no cache."""
+    try:
+        return time.time() - _cache_path().stat().st_mtime
+    except OSError:
+        return float("inf")
+
+
+def refresh(api_url: str, ttl: float | None = None, timeout: float = 0.6) -> bool:
+    """Fetch the catalog from ``{api_url}/pricing`` and cache it. TTL-gated: if the
+    cache is younger than ``ttl`` (default DEFAULT_TTL), skip the network entirely
+    and return True — so the picker/launch isn't slowed by a request on every run.
+    Only fetches when the cache is missing or stale. Fail-soft (False) on any
+    network/parse error — the caller keeps using the cache (or bundled fallback)."""
     if not api_url:
         return False
+    if ttl is None:
+        ttl = DEFAULT_TTL
+    if _cache_age() < ttl:
+        return True  # cache is fresh enough — no network
     try:
         req = urllib.request.Request(api_url.rstrip("/") + "/pricing",
                                      headers={"accept": "application/json"})

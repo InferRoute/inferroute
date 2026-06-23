@@ -62,69 +62,40 @@ class ModelAlias:
 # BUNDLED FALLBACK ONLY. The live list + prices come from the backend catalog
 # (catalog.py → GET /pricing), refreshed at launch. These are used when the backend
 # is unreachable and there's no cache yet (first run / offline). Order = picker order.
+# Versioned shorts only (no bare kimi/glm/minimax — those are hidden back-compat
+# aliases, see _HIDDEN_ALIASES). model_id is the CLEAN user-facing id (no -TEE /
+# provider prefix); the proxy normalizes it to the Chutes "…-TEE" id for routing.
 _BUNDLED: list[ModelAlias] = [
-    ModelAlias(
-        short="minimax",
-        # Bare `minimax` stays pinned to M2.7 for backward-compat (muscle
-        # memory). Pass the short name so Claude Code displays "MiniMax-M2.7"
-        # in the session header instead of revealing "minimax_direct/…". Proxy
-        # has a top-level `MiniMax-M2.7` model entry that routes to the
-        # MiniMax Token Plan sub (api.minimax.io/anthropic).
-        model_id="MiniMax-M2.7",
-        label="MiniMax M2.7 (cheaper)",
-        tier="fast",
-        price=Price(input=0.18, cache_read=0.036, output=0.90),
-    ),
-    ModelAlias(
-        short="minimax-m2.7",
-        # Explicit M2.7 alias (same target as bare `minimax`).
-        model_id="MiniMax-M2.7",
-        label="MiniMax M2.7 — cheaper/smaller direct-sub model",
-        tier="fast",
-        price=Price(input=0.18, cache_read=0.036, output=0.90),
-    ),
-    ModelAlias(
-        short="minimax-m3",
-        # MiniMax M3 — newer flagship on the same direct Token Plan sub.
-        # Proxy has a top-level `MiniMax-M3` entry routing to api.minimax.io/anthropic.
-        model_id="MiniMax-M3",
-        label="MiniMax M3 — newer/stronger flagship",
-        tier="balanced",
-        price=Price(input=0.30, cache_read=0.060, output=1.50),  # provisional
-    ),
-    ModelAlias(
-        short="kimi",
-        model_id="moonshotai/Kimi-K2.6-TEE",
-        label="Kimi K2.6 — strong reasoning, thinks before acting",
-        tier="balanced",
-        price=Price(input=0.20, cache_read=0.020, output=0.80),
-    ),
-    ModelAlias(
-        short="glm",
-        model_id="zai-org/GLM-5.1-TEE",
-        label="GLM-5.1 — solid general-purpose alternative",
-        tier="balanced",
-        price=Price(input=0.15, cache_read=0.015, output=0.50),
-    ),
-    ModelAlias(
-        # Added 2026-06-05 as a resilience alternate: when the K2.6 / GLM-5.1
-        # chutes are saturated, K2.5 has separate slot capacity on Chutes.
-        short="kimi-2.5",
-        model_id="moonshotai/Kimi-K2.5-TEE",
-        label="Kimi K2.5 — prior-gen Kimi, alternate when K2.6 is busy",
-        tier="balanced",
-        price=Price(input=0.15, cache_read=0.015, output=0.60),  # provisional
-    ),
-    ModelAlias(
-        # Added 2026-06-05: DeepSeek V3.2 on Chutes — a separate model family,
-        # so it stays available when the Kimi/GLM chutes are overloaded.
-        short="deepseek",
-        model_id="deepseek-ai/DeepSeek-V3.2-TEE",
-        label="DeepSeek V3.2 — strong coding/reasoning, separate capacity",
-        tier="balanced",
-        price=Price(input=0.25, cache_read=0.025, output=1.00),  # provisional
-    ),
+    ModelAlias(short="minimax-m2.7", model_id="MiniMax-M2.7",
+               label="MiniMax M2.7 — cheaper/smaller direct-sub model", tier="fast",
+               price=Price(input=0.18, cache_read=0.036, output=0.90)),
+    ModelAlias(short="minimax-m3", model_id="MiniMax-M3",
+               label="MiniMax M3 — newer/stronger flagship", tier="balanced",
+               price=Price(input=0.30, cache_read=0.060, output=1.50)),
+    ModelAlias(short="kimi-k2.6", model_id="Kimi-K2.6",
+               label="Kimi K2.6 — strong reasoning, thinks before acting", tier="balanced",
+               price=Price(input=0.49, cache_read=0.099, output=2.40)),
+    ModelAlias(short="glm-5.1", model_id="GLM-5.1",
+               label="GLM-5.1 — solid general-purpose alternative", tier="balanced",
+               price=Price(input=0.69, cache_read=0.139, output=1.80)),
+    ModelAlias(short="kimi-k2.5", model_id="Kimi-K2.5",
+               label="Kimi K2.5 — prior-gen Kimi, alternate when K2.6 is busy", tier="balanced",
+               price=Price(input=0.29, cache_read=0.059, output=1.40)),
+    ModelAlias(short="deepseek-v3.2", model_id="DeepSeek-V3.2",
+               label="DeepSeek V3.2 — strong coding/reasoning, separate capacity", tier="balanced",
+               price=Price(input=0.69, cache_read=0.139, output=0.69)),
 ]
+
+# Bare versionless shorts → versioned canonical. Kept ONLY so existing muscle memory
+# and scripts (`ir --model kimi`) keep working; never displayed in the picker/help
+# (those show only the versioned shorts). Resolved silently in get().
+_HIDDEN_ALIASES = {
+    "minimax": "minimax-m2.7",
+    "kimi": "kimi-k2.6",
+    "glm": "glm-5.1",
+    "deepseek": "deepseek-v3.2",
+    "kimi-2.5": "kimi-k2.5",  # prior short form
+}
 
 
 _RESOLVED: list[ModelAlias] | None = None  # memoized per process
@@ -165,6 +136,7 @@ def all_aliases() -> list[ModelAlias]:
 
 def get(short: str) -> ModelAlias | None:
     short = short.lower().strip()
+    short = _HIDDEN_ALIASES.get(short, short)  # bare kimi/glm/minimax → versioned
     for a in all_aliases():
         if a.short == short:
             return a
@@ -194,10 +166,10 @@ def by_tier(tier: str) -> list[ModelAlias]:
 # that carry a `picker` block. choose.py maps `accent` → its rich color and appends
 # the native-Anthropic escape hatch locally.
 _BUNDLED_PICKER = [
-    {"short": "minimax",    "name": "MiniMax M2.7", "desc": "get something usable — cheap, fast iteration", "badge": "FAST",     "accent": "amber"},
-    {"short": "minimax-m3", "name": "MiniMax M3",   "desc": "newer MiniMax — multimodal, 1M context, fast", "badge": "FLAGSHIP", "accent": "blue"},
-    {"short": "kimi",       "name": "Kimi K2.6",    "desc": "strong reasoning, thinks before acting",       "badge": "BALANCED", "accent": "green"},
-    {"short": "glm",        "name": "GLM-5.1",      "desc": "solid general-purpose alternative",            "badge": "BALANCED", "accent": "green"},
+    {"short": "minimax-m2.7", "name": "MiniMax M2.7", "desc": "get something usable — cheap, fast iteration", "badge": "FAST",     "accent": "amber"},
+    {"short": "minimax-m3",   "name": "MiniMax M3",   "desc": "newer MiniMax — multimodal, 1M context, fast", "badge": "FLAGSHIP", "accent": "blue"},
+    {"short": "kimi-k2.6",    "name": "Kimi K2.6",    "desc": "strong reasoning, thinks before acting",       "badge": "BALANCED", "accent": "green"},
+    {"short": "glm-5.1",      "name": "GLM-5.1",      "desc": "solid general-purpose alternative",            "badge": "BALANCED", "accent": "green"},
 ]
 
 

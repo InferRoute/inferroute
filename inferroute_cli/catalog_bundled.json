@@ -17,13 +17,7 @@
       },
       "aliases": [
         "minimax"
-      ],
-      "picker": {
-        "name": "MiniMax M2.7",
-        "desc": "get something usable \u2014 cheap, fast iteration",
-        "badge": "FAST",
-        "accent": "amber"
-      }
+      ]
     },
     {
       "short": "minimax-m3",
@@ -39,12 +33,6 @@
         "input": 0.09,
         "cached": 0.019,
         "output": 0.44
-      },
-      "picker": {
-        "name": "MiniMax M3",
-        "desc": "newer MiniMax \u2014 multimodal, 1M context, fast",
-        "badge": "FLAGSHIP",
-        "accent": "blue"
       }
     },
     {
@@ -114,25 +102,6 @@
       },
       "aliases": [
         "kimi-2.5"
-      ]
-    },
-    {
-      "short": "deepseek-v3.2",
-      "model_id": "DeepSeek-V3.2",
-      "label": "DeepSeek V3.2 \u2014 strong coding/reasoning, separate capacity",
-      "tier": "balanced",
-      "standard": {
-        "input": 0.74,
-        "cached": 0.14,
-        "output": 0.74
-      },
-      "economy": {
-        "input": 0.34,
-        "cached": 0.069,
-        "output": 0.34
-      },
-      "aliases": [
-        "deepseek"
       ]
     }
   ]

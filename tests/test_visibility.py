@@ -67,6 +67,20 @@ def test_visibility_headers_no_user_block_omits_hash(tmp_path):
     assert "x-inferroute-content-hash" not in h
 
 
+def test_forward_keeps_run_id_header():
+    # The Steward stamps x-inferroute-run-id via ANTHROPIC_CUSTOM_HEADERS; the
+    # daemon must FORWARD it (not strip it) so the cloud can attribute the turn to
+    # the run. Without this, Steward turns through the daemon lose their run_id.
+    from inferroute_local.proxy import _forward_headers
+    out = _forward_headers({
+        "authorization": "Bearer k",
+        "x-inferroute-run-id": "st-run-123",
+        "x-unrelated": "drop me",
+    })
+    assert out["x-inferroute-run-id"] == "st-run-123"
+    assert "x-unrelated" not in out
+
+
 def test_forward_merges_visibility_headers_over_allowlist(tmp_path):
     # _forward must merge the daemon's headers in (the allow-list would otherwise
     # strip them). Verify via the same merge the method does.

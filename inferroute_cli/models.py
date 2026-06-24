@@ -123,14 +123,18 @@ def by_tier(tier: str) -> list[ModelAlias]:
 
 
 def picker_options() -> list[dict]:
-    """The `ir choose` options — catalog rows carrying a `picker` block, in catalog
-    order. Each: {short, name, desc, badge, accent}. Excludes the native escape
-    hatch (choose.py appends it locally)."""
+    """The `ir choose` options — catalog rows carrying a `picker` block, sorted
+    cheapest-first by standard input price. Each: {short, name, desc, badge, accent}.
+    Excludes the native escape hatch (choose.py appends it locally)."""
     out = []
     for m in _rows():
         p = m.get("picker")
         if p:
             out.append({"short": m["short"], "name": p.get("name", m["short"]),
                         "desc": p.get("desc", ""), "badge": p.get("badge", ""),
-                        "accent": p.get("accent", "green")})
+                        "accent": p.get("accent", "green"),
+                        "_input": m.get("standard", {}).get("input", 0)})
+    out.sort(key=lambda x: x["_input"])
+    for row in out:
+        row.pop("_input")
     return out

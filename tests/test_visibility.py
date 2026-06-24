@@ -26,6 +26,12 @@ _BODY = {
 }
 
 
+# Cross-repo join anchor: cc-proxy-prod/tests/unit/test_recording_visibility.py
+# pins this SAME literal as the raw hash it expects to receive and namespace.
+# If either repo's canonicalization drifts, one of the two suites breaks.
+PINNED_RAW_HASH = "fa027481029df6bcedc43a85aea80b762d392f4ba022ab5637a36cd57647128d"
+
+
 def test_new_user_block_hash_matches_recorder_stored(tmp_path):
     # The hash emitted upstream must equal the one record_choice writes to disk.
     r = Recorder(tmp_path, level="metadata")
@@ -35,6 +41,12 @@ def test_new_user_block_hash_matches_recorder_stored(tmp_path):
     choice = [json.loads(l) for l in events[0].read_text().splitlines() if '"choice"' in l][0]
     assert choice["new_user_block_hash"] == new_user_block_hash(_BODY)
     assert new_user_block_hash(_BODY)  # non-empty
+
+
+def test_new_user_block_hash_matches_pinned_join_vector():
+    # The server (cc-proxy-prod) namespaces THIS exact value per account; pinning
+    # it in both repos proves the daemon→server hash join is stable end-to-end.
+    assert new_user_block_hash(_BODY) == PINNED_RAW_HASH
 
 
 def test_new_user_block_hash_none_without_user_message():

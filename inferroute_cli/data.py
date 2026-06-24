@@ -124,7 +124,7 @@ def _show() -> int:
     # The web view shows the same disposition/unique-conversation counts derived
     # from the one-way fingerprints (never content) for your account; the corpus
     # itself is only ever here on disk.
-    print("  Web view: https://inferroute.ai/recording  (your account, never your content)\n")
+    print("  Web view: https://inferroute.ai/corpus  (your account, never your content)\n")
     return 0
 
 

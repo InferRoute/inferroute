@@ -354,10 +354,18 @@ def _extract_json(raw: bytes) -> tuple[dict, Optional[str], Optional[str]]:
 
 def _forward_headers(incoming: dict[str, str]) -> dict[str, str]:
     """Headers to forward upstream: auth, anthropic version/beta, content-type,
-    and the per-launch session id so the cloud can tag usage for the dashboard."""
+    the per-launch session id, and the Steward's run id so the cloud can tag usage.
+
+    x-inferroute-run-id is the Steward's stable per-run join key (set via
+    ANTHROPIC_CUSTOM_HEADERS, agent.sh). It MUST be in this allow-list: when the
+    recorder daemon is running, `ir` routes through it (launch.py:_recording_daemon_url),
+    so without this the daemon would strip run-id and the cloud would store run_id=NULL —
+    making Steward turns indistinguishable from interactive ones on the corpus view.
+    """
     keep = {
         "authorization", "x-api-key", "anthropic-version", "anthropic-beta",
         "content-type", "x-inferroute-session", "x-inferroute-session-id",
+        "x-inferroute-run-id",
     }
     headers = {k.lower(): v for k, v in incoming.items() if k.lower() in keep}
     headers.setdefault("content-type", "application/json")

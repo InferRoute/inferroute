@@ -120,7 +120,11 @@ def _show() -> int:
         print("\n    model choices:")
         for m, c in sorted(models.items(), key=lambda kv: -kv[1]):
             print(f"      {c:>6}  {m}")
-    print("\n  Manage:  ir data export <dir>   |   ir data wipe\n")
+    print("\n  Manage:  ir data export <dir>   |   ir data wipe")
+    # The web view shows the same disposition/unique-conversation counts derived
+    # from the one-way fingerprints (never content) for your account; the corpus
+    # itself is only ever here on disk.
+    print("  Web view: https://inferroute.ai/recording  (your account, never your content)\n")
     return 0
 
 

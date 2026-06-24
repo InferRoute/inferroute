@@ -8,13 +8,15 @@
       "standard": {
         "input": 0.19,
         "cached": 0.039,
-        "output": 0.74
+        "output": 0.69
       },
       "economy": {
-        "input": 0.089,
+        "input": 0.084,
         "cached": 0.019,
         "output": 0.34
       },
+      "_ref": "openrouter",
+      "_ref_key": "minimax/minimax-m2.7",
       "aliases": [
         "minimax"
       ]
@@ -33,7 +35,9 @@
         "input": 0.09,
         "cached": 0.019,
         "output": 0.44
-      }
+      },
+      "_ref": "openrouter",
+      "_ref_key": "minimax/minimax-m3"
     },
     {
       "short": "kimi-k2.6",
@@ -50,12 +54,68 @@
         "cached": 0.049,
         "output": 1.4
       },
+      "_ref": "chutes",
+      "_ref_key": "moonshotai/Kimi-K2.6-TEE",
       "aliases": [
         "kimi"
       ],
       "picker": {
         "name": "Kimi K2.6",
         "desc": "strong reasoning, thinks before acting",
+        "badge": "BALANCED",
+        "accent": "blue"
+      }
+    },
+    {
+      "short": "kimi-k2.5",
+      "model_id": "Kimi-K2.5",
+      "label": "Kimi K2.5 \u2014 prior-gen Kimi, alternate when K2.6 is busy",
+      "tier": "balanced",
+      "standard": {
+        "input": 0.34,
+        "cached": 0.069,
+        "output": 1.4
+      },
+      "economy": {
+        "input": 0.14,
+        "cached": 0.029,
+        "output": 0.74
+      },
+      "_ref": "chutes",
+      "_ref_key": "moonshotai/Kimi-K2.5-TEE",
+      "aliases": [
+        "kimi-2.5"
+      ],
+      "picker": {
+        "name": "Kimi K2.5",
+        "desc": "prior-gen Kimi, alternate when K2.6 is busy",
+        "badge": "BALANCED",
+        "accent": "blue"
+      }
+    },
+    {
+      "short": "glm-5.2",
+      "model_id": "GLM-5.2",
+      "label": "GLM-5.2 \u2014 next-gen GLM, improved reasoning",
+      "tier": "balanced",
+      "standard": {
+        "input": 0.9,
+        "cached": 0.19,
+        "output": 3.4
+      },
+      "economy": {
+        "input": 0.49,
+        "cached": 0.099,
+        "output": 1.4
+      },
+      "_ref": "chutes",
+      "_ref_key": "zai-org/GLM-5.2-TEE",
+      "aliases": [
+        "glm"
+      ],
+      "picker": {
+        "name": "GLM-5.2",
+        "desc": "next-gen GLM, improved reasoning",
         "badge": "BALANCED",
         "accent": "green"
       }
@@ -75,34 +135,17 @@
         "cached": 0.069,
         "output": 0.9
       },
+      "_ref": "chutes",
+      "_ref_key": "zai-org/GLM-5.1-TEE",
       "aliases": [
-        "glm"
+        "glm-5.1-pinned"
       ],
       "picker": {
         "name": "GLM-5.1",
-        "desc": "solid general-purpose alternative",
+        "desc": "solid general-purpose alternative (prior gen)",
         "badge": "BALANCED",
         "accent": "green"
       }
-    },
-    {
-      "short": "kimi-k2.5",
-      "model_id": "Kimi-K2.5",
-      "label": "Kimi K2.5 \u2014 prior-gen Kimi, alternate when K2.6 is busy",
-      "tier": "balanced",
-      "standard": {
-        "input": 0.34,
-        "cached": 0.069,
-        "output": 1.4
-      },
-      "economy": {
-        "input": 0.14,
-        "cached": 0.029,
-        "output": 0.74
-      },
-      "aliases": [
-        "kimi-2.5"
-      ]
     }
   ]
 }

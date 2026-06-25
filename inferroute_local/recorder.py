@@ -166,6 +166,11 @@ class Recorder:
         # line shows the cache-hit % climbing through a session (explains the cost
         # curve). In-process; not seeded from disk (a restart just resumes counting).
         self._session_cache: dict[str, tuple[int, int]] = {}
+        # Lazily-built secret scrubber, reused across all blob writes so its
+        # reverse map + detectors are compiled once. Only ever instantiated on
+        # the `full` (blob-storing) level. See _get_scrubber / _scrub_blob_bytes.
+        self._scrubber_inst = None
+        self._scrubber_failed = False
 
         if self.enabled:
             try:
@@ -510,10 +515,70 @@ class Recorder:
         self._store_at(h, data)
         return h
 
+    def _get_scrubber(self):
+        """Lazily build the shared, deterministic secret scrubber.
+
+        One instance per Recorder — its detectors are compiled once and its
+        reverse map accumulates so tokenization stays stable across blobs.
+        Returns None if the scrubber can't be constructed (then callers treat
+        the blob as un-scrubbable and refuse to write it raw — see
+        _scrub_blob_bytes). Best-effort: never raises out of here.
+        """
+        if self._scrubber_inst is not None:
+            return self._scrubber_inst
+        if self._scrubber_failed:
+            return None
+        try:
+            from .scrubber import Scrubber
+            # Default per-user config dir (scrubber.default_config_dir():
+            # $INFERROUTE_SCRUBBER_DIR or ~/.config/inferroute/scrubber) — the
+            # same salt + reverse map the inferroute-scrub CLI uses, so a
+            # redacted blob can be locally rehydrated with the existing tooling.
+            self._scrubber_inst = Scrubber()
+            return self._scrubber_inst
+        except Exception as e:
+            self._scrubber_failed = True
+            logger.warning(f"scrubber unavailable; blobs will be redaction-placeholdered ({e})")
+            return None
+
+    def _scrub_blob_bytes(self, data: bytes) -> bytes:
+        """Redact secrets from a blob payload BEFORE it is written to disk.
+
+        Security-critical: this runs over EVERY blob the recorder persists, so
+        on-disk blobs never contain raw secrets (sk-/cpk-/inf_/PEM keys/DB URLs)
+        even at the `full` recording level. The blob's content-address HASH is
+        computed by the caller from the ORIGINAL bytes and is unchanged — only
+        the bytes written here are redacted — so dedup, event references, and
+        the upstream new_user_block_hash identity all still hold; downstream
+        readers fetch by hash and get the scrubbed payload.
+
+        Fail-soft but NEVER leak: if the scrubber can't run, we return a
+        redaction-failed placeholder rather than the raw bytes, so a scrubber
+        error degrades to "no content" instead of "unscrubbed content". The
+        gzip format/structure is preserved either way (still UTF-8 bytes).
+        """
+        scrubber = self._get_scrubber()
+        if scrubber is None:
+            return b"<inferroute: redaction unavailable; blob omitted>"
+        try:
+            text = data.decode("utf-8", "replace")
+            scrubbed = scrubber.scrub(text, persist=False).scrubbed_text
+            return scrubbed.encode("utf-8", "ignore")
+        except Exception as e:
+            logger.debug(f"blob scrub failed; omitting content ({e})")
+            return b"<inferroute: redaction failed; blob omitted>"
+
     def _store_at(self, h: str, data: bytes) -> None:
         """Write one content-addressed blob (gzip), store-once. Oversize blobs
         are truncated head+tail so a single huge tool-result can't bloat the
-        store — the hash still reflects the full content for dedup/reference."""
+        store — the hash still reflects the full content for dedup/reference.
+
+        The content is SCRUBBED of secrets before it touches disk (see
+        _scrub_blob_bytes); the hash `h` is the caller's hash of the ORIGINAL
+        bytes, so content-addressing/dedup is unaffected. Truncation runs on the
+        original bytes first (keeping the byte cap meaningful), then the kept
+        head+tail are scrubbed — so a secret straddling the cut is still in one
+        of the two retained pieces and gets redacted."""
         try:
             shard = self.blobs_dir / h[:2]
             path = shard / f"{h}.gz"
@@ -527,6 +592,7 @@ class Recorder:
                     + f"...<truncated {len(data)} bytes>...".encode()
                     + data[-half:]
                 )
+            data = self._scrub_blob_bytes(data)
             tmp = path.with_suffix(".gz.tmp")
             with gzip.open(tmp, "wb") as f:
                 f.write(data)

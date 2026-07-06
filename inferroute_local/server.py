@@ -70,6 +70,44 @@ def create_app(config: Config) -> FastAPI:
                 parsed = raw.decode(errors="replace")
             return JSONResponse(content=parsed, status_code=status, headers=resp_headers)
 
+    @app.post("/v1/chat/completions")
+    async def chat_completions(request: Request):
+        """OpenAI Chat Completions passthrough.
+
+        Forwards OpenAI-format requests to the cloud's /v1/chat/completions
+        endpoint. Used by Goose's openai provider to avoid the
+        Anthropic↔OpenAI double-translation that mangles tool names.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": "Invalid JSON", "type": "invalid_request_error"}},
+            )
+
+        headers = dict(request.headers)
+        status, resp_headers, stream = await proxy.handle_openai(body, headers)
+
+        if body.get("stream", False):
+            return StreamingResponse(
+                stream,
+                status_code=status,
+                headers=resp_headers,
+                media_type="text/event-stream",
+            )
+        else:
+            # Collect non-streaming response
+            chunks = []
+            async for chunk in stream:
+                chunks.append(chunk)
+            raw = b"".join(chunks)
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = raw.decode(errors="replace")
+            return JSONResponse(content=parsed, status_code=status, headers=resp_headers)
+
     @app.post("/inferroute/signal")
     async def signal(request: Request):
         """Control surface: the CLI/UX posts explicit human signals here

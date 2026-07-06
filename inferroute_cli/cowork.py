@@ -144,19 +144,36 @@ def _launch_desktop(app: str, env: dict) -> bool:
 
 # ── configure (idempotent, re-asserted every launch) ─────────────────────────
 def configure(creds: config.Credentials, model: str | None = None) -> str:
-    """Write InferRoute's goose config + secrets. Returns the routing host."""
+    """Write InferRoute's goose config + secrets. Returns the routing host.
+
+    Uses the OpenAI provider so Goose talks to /v1/chat/completions natively
+    (no Anthropic↔OpenAI double-translation that mangles tool names).
+    """
     model = model or _default_model()
-    host = _anthropic_host(creds)
+    host = _anthropic_host(creds)  # reuse the same routing logic (daemon or cloud)
 
     _write_merged(
         CONFIG_FILE,
-        {"GOOSE_PROVIDER": "anthropic", "GOOSE_MODEL": model, "ANTHROPIC_HOST": host},
+        {
+            "GOOSE_PROVIDER": "openai",
+            "GOOSE_MODEL": model,
+            "OPENAI_BASE_URL": host,
+            "active_provider": "openai",
+            "providers": {
+                "openai": {
+                    "enabled": True,
+                    "model": model,
+                    "configured": True,
+                }
+            },
+        },
         secret=False,
     )
     _write_merged(
         SECRETS_FILE,
         {
-            "ANTHROPIC_API_KEY": creds.api_key,
+            "OPENAI_API_KEY": creds.api_key,
+            "ANTHROPIC_API_KEY": creds.api_key,  # keep for backward compat
             "ANTHROPIC_CUSTOM_HEADERS": {"x-inferroute-client": CLIENT_TAG},
         },
         secret=True,

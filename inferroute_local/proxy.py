@@ -148,6 +148,18 @@ class InferrouteProxy:
             headers.update(extra_headers)  # bypass the allow-list — we set these
         return await self._stream(url, body, headers)
 
+    async def handle_openai(
+        self, body: dict, request_headers: dict[str, str],
+    ) -> tuple[int, dict[str, str], AsyncIterator[bytes]]:
+        """Forward an OpenAI-format /v1/chat/completions request to the cloud.
+
+        No recording or translation — just pass-through. The cloud endpoint
+        returns OpenAI SSE format which the client (Goose) consumes directly.
+        """
+        url = f"{self.config.inferroute_server_url}/v1/chat/completions"
+        headers = _forward_headers(request_headers)
+        return await self._stream(url, body, headers)
+
     # -------------------------------------------------------------------------
     # Outcome-recording stream wrapper
     # -------------------------------------------------------------------------

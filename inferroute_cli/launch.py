@@ -154,7 +154,7 @@ def _launch_index_file() -> Path:
     return Path.home() / ".config" / "inferroute" / "launches.jsonl"
 
 
-def _record_launch(session_id: str, model_id: str, lane: str) -> None:
+def _record_launch(session_id: str, model_id: str, lane: str, agent: str = "claude") -> None:
     """Append a one-line record of this fresh launch to the ir session index.
 
     Lets `ir --resume`'s menu tell YOUR inferroute sessions (id → model/lane/cwd)
@@ -170,6 +170,7 @@ def _record_launch(session_id: str, model_id: str, lane: str) -> None:
             "id": session_id,
             "model": model_id,
             "lane": lane,
+            "agent": agent,
             "cwd": os.getcwd(),
             "ts": time.time(),
         }
@@ -798,3 +799,127 @@ def launch_native_anthropic(extra_args: Iterable[str] = ()) -> None:
     status_args = _product_strip_settings_args(_native_strip_prefix(extra), extra)
     argv = [binary, *_DEFAULT_FLAGS, *status_args, *extra]
     os.execvp(binary, argv)
+
+
+def launch_goose(
+    model_id: str,
+    creds: Credentials,
+    extra_args: Iterable[str] = (),
+    session_id: str | None = None,
+) -> None:
+    """Exec `goose session` with OpenAI env pointing at inferroute.
+
+    Uses the native OpenAI /v1/chat/completions endpoint (no Anthropic
+    translation) so tool names round-trip correctly.
+    """
+    binary = shutil.which("goose")
+    if not binary:
+        sys.stderr.write(
+            "\n ❌ ERROR: `goose` not found on PATH.\n"
+            "    Goose is an open-source agent from https://github.com/block/goose\n"
+            "    One way to install: `pipx install goose-ai`\n\n"
+        )
+        sys.exit(127)
+
+    if not creds.is_valid:
+        sys.stderr.write(
+            "\n ❌ ERROR: no inferroute API key found.\n"
+            "    Run `ir login` first.\n\n"
+        )
+        sys.exit(2)
+
+    # Nested-session guard (same reason as claude path)
+    if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
+        sys.stderr.write(
+            "\n ir: refusing to launch a nested session (CLAUDECODE=1).\n"
+            "    You're already inside Claude Code.\n"
+            "    To force a nested launch, set IR_ALLOW_NESTED=1.\n\n"
+        )
+        sys.exit(2)
+
+    env = os.environ.copy()
+    base_url = _recording_daemon_url() or creds.api_url
+    env["OPENAI_BASE_URL"] = base_url
+    env["OPENAI_API_KEY"] = creds.api_key
+    env["GOOSE_PROVIDER"] = "openai"
+    env["GOOSE_MODEL"] = model_id
+
+    # Write Goose config files so the session picks up OpenAI provider
+    _write_goose_config(model_id, base_url, creds.api_key)
+
+    # Session tagging: Goose supports custom headers via ANTHROPIC_CUSTOM_HEADERS,
+    # and the inferroute proxy forwards them regardless of provider.
+    _headers: list[str] = [f"x-inferroute-session: {session_id}"]
+    _grant = env.get("IR_GRANT", "").strip()
+    if _grant:
+        _headers.append(f"ir-grant: {_grant}")
+    _existing = env.get("ANTHROPIC_CUSTOM_HEADERS", "")
+    if _existing:
+        _headers.append(_existing)
+    env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(_headers)
+
+    # Persist session link and model
+    _persist_session_link(creds.api_url, session_id)
+    _persist_last_model(model_id)
+    _record_launch(session_id, model_id, "standard", agent="goose")
+
+    # Goose CLI doesn't need --dangerously-skip-permissions (it's not CC)
+    argv = [binary, "session", *extra_args]
+    os.execvpe(binary, argv, env)
+
+
+# ── Goose config helpers (mirrors cowork.py pattern) ──────────────────────────
+
+def _write_goose_config(model_id: str, base_url: str, api_key: str) -> None:
+    """Write OpenAI-format Goose config + secrets."""
+    import stat
+
+    try:
+        import yaml
+    except ImportError:
+        # PyYAML may not be installed; Goose still works if user already
+        # configured it. Skip silently rather than crash.
+        return
+
+    goose_dir = Path.home() / ".config" / "goose"
+    config_file = goose_dir / "config.yaml"
+    secrets_file = goose_dir / "secrets.yaml"
+
+    config_data = {
+        "GOOSE_PROVIDER": "openai",
+        "GOOSE_MODEL": model_id,
+        "OPENAI_BASE_URL": base_url,
+        "active_provider": "openai",
+        "providers": {
+            "openai": {
+                "enabled": True,
+                "model": model_id,
+                "configured": True,
+            }
+        },
+    }
+    secrets_data = {"OPENAI_API_KEY": api_key}
+
+    goose_dir.mkdir(parents=True, exist_ok=True)
+
+    # Merge into existing config rather than overwriting
+    existing_config = _load_yaml(config_file)
+    existing_config.update(config_data)
+    config_file.write_text(yaml.safe_dump(existing_config, default_flow_style=False, sort_keys=False))
+
+    existing_secrets = _load_yaml(secrets_file)
+    existing_secrets.update(secrets_data)
+    secrets_file.write_text(yaml.safe_dump(existing_secrets, default_flow_style=False, sort_keys=False))
+    os.chmod(secrets_file, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _load_yaml(path: Path) -> dict:
+    try:
+        import yaml
+
+        if not path.exists():
+            return {}
+        data = yaml.safe_load(path.read_text()) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}

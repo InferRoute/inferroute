@@ -231,7 +231,7 @@ class ChooseApp(App):
         self.exit()
 
 
-def run(extra_args=None) -> int:
+def run(extra_args=None, agent: str = "claude") -> int:
     extra_args = list(extra_args or [])
 
     # The picker is a full-screen TUI — it needs a real terminal. Bail clearly
@@ -265,7 +265,7 @@ def run(extra_args=None) -> int:
 
     # Spawn it now so the picker isn't a dead-end.
     from .config import load
-    from .launch import launch_native_anthropic, launch_through_inferroute
+    from .launch import launch_goose, launch_native_anthropic, launch_through_inferroute
 
     if short == _ANTHROPIC:
         launch_native_anthropic(extra_args)
@@ -275,5 +275,9 @@ def run(extra_args=None) -> int:
     if alias is None:  # defensive — every other id is a real alias
         sys.stderr.write(f"  internal error: alias '{short}' missing\n")
         return 1
-    launch_through_inferroute(alias.model_id, load(), extra_args=extra_args)
+
+    if agent == "goose":
+        launch_goose(alias.model_id, load(), extra_args=extra_args)
+    else:
+        launch_through_inferroute(alias.model_id, load(), extra_args=extra_args)
     return 0  # never reached — exec replaces process

@@ -51,6 +51,29 @@ def _extract_model_override(args: list[str]) -> tuple[str | None, list[str]]:
     return resolved, out
 
 
+def _extract_agent(args: list[str]) -> tuple[str | None, list[str]]:
+    """Pull `--agent NAME` / `-a NAME` / `--agent=NAME` from argv and return it.
+
+    Returns (agent_name or None, remaining_args). Valid agents: claude, goose.
+    """
+    out: list[str] = []
+    agent: str | None = None
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--agent", "-a") and i + 1 < len(args):
+            agent = args[i + 1].lower()
+            i += 2
+            continue
+        if a.startswith("--agent="):
+            agent = a.split("=", 1)[1].lower()
+            i += 1
+            continue
+        out.append(a)
+        i += 1
+    return agent, out
+
+
 # Claude Code's resume/continue flags. When one is present and the user pinned
 # no model, `ir` resumes straight through inferroute on the last-used model —
 # no model picker — so `ir --resume` feels like `claude --resume`.
@@ -135,7 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     # subcommand to dispatch on; if the user pinned a model we launch it, else
     # we open the picker. (No auto-route — the user always chooses.)
     if not args or args[0].startswith("-"):
-        user_model, passthrough = _extract_model_override(args)
+        user_agent, passthrough = _extract_agent(args)
+        user_model, passthrough = _extract_model_override(passthrough)
+        agent = user_agent or "claude"
         # Resume/continue → resume.py: its own menu (inferroute sessions, annotated
         # with model · lane · cost, shown apart from native ones) for bare
         # `--resume`, the newest session for `-c`, or an explicit id — all resumed
@@ -158,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 launch.launch_native_anthropic(extra_args=args)
                 return 0  # never reached — exec replaces process
-            # Explicit pin: `ir --model X [claude flags]` → launch directly.
+            # Explicit pin: `ir --model X [agent flags]` → launch directly.
             creds = config.load()
             if not creds.is_valid:
                 sys.stderr.write(
@@ -166,11 +191,14 @@ def main(argv: list[str] | None = None) -> int:
                     "  Run `ir login` to set one up, or `ir help` for options.\n\n"
                 )
                 return 2
-            launch.launch_through_inferroute(user_model, creds, extra_args=passthrough)
+            if agent == "goose":
+                launch.launch_goose(user_model, creds, extra_args=passthrough)
+            else:
+                launch.launch_through_inferroute(user_model, creds, extra_args=passthrough)
             return 0  # never reached — exec replaces process
         # No model specified → interactive picker so the user chooses one.
         from . import choose as choose_mod
-        return choose_mod.run(passthrough)
+        return choose_mod.run(passthrough, agent=agent)
 
     cmd, rest = args[0], args[1:]
 
@@ -228,6 +256,24 @@ def main(argv: list[str] | None = None) -> int:
         # and launch it. The point-and-click surface for everyday work.
         from . import cowork as cowork_mod
         return cowork_mod.cmd_cowork(rest)
+
+    if cmd == "goose":
+        # `ir goose` — launch the Goose CLI agent through InferRoute.
+        # Shorthand for `ir --agent goose`. Opens the model picker when no
+        # `--model` flag is supplied; otherwise launches directly.
+        user_model, passthrough = _extract_model_override(rest)
+        if user_model is None:
+            from . import choose as choose_mod
+            return choose_mod.run(passthrough, agent="goose")
+        creds = config.load()
+        if not creds.is_valid:
+            sys.stderr.write(
+                "\n  No inferroute key configured.\n"
+                "  Run `ir login` to set one up, or `ir help` for options.\n\n"
+            )
+            return 2
+        launch.launch_goose(user_model, creds, extra_args=passthrough)
+        return 0  # never reached — exec replaces process
 
     if cmd == "anthropic":
         # Escape hatch — no env, no key check, no inferroute touch.

@@ -19,9 +19,10 @@ Fixes the v1 fingerprint's audit findings (docs/verifiable-recording-spine.md §
 The v1 hash stays dual-emitted for one release window; the server prefers v2
 (x-inferroute-content-hash-v2 + x-inferroute-turn-seq + x-inferroute-hash-v).
 Chain state is persisted so a daemon restart does not restart chains; if state
-IS lost, chains restart at seq 0 — safe, because the server's turn-dedup key
-includes the content hash, so a restarted chain can never collide a new turn
-into an old row.
+IS lost, chains restart at seq 0 — harmless, because turn_seq/turn_hash are only
+recorded metadata for the future anchor leaf, never a server-side billing or
+dedup key (that would be a client-controlled bypass). Duplicate turns are
+resolved at epoch-build time (anchoring), not at the usage INSERT.
 """
 import hashlib
 import hmac
@@ -212,8 +213,8 @@ class HashV2:
             chains = data.get("sessions")
             if isinstance(chains, dict):
                 # Type-validate, not just presence: a corrupted entry must be
-                # dropped (its chain restarts — safe, the server dedup key
-                # includes the content hash), never raise in the request path.
+                # dropped (its chain restarts — harmless, seq is only anchor-leaf
+                # metadata), never raise in the request path.
                 self._chains = {
                     k: v
                     for k, v in chains.items()

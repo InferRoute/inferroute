@@ -1,0 +1,193 @@
+{
+  "version": 1,
+  "description": "v1 content-hash canonicalization vectors: raw_hash = sha256(json.dumps(last_user_block, sort_keys=True, ensure_ascii=False, separators=(',',':')).encode('utf-8','ignore')); stored_hash = sha256(user_id + ':' + raw_hash). Dual-pinned in inferroute and cc-proxy-prod test suites.",
+  "namespace_formula": "sha256(user_id + ':' + raw_hash)",
+  "user_id": "user_test_123",
+  "vectors": [
+    {
+      "name": "pinned_join_vector",
+      "note": "Original cross-repo pinned vector (fa027481…); kept as case 0 forever.",
+      "body": {
+        "model": "kimi",
+        "messages": [
+          {
+            "role": "user",
+            "content": "hello"
+          },
+          {
+            "role": "assistant",
+            "content": "hi"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "do the thing"
+              }
+            ]
+          }
+        ]
+      },
+      "raw_hash": "fa027481029df6bcedc43a85aea80b762d392f4ba022ab5637a36cd57647128d",
+      "stored_hash": "b21998948f907d6304de039e7d7893cc0c166bf4be13d04266089f8cbbe0d225"
+    },
+    {
+      "name": "string_content",
+      "note": "Plain string content.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "fix the bug in auth.py"
+          }
+        ]
+      },
+      "raw_hash": "916336dc4da9f2ed5a9ef2c9a2a79efe0cc14860228e15fb78abc68ad34abd6a",
+      "stored_hash": "5841912420f9dcea5792d76cd95f6e250a68865c275092a86a8d6f6bcf702659"
+    },
+    {
+      "name": "unicode_astral_and_combining",
+      "note": "Astral emoji, combining accents, CJK — ensure_ascii=False path.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "café vs café — 🚀 你好"
+          }
+        ]
+      },
+      "raw_hash": "9665e356de386554bd356bd73cbbddf40270c552b12e74b3197ea55c75aab019",
+      "stored_hash": "ca02bd5ff3af2f0d08d5fd63cc30610f1f641e45c359b01e70589936715352bf"
+    },
+    {
+      "name": "string_vs_list_string_form",
+      "note": "Pair with the next case: same text, string form. v1 hashes these DIFFERENTLY.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "same text"
+          }
+        ]
+      },
+      "raw_hash": "fce39a0977817203f8950e5d6b04f5274c8fc9e43f3dac3b42c446c59e4b1aa0",
+      "stored_hash": "14f8d20d84bdc1e4f6d103c9c2a7deb8cf75a222d086c54030fc947a78591b28"
+    },
+    {
+      "name": "string_vs_list_list_form",
+      "note": "Pair with the previous case: same text, list form. v1 hashes these DIFFERENTLY.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "same text"
+              }
+            ]
+          }
+        ]
+      },
+      "raw_hash": "fe7c3dbae0c196162cdc70bfaefa5ac5f299b832d60b5362c095587ce9022778",
+      "stored_hash": "9cc7bafa929c541821901b66e903a525e3c39d0ae2aa359db8d6b82de20f990c"
+    },
+    {
+      "name": "cache_control_included",
+      "note": "Incidental provider fields on the block are part of the v1 hash.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "do the thing",
+                "cache_control": {
+                  "type": "ephemeral"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "raw_hash": "33cf5512ea31d82a3f6f86d0299eab638fa8bc253381054e9009d319128a0641",
+      "stored_hash": "b2c0f982dca544e24f1c01b10148726b2104b972788b02fdd652ae6a2d47716d"
+    },
+    {
+      "name": "nested_tool_result",
+      "note": "Deeply nested tool_result content; key order must not matter (sort_keys).",
+      "body": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "running"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "toolu_01",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "exit 0"
+                  },
+                  {
+                    "type": "text",
+                    "text": "{\"rows\": [1, 2, 3]}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "raw_hash": "8d809a8227c66bd556c2e6f585ec467996ab0248bcef2bb4b44fab50e94012d7",
+      "stored_hash": "2789be9ab9cac6aeb8fa8c0ca52b0749e55fc921268cac46c0cc5ae7a1bd3909"
+    },
+    {
+      "name": "last_user_block_selected",
+      "note": "Multiple user messages — only the LAST user block is hashed.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "first"
+          },
+          {
+            "role": "assistant",
+            "content": "ok"
+          },
+          {
+            "role": "user",
+            "content": "second"
+          }
+        ]
+      },
+      "raw_hash": "2aff134e66101355eeb6b7077410bed78fae9f41e2c6b1b4fcd786df942079cd",
+      "stored_hash": "eb64a4611048d914ca8b40b7b7ccd0d6f5fe2e003a20564e8402141e5ee72f2c"
+    },
+    {
+      "name": "no_user_block",
+      "note": "No user message → no hash (header omitted; server stores NULL).",
+      "body": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "x"
+          }
+        ]
+      },
+      "raw_hash": null,
+      "stored_hash": null
+    }
+  ]
+}

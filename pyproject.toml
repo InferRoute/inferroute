@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.3.29"
+version = "0.4.0"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"
@@ -46,6 +46,11 @@ local = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "click>=8.1",
+    # RFC 8785 (JCS) canonical JSON for hash_v2 content fingerprints
+    # (docs/verifiable-recording-spine.md). Deliberately a library, never
+    # hand-rolled: JCS number serialization is the trap. Absent -> daemon
+    # falls back to v1-only emission (see inferroute_local/hash_v2.py).
+    "rfc8785>=0.1.4",
 ]
 
 [project.scripts]

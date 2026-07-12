@@ -1,0 +1,145 @@
+{
+  "version": 2,
+  "description": "hash_v2 vectors: fp_v2 = HMAC-SHA256(record_key, rfc8785(normalize(last_user_block))); turn_hash_n = HMAC(key, '{session}:{n}:{prev}:{fp}'), prev_0 = 64*'0'; stored_hash = sha256(user_id + ':' + emitted_hash). Dual-pinned in inferroute and cc-proxy-prod; reference for the Phase-3 Python/TS verifiers.",
+  "record_key_hex": "1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f",
+  "user_id": "user_test_123",
+  "namespace_formula": "sha256(user_id + ':' + emitted_hash)",
+  "fp_vectors": [
+    {
+      "name": "string_form",
+      "note": "String content — must equal the list form below (v2 normalizes).",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "same text"
+          }
+        ]
+      },
+      "fp_v2": "1959d7fdcfdb805e09bd5fb468961ecc865d9c0f05e8f9a9de9aecc60b37c08c",
+      "stored_hash": "4bc016eaf99c5060f37f8bc7bcd98ceaf7440613b715999b68485f974b7dba28"
+    },
+    {
+      "name": "list_form",
+      "note": "List form of the same text — must equal string_form.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "same text"
+              }
+            ]
+          }
+        ]
+      },
+      "fp_v2": "1959d7fdcfdb805e09bd5fb468961ecc865d9c0f05e8f9a9de9aecc60b37c08c",
+      "stored_hash": "4bc016eaf99c5060f37f8bc7bcd98ceaf7440613b715999b68485f974b7dba28"
+    },
+    {
+      "name": "unicode_strict",
+      "note": "Astral + combining + CJK through JCS, UTF-8 strict.",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "café vs café — 🚀 你好"
+          }
+        ]
+      },
+      "fp_v2": "d21ef7daabb819c9eb9160065625613bcfcd2c22d54fdbdd395c2f976d8f212d",
+      "stored_hash": "edd6d33a42bc90136d9ec898cda11f9f5af5c423a4f8fbdd8caa6ac06219b515"
+    },
+    {
+      "name": "nested_tool_result",
+      "note": "Nested structures + numbers through JCS (the number path is why we use a library).",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "tool_result",
+                "tool_use_id": "toolu_01",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "exit 0"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "fp_v2": "a3a8247e8c7954c3df0b7e047c9acbe161856d2d89d39d7b9754c3cc7a0d47c7",
+      "stored_hash": "23beae8c78628bba4f32bdcca33c0ffbc6d57101c16e9546ce382edf8903d9fa"
+    },
+    {
+      "name": "no_user_block",
+      "note": "No user message → no fingerprint.",
+      "body": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "x"
+          }
+        ]
+      },
+      "fp_v2": null,
+      "stored_hash": null
+    }
+  ],
+  "chain_vectors": [
+    {
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "first turn"
+          }
+        ]
+      },
+      "session_id": "sess_fixture_01",
+      "turn_seq": 0,
+      "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+      "fp_v2": "0c158d8bad2e9ad4c04501a3f78626ff12dc7130137ba85277f8cb7c2dd08282",
+      "turn_hash": "1f035d0fe4b8f2074019300cf58e75c4aadf98008f2c7bf9c97824c129323370",
+      "stored_hash": "fae5c263e82a7c6169498321c7c6097f44bbc602e9ecc9a3ba8f07cd1d9b6477"
+    },
+    {
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "yes"
+          }
+        ]
+      },
+      "session_id": "sess_fixture_01",
+      "turn_seq": 1,
+      "prev": "1f035d0fe4b8f2074019300cf58e75c4aadf98008f2c7bf9c97824c129323370",
+      "fp_v2": "8a5388abc036addafa20246de837afd8f9b168317820cf9fa8665095d5040b7f",
+      "turn_hash": "9e42914ca606feba63e978246531a6ac8f804c1f581a68d23adedad2a25e40d1",
+      "stored_hash": "4aaad673056cb0301cc4bf941ea8055c4d6fbe8ea0062028ca80efd4e481f73b"
+    },
+    {
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "yes"
+          }
+        ]
+      },
+      "session_id": "sess_fixture_01",
+      "turn_seq": 2,
+      "prev": "9e42914ca606feba63e978246531a6ac8f804c1f581a68d23adedad2a25e40d1",
+      "fp_v2": "8a5388abc036addafa20246de837afd8f9b168317820cf9fa8665095d5040b7f",
+      "turn_hash": "46b86eec703bbc2eaf0c316587f85098e94e4161ed4c82cd7a89d6d3d6b5af04",
+      "stored_hash": "1a7072cb30fb188adbd7d5cf6697b714fedf2fd5b1bbab0eb024b4dc514192be"
+    }
+  ]
+}

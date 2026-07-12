@@ -26,6 +26,7 @@ from typing import AsyncIterator, Optional
 import httpx
 
 from .config import Config
+from .hash_v2 import HashV2
 from .recorder import Recorder, new_user_block_hash
 
 logger = logging.getLogger("inferroute_local")
@@ -47,6 +48,10 @@ class InferrouteProxy:
             ttl_days=config.record_ttl_days,
             blob_cap_bytes=config.record_blob_cap_bytes,
         )
+        # hash_v2: HMAC turn-chain fingerprints (dual-emitted alongside v1; the
+        # server prefers v2). Key + chain state live under base_dir; degrades to
+        # v1-only when rfc8785 or the key file is unavailable.
+        self.hash2 = HashV2(base_dir)
         # Prune expired raw blobs once at startup (best-effort, cheap).
         self.recorder.gc()
         # Sweep any wire-capture scratch from sessions that ended without an
@@ -76,14 +81,22 @@ class InferrouteProxy:
         """Record the choice, forward upstream, record the outcome. Returns
         (status, headers, body_stream)."""
         session_id = (request_headers.get("x-inferroute-session") or "").strip()
-        turn_id = self.recorder.record_choice(body=body, headers=request_headers)
+        # Computed ONCE per turn (chain state advances on each call), then shared
+        # by the local corpus event and the upstream headers so the two always
+        # carry the same values — the identity `ir verify` checks later.
+        v2 = (
+            self.hash2.turn(session_id, body)
+            if self.recorder.level in ("metadata", "full")
+            else None
+        )
+        turn_id = self.recorder.record_choice(body=body, headers=request_headers, v2=v2)
         chosen_model = str(body.get("model") or "")
         streaming = bool(body.get("stream"))
         start = time.monotonic()
 
         try:
             status, resp_headers, stream = await self._forward(
-                body, request_headers, self._visibility_headers(body)
+                body, request_headers, self._visibility_headers(body, v2)
             )
         except httpx.HTTPError as e:
             logger.warning(f"upstream unreachable ({e})")
@@ -118,7 +131,7 @@ class InferrouteProxy:
     # Forward upstream (to the inferroute cloud, which serves the pinned model)
     # -------------------------------------------------------------------------
 
-    def _visibility_headers(self, body: dict) -> dict[str, str]:
+    def _visibility_headers(self, body: dict, v2: dict | None = None) -> dict[str, str]:
         """Recording DISPOSITION + a content FINGERPRINT (never content) for the
         cloud, so fleet aggregates work — and keep working under TEE, where the
         cloud can't hash transit. Emitted here because the daemon is the only
@@ -129,6 +142,9 @@ class InferrouteProxy:
           x-inferroute-content-hash: <sha256>             (only when a corpus is
               being recorded; equals the locally-stored hash — see
               recorder.new_user_block_hash)
+          x-inferroute-hash-v / -content-hash-v2 / -turn-seq   (hash_v2 HMAC
+              turn-chain, dual-emitted with v1 for the transition; the server
+              prefers v2 — see inferroute_local/hash_v2.py)
         """
         level = self.recorder.level if self.recorder.level in ("full", "metadata", "off") else "off"
         out = {"x-inferroute-recording": level}
@@ -136,6 +152,11 @@ class InferrouteProxy:
             h = new_user_block_hash(body)
             if h:
                 out["x-inferroute-content-hash"] = h
+            if v2:
+                out["x-inferroute-hash-v"] = str(v2["hash_v"])
+                out["x-inferroute-content-hash-v2"] = v2["turn_hash"]
+                if v2.get("turn_seq") is not None:
+                    out["x-inferroute-turn-seq"] = str(v2["turn_seq"])
         return out
 
     async def _forward(

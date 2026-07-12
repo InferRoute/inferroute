@@ -196,9 +196,14 @@ class Recorder:
 
     # ----- public API ------------------------------------------------------
 
-    def record_choice(self, *, body: dict, headers: dict) -> Optional[str]:
+    def record_choice(self, *, body: dict, headers: dict, v2: Optional[dict] = None) -> Optional[str]:
         """Record a model selection. Returns the turn id (to join the outcome),
-        or None if disabled / on error."""
+        or None if disabled / on error.
+
+        v2: this turn's hash_v2 emission (from HashV2.turn — hash_v / fp_v2 /
+        turn_hash / turn_seq), stored on the event so the local corpus carries
+        the SAME values the upstream headers carried (`ir verify` joins on them).
+        """
         if not self.enabled:
             return None
         try:
@@ -237,6 +242,16 @@ class Recorder:
                     "turn_block_hashes": block_hashes,
                     "new_user_block_hash": new_user_hash,
                     "stream": bool(body.get("stream")),
+                    **(
+                        {
+                            "hash_v": v2["hash_v"],
+                            "fp_v2": v2["fp_v2"],
+                            "turn_hash": v2["turn_hash"],
+                            "turn_seq": v2["turn_seq"],
+                        }
+                        if v2
+                        else {}
+                    ),
                 }
             )
             return turn_id

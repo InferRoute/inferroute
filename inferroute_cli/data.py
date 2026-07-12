@@ -116,6 +116,17 @@ def _show() -> int:
         print(f"    range            {fmt(first_ts)} → {fmt(last_ts)}")
     print(f"    events size      {_fmt_bytes(_dir_size(events_dir))}")
     print(f"    blobs size       {_fmt_bytes(_dir_size(base / 'blobs'))}")
+    # hash_v2 record key: shown as a short sha256 prefix, NEVER the key itself.
+    # The key signs this machine's turn fingerprints (verifiable-recording-spine);
+    # losing it makes old turns unverifiable (not lost). Backed up with the dir.
+    key_file = base / "record_key"
+    if key_file.exists():
+        try:
+            import hashlib
+            k = bytes.fromhex(key_file.read_text().strip())
+            print(f"    record key       {hashlib.sha256(k).hexdigest()[:8]} (fingerprint; key never leaves this machine)")
+        except Exception:
+            pass
     if models:
         print("\n    model choices:")
         for m, c in sorted(models.items(), key=lambda kv: -kv[1]):

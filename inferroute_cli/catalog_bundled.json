@@ -3,7 +3,7 @@
     {
       "short": "minimax-m2.7",
       "model_id": "MiniMax-M2.7",
-      "label": "MiniMax M2.7 \u2014 cheaper/smaller direct-sub model",
+      "label": "MiniMax M2.7 — cheaper/smaller direct-sub model",
       "tier": "fast",
       "standard": {
         "input": 0.19,
@@ -17,14 +17,12 @@
       },
       "_ref": "openrouter",
       "_ref_key": "minimax/minimax-m2.7",
-      "aliases": [
-        "minimax"
-      ]
+      "aliases": []
     },
     {
       "short": "minimax-m3",
       "model_id": "MiniMax-M3",
-      "label": "MiniMax M3 \u2014 newer/stronger flagship",
+      "label": "MiniMax M3 — newer/stronger flagship",
       "tier": "balanced",
       "standard": {
         "input": 0.24,
@@ -42,7 +40,7 @@
     {
       "short": "kimi-k2.6",
       "model_id": "Kimi-K2.6",
-      "label": "Kimi K2.6 \u2014 strong reasoning, thinks before acting",
+      "label": "Kimi K2.6 — strong reasoning, thinks before acting",
       "tier": "balanced",
       "standard": {
         "input": 0.49,
@@ -56,9 +54,7 @@
       },
       "_ref": "chutes",
       "_ref_key": "moonshotai/Kimi-K2.6-TEE",
-      "aliases": [
-        "kimi"
-      ],
+      "aliases": [],
       "picker": {
         "name": "Kimi K2.6",
         "desc": "strong reasoning, thinks before acting",
@@ -69,7 +65,7 @@
     {
       "short": "kimi-k2.5",
       "model_id": "Kimi-K2.5",
-      "label": "Kimi K2.5 \u2014 prior-gen Kimi, alternate when K2.6 is busy",
+      "label": "Kimi K2.5 — prior-gen Kimi, alternate when K2.6 is busy",
       "tier": "balanced",
       "standard": {
         "input": 0.34,
@@ -96,7 +92,7 @@
     {
       "short": "glm-5.2",
       "model_id": "GLM-5.2",
-      "label": "GLM-5.2 \u2014 next-gen GLM, improved reasoning",
+      "label": "GLM-5.2 — next-gen GLM, improved reasoning",
       "tier": "balanced",
       "standard": {
         "input": 0.9,
@@ -110,9 +106,7 @@
       },
       "_ref": "chutes",
       "_ref_key": "zai-org/GLM-5.2-TEE",
-      "aliases": [
-        "glm"
-      ],
+      "aliases": [],
       "picker": {
         "name": "GLM-5.2",
         "desc": "next-gen GLM, improved reasoning",
@@ -123,7 +117,7 @@
     {
       "short": "glm-5.1",
       "model_id": "GLM-5.1",
-      "label": "GLM-5.1 \u2014 solid general-purpose alternative",
+      "label": "GLM-5.1 — solid general-purpose alternative",
       "tier": "balanced",
       "standard": {
         "input": 0.69,

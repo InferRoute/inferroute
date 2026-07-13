@@ -86,14 +86,18 @@ def _is_resume(args: list[str]) -> bool:
 
 
 def _resolve_model_name(name: str) -> str:
-    """`minimax` → `MiniMax-M2.7`. Unknown names pass through verbatim.
+    """`minimax`/`MiniMax-M2.7` → the canonical lowercase short `minimax-m2.7`.
+    Unknown names pass through verbatim.
 
-    This is the ONE place where friendly short names get translated. Anywhere
-    else that wants the same behavior should call this rather than
-    re-implementing it.
+    This is the ONE place where friendly names get normalized. We emit the
+    canonical `short` (docs/model-naming-standard.md §1) — the same string
+    `/v1/models` advertises as the model's `id` — so the name the CLI sends, the
+    name the cloud resolves, and the name recorded all match. The cloud
+    (config.normalize_model) maps any spelling → its backend key, so this only
+    needs to produce the canonical public name.
     """
     alias = models.get(name)
-    return alias.model_id if alias is not None else name
+    return alias.short if alias is not None else name
 
 
 def _is_premium_anthropic(model: str) -> bool:

@@ -104,13 +104,13 @@ def test_gate_strip_prefix_one_line_with_friendly_short():
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "sess123",
                                 "moonshotai/Kimi-K2.6-TEE", False)
     assert "\n" not in prefix
-    assert prefix == "⚡ kimi · standard │ https://inferroute.ai/session/sess123"
+    assert prefix == "⚡ kimi-k2.6 · standard │ https://inferroute.ai/session/sess123"
 
 
 def test_gate_strip_prefix_economy_lane():
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "s", "MiniMax-M2.7", True)
     assert "\n" not in prefix
-    assert prefix.startswith("⚡ minimax · economy │ ")
+    assert prefix.startswith("⚡ minimax-m2.7 · economy │ ")
 
 
 def test_gate_strip_prefix_unknown_model_passes_through_verbatim():
@@ -140,7 +140,7 @@ def test_statusline_command_renders_one_line_and_ignores_stdin():
     out = _run_statusline(cmd, '{"cost":{"total_cost_usd":99.99}}')  # CC's number — ignored
     assert out.returncode == 0
     assert out.stderr == ""
-    assert out.stdout == "⚡ kimi · standard │ https://inferroute.ai/session/sess123"
+    assert out.stdout == "⚡ kimi-k2.6 · standard │ https://inferroute.ai/session/sess123"
 
 
 def test_statusline_appends_real_cost_from_daemon_file(tmp_path):
@@ -332,7 +332,7 @@ def test_plain_economy_grabs_grant_and_has_no_mode_tag(monkeypatch, tmp_path):
 def test_economy_loop_strip_lane_label():
     prefix = _gate_strip_prefix("https://api.inferroute.ai", "s", "moonshotai/Kimi-K2.6-TEE",
                                 True, True)
-    assert prefix.startswith("⚡ kimi · economy·loop │ ")
+    assert prefix.startswith("⚡ kimi-k2.6 · economy·loop │ ")
 
 
 def test_main_consumes_economy_loop_flag(monkeypatch):

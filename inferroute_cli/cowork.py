@@ -76,7 +76,7 @@ def _default_model() -> str:
     try:
         from . import models
 
-        alias = models.get("kimi")
+        alias = models.get("kimi-k2.6")
         if alias is not None:
             return alias.short
     except Exception:

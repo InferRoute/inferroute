@@ -16,8 +16,8 @@ from .launch import launch_through_inferroute
 
 # The model the integration agent runs on. Tier-2 (cheap) by deliberate choice —
 # this is a bounded code task, and running onboarding on our own cheap backend
-# is the dogfood. Override with `ir integrate-deferral-gate --model glm`.
-DEFAULT_AGENT_MODEL = "kimi"
+# is the dogfood. Override with `ir integrate-deferral-gate --model glm-5.2`.
+DEFAULT_AGENT_MODEL = "kimi-k2.6"
 
 
 def _build_prompt(api_url: str) -> str:

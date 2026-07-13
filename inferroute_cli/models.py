@@ -33,12 +33,15 @@ class Price:
 
 @dataclass(frozen=True)
 class ModelAlias:
-    short: str           # what the user types as the --model value (versioned)
-    model_id: str        # the clean id we pass to claude --model (CC shows it)
+    short: str           # CANONICAL id — what the CLI sends + /v1/models advertises
+    model_id: str        # Title-case display spelling (back-compat, still resolves)
     label: str           # one-line description shown by `ir help` / `ir choose`
     tier: str            # "fast" | "balanced" | "smart"
     price: Price | None = None  # $/1M tokens; None = priced on your own plan
-    aliases: tuple = ()  # legacy/bare shorts that also resolve here (e.g. "kimi")
+    aliases: tuple = ()  # bare/family shorts that also resolve here (e.g. "kimi")
+    ref_key: str = ""    # backend key (e.g. moonshotai/Kimi-K2.6-TEE) — internal,
+                         # used only to reverse-map a served/persisted backend id
+                         # back to the canonical short for display.
 
     @property
     def help_line(self) -> str:
@@ -80,7 +83,8 @@ def _to_alias(m: dict) -> ModelAlias:
              if std else None)
     return ModelAlias(short=m["short"], model_id=m["model_id"],
                       label=m.get("label", m["short"]), tier=m.get("tier", "balanced"),
-                      price=price, aliases=tuple(m.get("aliases") or ()))
+                      price=price, aliases=tuple(m.get("aliases") or ()),
+                      ref_key=m.get("_ref_key", "") or "")
 
 
 def all_aliases() -> list[ModelAlias]:
@@ -108,12 +112,22 @@ def get(short: str) -> ModelAlias | None:
 
 
 def short_for_model_id(model_id: str) -> str | None:
-    """canonical model_id → friendly short (first match in catalog order). None for
-    ids we don't alias (callers fall back to the id verbatim)."""
+    """Any known spelling — canonical short, Title-case model_id, or family alias,
+    case-insensitively — → the canonical friendly short. Used for status-line /
+    resume DISPLAY, so it must recognise whatever form was persisted (new clients
+    persist the short; older ones the model_id). None for ids we don't alias
+    (callers fall back to the id verbatim)."""
     if not model_id:
         return None
+    a = get(model_id)  # matches short + family aliases, case-insensitive
+    if a is not None:
+        return a.short
+    ml = model_id.strip().lower()
     for a in all_aliases():
-        if a.model_id == model_id:
+        # Title-case model_id OR the internal backend key → canonical short, so a
+        # served/persisted backend id (e.g. moonshotai/Kimi-K2.6-TEE) never leaks
+        # into the status line (naming-standard invariant: backend keys not user-facing).
+        if a.model_id.lower() == ml or a.ref_key.lower() == ml:
             return a.short
     return None
 

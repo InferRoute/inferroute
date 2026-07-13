@@ -78,10 +78,10 @@ def _default_model() -> str:
 
         alias = models.get("kimi")
         if alias is not None:
-            return alias.model_id
+            return alias.short
     except Exception:
         pass
-    return "moonshotai/Kimi-K2.6-TEE"
+    return "kimi-k2.6"
 
 
 def _anthropic_host(creds: config.Credentials) -> str:
@@ -277,7 +277,7 @@ def cmd_cowork(rest: list[str]) -> int:
             from . import models
 
             alias = models.get(ns.model)
-            model = alias.model_id if alias is not None else ns.model
+            model = alias.short if alias is not None else ns.model
         except Exception:
             model = ns.model
 

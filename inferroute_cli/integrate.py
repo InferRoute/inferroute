@@ -93,7 +93,7 @@ def cmd_integrate(args: list[str]) -> int:
     # nested session — also blocked by the CLAUDECODE guard in launch.py). The prompt
     # is the first positional; --allowedTools is variadic so it goes last.
     launch_through_inferroute(
-        alias.model_id, creds,
+        alias.short, creds,
         extra_args=[
             prompt, *rest,
             # Block subagent spawning — it's a tiny task; Explore/Task subagents

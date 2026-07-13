@@ -277,7 +277,7 @@ def run(extra_args=None, agent: str = "claude") -> int:
         return 1
 
     if agent == "goose":
-        launch_goose(alias.model_id, load(), extra_args=extra_args)
+        launch_goose(alias.short, load(), extra_args=extra_args)
     else:
-        launch_through_inferroute(alias.model_id, load(), extra_args=extra_args)
+        launch_through_inferroute(alias.short, load(), extra_args=extra_args)
     return 0  # never reached — exec replaces process

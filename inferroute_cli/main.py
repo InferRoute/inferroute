@@ -255,6 +255,11 @@ def main(argv: list[str] | None = None) -> int:
         from . import data as data_mod
         return data_mod.cmd_data(rest)
 
+    if cmd == "verify":
+        # `ir verify` — check your anchored records against Base (zero trust).
+        from . import verify as verify_mod
+        return verify_mod.cmd_verify(rest)
+
     if cmd == "cowork":
         # `ir cowork` — wire goose (open-source agent desktop/CLI) to InferRoute
         # and launch it. The point-and-click surface for everyday work.

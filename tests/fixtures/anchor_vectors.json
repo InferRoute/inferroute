@@ -1,8 +1,8 @@
 {
   "note": "Cross-language anchor vectors. Python ir verify MUST reproduce leaf hashes, roots, commitment, and proofs from these inputs. Timestamps fixed.",
   "prev_commitment": "0000000000000000000000000000000000000000000000000000000000000000",
-  "batch_root": "51a27d7804362d5c6151018bc80f176338ebb3e911eca9b7e940ec9a506578ad",
-  "commitment": "3be495a15495879aa198e1cb63337ce51b982144965484b79e7049a52ada60bc",
+  "batch_root": "9d298569715140ef3c61b7be89cbd14cf78af0a4aef320979e5e0d431ce75162",
+  "commitment": "40faeb52d08a166e3416da83d4613817bf998ed379651f120660190151308f36",
   "records": [
     {
       "record_id": "rec-a",
@@ -15,7 +15,7 @@
         "turn_seq": 0,
         "content_hash": "1111111111111111111111111111111111111111111111111111111111111111",
         "hash_v": 2,
-        "recording": "\u0000none",
+        "recording": null,
         "model": "moonshotai/Kimi-K2.6-TEE",
         "economy": false,
         "input_tokens": 100,
@@ -24,18 +24,18 @@
         "cost_millicents": 42,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "4f61fa5aff7f51539896fe52ac8be4f1661ca3cbae5c385faf3c127c984c008e",
+      "leaf_hash": "446b493d632de727ce739e43fd9526ab97d6c146807d5c1b09d563ecc9b9c915",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "2992428a7cf1ad4ab0bad0f3d638d03ae6c22c8fe7ddf667c7fdb0fdd70bb448",
+      "user_root": "8189b521a8197d997adcff61e11ade5fd1e6a39bca58bcdb6572fdca4e526b98",
       "user_path": [
         {
-          "sibling": "433db67d0522f2883514b2ef3286c0c54e9f96aeaeac1f65a2cdb925284deef1",
+          "sibling": "b12f7c9d14d9233c8f67bb29db678a53bcf69d475984d415cea8a540f531d152",
           "right": true
         }
       ],
       "epoch_path": [
         {
-          "sibling": "fb840f4a2cb0dc6f7f4875a7ad8e00bc46d3de07857dbf743a86a3b75a352145",
+          "sibling": "bc1f45b0a503e7c231c4d99d8b999a9092023703ec1508920359fd18ee6e124e",
           "right": true
         }
       ]
@@ -51,7 +51,7 @@
         "turn_seq": 1,
         "content_hash": "2222222222222222222222222222222222222222222222222222222222222222",
         "hash_v": 2,
-        "recording": "\u0000none",
+        "recording": null,
         "model": "moonshotai/Kimi-K2.6-TEE",
         "economy": false,
         "input_tokens": 100,
@@ -60,18 +60,18 @@
         "cost_millicents": 42,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "433db67d0522f2883514b2ef3286c0c54e9f96aeaeac1f65a2cdb925284deef1",
+      "leaf_hash": "b12f7c9d14d9233c8f67bb29db678a53bcf69d475984d415cea8a540f531d152",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "2992428a7cf1ad4ab0bad0f3d638d03ae6c22c8fe7ddf667c7fdb0fdd70bb448",
+      "user_root": "8189b521a8197d997adcff61e11ade5fd1e6a39bca58bcdb6572fdca4e526b98",
       "user_path": [
         {
-          "sibling": "4f61fa5aff7f51539896fe52ac8be4f1661ca3cbae5c385faf3c127c984c008e",
+          "sibling": "446b493d632de727ce739e43fd9526ab97d6c146807d5c1b09d563ecc9b9c915",
           "right": false
         }
       ],
       "epoch_path": [
         {
-          "sibling": "fb840f4a2cb0dc6f7f4875a7ad8e00bc46d3de07857dbf743a86a3b75a352145",
+          "sibling": "bc1f45b0a503e7c231c4d99d8b999a9092023703ec1508920359fd18ee6e124e",
           "right": true
         }
       ]
@@ -87,7 +87,7 @@
         "turn_seq": 0,
         "content_hash": "3333333333333333333333333333333333333333333333333333333333333333",
         "hash_v": 2,
-        "recording": "\u0000none",
+        "recording": null,
         "model": "moonshotai/Kimi-K2.6-TEE",
         "economy": true,
         "input_tokens": 100,
@@ -96,13 +96,13 @@
         "cost_millicents": 7,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "700a91f0ac6cb29b0ba2a977c0a662127316d7b079dc414e15662069f46d5afa",
+      "leaf_hash": "37e9d8b049f5a226ed334d8f16e25ab997843dc6c47df4ee309b65c8bfbd8787",
       "user_bucket": "995f5da3d70a20eb4570ee88f5eb30191d536643068b9af22494a175727399c4",
-      "user_root": "700a91f0ac6cb29b0ba2a977c0a662127316d7b079dc414e15662069f46d5afa",
+      "user_root": "37e9d8b049f5a226ed334d8f16e25ab997843dc6c47df4ee309b65c8bfbd8787",
       "user_path": [],
       "epoch_path": [
         {
-          "sibling": "45901960dec0a919e12eb53741c7a71a519b7b91a1a192215cbc000d68d20ce9",
+          "sibling": "253f77cfa6ee3d5b2c8c85f1a826bfddde725c4e4cf092faaae286a4ff4e08c0",
           "right": false
         }
       ]

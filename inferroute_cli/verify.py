@@ -389,7 +389,7 @@ def cmd_verify(rest: list[str]) -> int:
             print(f"    · {cross['not_local']} fingerprinted record(s) not recorded on this machine")
         if cross["awaiting"]:
             print(f"    · {cross['awaiting']} fingerprinted turn(s) on this machine not in the anchored")
-            print("      set yet (queued for the next daily epoch, or pre-genesis)")
+            print("      set yet (queued for the next hourly epoch, or pre-genesis)")
 
     if kinds.get("usage") or tot_cost or models:
         print("\n  What was committed  (recomputed from the anchored leaves)")

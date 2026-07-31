@@ -36,6 +36,25 @@ def cmd_data(rest: list[str]) -> int:
     w.add_argument("--yes", "-y", action="store_true", help="Don't prompt.")
     e = sub.add_parser("export", help="Copy the metadata layer to a directory.")
     e.add_argument("dest", help="Destination directory.")
+
+    # CRE data contribution v0 — the CLI is THE submitting surface (the corpus,
+    # scrubber, and record key live here). docs/cre-data-contribution-v0.md.
+    sub.add_parser("calls", help="List open data calls (what we're taking right now).")
+    def _filters(p):
+        p.add_argument("call", help="Call id (prefix ok, from `ir data calls`).")
+        p.add_argument("--from", dest="from_", help="Only turns on/after this date (YYYY-MM-DD).")
+        p.add_argument("--to", help="Only turns on/before this date (YYYY-MM-DD).")
+        p.add_argument("--model", help="Only turns routed to models matching this substring.")
+        p.add_argument("--session", help="Only one session id.")
+    o = sub.add_parser("offer", help="LOCAL-ONLY preview of what you could submit (nothing uploads).")
+    _filters(o)
+    s = sub.add_parser("submit", help="Scrub, package and submit matching turns to an open call.")
+    _filters(s)
+    s.add_argument("--preview", metavar="FILE", help="Write the manifest to FILE and stop (no upload).")
+    s.add_argument("--yes", "-y", action="store_true", help="Skip the consent prompt.")
+    sub.add_parser("submissions", help="Status of your submissions (evaluation, credits).")
+    wd = sub.add_parser("withdraw", help="Withdraw an undecided submission (deletes the quarantined payload).")
+    wd.add_argument("submission", help="Submission id (prefix ok).")
     ns = ap.parse_args(rest)
 
     if ns.action == "show":
@@ -46,6 +65,17 @@ def cmd_data(rest: list[str]) -> int:
         return _wipe(ns.yes)
     if ns.action == "export":
         return _export(Path(ns.dest))
+    if ns.action in ("calls", "offer", "submit", "submissions", "withdraw"):
+        from . import contribute
+        if ns.action == "calls":
+            return contribute.cmd_calls(rest)
+        if ns.action == "offer":
+            return contribute.cmd_offer(ns)
+        if ns.action == "submit":
+            return contribute.cmd_submit(ns)
+        if ns.action == "submissions":
+            return contribute.cmd_submissions(rest)
+        return contribute.cmd_withdraw(ns)
     ap.print_help()
     return 2
 

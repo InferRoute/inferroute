@@ -205,6 +205,15 @@ def cmd_verify(rest: list[str]) -> int:
 
     contract = data.get("contract")
     rpc = os.environ.get("ANCHOR_VERIFY_RPC") or data.get("rpc") or "https://sepolia.base.org"
+    # Multi-chain (mainnet cutover): per-record `chain` + these maps resolve the
+    # right contract/rpc for EACH epoch — historical testnet epochs stay
+    # verifiable after the flip. Falls back to the single active contract when
+    # the server predates the maps.
+    active_chain = data.get("chain") or "base-sepolia"
+    contracts = data.get("contracts") or ({active_chain: contract} if contract else {})
+    rpcs = data.get("rpcs") or {active_chain: rpc}
+    if os.environ.get("ANCHOR_VERIFY_RPC"):
+        rpcs = {k: rpc for k in rpcs}  # explicit override wins everywhere
     user_id = data.get("user_id")
     records = data.get("records") or []
 
@@ -229,15 +238,21 @@ def cmd_verify(rest: list[str]) -> int:
 
     from collections import defaultdict
 
-    root_cache: dict[int, tuple[str, str]] = {}
+    root_cache: dict[tuple[str, int], tuple[str, str]] = {}
 
-    def roots(epoch: int) -> tuple[str, str]:
-        if epoch not in root_cache:
-            try:
-                root_cache[epoch] = _onchain_roots(rpc, contract, epoch)
-            except Exception:
-                root_cache[epoch] = ("", "")
-        return root_cache[epoch]
+    def roots(epoch: int, chain: Optional[str] = None) -> tuple[str, str]:
+        ch = chain or active_chain
+        key = (ch, epoch)
+        if key not in root_cache:
+            c, r = contracts.get(ch), rpcs.get(ch)
+            if not c or not r:
+                root_cache[key] = ("", "")
+            else:
+                try:
+                    root_cache[key] = _onchain_roots(r, c, epoch)
+                except Exception:
+                    root_cache[key] = ("", "")
+        return root_cache[key]
 
     verified, mismatched, on_chain_missing = 0, [], []
     by_epoch: dict[int, dict] = defaultdict(lambda: {"count": 0, "tx": None})
@@ -250,9 +265,12 @@ def cmd_verify(rest: list[str]) -> int:
     bucket_mismatch = 0
     expected_bucket = hashlib.sha256(user_id.encode("utf-8")).hexdigest() if user_id else None
 
+    epoch_chain: dict[int, str] = {}
     for rec in records:
         epoch = rec["epoch"]
-        on_batch, on_commit = roots(epoch)
+        rec_chain = rec.get("chain") or active_chain
+        epoch_chain[epoch] = rec_chain
+        on_batch, on_commit = roots(epoch, rec_chain)
         if not on_batch or on_batch == _ZERO:
             on_chain_missing.append(rec["record_id"]); continue
         # (a) the server's claimed root must equal what's actually on Base, and
@@ -297,12 +315,19 @@ def cmd_verify(rest: list[str]) -> int:
     chain_ok: Optional[bool] = None
     chain_checked = 0
     for e in sorted(by_epoch):
-        b, c = roots(e)
+        ch = epoch_chain.get(e)
+        b, c = roots(e, ch)
         if not b or b == _ZERO or not c:
             continue
-        prevc = _ZERO if e == 1 else roots(e - 1)[1]
+        if e == 1:
+            prevc = _ZERO
+        else:
+            prev_b, prev_c = roots(e - 1, ch)
+            # e-1 absent on THIS chain ⇒ e is the chain's genesis epoch (the
+            # offset-continuation deploy): its commitment must derive from ZERO.
+            prevc = _ZERO if (not prev_b or prev_b == _ZERO) else prev_c
         if not prevc:
-            continue  # predecessor not readable — skip this link
+            continue
         chain_checked += 1
         ok = verify_commitment(prevc, b, c)
         chain_ok = ok if chain_ok is None else (chain_ok and ok)
@@ -412,7 +437,8 @@ def cmd_verify(rest: list[str]) -> int:
         for e in sorted(by_epoch, reverse=True):
             tx = by_epoch[e]["tx"] or ""
             shown = (tx[:12] + "…") if tx else "—"
-            link = f"  {exp}/tx/{tx}" if tx else ""
+            e_exp = _explorer(epoch_chain.get(e, active_chain))
+            link = f"  {e_exp}/tx/{tx}" if tx else ""
             print(f"    epoch {e:<4} {by_epoch[e]['count']:>4} rec   {shown}{link}")
 
     if mismatched:

@@ -56,12 +56,56 @@ def epoch_leaf(user_bucket_hex: str, user_root_hex: str) -> str:
     return node_hash(ub, user_root_hex)
 
 
+# ---------------------------------------------------------------------------
+# LEAF SCHEMA REQUIREMENTS (fail-closed).
+#
+# WHY THIS EXISTS. The Merkle machinery proves the integrity of WHAT WAS
+# COMMITTED — it cannot prove that the right things were committed. Measured
+# 2026-08-18: a leaf with NO cost field at all verifies True against its own
+# anchored root, and the CLI totalled that record as 0 millicents. Nothing
+# anywhere required a field to be present. That is the "blind != quiet" class:
+# a verifier that never checks for a field prints exactly what a verifier that
+# checked and found it correct prints.
+#
+# So the v3 billing fields are only worth committing if verification REFUSES a
+# leaf that omits them. Enforced per declared version, so already-anchored v2
+# epochs keep verifying instead of being retroactively invalidated.
+_USAGE_V2 = {
+    "v", "kind", "record_id", "user_bucket", "session_id", "turn_seq",
+    "content_hash", "hash_v", "recording", "model", "economy",
+    "input_tokens", "output_tokens", "cache_read_tokens",
+    "cost_millicents", "created_at_ms",
+}
+# v3 adds: what was ACTUALLY debited (credits_cost), what the caller ASKED for
+# (requested_model — without it a silent model substitution is unprovable), and
+# cache-creation tokens (a billed input class that v2 committed nowhere).
+_USAGE_V3 = _USAGE_V2 | {
+    "credits_cost_millicents", "requested_model", "cache_creation_tokens",
+}
+USAGE_REQUIRED = {2: _USAGE_V2, 3: _USAGE_V3}
+
+
+def missing_usage_fields(fields: dict) -> set:
+    """Fields a usage leaf of its declared version must carry but does not.
+
+    An absent/unknown `v` is itself a failure: an unversioned leaf would let an
+    operator opt out of every requirement simply by omitting the version."""
+    if fields.get("kind") != "usage":
+        return set()                      # other kinds carry their own shapes
+    req = USAGE_REQUIRED.get(fields.get("v"))
+    if req is None:
+        return {"v(unknown-or-absent)"}
+    return req - set(fields)
+
+
 def verify_record(rec: dict, batch_root_hex: str) -> bool:
     """Full per-record check: recompute leaf from fields, prove to user_root, then
     the epoch-leaf to the batch_root. `rec` = one entry from a proof bundle
     (leaf_fields, leaf_hash, user_bucket, user_root, user_path, epoch_path)."""
     if leaf_hash(rec["leaf_fields"]) != rec["leaf_hash"]:
         return False
+    if missing_usage_fields(rec["leaf_fields"]):
+        return False          # fail-closed: an incomplete leaf is not a valid one
     if not verify_merkle_path(rec["leaf_hash"], rec["user_path"], rec["user_root"]):
         return False
     el = epoch_leaf(rec["user_bucket"], rec["user_root"])

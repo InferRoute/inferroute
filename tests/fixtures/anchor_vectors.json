@@ -1,13 +1,13 @@
 {
   "note": "Cross-language anchor vectors. Python ir verify MUST reproduce leaf hashes, roots, commitment, and proofs from these inputs. Timestamps fixed.",
   "prev_commitment": "0000000000000000000000000000000000000000000000000000000000000000",
-  "batch_root": "9d298569715140ef3c61b7be89cbd14cf78af0a4aef320979e5e0d431ce75162",
-  "commitment": "40faeb52d08a166e3416da83d4613817bf998ed379651f120660190151308f36",
+  "batch_root": "52c6b433a6d4f76758c1e38f242c1e1a27cd3e137ad50f52e9de7adc2c7e740a",
+  "commitment": "06ac11659fabcd924b1d3080b8565323711e67d12c2650dd1bbeaa04107b1f27",
   "records": [
     {
       "record_id": "rec-a",
       "leaf_fields": {
-        "v": 2,
+        "v": 3,
         "kind": "usage",
         "record_id": "rec-a",
         "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
@@ -22,20 +22,23 @@
         "output_tokens": 50,
         "cache_read_tokens": 0,
         "cost_millicents": 42,
+        "credits_cost_millicents": 42,
+        "requested_model": "moonshotai/Kimi-K2.6-TEE",
+        "cache_creation_tokens": 0,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "446b493d632de727ce739e43fd9526ab97d6c146807d5c1b09d563ecc9b9c915",
+      "leaf_hash": "3e0838a8d9724b878b48a2d31967ef387ed82f1cc4d38199b2b4e7972cababa9",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "8189b521a8197d997adcff61e11ade5fd1e6a39bca58bcdb6572fdca4e526b98",
+      "user_root": "9355755aab00d749df1b372840fc72459bad96edc53013fc23d14a8e033898ba",
       "user_path": [
         {
-          "sibling": "b12f7c9d14d9233c8f67bb29db678a53bcf69d475984d415cea8a540f531d152",
+          "sibling": "dbd28fa16bb5960fae1b93bbf89f439c1d3194820d2cbd6193ccfe001608beeb",
           "right": true
         }
       ],
       "epoch_path": [
         {
-          "sibling": "bc1f45b0a503e7c231c4d99d8b999a9092023703ec1508920359fd18ee6e124e",
+          "sibling": "0e1044183551a457c70f7f08b069acf2d7956aa095ec1f64fdff59ee1479d5f1",
           "right": true
         }
       ]
@@ -43,7 +46,7 @@
     {
       "record_id": "rec-b",
       "leaf_fields": {
-        "v": 2,
+        "v": 3,
         "kind": "usage",
         "record_id": "rec-b",
         "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
@@ -58,20 +61,23 @@
         "output_tokens": 50,
         "cache_read_tokens": 0,
         "cost_millicents": 42,
+        "credits_cost_millicents": 42,
+        "requested_model": "moonshotai/Kimi-K2.6-TEE",
+        "cache_creation_tokens": 0,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "b12f7c9d14d9233c8f67bb29db678a53bcf69d475984d415cea8a540f531d152",
+      "leaf_hash": "dbd28fa16bb5960fae1b93bbf89f439c1d3194820d2cbd6193ccfe001608beeb",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "8189b521a8197d997adcff61e11ade5fd1e6a39bca58bcdb6572fdca4e526b98",
+      "user_root": "9355755aab00d749df1b372840fc72459bad96edc53013fc23d14a8e033898ba",
       "user_path": [
         {
-          "sibling": "446b493d632de727ce739e43fd9526ab97d6c146807d5c1b09d563ecc9b9c915",
+          "sibling": "3e0838a8d9724b878b48a2d31967ef387ed82f1cc4d38199b2b4e7972cababa9",
           "right": false
         }
       ],
       "epoch_path": [
         {
-          "sibling": "bc1f45b0a503e7c231c4d99d8b999a9092023703ec1508920359fd18ee6e124e",
+          "sibling": "0e1044183551a457c70f7f08b069acf2d7956aa095ec1f64fdff59ee1479d5f1",
           "right": true
         }
       ]
@@ -79,7 +85,7 @@
     {
       "record_id": "rec-c",
       "leaf_fields": {
-        "v": 2,
+        "v": 3,
         "kind": "usage",
         "record_id": "rec-c",
         "user_bucket": "995f5da3d70a20eb4570ee88f5eb30191d536643068b9af22494a175727399c4",
@@ -94,15 +100,18 @@
         "output_tokens": 50,
         "cache_read_tokens": 0,
         "cost_millicents": 7,
+        "credits_cost_millicents": 42,
+        "requested_model": "moonshotai/Kimi-K2.6-TEE",
+        "cache_creation_tokens": 0,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "37e9d8b049f5a226ed334d8f16e25ab997843dc6c47df4ee309b65c8bfbd8787",
+      "leaf_hash": "44efede0e86fadaf637da9e767c33efb21be054986cbd6b733c91e3886fde71f",
       "user_bucket": "995f5da3d70a20eb4570ee88f5eb30191d536643068b9af22494a175727399c4",
-      "user_root": "37e9d8b049f5a226ed334d8f16e25ab997843dc6c47df4ee309b65c8bfbd8787",
+      "user_root": "44efede0e86fadaf637da9e767c33efb21be054986cbd6b733c91e3886fde71f",
       "user_path": [],
       "epoch_path": [
         {
-          "sibling": "253f77cfa6ee3d5b2c8c85f1a826bfddde725c4e4cf092faaae286a4ff4e08c0",
+          "sibling": "a87038c984cb3e38230c52b712365e0f24f5fb6dbfe89088906a22815afcd009",
           "right": false
         }
       ]

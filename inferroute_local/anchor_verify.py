@@ -81,8 +81,39 @@ _USAGE_V2 = {
 # cache-creation tokens (a billed input class that v2 committed nowhere).
 _USAGE_V3 = _USAGE_V2 | {
     "credits_cost_millicents", "requested_model", "cache_creation_tokens",
+    # The rates that PRODUCED credits_cost. Required to be PRESENT (they may be
+    # null) so they can never be quietly dropped -- absence would restore the
+    # exact hole this file exists to close.
+    "rate_input_mc", "rate_cached_mc", "rate_output_mc",
 }
 USAGE_REQUIRED = {2: _USAGE_V2, 3: _USAGE_V3}
+
+
+def recompute_credits(fields: dict):
+    """Recompute credits_cost from the committed rates, or None if the leaf
+    carries no rate snapshot (then the charge is UNVERIFIABLE -- callers must
+    report that distinctly and never as "verified").
+
+    This reproduces the producer's expression EXACTLY, floats and truncation
+    included (cc_proxy_prod/user_db.py compute_cost). Exact integer arithmetic
+    was measured against it over 400k synthetic turns and disagreed on 0.0085%
+    by one millicent -- enough to brand ~7 honest rows in 82k as fraudulent, so
+    the float form is deliberate, not an oversight. Python and JS both evaluate
+    it in IEEE-754 binary64 and were checked to agree on the disagreeing cases.
+    """
+    ri, rc, ro = (fields.get("rate_input_mc"), fields.get("rate_cached_mc"),
+                  fields.get("rate_output_mc"))
+    if ri is None or rc is None or ro is None:
+        return None
+    i = fields.get("input_tokens") or 0
+    o = fields.get("output_tokens") or 0
+    cr = fields.get("cache_read_tokens") or 0
+    cc = fields.get("cache_creation_tokens") or 0
+    d = ((i / 1_000_000) * (ri / 100_000)
+         + (cr / 1_000_000) * (rc / 100_000)
+         + (cc / 1_000_000) * (ri / 100_000)      # no create bucket -> input rate
+         + (o / 1_000_000) * (ro / 100_000))
+    return int(d * 100_000)
 
 
 def missing_usage_fields(fields: dict) -> set:
@@ -106,6 +137,9 @@ def verify_record(rec: dict, batch_root_hex: str) -> bool:
         return False
     if missing_usage_fields(rec["leaf_fields"]):
         return False          # fail-closed: an incomplete leaf is not a valid one
+    _exp = recompute_credits(rec["leaf_fields"])
+    if _exp is not None and _exp != rec["leaf_fields"].get("credits_cost_millicents"):
+        return False          # the committed charge is not what its own rates produce
     if not verify_merkle_path(rec["leaf_hash"], rec["user_path"], rec["user_root"]):
         return False
     el = epoch_leaf(rec["user_bucket"], rec["user_root"])

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from inferroute_local import anchor_verify as _av
 import os
 import urllib.request
 import urllib.error
@@ -257,6 +258,7 @@ def cmd_verify(rest: list[str]) -> int:
     verified, mismatched, on_chain_missing = 0, [], []
     by_epoch: dict[int, dict] = defaultdict(lambda: {"count": 0, "tx": None})
     tot_cost = tot_in = tot_out = tot_cache = 0
+    charge_ok = charge_bad = charge_unverifiable = 0
     models: set[str] = set()
     sessions: set[str] = set()
     kinds: dict[str, int] = defaultdict(int)
@@ -293,6 +295,17 @@ def cmd_verify(rest: list[str]) -> int:
         if kind == "usage" and f.get("content_hash"):
             fingerprinted.append(f)
         if kind != "founding-capsule":
+            # Charge verification, reported SEPARATELY from structural validity.
+            # A row whose rate snapshot is absent cannot have its charge
+            # recomputed; counting it as checked would be the exact defect this
+            # release closes -- unverifiable must never render as verified.
+            _exp = _av.recompute_credits(f)
+            if _exp is None:
+                charge_unverifiable += 1
+            elif _exp == int(f.get('credits_cost_millicents') or 0):
+                charge_ok += 1
+            else:
+                charge_bad += 1
             tot_cost += int(f.get("cost_millicents") or 0)
             tot_in += int(f.get("input_tokens") or 0)
             tot_out += int(f.get("output_tokens") or 0)
@@ -355,6 +368,9 @@ def cmd_verify(rest: list[str]) -> int:
                 "output_tokens": tot_out, "cache_read_tokens": tot_cache,
                 "models": sorted(models), "sessions": len(sessions),
                 "kinds": dict(kinds),
+                "charge_recomputed_ok": charge_ok,
+                "charge_recomputed_MISMATCH": charge_bad,
+                "charge_unverifiable_no_rate_snapshot": charge_unverifiable,
                 "first_ms": ts_min, "last_ms": ts_max,
             },
         }, indent=2))

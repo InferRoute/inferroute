@@ -66,9 +66,11 @@ def _v2_fields(ub):
 
 
 def _v3_fields(ub):
-    return _v2_fields(ub) | {"v": 3, "credits_cost_millicents": 30,
+    return _v2_fields(ub) | {"v": 3, "credits_cost_millicents": 16,
                              "requested_model": "kimi",
-                             "cache_creation_tokens": 0}
+                             "cache_creation_tokens": 0,
+                             "rate_input_mc": 44000, "rate_cached_mc": 8900,
+                             "rate_output_mc": 240000}
 
 
 def _single_leaf_tree(fields):
@@ -95,6 +97,8 @@ def test_legacy_v2_leaf_still_verifies():
     "requested_model",           # without it, model substitution is unprovable
     "cache_creation_tokens",     # a billed input class v2 committed nowhere
     "cost_millicents",           # the exact 2026-08-18 repro
+    "rate_input_mc",             # without rates the charge cannot be recomputed
+    "rate_output_mc",
 ])
 def test_incomplete_v3_leaf_is_refused(dropped):
     f = {k: v for k, v in _v3_fields(av.user_bucket("u1")).items() if k != dropped}
@@ -114,3 +118,30 @@ def test_unversioned_leaf_is_refused():
 def test_non_usage_kinds_are_unaffected():
     f = {"kind": "founding_capsule", "v": 2, "x": 1}
     assert av.missing_usage_fields(f) == set()
+
+
+def test_committed_charge_must_match_its_own_rates():
+    """A leaf whose credits_cost disagrees with the rates it commits is not a
+    valid leaf -- this is the check that turns the rate fields from decoration
+    into verification."""
+    f = _v3_fields(av.user_bucket("u1"))
+    f["credits_cost_millicents"] = 999          # rates say 16
+    rec, root = _single_leaf_tree(f)
+    assert av.verify_record(rec, root) is False
+
+
+def test_recompute_matches_producer_arithmetic():
+    f = _v3_fields(av.user_bucket("u1"))
+    assert av.recompute_credits(f) == 16
+
+
+def test_null_rates_are_unverifiable_not_invalid():
+    """Rows predating rate capture must still verify structurally, but the
+    charge is NOT verified -- recompute_credits returns None so callers can
+    report them distinctly instead of counting them as checked."""
+    f = _v3_fields(av.user_bucket("u1"))
+    f["rate_input_mc"] = f["rate_cached_mc"] = f["rate_output_mc"] = None
+    f["credits_cost_millicents"] = 12345        # arbitrary: nothing to check it against
+    rec, root = _single_leaf_tree(f)
+    assert av.verify_record(rec, root) is True
+    assert av.recompute_credits(f) is None

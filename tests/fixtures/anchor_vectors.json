@@ -1,8 +1,8 @@
 {
   "note": "Cross-language anchor vectors. Python ir verify MUST reproduce leaf hashes, roots, commitment, and proofs from these inputs. Timestamps fixed.",
   "prev_commitment": "0000000000000000000000000000000000000000000000000000000000000000",
-  "batch_root": "52c6b433a6d4f76758c1e38f242c1e1a27cd3e137ad50f52e9de7adc2c7e740a",
-  "commitment": "06ac11659fabcd924b1d3080b8565323711e67d12c2650dd1bbeaa04107b1f27",
+  "batch_root": "6ed5ca9e5695cc42969893e33bf5173ad63c13c79e26a06605486ecac688c89c",
+  "commitment": "5544fcf29ea913b73cfd4580218fa6366eaa30b8a1211e0adb7013f90e34d0f0",
   "records": [
     {
       "record_id": "rec-a",
@@ -25,20 +25,23 @@
         "credits_cost_millicents": 42,
         "requested_model": "moonshotai/Kimi-K2.6-TEE",
         "cache_creation_tokens": 0,
+        "rate_input_mc": null,
+        "rate_cached_mc": null,
+        "rate_output_mc": null,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "3e0838a8d9724b878b48a2d31967ef387ed82f1cc4d38199b2b4e7972cababa9",
+      "leaf_hash": "0bae752b384bb327685eb4c90ad8ec5898b5403a6fd40bbab09b922809a667c9",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "9355755aab00d749df1b372840fc72459bad96edc53013fc23d14a8e033898ba",
+      "user_root": "9f8bd084174994d3694f32be8200b035f80ed42a7b8c8b8b61e714b943c07338",
       "user_path": [
         {
-          "sibling": "dbd28fa16bb5960fae1b93bbf89f439c1d3194820d2cbd6193ccfe001608beeb",
+          "sibling": "a488e653b519db0b6521f8defc4b801e4bb2bb7eebbd0c853a28ec5f2257d2bf",
           "right": true
         }
       ],
       "epoch_path": [
         {
-          "sibling": "0e1044183551a457c70f7f08b069acf2d7956aa095ec1f64fdff59ee1479d5f1",
+          "sibling": "b2e3bc5074e08d880315864e9340ee5ef44270b4a364c4fc66e1bfc16cc403a9",
           "right": true
         }
       ]
@@ -64,20 +67,23 @@
         "credits_cost_millicents": 42,
         "requested_model": "moonshotai/Kimi-K2.6-TEE",
         "cache_creation_tokens": 0,
+        "rate_input_mc": null,
+        "rate_cached_mc": null,
+        "rate_output_mc": null,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "dbd28fa16bb5960fae1b93bbf89f439c1d3194820d2cbd6193ccfe001608beeb",
+      "leaf_hash": "a488e653b519db0b6521f8defc4b801e4bb2bb7eebbd0c853a28ec5f2257d2bf",
       "user_bucket": "0f0a552a1e170118dbfc6a9430304d4b4b5de563cd1db9f98f834064ba19a3fe",
-      "user_root": "9355755aab00d749df1b372840fc72459bad96edc53013fc23d14a8e033898ba",
+      "user_root": "9f8bd084174994d3694f32be8200b035f80ed42a7b8c8b8b61e714b943c07338",
       "user_path": [
         {
-          "sibling": "3e0838a8d9724b878b48a2d31967ef387ed82f1cc4d38199b2b4e7972cababa9",
+          "sibling": "0bae752b384bb327685eb4c90ad8ec5898b5403a6fd40bbab09b922809a667c9",
           "right": false
         }
       ],
       "epoch_path": [
         {
-          "sibling": "0e1044183551a457c70f7f08b069acf2d7956aa095ec1f64fdff59ee1479d5f1",
+          "sibling": "b2e3bc5074e08d880315864e9340ee5ef44270b4a364c4fc66e1bfc16cc403a9",
           "right": true
         }
       ]
@@ -103,15 +109,18 @@
         "credits_cost_millicents": 42,
         "requested_model": "moonshotai/Kimi-K2.6-TEE",
         "cache_creation_tokens": 0,
+        "rate_input_mc": null,
+        "rate_cached_mc": null,
+        "rate_output_mc": null,
         "created_at_ms": 1783987200000
       },
-      "leaf_hash": "44efede0e86fadaf637da9e767c33efb21be054986cbd6b733c91e3886fde71f",
+      "leaf_hash": "36209a171d7e7d2a51755ef34acc04ddc1f37a7be224ea4cf8bdfc9c627cf743",
       "user_bucket": "995f5da3d70a20eb4570ee88f5eb30191d536643068b9af22494a175727399c4",
-      "user_root": "44efede0e86fadaf637da9e767c33efb21be054986cbd6b733c91e3886fde71f",
+      "user_root": "36209a171d7e7d2a51755ef34acc04ddc1f37a7be224ea4cf8bdfc9c627cf743",
       "user_path": [],
       "epoch_path": [
         {
-          "sibling": "a87038c984cb3e38230c52b712365e0f24f5fb6dbfe89088906a22815afcd009",
+          "sibling": "5dca86bc957b0cbad6367fa6c277bd60d87b84b1cb7c02755feec13591ee1e70",
           "right": false
         }
       ]

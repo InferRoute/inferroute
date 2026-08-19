@@ -168,6 +168,46 @@ class StatusApp(App):
         self.refresh_data()
 
 
+def _fetch_once(creds: Credentials) -> dict:
+    try:
+        r = httpx.get(f"{creds.api_url.rstrip('/')}/v1/usage",
+                      headers={"x-api-key": creds.api_key}, timeout=10.0)
+        r.raise_for_status()
+        return r.json()
+    except httpx.HTTPStatusError as e:
+        return {"error": f"HTTP {e.response.status_code}"}
+    except httpx.HTTPError as e:
+        return {"error": str(e)}
+
+
+def print_once(creds: Credentials, out=None) -> int:
+    """One plain-text snapshot, no TUI, no loop — the `git status` shape."""
+    out = out or sys.stdout
+    data = _fetch_once(creds)
+    if "error" in data:
+        out.write(f"ir status: {data['error']}\n")
+        return 1
+    balance = data.get("credit_balance")
+    cost_usd = (data.get("total_cost_mc", 0) or 0) / 100_000.0
+    out.write(
+        f"account   plan={data.get('plan') or '—'}  credits={balance if balance is not None else '—'}¢\n"
+        f"lifetime  requests={_fmt_count(data.get('total_requests', 0))}"
+        f"  in={_fmt_count(data.get('total_input_tokens', 0))}"
+        f"  out={_fmt_count(data.get('total_output_tokens', 0))}"
+        f"  spent=${cost_usd:.2f}\n"
+    )
+    recent = data.get("recent_requests") or data.get("recent") or []
+    for e in recent[:10]:
+        lat = e.get("latency_ms")
+        lat_str = "—" if lat is None else (f"{int(lat)}ms" if lat < 1000 else f"{lat/1000:.1f}s")
+        in_t, out_t = int(e.get("input_tokens", 0) or 0), int(e.get("output_tokens", 0) or 0)
+        out.write(f"  {_fmt_ts(e.get('created_at') or '')}  "
+                  f"{_short_model(e.get('routed_model') or e.get('requested_model') or '?'):<22} "
+                  f"{_fmt_count(in_t)}/{_fmt_count(out_t):<9} {lat_str:>7} "
+                  f"${int(e.get('cost', 0) or 0)/100_000:.3f}\n")
+    return 0
+
+
 def run(args=None) -> int:
     creds = load()
     if not creds.is_valid:
@@ -176,5 +216,12 @@ def run(args=None) -> int:
             "  Run `ir login` first.\n\n"
         )
         return 2
+    # The TUI is a live full-screen app that never exits on its own. Headless — a
+    # pipe, a CI step, another program — that was an infinite stream of escape
+    # codes (found on the first tester walk: `ir status` hung a scripted setup
+    # forever). No tty → one plain snapshot and exit, like `git status`; the live
+    # dashboard remains the interactive default. `--once` forces the same in a tty.
+    if "--once" in (args or []) or not sys.stdout.isatty():
+        return print_once(creds)
     StatusApp(creds).run()
     return 0

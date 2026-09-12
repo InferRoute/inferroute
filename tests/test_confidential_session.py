@@ -303,7 +303,7 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
     for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
-                   "No single hardware certificate names both this VM and its GPUs"):
+                   "vouched for by the enclave's measured software"):
         assert needle in pre, needle
     assert "attributed" not in pre
     # a refused session has no preamble to give (nothing verified)

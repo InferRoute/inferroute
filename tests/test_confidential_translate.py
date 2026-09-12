@@ -193,3 +193,21 @@ def test_lane_preamble_is_prepended_to_the_system_prompt_for_both_shapes():
     assert r["messages"][0] == {"role": "system", "content": pre}
     r = T.to_openai(_cc_request(system=None), KIMI)
     assert r["messages"][0]["role"] == "user", "no preamble, no system → no system message"
+
+
+def test_native_openai_passthrough_pins_model_drops_identifiers_and_prepends_preamble():
+    body = {"model": "whatever", "user": "u-123", "metadata": {"x": 1}, "stream": True, "temperature": 0.2,
+            "messages": [{"role": "system", "content": "You are Pi."}, {"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "bash", "parameters": {"type": "object"}}}]}
+    r = T.native_openai(body, KIMI, system_prefix="# lane\nfacts")
+    assert r["model"] == KIMI and "user" not in r and "metadata" not in r
+    assert r["messages"][0] == {"role": "system", "content": "# lane\nfacts\n\nYou are Pi."}
+    assert r["messages"][1] == {"role": "user", "content": "hi"} and r["tools"] == body["tools"] and r["temperature"] == 0.2
+    assert r["stream_options"] == {"include_usage": True}
+    r2 = T.native_openai({"messages": [{"role": "user", "content": "hi"}]}, KIMI, system_prefix="p")
+    assert r2["messages"][0] == {"role": "system", "content": "p"} and "stream_options" not in r2
+    u = {}
+    T.scan_openai_usage(b'data: {"usage": {"prompt_tokens": 10, "completion_tokens": 3, "prompt_tokens_details": {"cached_tokens": 4}}}\n', u)
+    assert u == {"input_tokens": 6, "output_tokens": 3, "cache_read_input_tokens": 4, "cache_creation_input_tokens": 0}
+    T.scan_openai_usage(b"data: [DONE]\n", u)
+    assert T.openai_error("x")["error"]["message"] == "x"

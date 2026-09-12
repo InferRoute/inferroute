@@ -230,6 +230,107 @@ class ConfidentialSession:
             return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed)
         return 200, {"content-type": "application/json"}, self._open_json(raw, sealed)
 
+    async def chat_completions(self, body: dict) -> tuple[int, dict, AsyncIterator[bytes]]:
+        """OpenAI request in → OpenAI response out, sealed AS-IS: the enclaves speak OpenAI
+        natively, so an agent that speaks it gets no translation at all (Henry, 2026-09-12:
+        native dialects end to end; translate only where the agent cannot). Only the model name
+        is pinned, `user`/`metadata` identifiers are dropped, and the lane preamble is prepended
+        to the system message."""
+        c = self.receipt.counters
+        streaming = bool(body.get("stream"))
+        try:
+            oai = translate.native_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
+            pinned, nonce = await self._take_nonce()
+            sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
+        except Refused as e:
+            c["errors"] += 1
+            return self._error(streaming, 503, str(e), openai=True)
+        except Exception as e:
+            c["errors"] += 1
+            return self._error(streaming, 500, f"could not seal the request: {e}", openai=True)
+        c["requests"] += 1
+        c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
+        c["ciphertext_bytes_sent"] += len(sealed.blob)
+        try:
+            status, headers, raw = await self.transport.invoke(
+                chute_id=self.chute_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
+        except httpx.HTTPError as e:
+            c["errors"] += 1
+            return self._error(streaming, 502, f"the relay is unreachable: {e}", openai=True)
+        if status != 200:
+            c["errors"] += 1
+            try:
+                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
+            except Exception as e:
+                detail = f"(body unreadable: {type(e).__name__})"
+            return self._error(streaming, status, f"upstream {status}: {detail}", openai=True)
+        if streaming:
+            return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed)
+        return 200, {"content-type": "application/json"}, self._open_json_native(raw, sealed)
+
+    async def _open_stream_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+        """The enclave's own OpenAI SSE, decrypted and passed through byte-for-byte; usage is
+        read off the stream for the receipt."""
+        opener = e2ee.StreamOpener(sealed.response_sk)
+        c = self.receipt.counters
+        linebuf = b""
+        usage: dict = {}
+        try:
+            async for chunk in raw:
+                plain = opener.feed(chunk)
+                if opener.passthrough:
+                    ev = opener.passthrough.pop()
+                    msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
+                    yield ("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode()
+                    c["errors"] += 1
+                    return
+                if not plain:
+                    continue
+                c["response_bytes_opened_here"] += len(plain)
+                linebuf += plain
+                while True:
+                    i = linebuf.find(b"\n")
+                    if i == -1:
+                        break
+                    line, linebuf = linebuf[:i + 1], linebuf[i + 1:]
+                    translate.scan_openai_usage(line, usage)
+                    yield line
+            tail = opener.flush()
+            if tail:
+                translate.scan_openai_usage(tail, usage)
+                yield tail
+            if linebuf:
+                yield linebuf
+        except e2ee.E2EEError as e:
+            c["errors"] += 1
+            yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
+            return
+        except (httpx.HTTPError, OSError) as e:
+            c["errors"] += 1
+            yield ("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode()
+            return
+        finally:
+            c["ciphertext_frames_received"] += opener.frames
+        self._account(usage)
+
+    async def _open_json_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+        c = self.receipt.counters
+        try:
+            data = await _drain(raw)
+            blob = base64.b64decode(json.loads(data)["e2e"]) if data[:1] == b"{" else data
+            resp = e2ee.open_response(blob, sealed.response_sk)
+        except (httpx.HTTPError, OSError) as e:
+            c["errors"] += 1
+            yield json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
+            return
+        except Exception as e:
+            c["errors"] += 1
+            yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
+            return
+        c["response_bytes_opened_here"] += len(data)
+        self._account(translate._usage(resp.get("usage")))
+        yield json.dumps(resp).encode()
+
     async def _open_stream(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
         opener = e2ee.StreamOpener(sealed.response_sk)
         tr = translate.StreamTranslator(self.model_short)
@@ -310,11 +411,14 @@ class ConfidentialSession:
             "session_id": self.session_id, "chute_id": self.chute_id, "model": self.upstream_model,
             "instance_id": self.pinned.instance_id if self.pinned else "", "usage": usage, "self_reported": True}))
 
-    def _error(self, streaming: bool, status: int, message: str) -> tuple[int, dict, AsyncIterator[bytes]]:
-        body = translate.error_body(message)
+    def _error(self, streaming: bool, status: int, message: str, openai: bool = False) -> tuple[int, dict, AsyncIterator[bytes]]:
+        body = translate.openai_error(message) if openai else translate.error_body(message)
 
         async def _gen():
-            yield (translate.sse("error", body) if streaming else json.dumps(body)).encode()
+            if openai:
+                yield (("data: " + json.dumps(body) + "\n\n") if streaming else json.dumps(body)).encode()
+            else:
+                yield (translate.sse("error", body) if streaming else json.dumps(body)).encode()
 
         return status, {"content-type": "text/event-stream" if streaming else "application/json"}, _gen()
 

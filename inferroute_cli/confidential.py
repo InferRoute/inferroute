@@ -155,9 +155,9 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
 
 # ───────────────────────── ir --confidential ─────────────────────────
 
-def launch(args: list[str]) -> int:
+def launch(args: list[str], agent: str = "claude") -> int:
     _need_extra()
-    from . import launch as launch_mod
+    from . import launch as launch_mod, agents as agents_mod
     from inferroute_local.confidential import display
     import httpx
     import uvicorn
@@ -174,21 +174,24 @@ def launch(args: list[str]) -> int:
                                      "confidential lane · choose an enclave model · USD per 1M tokens")
         if user_model is None:
             return 130
-        sys.stderr.write(f"\n  Run this next time directly:  ir --confidential --model {user_model}\n\n")
+        hint = f"ir {agent} --model {user_model}" if agent != "claude" else f"ir --model {user_model}"
+        sys.stderr.write(f"\n  Run this next time directly:  {hint}\n\n")
     alias = _resolve_model(user_model)
     if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
-        sys.stderr.write("\n  ir: refusing to launch a nested Claude Code session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
+        sys.stderr.write("\n  ir: refusing to launch a nested agent session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
         return 2
-    binary = launch_mod._require_claude_binary()
+    binary = agents_mod.binary_for(agent)
     console = _console()
-    # Resume: `--resume <id>` (also what `ir --resume`'s menu hands us for a confidential
-    # session) or `-c`. The resumed turns are sealed like fresh ones; a confidential
-    # session never silently continues on the plaintext lane.
-    mode, explicit_id, passthrough = resume_mod._parse(passthrough)
-    resuming = explicit_id or (resume_mod.newest(os.getcwd()) if mode == "continue" else None)
-    if mode == "continue" and not resuming:
-        sys.stderr.write("\n  ir: nothing to continue in this directory.\n\n")
-        return 1
+    # Resume (Claude Code only — the other agents manage their own sessions): `--resume <id>` or
+    # `-c`. The resumed turns are sealed like fresh ones; a confidential session never silently
+    # continues on the plaintext lane.
+    resuming = None
+    if agent == "claude":
+        mode, explicit_id, passthrough = resume_mod._parse(passthrough)
+        resuming = explicit_id or (resume_mod.newest(os.getcwd()) if mode == "continue" else None)
+        if mode == "continue" and not resuming:
+            sys.stderr.write("\n  ir: nothing to continue in this directory.\n\n")
+            return 1
     session_id = resuming or launch_mod._new_session_id()
     # What Claude Code shows as the model name — the one persistent on-screen reminder
     # of the lane. The local endpoint answers to this id; the enclave sees `alias.ref_key`.
@@ -204,7 +207,7 @@ def launch(args: list[str]) -> int:
                 # Claude Code's full-screen TUI replaces this screen the moment it starts, so give
                 # the panel a beat: Enter (or 20 s) to continue. The 🔒 status line inside Claude
                 # Code and `ir confidential show` carry the proof from there on.
-                await _pause("Enter to open Claude Code · the 🔒 status line and `ir confidential show` keep this proof")
+                await _pause(f"Enter to open {agent} · `ir confidential show` re-prints this proof any time")
             port = _free_port()
             server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
             server_task = asyncio.create_task(server.serve())
@@ -213,28 +216,42 @@ def launch(args: list[str]) -> int:
                     server_task.result()
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
-            env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{port}"
-            env["ANTHROPIC_AUTH_TOKEN"] = "ir-confidential-local"
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = shown_model
-            env["ANTHROPIC_SMALL_FAST_MODEL"] = shown_model
             env["IR_CONFIDENTIAL"] = "1"
-            env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
-                [h for h in [env.get("ANTHROPIC_CUSTOM_HEADERS", "").strip()] if h] + [f"x-inferroute-session: {session_id}"])
-            launch_mod._apply_autocompact_env(env, alias.model_id)
-            session.shown_model = shown_model
-            # Pinned inside Claude Code's TUI for the whole session (the pre-launch panel scrolls
-            # away in fullscreen mode): lane · model · enclave · when verified, plus a live
-            # "N sealed" count read from the receipt the session keeps updating. No network.
-            status_args = launch_mod._product_strip_settings_args(
-                _strip_prefix(receipt), passthrough, disable_connectors=True)
-            _attach_counter(status_args, receipt.path)
-            if resuming:
-                argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough, *status_args]
+            local = f"http://127.0.0.1:{port}"
+            session.shown_model = shown_model if agent == "claude" else alias.short
+            if agent == "claude":
+                env["ANTHROPIC_BASE_URL"] = local
+                env["ANTHROPIC_AUTH_TOKEN"] = "ir-confidential-local"
+                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = shown_model
+                env["ANTHROPIC_SMALL_FAST_MODEL"] = shown_model
+                env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
+                    [h for h in [env.get("ANTHROPIC_CUSTOM_HEADERS", "").strip()] if h] + [f"x-inferroute-session: {session_id}"])
+                launch_mod._apply_autocompact_env(env, alias.model_id)
+                # Pinned inside Claude Code's TUI for the whole session (the pre-launch panel
+                # scrolls away in fullscreen mode): lane · model · enclave · when verified, plus a
+                # live "N sealed" count read from the receipt the session keeps updating.
+                status_args = launch_mod._product_strip_settings_args(
+                    _strip_prefix(receipt), passthrough, disable_connectors=True)
+                _attach_counter(status_args, receipt.path)
+                if resuming:
+                    argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough, *status_args]
+                else:
+                    argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
+            elif agent == "pi":
+                argv = agents_mod.pi_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
+                                              alias=alias, upstream_name=f"{alias.model_id} [confidential]")
+            elif agent == "opencode":
+                argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
+                                                    alias=alias, upstream_name=f"{alias.model_id} [confidential]")
+            elif agent == "goose":
+                argv = agents_mod.goose_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local", alias=alias)
             else:
-                argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
-                launch_mod._record_launch(session_id, alias.model_id, "confidential")
-            console.print(f"[grey58]{'resuming' if resuming else 'launching'} claude on the confidential lane · "
-                          f"local endpoint 127.0.0.1:{port} · Ctrl-C twice in claude to leave[/]\n")
+                console.print(f"[red]unknown agent {agent}[/]")
+                return 2
+            if not resuming:
+                launch_mod._record_launch(session_id, alias.model_id, "confidential", agent=agent)
+            console.print(f"[grey58]{'resuming' if resuming else 'launching'} {agent} on the confidential lane · "
+                          f"local endpoint 127.0.0.1:{port}[/]\n")
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             proc = await asyncio.create_subprocess_exec(
                 *argv, env=env, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))

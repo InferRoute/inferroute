@@ -10,8 +10,12 @@ receipt this document describes; nothing on screen can be stronger than what is 
 ## What happens when you run it
 
 ```
-ir --confidential                       # default model: kimi-k2.6
-ir --confidential --model glm-5.2
+ir                                      # picker → enclave-backed picks open confidentially (the default)
+ir --model glm-5.2                      # confidential by default for enclave-backed models
+ir --model glm-5.2 --plain              # opt out: the standard lane, and it says so
+ir pi --model kimi-k2.6                 # Pi on the confidential lane (native OpenAI dialect, no translation)
+ir opencode run "…"                     # OpenCode, same
+ir goose                                # Goose, same
 ir --confidential -c                    # continue the latest session, still sealed
 ir confidential show                    # re-print the last session's panel
 ir confidential card                    # export the last panel as an SVG card
@@ -71,7 +75,10 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    instance's key, HKDF-SHA256, ChaCha20-Poly1305. The response is encrypted by the enclave to
    a per-request key that also never leaves your process. The byte format is the one Chutes'
    own clients speak; it is re-implemented here so every byte can be read in one file.
-5. **Translate on your device** (`translate.py`): Claude Code speaks the Anthropic Messages API;
+5. **Native dialects, translate only where the agent cannot.** The enclaves speak OpenAI Chat
+   Completions. Pi, OpenCode and Goose speak it too, so their requests are sealed **as-is** through
+   the local `/v1/chat/completions` — no translation anywhere. Claude Code speaks only the
+   Anthropic Messages API, so for it the client translates on your device (`translate.py`):
    the enclave speaks OpenAI Chat Completions. On the normal lane InferRoute translates; on this
    lane InferRoute cannot see the request, so the client does — including tools, tool results,
    images, streaming, and reasoning (`thinking` blocks). Claude Code's `metadata.user_id` is

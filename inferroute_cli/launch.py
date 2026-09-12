@@ -923,3 +923,32 @@ def _load_yaml(path: Path) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def launch_agent_plain(agent: str, model_id: str, creds: Credentials, extra_args: Iterable[str] = ()) -> None:
+    """Exec Pi or OpenCode on the STANDARD lane: straight at api.inferroute.ai with the user's
+    key (Anthropic Messages dialect, which both speak natively), tagged with a session id."""
+    from . import agents as agents_mod, models
+    binary = agents_mod.binary_for(agent)
+    if not creds.is_valid:
+        sys.stderr.write("\n ❌ ERROR: no inferroute API key found.\n    Run `ir login` first.\n\n")
+        sys.exit(2)
+    if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
+        sys.stderr.write("\n ir: refusing to launch a nested session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
+        sys.exit(2)
+    alias = models.get(model_id)
+    if alias is None:
+        sys.stderr.write(f"\n  `{model_id}` is not a known model short name (see `ir help`).\n\n")
+        sys.exit(2)
+    session_id = _new_session_id()
+    env = os.environ.copy()
+    headers = {"x-inferroute-session": session_id}
+    kw = dict(base_url=creds.api_url, api_key=creds.api_key, alias=alias, upstream_name=alias.model_id, headers=headers)
+    if agent == "pi":
+        argv = agents_mod.pi_env_argv(binary, env, list(extra_args), **kw)
+    else:
+        argv = agents_mod.opencode_env_argv(binary, env, list(extra_args), confidential=False, **kw)
+    _persist_session_link(creds.api_url, session_id)
+    _persist_last_model(alias.model_id)
+    _record_launch(session_id, alias.model_id, "standard", agent=agent)
+    os.execve(binary, argv, env)

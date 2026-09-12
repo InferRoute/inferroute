@@ -47,6 +47,33 @@ def create_app(session: ConfidentialSession) -> FastAPI:
     async def count_tokens():
         return JSONResponse(status_code=404, content={"type": "error", "error": {"type": "not_found_error", "message": "not available on the confidential lane"}})
 
+    @app.post("/v1/chat/completions")
+    async def chat_completions(request: Request):
+        """Native OpenAI dialect for agents that speak it (Pi, OpenCode, Goose): sealed as-is."""
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": {"message": "Invalid JSON", "type": "invalid_request_error"}})
+        try:
+            status, headers, stream = await session.chat_completions(body)
+        except Exception as e:
+            session.receipt.counters["errors"] += 1
+            msg = f"confidential lane: unexpected failure ({type(e).__name__}: {e}); nothing left this device in the clear"
+            if body.get("stream"):
+                return StreamingResponse(iter([("data: " + json.dumps({"error": {"message": msg, "type": "server_error"}}) + "\n\n").encode()]),
+                                         status_code=500, media_type="text/event-stream")
+            return JSONResponse(status_code=500, content={"error": {"message": msg, "type": "server_error"}})
+        if body.get("stream"):
+            return StreamingResponse(stream, status_code=status, headers=headers, media_type="text/event-stream")
+        chunks = []
+        async for c in stream:
+            chunks.append(c)
+        raw = b"".join(chunks)
+        try:
+            return JSONResponse(content=json.loads(raw), status_code=status)
+        except Exception:
+            return JSONResponse(content={"error": {"message": raw.decode("utf-8", "replace")[:500], "type": "server_error"}}, status_code=500)
+
     @app.get("/v1/models")
     async def models():
         shown = getattr(session, "shown_model", session.model_short)

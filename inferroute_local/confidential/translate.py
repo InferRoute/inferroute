@@ -468,3 +468,46 @@ def iter_sse_lines(chunks: Iterator[bytes]) -> Iterator[str]:
             buf = buf[i + 1:]
     if buf.strip():
         yield buf.decode("utf-8", "replace")
+
+
+# ───────────────────────────── native OpenAI (no translation) ─────────────────────────────
+
+def native_openai(body: dict, upstream_model: str, system_prefix: str = "") -> dict:
+    """An OpenAI Chat Completions request from an agent that speaks it natively: forwarded as-is
+    except that the model is pinned to the enclave's, identifying fields are dropped (`user`,
+    `metadata`), streams always ask for usage, and the lane preamble is prepended to the system
+    message (or becomes one)."""
+    req = {k: v for k, v in body.items() if k not in ("user", "metadata", "store")}
+    req["model"] = upstream_model
+    msgs = list(req.get("messages") or [])
+    if system_prefix.strip():
+        if msgs and msgs[0].get("role") in ("system", "developer") and isinstance(msgs[0].get("content"), str):
+            msgs[0] = {**msgs[0], "content": system_prefix.rstrip() + "\n\n" + msgs[0]["content"]}
+        else:
+            msgs.insert(0, {"role": "system", "content": system_prefix.rstrip()})
+    req["messages"] = msgs
+    if req.get("stream"):
+        so = dict(req.get("stream_options") or {})
+        so.setdefault("include_usage", True)
+        req["stream_options"] = so
+    return req
+
+
+def openai_error(message: str, kind: str = "server_error") -> dict:
+    return {"error": {"message": message, "type": kind, "code": None, "param": None}}
+
+
+def scan_openai_usage(line: bytes, usage: dict) -> None:
+    """Fold a streamed chunk's `usage` (if any) into `usage`, Anthropic-keyed, for the receipt."""
+    s = line.strip()
+    if not s.startswith(b"data:"):
+        return
+    payload = s[5:].strip()
+    if not payload or payload == b"[DONE]":
+        return
+    try:
+        obj = json.loads(payload)
+    except json.JSONDecodeError:
+        return
+    if isinstance(obj, dict) and obj.get("usage"):
+        usage.update(_usage(obj["usage"]))

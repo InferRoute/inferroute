@@ -85,6 +85,11 @@ Rendered on screen as stated limitations, never as passed checks:
 
 ## Verified live (2026-09-12)
 
+**Product path, deployed:** real Claude Code → `ir --confidential` → `api.inferroute.ai`
+(relay image `20260912-005639-0546461`) → GLM-5.2 and Kimi-K2.6 enclaves; Bash and Read tools
+ran; the relay's metadata log holds user, instance, sizes, timing — and no words.
+
+
 Both TEE model families, through the encrypted path, zero errors: `moonshotai/Kimi-K2.6-TEE`
 (vLLM) and `zai-org/GLM-5.2-TEE` (SGLang) — non-streaming, streaming with reasoning, and a full
 tool-call round trip. Then real Claude Code, headless, through `ir --confidential`: it ran `ls`

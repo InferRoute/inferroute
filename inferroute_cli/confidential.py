@@ -77,9 +77,11 @@ async def _open_session(alias, session_id: str, http, console):
             sys.exit(3)
         except httpx.HTTPStatusError as e:
             body = (e.response.text or "")[:200].replace("\n", " ")
-            console.print(f"[red]the carrier answered {e.response.status_code} while listing confidential models[/]"
-                          f"\n[grey58]{transport.name} · {body}[/]\n[grey58]Nothing was sent. Try again in a minute, "
-                          f"or set IR_CHUTES_API_KEY to go direct.[/]")
+            code = e.response.status_code
+            hint = ("your InferRoute key was refused — run `ir login`" if code in (401, 403)
+                    else "try again in a minute, or set IR_CHUTES_API_KEY to go direct")
+            console.print(f"[red]the carrier answered {code} while listing confidential models[/]"
+                          f"\n[grey58]{transport.name} · {body}[/]\n[grey58]Nothing was sent; {hint}.[/]")
             sys.exit(3)
         except httpx.HTTPError as e:
             console.print(f"[red]cannot reach the carrier ({type(e).__name__}: {e})[/]\n[grey58]Nothing was sent.[/]")
@@ -260,6 +262,6 @@ def run(rest: list[str]) -> int:
     if ns.action == "card":
         out = Path(ns.svg) if ns.svg else Path(r.path).with_suffix(".svg")
         display.save_svg(r, out)
-        console.print(f"[bold]card written:[/] {out}")
+        print(f"card written: {out}")
         return 0
     return 2

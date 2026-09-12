@@ -131,15 +131,16 @@ async def _open_session(alias, session_id: str, http, console):
 
 
 def _strip_prefix(receipt) -> str:
-    """The static half of the status line: `🔒 confidential · kimi-k2.6 · enclave d6af7f39 verified 01:04Z`."""
-    inst = (receipt.instance or {}).get("id", "")[:8]
+    """The static half of the status line: `🔒 confidential · kimi-k2.6 · enclave verified 01:04Z`.
+    No instance id here (it is on the receipt; the status line is the thing people screenshot)."""
     when = (receipt.verified_at or receipt.started_at or "")[11:16]
-    return f"🔒 confidential · {receipt.model_short} · enclave {inst} verified {when}Z"
+    return f"🔒 confidential · {receipt.model_short} · enclave verified {when}Z"
 
 
 def _attach_counter(status_args: list[str], receipt_path: str) -> None:
-    """Append ` · N sealed` to the status-line command, read from the receipt on every render
-    (the session rewrites it after each turn). Dependency-free shell; exit status stays 0."""
+    """Append the live privacy figures to the status-line command, read from the receipt on every
+    render (the session rewrites it after each turn): how much was sealed on this device and
+    that nothing left in the clear. Dependency-free shell; exit status stays 0."""
     import json
     import shlex
     if len(status_args) != 2 or not receipt_path:
@@ -150,8 +151,9 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
     except (ValueError, KeyError, TypeError):
         return
     rp = shlex.quote(receipt_path)
-    cmd += (f"; n=$(grep -o '\"requests\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
-            f"[ -n \"$n\" ] && printf ' · %s sealed' \"$n\" || true")
+    cmd += (f"; b=$(grep -o '\"plaintext_bytes_sealed_here\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
+            f"if [ -n \"$b\" ]; then if [ \"$b\" -ge 1048576 ]; then printf ' · %s.%s MB sealed here' $((b/1048576)) $(( (b%1048576)*10/1048576 )); "
+            f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · 0 B in the clear'; fi || true")
     settings["statusLine"]["command"] = cmd
     status_args[1] = json.dumps(settings)
 

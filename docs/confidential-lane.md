@@ -23,8 +23,8 @@ ir confidential models                  # models that can run confidentially
 ```
 
 Inside Claude Code the model reads `kimi-k2.6 [confidential]` and the status line at the bottom
-stays pinned for the whole session: `🔒 confidential · kimi-k2.6 · enclave d6af7f39 verified 01:04Z · N sealed`
-(the count comes from the receipt, which the session rewrites after every turn). Without `--model`
+stays pinned for the whole session: `🔒 confidential · kimi-k2.6 · enclave verified 01:04Z · 391 KB sealed here · 0 B in the clear`
+(the figures come from the receipt, which the session rewrites after every turn). Without `--model`
 the usual picker opens, narrowed to enclave-capable models; before Claude Code takes the screen the
 panel waits for Enter (or 20 s).
 

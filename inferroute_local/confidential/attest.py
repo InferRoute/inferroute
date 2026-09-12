@@ -86,11 +86,8 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("gpu-pairing", "No single hardware certificate names both this VM and its GPUs (that arrives with "
-                    "TDISP / TDX Connect, which the provider does not yet expose). What is checked: the GPU "
-                    "reports were requested from inside the verified VM, answered this session's challenge "
-                    "and travel in the VM's signed evidence; in NVIDIA confidential-computing mode the GPU "
-                    "that signs a report is the GPU holding the encrypted session the work runs through."),
+    ("gpu-pairing", "The GPU–VM pairing is vouched for by the enclave's measured software, not by a separate "
+                    "hardware certificate (that needs TDISP / TDX Connect, not yet offered by the provider)."),
     ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
                          "the words are not."),
 )

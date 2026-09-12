@@ -127,6 +127,10 @@ def situational_limitations(checks: dict) -> list[tuple[str, str]]:
                                   "the kernel command line and the initial RAM filesystem. What is not recomputed "
                                   "is the measurement over the root filesystem, which is encrypted in the "
                                   "published image."))
+    elif "signed with a key held offline" in why:
+        out.append(("signed-build", "This enclave build was authorised by InferRoute after your client was "
+                                    "released, using a key kept off our servers — so a compromise of them "
+                                    "could not have added it. It has not yet been independently reproduced."))
     elif "PENDING" in why:
         out.append(("pending-build", "This enclave build was served to your client at run time rather than shipped in "
                                      "a released version of it. InferRoute has not reviewed it and has reproduced "
@@ -325,8 +329,11 @@ def check_build_recorded(q: dict) -> Check:
     if b is not None:
         st = b.get("status", "observed")
         repro = b.get("reproduced") or []
-        if b.get("origin") != "bundled":
-            how = ("PENDING — served at run time, not part of InferRoute's shipped record. "
+        if b.get("origin") == "signed":
+            how = ("recorded by InferRoute and signed with a key held offline — served at run time, "
+                   "but only InferRoute could have authorised it")
+        elif b.get("origin") != "bundled":
+            how = ("PENDING — served at run time, unsigned, so not part of InferRoute's record. "
                    "It has not been reviewed and nothing about it has been reproduced here")
         elif st == "reviewed":
             how = "reviewed by InferRoute"

@@ -1,7 +1,6 @@
 """`ir --confidential` and `ir confidential …` — the confidential lane.
 
     ir --confidential [--model kimi-k2.6] [claude flags]   verify an enclave, pin it, launch
-    ir confidential verify [--model M]                     show every instance's checks, send nothing
     ir confidential show                                   re-print the last session's panel
     ir confidential card [--svg PATH]                      export the last session's panel as an SVG card
     ir confidential models                                 which models can run confidentially
@@ -73,13 +72,13 @@ async def _open_session(alias, session_id: str, http, console):
         try:
             catalog = await transport.models()
         except RelayUnavailable as e:
-            console.print(f"[red]{e}[/]\n[grey58]For now set IR_CHUTES_API_KEY to use your own Chutes key directly.[/]")
+            console.print(f"[red]{e}[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
         except httpx.HTTPStatusError as e:
             body = (e.response.text or "")[:200].replace("\n", " ")
             code = e.response.status_code
             hint = ("your InferRoute key was refused — run `ir login`" if code in (401, 403)
-                    else "try again in a minute, or set IR_CHUTES_API_KEY to go direct")
+                    else "try again in a minute")
             console.print(f"[red]the carrier answered {code} while listing confidential models[/]"
                           f"\n[grey58]{transport.name} · {body}[/]\n[grey58]Nothing was sent; {hint}.[/]")
             sys.exit(3)
@@ -193,9 +192,6 @@ def launch(args: list[str]) -> int:
 def run(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="ir confidential", description="the confidential lane")
     sub = ap.add_subparsers(dest="action")
-    v = sub.add_parser("verify", help="Verify every instance of a model from this device. Sends nothing.")
-    v.add_argument("--model", default=None)
-    v.add_argument("--json", action="store_true")
     sub.add_parser("show", help="Re-print the last session's panel.")
     c = sub.add_parser("card", help="Export the last session's panel as an SVG card.")
     c.add_argument("--svg", default=None, help="output path (default: next to the receipt)")
@@ -216,53 +212,6 @@ def run(rest: list[str]) -> int:
                 print(f"  ir --confidential --model {a.short:<18} {a.label}")
         print()
         return 0
-
-    if ns.action == "verify":
-        import httpx
-        import json
-        from inferroute_local.confidential import attest
-        from inferroute_local.confidential.transport import make_transport
-        from . import config as cfg
-        alias = _resolve_model(ns.model)
-
-        async def _v():
-            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as http:
-                creds = cfg.load()
-                chute_id = None
-                try:
-                    t = make_transport(http, api_url=creds.api_url, api_key=creds.api_key)
-                except ValueError as e:
-                    console.print(f"[red]{e}[/]")
-                    return 2
-                try:
-                    chute_id = next((m["chute_id"] for m in await t.models() if m.get("name") == alias.ref_key), None)
-                except Exception:
-                    pass
-                if not chute_id:
-                    r = await http.get("https://llm.chutes.ai/v1/models", timeout=30)
-                    chute_id = next((m["chute_id"] for m in r.json().get("data", []) if m.get("id") == alias.ref_key), None)
-                if not chute_id:
-                    console.print(f"[red]cannot resolve {alias.ref_key} to a chute[/]")
-                    return 3
-                # the encryption keys come from the carrier (relay or direct); the quote is checked
-                # against them, so `verify` exercises exactly what a session would seal to
-                keys: dict = {}
-                try:
-                    e2 = await t.instances(chute_id)
-                    keys = {i["instance_id"]: i.get("e2e_pubkey") or "" for i in e2.get("instances") or []}
-                except Exception as e:
-                    console.print(f"[grey58]could not list encryption keys via {t.name} ({e}); the key-binding check will fail for every instance[/]")
-                with console.status("[bold]fetching evidence from Chutes with a fresh challenge…", spinner="dots"):
-                    fleet = await attest.fetch_and_verify(chute_id, http, e2e_pubkeys=keys)
-                if ns.json:
-                    print(json.dumps(fleet.as_dict(), indent=1))
-                else:
-                    display.render_fleet(fleet, console)
-                    console.print(f"\n[grey58]{len(fleet.verified_ids)} of {len(fleet.instances)} verified. "
-                                  f"This is fleet-level evidence; a session pins one verified instance and seals to it.[/]")
-                return 0 if fleet.verified_ids else 1
-
-        return asyncio.run(_v())
 
     r = receipt_mod.latest()
     if r is None:

@@ -71,15 +71,15 @@ class ConfidentialSession:
         except Exception as e:
             return self._refuse(f"could not list e2ee-capable instances via {self.transport.name}: {e}")
         keys = _keys_of(e2)
-        say("fetching the fleet's attestation evidence from Chutes (this is the slow part)…")
+        say("fetching the enclave fleet's attestation evidence (this is the slow part)…")
         try:
             # the quote is checked against the very keys we will seal to
             self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=keys)
         except Exception as e:
-            return self._refuse(f"could not fetch attestation evidence from Chutes: {e}")
+            return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {e}")
         self._verified_at = time.time()
         verified = self.fleet.verified_ids
-        say(f"verified {len(verified)} of {len(self.fleet.instances)} instances…")
+        say("evidence verified; pinning an enclave for this session…")
         self._absorb_pool(e2)
         eligible = [i for i in self._pool if i in verified]
         self.receipt.fleet = {"instances": len(self.fleet.instances), "verified": len(verified),

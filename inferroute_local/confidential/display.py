@@ -90,7 +90,7 @@ def flow_diagram(r: Receipt) -> Text:
     if not direct:
         line.append("InferRoute ", style="bold")
         line.append("──────▶ ", style=DIM)
-    line.append("Chutes ", style="bold")
+    line.append("enclave operator ", style="bold")
     line.append("──────▶ ", style=DIM)
     line.append("🔒 enclave", style=f"bold {ACCENT}")
     line.append("\n  every arrow carries ciphertext only", style=DIM)
@@ -99,7 +99,7 @@ def flow_diagram(r: Receipt) -> Text:
     line.append(" · ")
     line.append("the enclave", style=f"bold {ACCENT}")
     line.append("\n  cannot:              ", style=DIM)
-    parts = ([] if direct else ["InferRoute"]) + ["Chutes", "the cloud host", "the network"]
+    parts = ([] if direct else ["InferRoute"]) + ["the enclave operator", "the cloud host", "the network"]
     line.append(" · ".join(parts), style=DIM)
     return line
 
@@ -120,12 +120,10 @@ def facts_table(r: Receipt) -> Table:
     t.add_column(style=DIM, width=10)
     t.add_column()
     inst = r.instance or {}
-    fleet = r.fleet or {}
     t.add_row("Model", Text.from_markup(_title_model(r)))
     gpus = inst.get("gpu_count") or 0
     t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA GPU (confidential computing)")
-    t.add_row("Instance", f"{_short(inst.get('id', ''))}  · pinned for this session · "
-                          f"{fleet.get('eligible', 0)} of {fleet.get('instances', 0)} verified & sealable")
+    t.add_row("Instance", f"{_short(inst.get('id', ''))}  · verified, then pinned for this whole session")
     t.add_row("Build", f"MRTD {(inst.get('mrtd') or '')[:16]}…  · matches the provider's published measurements")
     t.add_row("Carrier", r.transport)
     return t
@@ -162,7 +160,7 @@ def render_refusal(r: Receipt, console: Console | None = None) -> None:
         Text(f"Reason: {r.refusal or r.verdict}", style="bold"),
         Text(""),
         Text("The confidential lane refuses rather than degrades: if the enclave cannot be verified from\n"
-             "this device, no request leaves it. Run `ir confidential verify` to see every instance's checks.", style=DIM),
+             "this device, no request leaves it. Try again in a minute; if it persists, tell us.", style=DIM),
         Text(""),
         Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)),
     )

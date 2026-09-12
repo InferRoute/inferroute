@@ -66,14 +66,14 @@ class Transport:
 
 
 class DirectChutes(Transport):
-    name = "direct to Chutes (your own key — InferRoute is not in the path)"
+    name = "direct to the enclave operator (your own key — InferRoute is not in the path)"
 
     def __init__(self, http: httpx.AsyncClient, api_key: str | None = None, api_base: str = CHUTES_API):
         super().__init__(http)
         self.api_key = api_key or os.environ.get("IR_CHUTES_API_KEY", "")
         self.api_base = api_base.rstrip("/")
         if not self.api_key:
-            raise ValueError("DirectChutes needs a Chutes API key (IR_CHUTES_API_KEY)")
+            raise ValueError("direct carrier needs an operator API key (IR_CHUTES_API_KEY)")
 
     def _auth(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}", "User-Agent": UA}

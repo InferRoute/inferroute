@@ -83,3 +83,12 @@ def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it(tmp_path,
     import os
     assert os.path.islink(d + "/settings.json") and os.path.realpath(d + "/sessions") == str(user / "sessions")
     assert models.get("kimi-k2.6") is not None
+
+
+def test_goose_adapter_points_its_openai_provider_at_the_endpoint_and_honours_run(monkeypatch, tmp_path):
+    monkeypatch.setattr("inferroute_cli.launch._write_goose_config", lambda *a, **k: None)
+    env = {}
+    argv = agents.goose_env_argv("/bin/goose", env, ["run", "-t", "hi", "--no-session"], base_url="http://127.0.0.1:5", api_key="k", alias=_Alias())
+    assert argv == ["/bin/goose", "run", "-t", "hi", "--no-session"]
+    assert env["OPENAI_BASE_URL"] == "http://127.0.0.1:5" and env["GOOSE_PROVIDER"] == "openai" and env["GOOSE_MODEL"] == "kimi-k2.6"
+    assert agents.goose_env_argv("/bin/goose", {}, ["--name", "x"], base_url="u", api_key="k", alias=_Alias())[:2] == ["/bin/goose", "session"]

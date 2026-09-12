@@ -132,4 +132,8 @@ def goose_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: 
     env["GOOSE_PROVIDER"] = "openai"
     env["GOOSE_MODEL"] = alias.short
     _write_goose_config(alias.short, base_url, api_key)
+    # `goose session` (interactive) by default; a leading `run`/`session` from the user is honoured
+    # so `ir goose run -t "…" --no-session` works headless like plain goose.
+    if passthrough and passthrough[0] in ("run", "session"):
+        return [binary, *passthrough]
     return [binary, "session", *passthrough]

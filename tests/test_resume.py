@@ -140,3 +140,17 @@ def test_menu_enter_returns_chosen_session_id():
             return app.chosen
 
     assert asyncio.run(drive()) == "s2"
+
+
+def test_a_confidential_session_resumes_on_the_confidential_lane(tmp_path, monkeypatch):
+    """The resume path must never replay a sealed session's transcript through the plaintext
+    lane: an index record with lane=confidential hands off to confidential.launch."""
+    from inferroute_cli import resume, launch, confidential
+    monkeypatch.setattr(launch, "launch_index", lambda: {"sess-1": {"model": "Kimi-K2.6", "lane": "confidential"}})
+    called = {}
+    monkeypatch.setattr(confidential, "launch", lambda args: (called.__setitem__("args", args), 0)[1])
+    plain = {}
+    monkeypatch.setattr(resume, "_launch", lambda *a, **k: (plain.__setitem__("hit", True), 0)[1])
+    rc = resume.handle(["--resume", "sess-1", "--verbose"])
+    assert rc == 0 and "hit" not in plain
+    assert called["args"] == ["--model", "kimi-k2.6", "--verbose", "--resume", "sess-1"]

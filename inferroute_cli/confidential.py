@@ -100,6 +100,7 @@ def launch(args: list[str]) -> int:
     from inferroute_local.confidential.server import create_app
 
     from .main import _extract_model_override
+    from . import resume as resume_mod
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
     alias = _resolve_model(user_model)
@@ -108,7 +109,18 @@ def launch(args: list[str]) -> int:
         return 2
     binary = launch_mod._require_claude_binary()
     console = _console()
-    session_id = launch_mod._new_session_id()
+    # Resume: `--resume <id>` (also what `ir --resume`'s menu hands us for a confidential
+    # session) or `-c`. The resumed turns are sealed like fresh ones; a confidential
+    # session never silently continues on the plaintext lane.
+    mode, explicit_id, passthrough = resume_mod._parse(passthrough)
+    resuming = explicit_id or (resume_mod.newest(os.getcwd()) if mode == "continue" else None)
+    if mode == "continue" and not resuming:
+        sys.stderr.write("\n  ir: nothing to continue in this directory.\n\n")
+        return 1
+    session_id = resuming or launch_mod._new_session_id()
+    # What Claude Code shows as the model name — the one persistent on-screen reminder
+    # of the lane. The local endpoint answers to this id; the enclave sees `alias.ref_key`.
+    shown_model = f"{alias.short} [confidential]"
 
     async def _run() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
@@ -126,14 +138,20 @@ def launch(args: list[str]) -> int:
             env = os.environ.copy()
             env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{port}"
             env["ANTHROPIC_AUTH_TOKEN"] = "ir-confidential-local"
-            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = alias.short
-            env["ANTHROPIC_SMALL_FAST_MODEL"] = alias.short
+            env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = shown_model
+            env["ANTHROPIC_SMALL_FAST_MODEL"] = shown_model
             env["IR_CONFIDENTIAL"] = "1"
             env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
                 [h for h in [env.get("ANTHROPIC_CUSTOM_HEADERS", "").strip()] if h] + [f"x-inferroute-session: {session_id}"])
             launch_mod._apply_autocompact_env(env, alias.model_id)
-            argv = [binary, "--model", alias.short, "--session-id", session_id, *passthrough]
-            console.print(f"[grey58]launching claude on the confidential lane · local endpoint 127.0.0.1:{port}[/]\n")
+            session.shown_model = shown_model
+            if resuming:
+                argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough]
+            else:
+                argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough]
+                launch_mod._record_launch(session_id, alias.model_id, "confidential")
+            console.print(f"[grey58]{'resuming' if resuming else 'launching'} claude on the confidential lane · "
+                          f"local endpoint 127.0.0.1:{port} · Ctrl-C twice in claude to leave[/]\n")
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             proc = await asyncio.create_subprocess_exec(
                 *argv, env=env, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
@@ -170,9 +188,11 @@ def run(rest: list[str]) -> int:
 
     if ns.action == "models":
         from . import models as models_mod
+        print()
         for a in models_mod.all_aliases():
             if (a.ref_key or "").endswith("-TEE"):
-                console.print(f"  ir --confidential --model [bold]{a.short:<14}[/] {a.label}")
+                print(f"  ir --confidential --model {a.short:<18} {a.label}")
+        print()
         return 0
 
     if ns.action == "verify":

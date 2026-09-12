@@ -78,11 +78,13 @@ def _user_message(msg: dict, out: list) -> None:
     texts, parts, has_image = [], [], False
     for b in content or []:
         if isinstance(b, str):
-            texts.append(b); parts.append({"type": "text", "text": b})
+            texts.append(b)
+            parts.append({"type": "text", "text": b})
         elif not isinstance(b, dict):
             continue
         elif b.get("type") == "text":
-            texts.append(b.get("text") or ""); parts.append({"type": "text", "text": b.get("text") or ""})
+            texts.append(b.get("text") or "")
+            parts.append({"type": "text", "text": b.get("text") or ""})
         elif b.get("type") == "image":
             url = _image_url(b)
             if url:

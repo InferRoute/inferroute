@@ -3,13 +3,11 @@ instance is BOTH verified and sealable, seals every request, opens every answer 
 streaming shapes, exactly as the gateway sends them), refreshes nonces, switches only to verified
 instances, and refuses rather than degrades."""
 import asyncio
-import base64
 import json
-import time
 
 import pytest
 
-from inferroute_local.confidential import attest, e2ee, session as S
+from inferroute_local.confidential import attest, session as S
 from tests.confidential_fake_enclave import FakeEnclave
 
 
@@ -96,7 +94,7 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     assert r.fleet == {"instances": 3, "verified": 2, "e2ee_capable": 2, "eligible": 2, "failed_instance_ids": []}
     assert all(c["ok"] for c in r.checks.values()) and set(r.checks) == set(attest.REQUIRED)
     assert r.claim and r.path and r.e2ee["kem"].startswith("ML-KEM-768")
-    assert any(l["id"] == "attributed-key" for l in r.limitations), "the honest gap is always on the receipt"
+    assert any(lim["id"] == "attributed-key" for lim in r.limitations), "the honest gap is always on the receipt"
 
 
 def test_refuses_when_verified_and_sealable_sets_are_disjoint(world):
@@ -149,7 +147,7 @@ def test_stream_round_trip_with_a_tool_call(world):
     st, h, body = asyncio.run(_msg(s, {"model": "fake", "stream": True, "messages": [{"role": "user", "content": "go"}],
                                        "tools": [{"name": "Bash", "input_schema": {"type": "object"}}]}))
     assert st == 200 and h["content-type"] == "text/event-stream"
-    evs = [json.loads(l[6:]) for l in body.decode().split("\n") if l.startswith("data: ")]
+    evs = [json.loads(line[6:]) for line in body.decode().split("\n") if line.startswith("data: ")]
     types = [e["type"] for e in evs]
     assert types[0] == "message_start" and types[-1] == "message_stop"
     starts = [e["content_block"] for e in evs if e["type"] == "content_block_start"]

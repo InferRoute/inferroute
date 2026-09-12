@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import AsyncIterator, Awaitable, Callable
+from typing import AsyncIterator, Callable
 
 import httpx
 

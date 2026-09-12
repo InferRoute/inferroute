@@ -33,6 +33,26 @@ def _kb(n: int) -> str:
     return f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.2f} MB"
 
 
+def _when(r: Receipt) -> str:
+    """'moments ago' only while it is true; a re-printed receipt names its time."""
+    import datetime as dt
+    try:
+        t = dt.datetime.strptime(r.verified_at or r.started_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return "at session start"
+    age = (dt.datetime.now(dt.timezone.utc) - t).total_seconds()
+    if age < 120:
+        return "moments ago"
+    if age < 3600:
+        return f"{int(age // 60)} minutes ago"
+    return "on " + t.strftime("%Y-%m-%d at %H:%M UTC")
+
+
+def _home(path: str) -> str:
+    h = str(Path.home())
+    return "~" + path[len(h):] if path.startswith(h) else path
+
+
 def _title_model(r: Receipt) -> str:
     fam = r.upstream_model.split("/")[-1].replace("-TEE", "")
     return f"{fam}  [{DIM}]({r.upstream_model})[/]"
@@ -113,7 +133,7 @@ def render_panel(r: Receipt, console: Console | None = None) -> None:
         render_refusal(r, console)
         return
     head = Text("Your words are encrypted on this machine and can only be opened inside a hardware enclave "
-                "that this machine verified itself, moments ago — not on anyone's word.", style="bold")
+                f"that this machine verified itself, {_when(r)} — not on anyone's word.", style="bold")
     body = Group(
         head, Text(""),
         facts_table(r), Text(""),
@@ -123,9 +143,9 @@ def render_panel(r: Receipt, console: Console | None = None) -> None:
         flow_diagram(r), Text(""),
         Text("What this does not prove — we would rather say it than let you assume it", style=f"bold {AMBER}"),
         limitations_block(r), Text(""),
-        Text.assemble(("Receipt  ", DIM), (str(r.path), DIM)),
+        Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)),
     )
-    console.print(Panel(body, title=f"[bold]🔒 InferRoute · Confidential session[/]",
+    console.print(Panel(body, title="[bold]🔒 InferRoute · Confidential session[/]",
                         subtitle=f"[{DIM}]verified {r.verified_at or r.started_at} · session {r.session_id[:8]}[/]",
                         border_style=ACCENT, box=box.ROUNDED, width=WIDTH, padding=(1, 2)))
 
@@ -140,7 +160,7 @@ def render_refusal(r: Receipt, console: Console | None = None) -> None:
         Text("The confidential lane refuses rather than degrades: if the enclave cannot be verified from\n"
              "this device, no request leaves it. Run `ir confidential verify` to see every instance's checks.", style=DIM),
         Text(""),
-        Text.assemble(("Receipt  ", DIM), (str(r.path), DIM)),
+        Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)),
     )
     console.print(Panel(body, title="[bold red]⛔ InferRoute · Confidential session refused[/]",
                         border_style="red", box=box.ROUNDED, width=WIDTH, padding=(1, 2)))
@@ -158,7 +178,7 @@ def render_summary(r: Receipt, console: Console | None = None) -> None:
         t.append(f"  ·  {c['instance_switches']} instance switch(es)", style=AMBER)
     if c.get("errors"):
         t.append(f"  ·  {c['errors']} error(s)", style="red")
-    t.append(f"\n   plaintext that left this device: 0 bytes  ·  receipt: {r.path}", style=DIM)
+    t.append(f"\n   plaintext that left this device: 0 bytes  ·  receipt: {_home(str(r.path))}", style=DIM)
     console.print(t)
 
 

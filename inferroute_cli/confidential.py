@@ -99,6 +99,8 @@ async def _open_session(alias, session_id: str, http, console):
             sys.exit(3)
         except httpx.HTTPStatusError as e:
             body = (e.response.text or "")[:200].replace("\n", " ")
+            import re
+            body = re.sub(r"https?://\S+", "<url>", body)
             code = e.response.status_code
             hint = ("your InferRoute key was refused — run `ir login`" if code in (401, 403)
                     else "try again in a minute")
@@ -106,7 +108,7 @@ async def _open_session(alias, session_id: str, http, console):
                           f"\n[grey58]{transport.name} · {body}[/]\n[grey58]Nothing was sent; {hint}.[/]")
             sys.exit(3)
         except httpx.HTTPError as e:
-            console.print(f"[red]cannot reach the carrier ({type(e).__name__}: {e})[/]\n[grey58]Nothing was sent.[/]")
+            console.print(f"[red]cannot reach the carrier ({type(e).__name__})[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
     chute_id = next((m["chute_id"] for m in catalog if m.get("name") == alias.ref_key), None)
     if not chute_id:
@@ -120,7 +122,8 @@ async def _open_session(alias, session_id: str, http, console):
         receipt = await session.open(progress=lambda s: status.update(f"[bold]{s}"))
     except Exception as e:  # session.open() refuses on expected failures; anything else is a bug, shown cleanly
         status.stop()
-        console.print(f"[red]could not open the confidential session ({type(e).__name__}: {e})[/]\n[grey58]Nothing was sent.[/]")
+        from inferroute_local.confidential.session import public_reason
+        console.print(f"[red]could not open the confidential session ({public_reason(e)})[/]\n[grey58]Nothing was sent.[/]")
         sys.exit(3)
     finally:
         status.stop()

@@ -303,7 +303,7 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
     for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
-                   "no separate hardware proof of the pairing"):
+                   "No single hardware certificate names both this VM and its GPUs"):
         assert needle in pre, needle
     assert "attributed" not in pre
     # a refused session has no preamble to give (nothing verified)
@@ -378,3 +378,26 @@ def test_native_openai_round_trip_is_sealed_and_passed_through_untranslated(worl
 async def _oai(s, body):
     st, h, it = await s.chat_completions(body)
     return st, h, await _drain(it)
+
+
+def test_public_reason_never_leaks_urls_or_hosts():
+    import httpx
+    from inferroute_local.confidential.session import public_reason
+    req = httpx.Request("GET", "https://api.example-provider.ai/chutes/abc/evidence?nonce=deadbeef")
+    e = httpx.HTTPStatusError("Client error '429 Too Many Requests' for url 'https://api.example-provider.ai/x'", request=req, response=httpx.Response(429, request=req))
+    r = public_reason(e)
+    assert r == "the attestation service answered 429 (rate-limited — try again in a minute)"
+    assert "http" not in r and "example-provider" not in r
+    r2 = public_reason(RuntimeError("boom at https://api.example-provider.ai/path and host api.example-provider.ai"))
+    assert "https://" not in r2 and "example-provider.ai" not in r2 and r2.startswith("RuntimeError")
+    assert public_reason(httpx.ConnectError("x", request=req)) == "the attestation service is unreachable (ConnectError)"
+
+
+def test_a_429_on_evidence_refuses_with_a_clean_reason(world, monkeypatch):
+    import httpx
+    async def boom(*a, **k):
+        req = httpx.Request("GET", "https://api.example-provider.ai/chutes/abc/evidence")
+        raise httpx.HTTPStatusError("429 for url 'https://api.example-provider.ai/chutes/abc/evidence'", request=req, response=httpx.Response(429, request=req))
+    monkeypatch.setattr(attest, "fetch_and_verify", boom)
+    r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
+    assert r.verdict == "refused" and "answered 429" in r.refusal and "http" not in r.refusal and "example-provider" not in r.refusal

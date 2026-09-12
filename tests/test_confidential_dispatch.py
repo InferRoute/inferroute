@@ -2,6 +2,7 @@
 `--plain` opts out with a printed note; non-enclave models stay on the standard lane; the agent
 adapters produce configs that point at the given endpoint in the agent's NATIVE dialect."""
 import json
+import pathlib
 
 from inferroute_cli import agents, main as M, models
 
@@ -66,22 +67,30 @@ def test_opencode_adapter_uses_the_openai_compatible_sdk_and_disables_sharing_wh
     assert argv == ["/bin/opencode", "run", "hi"] and json.loads(env["OPENCODE_CONFIG_CONTENT"])["model"] == "inferroute/kimi-k2.6"
 
 
-def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it(tmp_path, monkeypatch):
+def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it_and_is_stable(tmp_path, monkeypatch):
     user = tmp_path / "agent"
     user.mkdir()
     (user / "settings.json").write_text("{}")
     (user / "models.json").write_text(json.dumps({"providers": {"mine": {"baseUrl": "x"}}}))
     (user / "sessions").mkdir()
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(user))
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
     env = {}
     argv = agents.pi_env_argv("/bin/pi", env, ["-p", "hi"], base_url="http://127.0.0.1:5", api_key="k", alias=_Alias(), upstream_name="n")
     assert argv == ["/bin/pi", "--provider", "inferroute", "--model", "kimi-k2.6", "-p", "hi"]
     d = env["PI_CODING_AGENT_DIR"]
-    assert d != str(user) and (tmp_path / "agent" / "models.json").read_text() == json.dumps({"providers": {"mine": {"baseUrl": "x"}}}), "the user's file is untouched"
+    assert d == str(tmp_path / "irhome" / "pi-agent"), "stable, ir-owned"
+    assert (user / "models.json").read_text() == json.dumps({"providers": {"mine": {"baseUrl": "x"}}}), "the user's file is untouched"
     merged = json.loads(open(d + "/models.json").read())
     assert set(merged["providers"]) == {"mine", "inferroute"}
     import os
     assert os.path.islink(d + "/settings.json") and os.path.realpath(d + "/sessions") == str(user / "sessions")
+    # Pi's own downloads (bin/) survive the next launch; the links are rebuilt
+    (pathlib.Path(d) / "bin" / "rg").write_text("tool")
+    (user / "settings.json").unlink()
+    agents.pi_env_argv("/bin/pi", {}, [], base_url="http://127.0.0.1:6", api_key="k", alias=_Alias(), upstream_name="n")
+    assert (pathlib.Path(d) / "bin" / "rg").read_text() == "tool" and not os.path.lexists(d + "/settings.json")
+    assert json.loads(open(d + "/models.json").read())["providers"]["inferroute"]["baseUrl"] == "http://127.0.0.1:6/v1"
     assert models.get("kimi-k2.6") is not None
 
 

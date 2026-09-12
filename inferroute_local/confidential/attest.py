@@ -65,7 +65,7 @@ REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape
 # Online checks (Intel PCS + NVIDIA NRAS), added by `verify_online`; an instance is verified only
 # when BOTH sets pass. Kept separate so the offline pass can run over a whole fleet cheaply and the
 # online pass only over the instances a session could actually use.
-REQUIRED_ONLINE = ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current", "gpu_verified")
+REQUIRED_ONLINE = ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current", "gpu_in_signed_evidence", "gpu_verified")
 
 # Plain-language labels + the one line of "why it matters" the display prints beside each.
 LABELS: dict[str, tuple[str, str]] = {
@@ -81,12 +81,16 @@ LABELS: dict[str, tuple[str, str]] = {
     "not_revoked": ("Nothing revoked", "no certificate in the chain is on Intel's revocation lists"),
     "tcb_current": ("Platform firmware current", "Intel's signed TCB status for this platform is up to date"),
     "qe_current": ("Quoting Enclave current", "matches Intel's signed identity, at an up-to-date version"),
+    "gpu_in_signed_evidence": ("GPU reports inside the signed evidence", "the reports NVIDIA checked are the bytes the enclave signed for this challenge"),
     "gpu_verified": ("GPUs verified by NVIDIA", "each GPU's report checked by NVIDIA for this session's challenge"),
 }
 
 LIMITATIONS = (
-    ("gpu-pairing", "That these GPUs are the ones serving this VM rests on the enclave's own attested "
-                    "software (its measured, known build) reporting them; there is no separate hardware proof of the pairing."),
+    ("gpu-pairing", "No single hardware certificate names both this VM and its GPUs (that arrives with "
+                    "TDISP / TDX Connect, which the provider does not yet expose). What is checked: the GPU "
+                    "reports were requested from inside the verified VM, answered this session's challenge "
+                    "and travel in the VM's signed evidence; in NVIDIA confidential-computing mode the GPU "
+                    "that signs a report is the GPU holding the encrypted session the work runs through."),
     ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
                          "the words are not."),
 )
@@ -390,10 +394,45 @@ async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeou
     to; the session passes the keys it just fetched, so the SAME key is verified and used."""
     nonce = nonce or new_nonce()
     h = {"User-Agent": UA}
-    ref = (await http.get(measurements_url(), headers=h, timeout=timeout)).json()
-    r = await http.get(evidence_url(chute_id, nonce), headers=h, timeout=timeout)
-    r.raise_for_status()
+    ref = (await _get_retry(http, measurements_url(), h, timeout)).json()
+    r = await _get_retry(http, evidence_url(chute_id, nonce), h, timeout)
     return verify_fleet(chute_id, r.json(), ref, nonce, e2e_pubkeys)
+
+
+async def _get_retry(http, url: str, headers: dict, timeout: float, attempts: int = 4):
+    """GET with backoff on 429 / 5xx (Retry-After honoured, capped): the evidence document is
+    ~1.7 MB per fleet and the provider rate-limits it; one busy minute must not refuse a session."""
+    import asyncio
+    delay = 2.0
+    for i in range(attempts):
+        r = await http.get(url, headers=headers, timeout=timeout)
+        if r.status_code == 429 or 500 <= r.status_code < 600:
+            if i == attempts - 1:
+                r.raise_for_status()
+            try:
+                wait = min(float(r.headers.get("Retry-After") or delay), 20.0)
+            except ValueError:
+                wait = delay
+            await asyncio.sleep(wait)
+            delay = min(delay * 2, 20.0)
+            continue
+        r.raise_for_status()
+        return r
+    r.raise_for_status()
+    return r
+
+
+def signed_gpu_evidence(inst: dict) -> list:
+    """The GPU evidence list as it sits INSIDE the signed attested body (`evidence.nvtrust_evidence`,
+    a JSON string), or [] when absent/unparseable."""
+    try:
+        body = json.loads(body_bytes(inst.get("attested_body") or "")[0])
+        nv = (body.get("evidence") or {}).get("nvtrust_evidence")
+        if isinstance(nv, str):
+            nv = json.loads(nv)
+        return list(nv) if isinstance(nv, list) else []
+    except Exception:
+        return []
 
 
 async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, timeout: float = 120.0) -> InstanceReport:
@@ -415,8 +454,19 @@ async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, ti
     except Exception as e:
         for k in ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current"):
             ck.setdefault(k, Check(False, f"Intel collateral unavailable: {type(e).__name__}: {str(e)[:80]}"))
+    # The GPU reports are taken from INSIDE the quote-signed attested body (nonce_in_body + sig_ok
+    # + spki_bound cover those bytes), never from the loose `gpu_evidence` field — so what NVIDIA
+    # verifies is exactly what the enclave signed for this challenge. The loose copy must agree.
+    signed_gpu = signed_gpu_evidence(inst)
+    loose = inst.get("gpu_evidence") or []
+    if not signed_gpu:
+        ck["gpu_in_signed_evidence"] = Check(False, "the signed attested body carries no GPU evidence")
+    elif loose and loose != signed_gpu:
+        ck["gpu_in_signed_evidence"] = Check(False, "the GPU evidence outside the signed body DIFFERS from the signed copy")
+    else:
+        ck["gpu_in_signed_evidence"] = Check(True, f"{len(signed_gpu)} GPU report(s) read from the enclave-signed body (the copy the quote-bound key signed)")
     try:
-        v = await attest_nvidia.attest_gpus(http, inst.get("gpu_evidence") or [], nonce, report.e2e_pubkey, timeout=timeout)
+        v = await attest_nvidia.attest_gpus(http, signed_gpu, nonce, report.e2e_pubkey, timeout=timeout)
         ck["gpu_verified"] = attest_nvidia.check_from(v)
         report.gpus = v.per_gpu if v.ok else {}
     except Exception as e:

@@ -70,7 +70,7 @@ class ConfidentialSession:
         try:
             e2 = await self.transport.instances(self.chute_id)
         except Exception as e:
-            return self._refuse(f"could not list e2ee-capable instances via {self.transport.name}: {e}")
+            return self._refuse(f"could not list sealable enclaves via {self.transport.name}: {public_reason(e)}")
         keys = _keys_of(e2)
         say("fetching the enclave fleet's attestation evidence (this is the slow part)…")
         try:
@@ -78,7 +78,7 @@ class ConfidentialSession:
             self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=keys)
             self._raw_evidence = self.fleet.raw
         except Exception as e:
-            return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {e}")
+            return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {public_reason(e)}")
         self._verified_at = time.time()
         say("checking the platform with Intel and the GPUs with NVIDIA…")
         await self._online_pass(e2)
@@ -183,7 +183,7 @@ class ConfidentialSession:
             self._raw_evidence = self.fleet.raw
             await self._online_pass(e2)
         except Exception as e:
-            self.receipt.note("reverify-failed", str(e))
+            self.receipt.note("reverify-failed", public_reason(e))
             return
         self._verified_at = time.time()
         ok = set(self.fleet.verified_ids)
@@ -209,7 +209,7 @@ class ConfidentialSession:
             return self._error(streaming, 503, str(e))
         except Exception as e:
             c["errors"] += 1
-            return self._error(streaming, 500, f"could not seal the request: {e}")
+            return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}")
         c["requests"] += 1
         c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
         c["ciphertext_bytes_sent"] += len(sealed.blob)
@@ -218,7 +218,7 @@ class ConfidentialSession:
                 chute_id=self.chute_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
         except httpx.HTTPError as e:
             c["errors"] += 1
-            return self._error(streaming, 502, f"the relay is unreachable: {e}")
+            return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}")
         if status != 200:
             c["errors"] += 1
             try:
@@ -247,7 +247,7 @@ class ConfidentialSession:
             return self._error(streaming, 503, str(e), openai=True)
         except Exception as e:
             c["errors"] += 1
-            return self._error(streaming, 500, f"could not seal the request: {e}", openai=True)
+            return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}", openai=True)
         c["requests"] += 1
         c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
         c["ciphertext_bytes_sent"] += len(sealed.blob)
@@ -256,7 +256,7 @@ class ConfidentialSession:
                 chute_id=self.chute_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
         except httpx.HTTPError as e:
             c["errors"] += 1
-            return self._error(streaming, 502, f"the relay is unreachable: {e}", openai=True)
+            return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}", openai=True)
         if status != 200:
             c["errors"] += 1
             try:
@@ -431,6 +431,27 @@ class ConfidentialSession:
             self.receipt.ended_at = _now()
             self.receipt.save()
         return self.receipt
+
+
+def public_reason(e: BaseException) -> str:
+    """What the user is told about an upstream failure: the status and a plain cause, never a
+    URL, host or path (an httpx error string embeds the request URL — the 429 refusal panel
+    leaked the provider's API that way, Henry 2026-09-12)."""
+    import re
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        cause = {429: "rate-limited — try again in a minute", 401: "refused our credentials", 403: "refused our credentials",
+                 404: "not found", 502: "bad gateway", 503: "temporarily unavailable", 504: "timed out"}.get(code, "")
+        return f"the attestation service answered {code}" + (f" ({cause})" if cause else "")
+    if isinstance(e, httpx.TimeoutException):
+        return "the attestation service timed out"
+    if isinstance(e, httpx.HTTPError):
+        return f"the attestation service is unreachable ({type(e).__name__})"
+    if isinstance(e, Refused):
+        return str(e)
+    text = re.sub(r"https?://\S+", "<url>", str(e))
+    text = re.sub(r"\b[a-z0-9.-]+\.(ai|com|io|net|org)\b", "<host>", text)
+    return f"{type(e).__name__}: {text[:160]}"
 
 
 def _keys_of(e2: dict) -> dict[str, str]:

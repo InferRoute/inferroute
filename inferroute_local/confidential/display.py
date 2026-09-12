@@ -191,7 +191,7 @@ def render_summary(r: Receipt, console: Console | None = None) -> None:
 # Short column heads for the operator fleet table (offline | online), in check order.
 FLEET_COLS = {"nonce_in_body": "nonce", "sig_ok": "sig", "spki_bound": "spki", "e2e_key_bound": "key", "tdx_shape": "tdx",
               "measurement_ok": "build", "chain_ok": "chain", "quote_sig": "qsig", "root_pinned": "root", "not_revoked": "crl",
-              "tcb_current": "tcb", "qe_current": "qe", "gpu_verified": "gpu"}
+              "tcb_current": "tcb", "qe_current": "qe", "gpu_in_signed_evidence": "gpu∈sig", "gpu_verified": "gpu"}
 
 
 def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> None:
@@ -214,7 +214,7 @@ def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> N
             verdict = Text("FAILED " + ",".join(i.failing), style="red")
         t.add_row(_short(i.instance_id, 8), str(i.gpu_count), *cells, verdict)
     console.print(t)
-    console.print(Text("offline: nonce sig spki key tdx build chain · online: qsig root crl tcb qe gpu · '·' = not run (no sealing key)", style=DIM))
+    console.print(Text("offline: nonce sig spki key tdx build chain · online: qsig root crl tcb qe gpu∈sig gpu · '·' = not run (no sealing key)", style=DIM))
     if fleet.failed_instance_ids:
         console.print(Text(f"instances the provider itself reports as failed: {fleet.failed_instance_ids}", style=DIM))
 

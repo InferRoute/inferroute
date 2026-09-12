@@ -90,10 +90,14 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones. Except "
-                     "where a measurement has been independently recomputed — stated per session above — the "
-                     "image's contents rest on the operator's published sources, plus the fact that any change "
-                     "to them changes the measurements and is caught."),
+    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones, and "
+                     "recomputes what it can — stated per session above. But the measurements cover the "
+                     "firmware, the boot chain and a short list of configuration files, NOT the whole "
+                     "filesystem the model runs from. The enclave operator holds the disk key, so they could "
+                     "change code outside that list without changing any measurement. What the hardware "
+                     "proves is that your words reach a genuine, non-debuggable enclave and are readable "
+                     "nowhere else in transit. That the enclave's own software does not retain them is a "
+                     "claim about the operator's published image, not something this device can verify."),
     ("gpu-binding", "The GPU reports are signed by the same quote-bound key as the rest of the evidence, so "
                     "the enclave itself vouches that these are its GPUs — but NVIDIA provides no way to prove "
                     "from the outside that an attested GPU is attached to an attested CPU enclave. That step "

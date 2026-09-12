@@ -52,6 +52,7 @@ def test_pi_adapter_declares_an_openai_native_provider_and_keeps_the_users_provi
     prov = doc["providers"]["inferroute"]
     assert prov["api"] == "openai-completions" and prov["baseUrl"] == "http://127.0.0.1:5/v1" and prov["apiKey"] == "k"
     assert prov["compat"]["thinkingFormat"] == "deepseek" and prov["models"][0]["id"] == "kimi-k2.6"
+    assert prov["models"][0]["cost"]["input"] == 0.44 and prov["models"][0]["cost"]["cacheRead"] == 0.089, "catalog price → Pi's cost display"
     assert doc["providers"]["mine"] == {"baseUrl": "x"}, "the user's own providers survive the merge"
 
 
@@ -60,6 +61,7 @@ def test_opencode_adapter_uses_the_openai_compatible_sdk_and_disables_sharing_wh
     p = cfg["provider"]["inferroute"]
     assert p["npm"] == "@ai-sdk/openai-compatible" and p["options"]["baseURL"] == "http://127.0.0.1:5/v1"
     assert cfg["model"] == "inferroute/kimi-k2.6" == cfg["small_model"] and cfg["share"] == "disabled"
+    assert p["models"]["kimi-k2.6"]["cost"] == {"input": 0.44, "output": 2.4, "cache_read": 0.089, "cache_write": 0.44}
     plain = agents.opencode_config("https://api.inferroute.ai", "k", _Alias(), "Kimi", headers={"x-inferroute-session": "s"}, confidential=False)
     assert "share" not in plain and plain["provider"]["inferroute"]["options"]["headers"] == {"x-inferroute-session": "s"}
     env = {}

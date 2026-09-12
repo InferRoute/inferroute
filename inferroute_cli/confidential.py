@@ -80,6 +80,13 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _lane_price(alias, economy: bool) -> dict:
+    """USD per 1M tokens from the catalog for this model and lane ({input, cached, output})."""
+    from . import models as models_mod
+    row = next((m for m in models_mod._rows() if m.get("short") == alias.short), None) or {}
+    return dict((row.get("economy") if economy else row.get("standard")) or {})
+
+
 async def _open_session(alias, session_id: str, http, console):
     from inferroute_local.confidential.session import ConfidentialSession
     from inferroute_local.confidential.transport import RelayUnavailable, make_transport
@@ -114,8 +121,10 @@ async def _open_session(alias, session_id: str, http, console):
     if not fleet_id:
         console.print(f"[red]{alias.ref_key} is not offered on the confidential lane right now[/]")
         sys.exit(3)
+    economy = os.environ.get("IR_LANE", "").strip().lower() in ("economy", "economy-loop")
     session = ConfidentialSession(session_id=session_id, model_short=alias.short, upstream_model=alias.ref_key,
-                                  fleet_id=fleet_id, transport=transport, http=http)
+                                  fleet_id=fleet_id, transport=transport, http=http,
+                                  price=_lane_price(alias, economy), economy=economy)
     status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
     status.start()
     try:
@@ -153,7 +162,9 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
     rp = shlex.quote(receipt_path)
     cmd += (f"; b=$(grep -o '\"plaintext_bytes_sealed_here\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
             f"if [ -n \"$b\" ]; then if [ \"$b\" -ge 1048576 ]; then printf ' · %s.%s MB sealed here' $((b/1048576)) $(( (b%1048576)*10/1048576 )); "
-            f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · 0 B in the clear'; fi || true")
+            f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · 0 B in the clear'; fi; "
+            f"u=$(grep -o '\"estimated_cost_usd\": [0-9.]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9.]*$'); "
+            f"[ -n \"$u\" ] && printf ' │ $%.2f' \"$u\" 2>/dev/null || true")
     settings["statusLine"]["command"] = cmd
     status_args[1] = json.dumps(settings)
 

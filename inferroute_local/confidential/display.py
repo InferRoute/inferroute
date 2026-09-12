@@ -67,7 +67,7 @@ def _title_model(r: Receipt) -> str:
 def checks_table(r: Receipt) -> Table:
     t = Table(box=None, show_header=False, pad_edge=False, padding=(0, 1), expand=False)
     t.add_column(width=2)
-    t.add_column(width=26)
+    t.add_column(width=31)
     t.add_column(style=DIM)
     for name in attest.REQUIRED:
         c = r.checks.get(name) or {}
@@ -197,8 +197,13 @@ def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> N
     t.add_column("verdict")
     for i in fleet.instances:
         cells = [Text("✓", style=ACCENT) if i.checks[n].ok else Text("✗", style="red") for n in attest.REQUIRED]
-        t.add_row(_short(i.instance_id, 12), str(i.gpu_count), *cells,
-                  Text("verified", style=f"bold {ACCENT}") if i.verified else Text("FAILED " + ",".join(i.failing), style="red"))
+        if i.verified:
+            verdict = Text("verified", style=f"bold {ACCENT}")
+        elif i.failing == ["e2e_key_bound"] and "no encryption key" in i.checks["e2e_key_bound"].why:
+            verdict = Text("attested, not sealable (no key offered)", style=DIM)   # not a fault, just not usable
+        else:
+            verdict = Text("FAILED " + ",".join(i.failing), style="red")
+        t.add_row(_short(i.instance_id, 12), str(i.gpu_count), *cells, verdict)
     console.print(t)
     if fleet.failed_instance_ids:
         console.print(Text(f"instances the provider itself reports as failed: {fleet.failed_instance_ids}", style=DIM))

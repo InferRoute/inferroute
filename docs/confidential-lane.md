@@ -13,7 +13,6 @@ receipt this document describes; nothing on screen can be stronger than what is 
 ir --confidential                       # default model: kimi-k2.6
 ir --confidential --model glm-5.2
 ir --confidential -c                    # continue the latest session, still sealed
-ir confidential verify --model kimi-k2.6   # inspect every instance; sends nothing
 ir confidential show                    # re-print the last session's panel
 ir confidential card                    # export the last panel as an SVG card
 ir confidential models                  # models that can run confidentially

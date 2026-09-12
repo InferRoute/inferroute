@@ -40,7 +40,7 @@ ir choose           interactive picker — pick a model, then launch
 ir anthropic        escape hatch — plain Claude, your own setup
 ir --confidential   confidential lane: verify a hardware enclave from this device,
                     seal every request to it, launch  (docs/confidential-lane.md)
-ir confidential …   verify | show | card | models — inspect the lane, send nothing
+ir confidential …   show | card | models — re-print the last panel, export it, list models
 ir status           personal usage view (TUI)
 ir login            save / refresh your inferroute API key
 ir help             one-screen explainer

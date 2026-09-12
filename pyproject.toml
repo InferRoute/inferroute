@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.5.1"
+version = "0.6.0"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"
@@ -41,6 +41,17 @@ dependencies = [
 # Installed by `ir add recording`.
 # See shared-docs/inferroute/local-decision-recorder-spec.md.
 [project.optional-dependencies]
+# The confidential lane (`ir --confidential`): the enclave's attestation is verified on
+# this device and every request is sealed to it with ML-KEM-768 + ChaCha20-Poly1305.
+# `cryptography` ≥ 50 bundles ML-KEM; on an older wheel `kyber-py` (pure Python) is
+# the drop-in fallback. See inferroute_local/confidential/ and docs/confidential-lane.md.
+confidential = [
+    "cryptography>=50",
+    "rich>=13",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+]
 local = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",

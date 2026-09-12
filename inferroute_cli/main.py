@@ -162,6 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     # subcommand to dispatch on; if the user pinned a model we launch it, else
     # we open the picker. (No auto-route — the user always chooses.)
     if not args or args[0].startswith("-"):
+        # `ir --confidential [--model M] [claude flags]` → the confidential lane: the
+        # enclave is verified from this device and every request is sealed to it.
+        if "--confidential" in args:
+            from . import confidential as confidential_mod
+            return confidential_mod.launch(args)
         user_agent, passthrough = _extract_agent(args)
         user_model, passthrough = _extract_model_override(passthrough)
         agent = user_agent or "claude"
@@ -205,6 +210,11 @@ def main(argv: list[str] | None = None) -> int:
         return choose_mod.run(passthrough, agent=agent)
 
     cmd, rest = args[0], args[1:]
+
+    if cmd == "confidential":
+        # `ir confidential verify|show|card|models` — inspect the lane without launching.
+        from . import confidential as confidential_mod
+        return confidential_mod.run(rest)
 
     # ── Account / utility commands ─────────────────────────────────────
     if cmd == "login":

@@ -1,0 +1,352 @@
+"""Verify a Chutes TEE instance's attestation ON THIS DEVICE, with no vendor SDK.
+
+Evidence is fetched from Chutes directly — never through InferRoute, because the point of the
+check is that the user does not have to trust InferRoute (or Chutes) about it:
+
+    GET https://api.chutes.ai/chutes/{chute_id}/evidence?nonce={64 hex}   (unauthenticated)
+    GET https://api.chutes.ai/servers/tee/measurements                      (unauthenticated)
+
+Per running instance the evidence carries an Intel TDX ``quote``, NVIDIA ``gpu_evidence``, a
+``certificate``, a ``signature`` and a base64-JSON ``attested_body`` that embeds our nonce.
+
+Each check states what it proves. The display prints these words; keep them honest.
+
+  nonce_in_body   our 32-byte nonce appears verbatim in the decoded attested body
+                  → the evidence was produced FOR THIS CHALLENGE, not replayed.
+  sig_ok          ``signature`` verifies (RSA-PKCS1v15/SHA-256 or ECDSA) over the body under
+                  the public key in ``certificate`` → whoever answered holds that private key.
+  spki_bound      TDX report_data[32:64] == SHA-256(SubjectPublicKeyInfo of ``certificate``)
+                  → the hardware quote COMMITS to that key. With sig_ok this is the
+                  load-bearing link: the party that signed for our nonce is the party the
+                  quote is about.
+  tdx_shape       tee_type 0x81, quote version 4, TD DEBUG attribute clear → a real
+                  confidential VM, not a debuggable one whose measurements mean nothing.
+  measurement_ok  MRTD and RTMR0–3 all appear in ONE config of the published registry
+                  → the VM runs a build the provider publishes, not an arbitrary image.
+  chain_ok        every certificate in the quote's embedded PCK chain verifies under the
+                  next, ending in a self-signed root → the chain is internally sound.
+
+What this does NOT prove (rendered by the display as stated limitations, never as checks):
+  * ``chain_ok`` does not pin the root to Intel's published SGX Root CA and fetches no Intel
+    PCS collateral: TCB status and revocation are UNCHECKED.
+  * GPU evidence is counted, not attested against NVIDIA's service; Chutes' own claim string
+    concedes it attests "a genuine CC GPU, not its binding to" the CPU TEE.
+  * The instance's ML-KEM e2ee key is not committed to by the quote (see e2ee.py). That gap
+    belongs to the provider, and closing it is a one-line change on their side.
+
+Fail-closed: a check that cannot be performed is False with a reason, never absent, and an
+instance is ``verified`` only when every REQUIRED check passed.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import secrets
+from dataclasses import dataclass, field
+
+API = "https://api.chutes.ai"
+UA = "inferroute-confidential/1 (+native verifier, no SDK)"
+
+# TDX quote v4 (Intel DCAP): 48-byte header, then a 584-byte TD report body.
+_HDR, _BODY = 48, 584
+_OFF = {
+    "td_attributes": (120, 128), "mrtd": (136, 184), "rtmr0": (328, 376),
+    "rtmr1": (376, 424), "rtmr2": (424, 472), "rtmr3": (472, 520), "report_data": (520, 584),
+}
+REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "tdx_shape", "measurement_ok", "chain_ok")
+
+# Plain-language labels + the one line of "why it matters" the display prints beside each.
+LABELS: dict[str, tuple[str, str]] = {
+    "nonce_in_body": ("Fresh challenge answered", "the evidence was made for this session, not replayed"),
+    "sig_ok": ("Signature valid", "signed by the key the enclave holds"),
+    "spki_bound": ("Key bound to enclave", "the hardware quote commits to that signing key"),
+    "tdx_shape": ("Genuine TDX, debug off", "a real confidential VM, not a debuggable one"),
+    "measurement_ok": ("Known build", "measurements match the provider's published registry"),
+    "chain_ok": ("Certificate chain sound", "every link verifies up to a self-signed root"),
+}
+
+LIMITATIONS = (
+    ("attributed-key", "The encryption key is attributed to this enclave by the provider's API; "
+                       "the hardware quote itself does not commit to it."),
+    ("tcb-unchecked", "Intel's TCB and revocation status are not fetched (no PCS lookup)."),
+    ("gpu-binding", "GPU attestation is counted, not verified against NVIDIA; its binding to the "
+                    "CPU enclave is the provider's own claim."),
+    ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
+                         "the words are not."),
+)
+
+
+@dataclass
+class Check:
+    ok: bool
+    why: str
+
+
+@dataclass
+class InstanceReport:
+    instance_id: str
+    checks: dict[str, Check]
+    gpu_count: int
+    mrtd: str
+    rtmrs: list[str]
+    verified: bool
+    chain: str = ""
+
+    @property
+    def failing(self) -> list[str]:
+        return [k for k in REQUIRED if not self.checks[k].ok]
+
+    def as_dict(self) -> dict:
+        return {
+            "instance_id": self.instance_id, "verified": self.verified, "gpu_count": self.gpu_count,
+            "mrtd": self.mrtd, "rtmrs": self.rtmrs, "chain": self.chain,
+            "checks": {k: {"ok": c.ok, "why": c.why} for k, c in self.checks.items()},
+        }
+
+
+@dataclass
+class FleetReport:
+    chute_id: str
+    nonce: str
+    instances: list[InstanceReport]
+    failed_instance_ids: list = field(default_factory=list)
+
+    @property
+    def verified_ids(self) -> list[str]:
+        return [i.instance_id for i in self.instances if i.verified]
+
+    def as_dict(self) -> dict:
+        return {"chute_id": self.chute_id, "nonce": self.nonce,
+                "verified": len(self.verified_ids), "instances": [i.as_dict() for i in self.instances],
+                "failed_instance_ids": self.failed_instance_ids}
+
+
+# ───────────────────────────── parsing ─────────────────────────────
+
+def _b64(s: str) -> bytes:
+    s = (s or "").strip()
+    return base64.b64decode(s + "=" * (-len(s) % 4))
+
+
+def quote_fields(quote_b: bytes) -> dict:
+    """Structural parse; {} when the buffer is too short to BE a v4 TDX quote."""
+    if len(quote_b) < _HDR + _BODY:
+        return {}
+    body = quote_b[_HDR:_HDR + _BODY]
+    out = {"version": int.from_bytes(quote_b[0:2], "little"),
+           "tee_type": int.from_bytes(quote_b[4:8], "little")}
+    for k, (a, b) in _OFF.items():
+        out[k] = body[a:b]
+    return out
+
+
+def body_bytes(attested_body) -> tuple[bytes, str]:
+    """``attested_body`` is base64 of a JSON document; the nonce lives in the DECODED bytes and the
+    signature covers them (measured 2026-09-02). Both forms are tried and the one that verified is
+    named, because a verifier that silently accepts either has not established what was signed."""
+    raw = attested_body.encode() if isinstance(attested_body, str) else (attested_body or b"")
+    try:
+        dec = base64.b64decode(raw + b"=" * (-len(raw) % 4), validate=True)
+        if dec[:1] in (b"{", b"["):
+            return dec, "base64-decoded JSON"
+    except Exception:
+        pass
+    return raw, "raw bytes"
+
+
+def _load_cert(s: str):
+    from cryptography import x509
+    if not s:
+        return None
+    try:
+        t = s if "BEGIN CERT" in s else ("-----BEGIN CERTIFICATE-----\n" + s.strip() + "\n-----END CERTIFICATE-----\n")
+        return x509.load_pem_x509_certificate(t.encode())
+    except Exception:
+        try:
+            return x509.load_der_x509_certificate(_b64(s))
+        except Exception:
+            return None
+
+
+def _cn(cert) -> str:
+    from cryptography.x509.oid import NameOID
+    try:
+        return cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+    except Exception:
+        return cert.subject.rfc4514_string()[:40]
+
+
+# ───────────────────────────── checks ─────────────────────────────
+
+def check_nonce(attested_body, nonce: str) -> Check:
+    dec, form = body_bytes(attested_body)
+    ok = bool(nonce) and nonce.encode() in dec
+    return Check(ok, f"nonce present verbatim in the {form}" if ok else "OUR NONCE IS ABSENT — evidence may be replayed")
+
+
+def check_signature(attested_body, signature_b64: str, cert_s: str) -> Check:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+    cert = _load_cert(cert_s)
+    if cert is None:
+        return Check(False, "certificate did not parse")
+    pub = cert.public_key()
+    try:
+        sig = _b64(signature_b64)
+    except Exception:
+        return Check(False, "signature is not base64")
+    raw = attested_body.encode() if isinstance(attested_body, str) else (attested_body or b"")
+    dec, form = body_bytes(attested_body)
+    for data, label in ((dec, form), (raw, "raw base64 string")):
+        try:
+            if isinstance(pub, rsa.RSAPublicKey):
+                pub.verify(sig, data, padding.PKCS1v15(), hashes.SHA256())
+            elif isinstance(pub, ec.EllipticCurvePublicKey):
+                pub.verify(sig, data, ec.ECDSA(hashes.SHA256()))
+            else:
+                return Check(False, f"unsupported key type {type(pub).__name__}")
+            return Check(True, f"verifies over the {label} ({len(data)} B)")
+        except Exception:
+            continue
+    return Check(False, "signature does NOT verify over the decoded body or the raw string")
+
+
+def check_spki_bound(q: dict, cert_s: str) -> Check:
+    from cryptography.hazmat.primitives import serialization
+    if not q:
+        return Check(False, "no quote to bind")
+    cert = _load_cert(cert_s)
+    if cert is None:
+        return Check(False, "certificate did not parse")
+    spki = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+    want, got = hashlib.sha256(spki).digest(), q["report_data"][32:64]
+    return Check(got == want, "report_data[32:64] == SHA-256(SPKI)" if got == want
+                 else f"MISMATCH: quote {got.hex()[:16]}… vs SPKI hash {want.hex()[:16]}…")
+
+
+def check_tdx_shape(q: dict) -> Check:
+    if not q:
+        return Check(False, "buffer too short to be a v4 TDX quote")
+    if q["tee_type"] != 0x81:
+        return Check(False, f"tee_type 0x{q['tee_type']:02x} is not TDX (0x81)")
+    if q["version"] != 4:
+        return Check(False, f"quote version {q['version']} is not 4")
+    if q["td_attributes"][0] & 0x01:
+        return Check(False, "TD DEBUG bit is SET — a debuggable TD's measurements prove nothing")
+    return Check(True, "TDX v4, debug bit clear")
+
+
+def check_measurements(q: dict, reference) -> Check:
+    """MRTD and all four RTMRs must appear TOGETHER in one published reference config."""
+    if not q:
+        return Check(False, "no quote to match")
+    mine = {k: q[k].hex() for k in ("mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3")}
+    configs = reference.get("configs") if isinstance(reference, dict) else None
+    if isinstance(configs, list) and configs:
+        for cfg in configs:
+            blob = json.dumps(cfg).lower()
+            if all(v in blob for v in mine.values()):
+                return Check(True, f"MRTD + RTMR0–3 all present in registry config '{cfg.get('name', '?')}'")
+        return Check(False, f"no single registry config holds all five measurements ({len(configs)} configs)")
+    blob = json.dumps(reference).lower()
+    missing = [k for k, v in mine.items() if v not in blob]
+    return Check(not missing, "MRTD + RTMR0–3 all present in the registry" if not missing
+                 else f"not in the published registry: {', '.join(missing)}")
+
+
+def embedded_chain(quote_b: bytes) -> list:
+    from cryptography import x509
+    out, beg, end = [], b"-----BEGIN CERTIFICATE-----", b"-----END CERTIFICATE-----"
+    i = quote_b.find(beg)
+    while i != -1:
+        j = quote_b.find(end, i)
+        if j == -1:
+            break
+        j += len(end)
+        try:
+            out.append(x509.load_pem_x509_certificate(quote_b[i:j]))
+        except Exception:
+            pass
+        i = quote_b.find(beg, j)
+    return out
+
+
+def check_chain(certs: list) -> Check:
+    from cryptography.hazmat.primitives.asymmetric import ec, padding
+    if not certs:
+        return Check(False, "no certificates embedded in the quote")
+
+    def signed_by(child, parent) -> bool:
+        pub = parent.public_key()
+        try:
+            if isinstance(pub, ec.EllipticCurvePublicKey):
+                pub.verify(child.signature, child.tbs_certificate_bytes, ec.ECDSA(child.signature_hash_algorithm))
+            else:
+                pub.verify(child.signature, child.tbs_certificate_bytes, padding.PKCS1v15(), child.signature_hash_algorithm)
+            return True
+        except Exception:
+            return False
+
+    for a, b in zip(certs, certs[1:]):
+        if not signed_by(a, b):
+            return Check(False, f"link broken: {_cn(a)} is not signed by {_cn(b)}")
+    if not signed_by(certs[-1], certs[-1]):
+        return Check(False, f"root {_cn(certs[-1])} is not self-signed")
+    return Check(True, "chain internally sound: " + " → ".join(_cn(c) for c in certs))
+
+
+# ───────────────────────────── verdicts ─────────────────────────────
+
+def verify_instance(inst: dict, nonce: str, reference) -> InstanceReport:
+    body = inst.get("attested_body") or ""
+    quote_b = _b64(inst.get("quote") or "")
+    q = quote_fields(quote_b)
+    certs = embedded_chain(quote_b)
+    checks = {
+        "nonce_in_body": check_nonce(body, nonce),
+        "sig_ok": check_signature(body, inst.get("signature") or "", inst.get("certificate") or ""),
+        "spki_bound": check_spki_bound(q, inst.get("certificate") or ""),
+        "tdx_shape": check_tdx_shape(q),
+        "measurement_ok": check_measurements(q, reference),
+        "chain_ok": check_chain(certs),
+    }
+    return InstanceReport(
+        instance_id=str(inst.get("instance_id") or ""),
+        checks=checks,
+        gpu_count=len(inst.get("gpu_evidence") or []),
+        mrtd=q["mrtd"].hex() if q else "",
+        rtmrs=[q[k].hex() for k in ("rtmr0", "rtmr1", "rtmr2", "rtmr3")] if q else [],
+        verified=all(checks[k].ok for k in REQUIRED),
+        chain=" → ".join(_cn(c) for c in certs),
+    )
+
+
+def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str) -> FleetReport:
+    inst = evidence_doc.get("evidence") if isinstance(evidence_doc, dict) else evidence_doc
+    rows = [verify_instance(i, nonce, reference) for i in (inst or [])]
+    failed = evidence_doc.get("failed_instance_ids") if isinstance(evidence_doc, dict) else None
+    return FleetReport(chute_id=chute_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []))
+
+
+def new_nonce() -> str:
+    return secrets.token_hex(32)
+
+
+def evidence_url(chute_id: str, nonce: str) -> str:
+    return f"{API}/chutes/{chute_id}/evidence?nonce={nonce}"
+
+
+def measurements_url() -> str:
+    return f"{API}/servers/tee/measurements"
+
+
+async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeout: float = 240.0) -> FleetReport:
+    """Fetch evidence + registry FROM CHUTES DIRECTLY with a fresh nonce, then verify offline.
+    ``http`` is an ``httpx.AsyncClient``; the 1–2 MB evidence document takes ~10 s to arrive."""
+    nonce = nonce or new_nonce()
+    h = {"User-Agent": UA}
+    ref = (await http.get(measurements_url(), headers=h, timeout=timeout)).json()
+    r = await http.get(evidence_url(chute_id, nonce), headers=h, timeout=timeout)
+    r.raise_for_status()
+    return verify_fleet(chute_id, r.json(), ref, nonce)

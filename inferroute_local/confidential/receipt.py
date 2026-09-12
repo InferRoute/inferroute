@@ -83,6 +83,7 @@ def latest() -> Receipt | None:
 
 CLAIM_CONFIDENTIAL = (
     "This session's requests were encrypted on this device with ML-KEM-768 + ChaCha20-Poly1305 to "
-    "an instance whose Intel TDX attestation this device verified against a fresh challenge. The "
-    "relay carried ciphertext only. Stated limitations apply and are listed in this receipt."
+    "an encryption key that an Intel TDX hardware quote, verified on this device against a fresh "
+    "challenge, commits to. No relay, and no provider, could substitute the key without failing that "
+    "check. The relay carried ciphertext only. Stated limitations apply and are listed in this receipt."
 )

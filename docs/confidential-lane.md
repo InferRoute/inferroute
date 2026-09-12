@@ -27,7 +27,7 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    a random 32-byte nonce and asks Chutes for the evidence of every running instance of the
    model (`GET api.chutes.ai/chutes/{id}/evidence?nonce=…`, unauthenticated). This request never
    goes through InferRoute: the point is that you do not have to trust InferRoute about it.
-2. **Six checks, on your device, no vendor SDK** (`inferroute_local/confidential/attest.py`):
+2. **Seven checks, on your device, no vendor SDK** (`inferroute_local/confidential/attest.py`):
 
    | check | what it proves |
    |---|---|
@@ -37,8 +37,9 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    | genuine TDX, debug off | `tee_type` 0x81, quote v4, TD DEBUG attribute clear |
    | known build | MRTD + RTMR0–3 all appear in one config of the provider's published measurement registry |
    | certificate chain sound | every embedded PCK certificate verifies under the next, ending in a self-signed root |
+   | **encryption key bound to enclave** | the quote's `report_data[0:32]` = SHA-256(your nonce ‖ the instance's ML-KEM public key) → the hardware quote commits to the very key your requests are sealed to |
 
-   An instance is *verified* only if all six pass. Fail-closed: a check that cannot be run is a
+   An instance is *verified* only if all seven pass. Fail-closed: a check that cannot be run is a
    failure, and an empty fleet is never "verified".
 3. **Pin.** The session picks one instance that is both verified and able to accept sealed
    requests, and keeps it for the whole session (this also keeps the enclave's own prefix cache
@@ -68,12 +69,14 @@ another *verified* instance and records the switch; if none exists it refuses fu
 
 Rendered on screen as stated limitations, never as passed checks:
 
-* **The encryption key is attributed, not attested.** The instance's ML-KEM public key comes
-  from Chutes' API (`/e2e/instances`); the TDX quote does not commit to it (measured
-  2026-09-12: `report_data[0:32]` matches neither the key nor the nonce, and the attested body
-  contains no key). So "only the enclave can decrypt" rests on Chutes handing out the right key.
-  *Ask to the provider:* include `SHA-256(e2e_pubkey)` in the attested body (their aegis library
-  has the key at `e2e_init`). One line; closes the gap; the client already has a slot for it.
+* ~~The encryption key is attributed, not attested~~ — **closed 2026-09-12.** It looked
+  unbound because the obvious derivations (hash of the key, of the nonce, of both as bytes) did
+  not match. Chutes' evidence service in fact derives the quote's challenge as
+  `sha256((nonce + e2e_pubkey).encode())` — the nonce *string* concatenated with the base64 key
+  *string* (`chutes/entrypoint/verify.py`). Confirmed live on 8/8 instances across both model
+  families, with a negative result for every other instance's key. The client now fetches the
+  instance keys first, verifies the quote against exactly those keys, and refuses to seal to any
+  key the quote did not commit to. No change on the provider's side was needed.
 * **Intel TCB / revocation are not checked** — no Intel PCS lookup; the chain is verified for
   internal soundness and its root named, not pinned to Intel's published root key.
 * **GPU attestation is counted, not verified** against NVIDIA's service; its binding to the CPU

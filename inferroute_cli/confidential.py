@@ -231,6 +231,10 @@ def run(rest: list[str]) -> int:
                 chute_id = None
                 try:
                     t = make_transport(http, api_url=creds.api_url, api_key=creds.api_key)
+                except ValueError as e:
+                    console.print(f"[red]{e}[/]")
+                    return 2
+                try:
                     chute_id = next((m["chute_id"] for m in await t.models() if m.get("name") == alias.ref_key), None)
                 except Exception:
                     pass
@@ -240,8 +244,16 @@ def run(rest: list[str]) -> int:
                 if not chute_id:
                     console.print(f"[red]cannot resolve {alias.ref_key} to a chute[/]")
                     return 3
+                # the encryption keys come from the carrier (relay or direct); the quote is checked
+                # against them, so `verify` exercises exactly what a session would seal to
+                keys: dict = {}
+                try:
+                    e2 = await t.instances(chute_id)
+                    keys = {i["instance_id"]: i.get("e2e_pubkey") or "" for i in e2.get("instances") or []}
+                except Exception as e:
+                    console.print(f"[grey58]could not list encryption keys via {t.name} ({e}); the key-binding check will fail for every instance[/]")
                 with console.status("[bold]fetching evidence from Chutes with a fresh challenge…", spinner="dots"):
-                    fleet = await attest.fetch_and_verify(chute_id, http)
+                    fleet = await attest.fetch_and_verify(chute_id, http, e2e_pubkeys=keys)
                 if ns.json:
                     print(json.dumps(fleet.as_dict(), indent=1))
                 else:

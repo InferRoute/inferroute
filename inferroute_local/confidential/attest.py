@@ -25,14 +25,20 @@ Each check states what it proves. The display prints these words; keep them hone
                   → the VM runs a build the provider publishes, not an arbitrary image.
   chain_ok        every certificate in the quote's embedded PCK chain verifies under the
                   next, ending in a self-signed root → the chain is internally sound.
+  e2e_key_bound   TDX report_data[0:32] == SHA-256(our nonce ‖ the instance's ML-KEM public key
+                  as served by /e2e/instances) → the hardware quote COMMITS to the encryption
+                  key we seal to. Chutes' evidence service derives the quote's challenge exactly
+                  this way (chutes/entrypoint/verify.py: `sha256((nonce + e2e_pubkey).encode())`,
+                  measured live 2026-09-12 on 8/8 instances, negative on every other key). This
+                  closes the join between "attested" and "encrypted to": a substituted key
+                  fails here before a byte is sent.
 
 What this does NOT prove (rendered by the display as stated limitations, never as checks):
   * ``chain_ok`` does not pin the root to Intel's published SGX Root CA and fetches no Intel
     PCS collateral: TCB status and revocation are UNCHECKED.
   * GPU evidence is counted, not attested against NVIDIA's service; Chutes' own claim string
     concedes it attests "a genuine CC GPU, not its binding to" the CPU TEE.
-  * The instance's ML-KEM e2ee key is not committed to by the quote (see e2ee.py). That gap
-    belongs to the provider, and closing it is a one-line change on their side.
+  * Nothing here consults NVIDIA or Intel online services; see the two points above.
 
 Fail-closed: a check that cannot be performed is False with a reason, never absent, and an
 instance is ``verified`` only when every REQUIRED check passed.
@@ -54,21 +60,20 @@ _OFF = {
     "td_attributes": (120, 128), "mrtd": (136, 184), "rtmr0": (328, 376),
     "rtmr1": (376, 424), "rtmr2": (424, 472), "rtmr3": (472, 520), "report_data": (520, 584),
 }
-REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "tdx_shape", "measurement_ok", "chain_ok")
+REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "chain_ok")
 
 # Plain-language labels + the one line of "why it matters" the display prints beside each.
 LABELS: dict[str, tuple[str, str]] = {
     "nonce_in_body": ("Fresh challenge answered", "the evidence was made for this session, not replayed"),
     "sig_ok": ("Signature valid", "signed by the key the enclave holds"),
-    "spki_bound": ("Key bound to enclave", "the hardware quote commits to that signing key"),
+    "spki_bound": ("Signing key bound to enclave", "the hardware quote commits to that signing key"),
+    "e2e_key_bound": ("Encryption key bound to enclave", "the quote commits to SHA-256(challenge ‖ the key you seal to)"),
     "tdx_shape": ("Genuine TDX, debug off", "a real confidential VM, not a debuggable one"),
     "measurement_ok": ("Known build", "measurements match the provider's published registry"),
     "chain_ok": ("Certificate chain sound", "every link verifies up to a self-signed root"),
 }
 
 LIMITATIONS = (
-    ("attributed-key", "The encryption key is attributed to this enclave by the provider's API; the "
-                       "hardware quote does not commit to it (a one-line provider change closes this)."),
     ("tcb-unchecked", "Intel's TCB and revocation status are not fetched (no PCS lookup)."),
     ("gpu-binding", "GPU attestation is counted, not verified against NVIDIA; its binding to the "
                     "CPU enclave is the provider's own claim."),
@@ -92,6 +97,7 @@ class InstanceReport:
     rtmrs: list[str]
     verified: bool
     chain: str = ""
+    e2e_pubkey: str = ""     # the ML-KEM key (base64) the quote was found to commit to; "" if unchecked
 
     @property
     def failing(self) -> list[str]:
@@ -100,7 +106,7 @@ class InstanceReport:
     def as_dict(self) -> dict:
         return {
             "instance_id": self.instance_id, "verified": self.verified, "gpu_count": self.gpu_count,
-            "mrtd": self.mrtd, "rtmrs": self.rtmrs, "chain": self.chain,
+            "mrtd": self.mrtd, "rtmrs": self.rtmrs, "chain": self.chain, "e2e_pubkey": self.e2e_pubkey,
             "checks": {k: {"ok": c.ok, "why": c.why} for k, c in self.checks.items()},
         }
 
@@ -225,6 +231,19 @@ def check_spki_bound(q: dict, cert_s: str) -> Check:
                  else f"MISMATCH: quote {got.hex()[:16]}… vs SPKI hash {want.hex()[:16]}…")
 
 
+def check_e2e_key_bound(q: dict, nonce: str, e2e_pubkey_b64: str | None) -> Check:
+    """report_data[0:32] must equal SHA-256 of the nonce string concatenated with the base64
+    ML-KEM public key string — the exact derivation Chutes' evidence service uses."""
+    if not q:
+        return Check(False, "no quote to bind")
+    if not e2e_pubkey_b64:
+        return Check(False, "no encryption key supplied to bind (instance not listed by /e2e/instances)")
+    want = hashlib.sha256((nonce + e2e_pubkey_b64).encode()).digest()
+    got = q["report_data"][:32]
+    return Check(got == want, "report_data[0:32] == SHA-256(nonce ‖ e2e_pubkey)" if got == want
+                 else f"MISMATCH: the quote does not commit to this encryption key ({got.hex()[:16]}… vs {want.hex()[:16]}…)")
+
+
 def check_tdx_shape(q: dict) -> Check:
     if not q:
         return Check(False, "buffer too short to be a v4 TDX quote")
@@ -298,7 +317,7 @@ def check_chain(certs: list) -> Check:
 
 # ───────────────────────────── verdicts ─────────────────────────────
 
-def verify_instance(inst: dict, nonce: str, reference) -> InstanceReport:
+def verify_instance(inst: dict, nonce: str, reference, e2e_pubkey_b64: str | None = None) -> InstanceReport:
     body = inst.get("attested_body") or ""
     quote_b = _b64(inst.get("quote") or "")
     q = quote_fields(quote_b)
@@ -307,6 +326,7 @@ def verify_instance(inst: dict, nonce: str, reference) -> InstanceReport:
         "nonce_in_body": check_nonce(body, nonce),
         "sig_ok": check_signature(body, inst.get("signature") or "", inst.get("certificate") or ""),
         "spki_bound": check_spki_bound(q, inst.get("certificate") or ""),
+        "e2e_key_bound": check_e2e_key_bound(q, nonce, e2e_pubkey_b64),
         "tdx_shape": check_tdx_shape(q),
         "measurement_ok": check_measurements(q, reference),
         "chain_ok": check_chain(certs),
@@ -319,12 +339,17 @@ def verify_instance(inst: dict, nonce: str, reference) -> InstanceReport:
         rtmrs=[q[k].hex() for k in ("rtmr0", "rtmr1", "rtmr2", "rtmr3")] if q else [],
         verified=all(checks[k].ok for k in REQUIRED),
         chain=" → ".join(_cn(c) for c in certs),
+        e2e_pubkey=(e2e_pubkey_b64 or "") if checks["e2e_key_bound"].ok else "",
     )
 
 
-def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str) -> FleetReport:
+def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str,
+                 e2e_pubkeys: dict[str, str] | None = None) -> FleetReport:
+    """``e2e_pubkeys``: instance_id → base64 ML-KEM key as served by /e2e/instances. Without it
+    the e2e_key_bound check cannot run and NO instance verifies (fail-closed)."""
     inst = evidence_doc.get("evidence") if isinstance(evidence_doc, dict) else evidence_doc
-    rows = [verify_instance(i, nonce, reference) for i in (inst or [])]
+    keys = e2e_pubkeys or {}
+    rows = [verify_instance(i, nonce, reference, keys.get(str(i.get("instance_id") or ""))) for i in (inst or [])]
     failed = evidence_doc.get("failed_instance_ids") if isinstance(evidence_doc, dict) else None
     return FleetReport(chute_id=chute_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []))
 
@@ -341,12 +366,15 @@ def measurements_url() -> str:
     return f"{API}/servers/tee/measurements"
 
 
-async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeout: float = 240.0) -> FleetReport:
+async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeout: float = 240.0,
+                           e2e_pubkeys: dict[str, str] | None = None) -> FleetReport:
     """Fetch evidence + registry FROM CHUTES DIRECTLY with a fresh nonce, then verify offline.
-    ``http`` is an ``httpx.AsyncClient``; the 1–2 MB evidence document takes ~10 s to arrive."""
+    ``http`` is an ``httpx.AsyncClient``; the 1–2 MB evidence document takes ~10 s to arrive.
+    ``e2e_pubkeys`` (instance_id → key) lets the quote be checked against the key we will seal
+    to; the session passes the keys it just fetched, so the SAME key is verified and used."""
     nonce = nonce or new_nonce()
     h = {"User-Agent": UA}
     ref = (await http.get(measurements_url(), headers=h, timeout=timeout)).json()
     r = await http.get(evidence_url(chute_id, nonce), headers=h, timeout=timeout)
     r.raise_for_status()
-    return verify_fleet(chute_id, r.json(), ref, nonce)
+    return verify_fleet(chute_id, r.json(), ref, nonce, e2e_pubkeys)

@@ -11,11 +11,12 @@ from inferroute_local.confidential import attest, session as S
 from tests.confidential_fake_enclave import FakeEnclave
 
 
-def _report(iid: str, ok: bool = True) -> attest.InstanceReport:
+def _report(iid: str, ok: bool = True, e2e_pubkey: str = "") -> attest.InstanceReport:
     checks = {k: attest.Check(ok, "fixture") for k in attest.REQUIRED}
     if not ok:
         checks["measurement_ok"] = attest.Check(False, "unknown MRTD")
-    return attest.InstanceReport(iid, checks, gpu_count=8, mrtd="aa" * 48, rtmrs=["bb" * 48] * 4, verified=ok, chain="leaf → root")
+    return attest.InstanceReport(iid, checks, gpu_count=8, mrtd="aa" * 48, rtmrs=["bb" * 48] * 4, verified=ok, chain="leaf → root",
+                                 e2e_pubkey=e2e_pubkey if ok else "")
 
 
 class FakeCarrier:
@@ -70,11 +71,17 @@ def world(monkeypatch, tmp_path):
     encl = {"i-a": FakeEnclave(), "i-b": FakeEnclave()}
     verified = {"i-a": True, "i-b": True}
 
-    async def fake_fetch(chute_id, http, nonce=None, timeout=0):
-        return attest.FleetReport(chute_id, nonce or "n" * 64, [_report(i, verified[i]) for i in encl] + [_report("i-c", False)])
+    async def fake_fetch(chute_id, http, nonce=None, timeout=0, e2e_pubkeys=None):
+        # the fake verifier "binds" whatever key the session handed it — exactly the real
+        # contract: the report carries the key the quote committed to
+        keys = e2e_pubkeys or {}
+        world["keys_seen"] = dict(keys)
+        return attest.FleetReport(chute_id, nonce or "n" * 64,
+                                  [_report(i, verified[i], keys.get(i, "")) for i in encl] + [_report("i-c", False)])
 
     monkeypatch.setattr(attest, "fetch_and_verify", fake_fetch)
-    return {"enclaves": encl, "verified": verified}
+    world = {"enclaves": encl, "verified": verified}
+    return world
 
 
 def _session(carrier):
@@ -94,7 +101,36 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     assert r.fleet == {"instances": 3, "verified": 2, "e2ee_capable": 2, "eligible": 2, "failed_instance_ids": []}
     assert all(c["ok"] for c in r.checks.values()) and set(r.checks) == set(attest.REQUIRED)
     assert r.claim and r.path and r.e2ee["kem"].startswith("ML-KEM-768")
-    assert any(lim["id"] == "attributed-key" for lim in r.limitations), "the honest gap is always on the receipt"
+    assert not any(lim["id"] == "attributed-key" for lim in r.limitations), "the key binding is a check, not a limitation"
+    assert r.checks["e2e_key_bound"]["ok"] and "commits to" in r.checks["e2e_key_bound"]["explain"]
+
+
+def test_the_keys_verified_are_the_keys_sealed_to(world):
+    """The session fetches the instance keys FIRST and hands them to the verifier, so the quote
+    is checked against the very key each request is sealed with."""
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    assert world["keys_seen"] == {i: e.pubkey_b64 for i, e in world["enclaves"].items()}
+    assert s.pinned.pubkey_b64 == s.pinned.report.e2e_pubkey
+
+
+def test_a_key_the_quote_did_not_commit_to_is_never_sealed_to(world):
+    """Carrier offers a key for i-a that differs from the one the verifier bound: i-a is skipped."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    orig = carrier.instances
+
+    async def swapped(chute_id):
+        e2 = await orig(chute_id)
+        e2["instances"][0]["e2e_pubkey"] = FakeEnclave().pubkey_b64   # substituted AFTER verification
+        return e2
+    asyncio.run(s.open())
+    carrier.instances = swapped
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
+    st, _, _ = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "2"}]}))
+    assert st == 200 and carrier.calls[-1][0] == "i-b"
+    assert any(e["kind"] == "key-changed" for e in s.receipt.events)
 
 
 def test_refuses_when_verified_and_sealable_sets_are_disjoint(world):

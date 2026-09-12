@@ -65,18 +65,21 @@ class ConfidentialSession:
 
     async def open(self, progress: Callable[[str], None] | None = None) -> Receipt:
         say = progress or (lambda s: None)
-        say("fetching the fleet's attestation evidence from Chutes (this is the slow part)…")
-        try:
-            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http)
-        except Exception as e:
-            return self._refuse(f"could not fetch attestation evidence from Chutes: {e}")
-        self._verified_at = time.time()
-        verified = self.fleet.verified_ids
-        say(f"verified {len(verified)} of {len(self.fleet.instances)} instances; asking which accept sealed requests…")
+        say("asking which instances accept sealed requests, and for their encryption keys…")
         try:
             e2 = await self.transport.instances(self.chute_id)
         except Exception as e:
             return self._refuse(f"could not list e2ee-capable instances via {self.transport.name}: {e}")
+        keys = _keys_of(e2)
+        say("fetching the fleet's attestation evidence from Chutes (this is the slow part)…")
+        try:
+            # the quote is checked against the very keys we will seal to
+            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=keys)
+        except Exception as e:
+            return self._refuse(f"could not fetch attestation evidence from Chutes: {e}")
+        self._verified_at = time.time()
+        verified = self.fleet.verified_ids
+        say(f"verified {len(verified)} of {len(self.fleet.instances)} instances…")
         self._absorb_pool(e2)
         eligible = [i for i in self._pool if i in verified]
         self.receipt.fleet = {"instances": len(self.fleet.instances), "verified": len(verified),
@@ -110,10 +113,10 @@ class ConfidentialSession:
             rep = reports.get(iid)
             if not iid or rep is None or not rep.verified:
                 continue
-            prev = self._pool.get(iid)
-            if prev and prev.pubkey_b64 != inst.get("e2e_pubkey"):
-                # a restarted instance has a new key AND (possibly) a new measurement: re-verify before trusting
-                self.receipt.note("key-changed", f"{iid[:8]} rotated its e2ee key; re-verification required")
+            if rep.e2e_pubkey != (inst.get("e2e_pubkey") or ""):
+                # the key on offer is not the key the hardware quote committed to (a rotated
+                # instance, or a substituted key): never seal to it until re-verified
+                self.receipt.note("key-changed", f"{iid[:8]} offers a key the verified quote does not commit to; re-verification required")
                 continue
             fresh[iid] = Pinned(iid, inst.get("e2e_pubkey") or "", list(inst.get("nonces") or []), expires, rep)
         self._pool, self._pool_expire = fresh, expires
@@ -163,7 +166,8 @@ class ConfidentialSession:
 
     async def _reverify(self) -> None:
         try:
-            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http)
+            e2 = await self.transport.instances(self.chute_id)
+            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=_keys_of(e2))
         except Exception as e:
             self.receipt.note("reverify-failed", str(e))
             return
@@ -297,6 +301,10 @@ class ConfidentialSession:
             self.receipt.ended_at = _now()
             self.receipt.save()
         return self.receipt
+
+
+def _keys_of(e2: dict) -> dict[str, str]:
+    return {str(i.get("instance_id")): str(i.get("e2e_pubkey") or "") for i in (e2.get("instances") or []) if i.get("instance_id")}
 
 
 async def _drain(it: AsyncIterator[bytes]) -> bytes:

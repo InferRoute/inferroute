@@ -136,6 +136,6 @@ def test_fleet_report_arithmetic_and_empty_fleet(world):
 
 
 def test_labels_cover_every_required_check_and_limitations_name_the_key_gap():
-    assert set(A.LABELS) == set(A.REQUIRED)
+    assert set(A.LABELS) == set(A.REQUIRED) | set(A.REQUIRED_ONLINE)
     assert not any(k == "attributed-key" for k, _ in A.LIMITATIONS), "the key binding is a CHECK now, not a limitation"
     assert "e2e_key_bound" in A.REQUIRED

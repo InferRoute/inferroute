@@ -139,3 +139,32 @@ def test_labels_cover_every_required_check_and_limitations_name_the_key_gap():
     assert set(A.LABELS) == set(A.REQUIRED) | set(A.REQUIRED_ONLINE)
     assert not any(k == "attributed-key" for k, _ in A.LIMITATIONS), "the key binding is a CHECK now, not a limitation"
     assert "e2e_key_bound" in A.REQUIRED
+
+
+def test_evidence_fetch_backs_off_on_429_then_succeeds_and_gives_up_after_attempts(monkeypatch):
+    import asyncio
+    calls = {"n": 0}
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda s: real_sleep(0))
+
+    class R:
+        def __init__(self, code):
+            self.status_code, self.headers = code, {"Retry-After": "0"}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(f"HTTP {self.status_code}")
+        def json(self):
+            return {}
+
+    class Http:
+        async def get(self, url, headers=None, timeout=None):
+            calls["n"] += 1
+            return R(429 if calls["n"] < 3 else 200)
+    r = asyncio.run(A._get_retry(Http(), "u", {}, 1.0))
+    assert r.status_code == 200 and calls["n"] == 3
+
+    class Dead:
+        async def get(self, url, headers=None, timeout=None):
+            return R(429)
+    with pytest.raises(RuntimeError):
+        asyncio.run(A._get_retry(Dead(), "u", {}, 1.0, attempts=2))

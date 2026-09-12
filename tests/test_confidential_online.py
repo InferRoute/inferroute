@@ -243,11 +243,51 @@ def test_verify_online_marks_unreachable_services_as_failed_checks_never_raises(
             raise ConnectionError("offline")
         async def post(self, *a, **k):
             raise ConnectionError("offline")
-    inst = {"quote": base64.b64encode(q).decode(), "gpu_evidence": [{"arch": "BLACKWELL", "evidence": "x", "certificate": "y"}]}
+    gpu = [{"arch": "BLACKWELL", "evidence": "x", "certificate": "y"}]
+    inner = json.dumps({"evidence": {"tdx_quote": "…", "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
+    inst = {"quote": base64.b64encode(q).decode(), "attested_body": base64.b64encode(inner).decode(), "gpu_evidence": gpu}
     out = asyncio.run(A.verify_online(rep, inst, NONCE, Dead()))
     assert out.checks["quote_sig"].ok, "the quote's own signature needs no network"
     assert not out.verified
     assert "Intel collateral unavailable" in out.checks["tcb_current"].why
     assert "NVIDIA attestation service unavailable" in out.checks["gpu_verified"].why
     assert set(A.REQUIRED_ONLINE) <= set(out.checks) and out.online_done
+    assert out.checks["gpu_in_signed_evidence"].ok
     assert out.failing == ["root_pinned", "not_revoked", "tcb_current", "qe_current", "gpu_verified"]
+
+
+def test_gpu_reports_are_taken_from_the_signed_body_and_a_divergent_loose_copy_is_refused(intel):
+    import asyncio
+    import base64 as b64
+    q = intel["quote"]
+    gpu = [{"arch": "BLACKWELL", "evidence": "AAAA", "certificate": "BBBB"}]
+    inner = json.dumps({"evidence": {"tdx_quote": "…", "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
+    inst = {"quote": b64.b64encode(q).decode(), "attested_body": b64.b64encode(inner).decode(), "gpu_evidence": gpu}
+    assert A.signed_gpu_evidence(inst) == gpu
+    rep = A.InstanceReport("i-1", {k: A.Check(True, "x") for k in A.REQUIRED}, 1, "aa", [], True, e2e_pubkey="PK")
+    sent = {}
+    class Http:
+        async def get(self, url, **k):
+            class R:
+                status_code = 200
+                headers = {}
+                content = b""
+                text = ""
+                def raise_for_status(self): pass
+                def json(self): return {"keys": []}
+            return R()
+        async def post(self, url, json=None, **k):
+            sent["payload"] = json
+            class R:
+                status_code = 503
+                text = "down"
+            return R()
+    out = asyncio.run(A.verify_online(rep, inst, NONCE, Http()))
+    assert out.checks["gpu_in_signed_evidence"].ok and "signed body" in out.checks["gpu_in_signed_evidence"].why
+    assert sent["payload"]["evidence_list"] == [{"evidence": "AAAA", "certificate": "BBBB"}], "NVIDIA receives the SIGNED copy"
+    tampered = dict(inst, gpu_evidence=[{"arch": "BLACKWELL", "evidence": "ZZZZ", "certificate": "BBBB"}])
+    out = asyncio.run(A.verify_online(rep, tampered, NONCE, Http()))
+    assert not out.checks["gpu_in_signed_evidence"].ok and "DIFFERS" in out.checks["gpu_in_signed_evidence"].why
+    nogpu = dict(inst, attested_body=b64.b64encode(json.dumps({"evidence": {}, "nonce": NONCE}).encode()).decode())
+    out = asyncio.run(A.verify_online(rep, nogpu, NONCE, Http()))
+    assert "carries no GPU evidence" in out.checks["gpu_in_signed_evidence"].why

@@ -21,7 +21,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 AGENTS = ("claude", "pi", "opencode", "goose")
@@ -66,12 +65,19 @@ def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, heade
 
 
 def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None) -> Path:
-    """A per-launch PI_CODING_AGENT_DIR: the user's ~/.pi/agent mirrored by symlink (everything
-    except models.json, which is merged), so their settings/auth/extensions/sessions all apply."""
+    """The PI_CODING_AGENT_DIR for an `ir pi` launch: a STABLE ir-owned dir (~/.inferroute/pi-agent)
+    re-populated on every launch with symlinks to the user's ~/.pi/agent entries (settings, auth,
+    extensions, skills, themes, prompts, sessions — all theirs, untouched) plus a merged
+    models.json. Stable so Pi's own downloads (its `bin/` with fd and ripgrep) persist across
+    launches instead of being fetched every time (Henry saw that on each `ir pi`)."""
     user_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or (Path.home() / ".pi" / "agent"))
-    d = Path(tempfile.mkdtemp(prefix="ir-pi-"))
+    d = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "pi-agent"
+    d.mkdir(parents=True, exist_ok=True)
+    for entry in d.iterdir():                      # drop last launch's links; keep real dirs (bin/)
+        if entry.is_symlink() or entry.name == "models.json":
+            entry.unlink()
     existing = None
-    if user_dir.is_dir():
+    if user_dir.is_dir() and user_dir.resolve() != d.resolve():
         for entry in user_dir.iterdir():
             if entry.name == "models.json":
                 try:
@@ -79,13 +85,15 @@ def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, header
                 except (OSError, ValueError):
                     existing = None
                 continue
+            if (d / entry.name).exists():
+                continue                            # e.g. our persistent bin/ when the user has none
             try:
                 os.symlink(entry, d / entry.name)
             except OSError:
                 pass
     (d / "models.json").write_text(json.dumps(pi_models_json(base_url, api_key, alias, upstream_name, headers, existing), indent=1))
-    if not (d / "sessions").exists():
-        (d / "sessions").mkdir()
+    (d / "sessions").mkdir(exist_ok=True)
+    (d / "bin").mkdir(exist_ok=True)
     return d
 
 

@@ -94,9 +94,9 @@ def world(monkeypatch, tmp_path):
     return world
 
 
-def _session(carrier):
+def _session(carrier, price=None):
     return S.ConfidentialSession(session_id="s1", model_short="fake", upstream_model="fake/Model-TEE", fleet_id="chute-1",
-                                 transport=carrier, http=None)
+                                 transport=carrier, http=None, price=price)
 
 
 async def _drain(it):
@@ -402,3 +402,16 @@ def test_a_429_on_evidence_refuses_with_a_clean_reason(world, monkeypatch):
     monkeypatch.setattr(attest, "fetch_and_verify", boom)
     r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
     assert r.verdict == "refused" and "answered 429" in r.refusal and "http" not in r.refusal and "example-provider" not in r.refusal
+
+
+def test_usage_is_priced_locally_and_reported_with_model_short_and_latency(world):
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier, price={"input": 1.0, "cached": 0.1, "output": 10.0})
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))   # 5 in / 2 out
+    c = s.receipt.counters
+    assert c["input_tokens"] == 5 and c["output_tokens"] == 2
+    assert abs(c["estimated_cost_usd"] - (5 / 1e6 * 1.0 + 2 / 1e6 * 10.0)) < 1e-12
+    rep = carrier.usage_reports[-1]
+    assert rep["model_short"] == "fake" and rep["model"] == "fake/Model-TEE" and rep["economy"] is False
+    assert rep["usage"]["input_tokens"] == 5 and "latency_ms" in rep["usage"]

@@ -41,7 +41,7 @@ class Receipt:
     counters: dict = field(default_factory=lambda: {
         "requests": 0, "plaintext_bytes_sealed_here": 0, "ciphertext_bytes_sent": 0,
         "ciphertext_frames_received": 0, "response_bytes_opened_here": 0, "errors": 0,
-        "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0})
+        "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0})
     events: list = field(default_factory=list)          # [{ts, kind, detail}] — pins, switches, re-verifications
     verified_at: str = ""
     claim: str = ""

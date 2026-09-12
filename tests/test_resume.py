@@ -166,6 +166,7 @@ def test_confidential_status_line_names_the_lane_and_shows_live_privacy_figures(
     r.verified_at = "2026-09-12T01:04:38Z"
     r.verdict = "confidential"
     r.counters["plaintext_bytes_sealed_here"] = 401239
+    r.counters["estimated_cost_usd"] = 0.1234
     r.path = str(tmp_path / "receipt.json")
     r.save()
     prefix = C._strip_prefix(r)
@@ -175,10 +176,10 @@ def test_confidential_status_line_names_the_lane_and_shows_live_privacy_figures(
     C._attach_counter(args, r.path)
     cmd = json.loads(args[1])["statusLine"]["command"]
     out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    assert out.returncode == 0 and out.stdout == "X · 391 KB sealed here · 0 B in the clear"
+    assert out.returncode == 0 and out.stdout == "X · 391 KB sealed here · 0 B in the clear │ $0.12"
     r.counters["plaintext_bytes_sealed_here"] = 3 * 1048576 + 524288
     r.save()
     out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    assert out.stdout == "X · 3.5 MB sealed here · 0 B in the clear"
+    assert out.stdout == "X · 3.5 MB sealed here · 0 B in the clear │ $0.12"
     C._attach_counter(args := ["--settings", "{}"], r.path)   # malformed settings: untouched, no crash
     assert args[1] == "{}"

@@ -42,7 +42,7 @@ class Pinned:
 
 class ConfidentialSession:
     def __init__(self, *, session_id: str, model_short: str, upstream_model: str, fleet_id: str,
-                 transport: Transport, http: httpx.AsyncClient):
+                 transport: Transport, http: httpx.AsyncClient, price: dict | None = None, economy: bool = False):
         self.session_id = session_id
         self.model_short = model_short
         self.upstream_model = upstream_model
@@ -53,6 +53,10 @@ class ConfidentialSession:
                                fleet_id=fleet_id, transport=transport.name)
         self.receipt.e2ee = {"kem": "ML-KEM-768 (FIPS 203)", "aead": "ChaCha20-Poly1305", "kdf": "HKDF-SHA256",
                              "backend": e2ee.backend().name}
+        # USD per 1M tokens for the lane ({input, cached, output}); the receipt keeps a running
+        # estimate the status line shows. The relay bills from the same catalog rate.
+        self.price = price or {}
+        self.economy = economy
         self.fleet: attest.FleetReport | None = None
         self.pinned: Pinned | None = None
         self._pool: dict[str, Pinned] = {}          # instance_id → pool entry (verified instances only)
@@ -204,6 +208,7 @@ class ConfidentialSession:
         """Anthropic request in → Anthropic response out; everything in between is sealed."""
         c = self.receipt.counters
         streaming = bool(body.get("stream"))
+        t0 = time.monotonic()
         try:
             oai = translate.to_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
             pinned, nonce = await self._take_nonce()
@@ -231,8 +236,8 @@ class ConfidentialSession:
                 detail = f"(body unreadable: {type(e).__name__})"
             return self._error(streaming, status, f"upstream {status}: {detail}")
         if streaming:
-            return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed)
-        return 200, {"content-type": "application/json"}, self._open_json(raw, sealed)
+            return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed, t0)
+        return 200, {"content-type": "application/json"}, self._open_json(raw, sealed, t0)
 
     async def chat_completions(self, body: dict) -> tuple[int, dict, AsyncIterator[bytes]]:
         """OpenAI request in → OpenAI response out, sealed AS-IS: the enclaves speak OpenAI
@@ -242,6 +247,7 @@ class ConfidentialSession:
         to the system message."""
         c = self.receipt.counters
         streaming = bool(body.get("stream"))
+        t0 = time.monotonic()
         try:
             oai = translate.native_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
             pinned, nonce = await self._take_nonce()
@@ -269,10 +275,10 @@ class ConfidentialSession:
                 detail = f"(body unreadable: {type(e).__name__})"
             return self._error(streaming, status, f"upstream {status}: {detail}", openai=True)
         if streaming:
-            return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed)
-        return 200, {"content-type": "application/json"}, self._open_json_native(raw, sealed)
+            return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed, t0)
+        return 200, {"content-type": "application/json"}, self._open_json_native(raw, sealed, t0)
 
-    async def _open_stream_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+    async def _open_stream_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         """The enclave's own OpenAI SSE, decrypted and passed through byte-for-byte; usage is
         read off the stream for the receipt."""
         opener = e2ee.StreamOpener(sealed.response_sk)
@@ -315,9 +321,9 @@ class ConfidentialSession:
             return
         finally:
             c["ciphertext_frames_received"] += opener.frames
-        self._account(usage)
+        self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
 
-    async def _open_json_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+    async def _open_json_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         c = self.receipt.counters
         try:
             data = await _drain(raw)
@@ -332,10 +338,10 @@ class ConfidentialSession:
             yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
-        self._account(translate._usage(resp.get("usage")))
+        self._account(translate._usage(resp.get("usage")), int((time.monotonic() - t0) * 1000) if t0 else 0)
         yield json.dumps(resp).encode()
 
-    async def _open_stream(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+    async def _open_stream(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         opener = e2ee.StreamOpener(sealed.response_sk)
         tr = translate.StreamTranslator(self.model_short)
         c = self.receipt.counters
@@ -378,9 +384,9 @@ class ConfidentialSession:
             c["ciphertext_frames_received"] += opener.frames
         for ev in tr.finish_events():
             yield ev.encode()
-        self._account(tr.usage)
+        self._account(tr.usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
 
-    async def _open_json(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
+    async def _open_json(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         c = self.receipt.counters
         try:
             data = await _drain(raw)
@@ -403,17 +409,24 @@ class ConfidentialSession:
             return
         c["response_bytes_opened_here"] += len(data)
         out = translate.from_openai(resp, self.model_short)
-        self._account(out.get("usage") or {})
+        self._account(out.get("usage") or {}, int((time.monotonic() - t0) * 1000) if t0 else 0)
         yield json.dumps(out).encode()
 
-    def _account(self, usage: dict) -> None:
+    def _account(self, usage: dict, latency_ms: int = 0) -> None:
         c = self.receipt.counters
         for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
             c[k] += int(usage.get(k) or 0)
+        if self.price:
+            c["estimated_cost_usd"] = round(
+                c["input_tokens"] / 1e6 * float(self.price.get("input", 0))
+                + c["cache_read_input_tokens"] / 1e6 * float(self.price.get("cached", 0))
+                + c["output_tokens"] / 1e6 * float(self.price.get("output", 0)), 6)
         self.receipt.save()
         asyncio.ensure_future(self.transport.report_usage({
             "session_id": self.session_id, "fleet_id": self.fleet_id, "model": self.upstream_model,
-            "instance_id": self.pinned.instance_id if self.pinned else "", "usage": usage, "self_reported": True}))
+            "model_short": self.model_short, "economy": self.economy,
+            "instance_id": self.pinned.instance_id if self.pinned else "",
+            "usage": {**usage, "latency_ms": int(latency_ms)}, "self_reported": True}))
 
     def _error(self, streaming: bool, status: int, message: str, openai: bool = False) -> tuple[int, dict, AsyncIterator[bytes]]:
         body = translate.openai_error(message) if openai else translate.error_body(message)

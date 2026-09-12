@@ -44,17 +44,29 @@ def binary_for(agent: str) -> str:
 
 # ───────────────────────── Pi ─────────────────────────
 
+def _price(alias) -> dict:
+    """Catalog USD/1M for the standard lane ({input, cached, output}); zeros if unknown."""
+    try:
+        from . import models as models_mod
+        row = next((m for m in models_mod._rows() if m.get("short") == alias.short), None) or {}
+        return dict(row.get("standard") or {})
+    except Exception:
+        return {}
+
+
 def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
                    existing: dict | None = None) -> dict:
     """A models.json declaring the `inferroute` provider, merged over the user's own file."""
     doc = dict(existing or {})
     providers = dict(doc.get("providers") or {})
+    pr = _price(alias)
     prov: dict = {
         "name": "InferRoute", "baseUrl": base_url.rstrip("/") + "/v1", "api": "openai-completions", "apiKey": api_key,
         # open-weight reasoning models return `reasoning_content`; Pi's deepseek thinking format reads it
         "compat": {"thinkingFormat": "deepseek", "supportsDeveloperRole": False, "maxTokensField": "max_tokens"},
         "models": [{"id": alias.short, "name": upstream_name, "reasoning": True, "input": ["text", "image"],
-                    "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+                    "cost": {"input": pr.get("input", 0), "output": pr.get("output", 0),
+                             "cacheRead": pr.get("cached", 0), "cacheWrite": pr.get("input", 0)},
                     "contextWindow": 262144, "maxTokens": 32768}],
     }
     if headers:
@@ -110,12 +122,15 @@ def pi_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str
 def opencode_config(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
                     confidential: bool = True) -> dict:
     options: dict = {"baseURL": base_url.rstrip("/") + "/v1", "apiKey": api_key}
+    pr = _price(alias)
     if headers:
         options["headers"] = headers
     cfg: dict = {
         "$schema": "https://opencode.ai/config.json",
         "provider": {"inferroute": {"npm": "@ai-sdk/openai-compatible", "name": "InferRoute", "options": options,
-                                    "models": {alias.short: {"name": upstream_name, "limit": {"context": 262144, "output": 32768}}}}},
+                                    "models": {alias.short: {"name": upstream_name, "limit": {"context": 262144, "output": 32768},
+                                                             "cost": {"input": pr.get("input", 0), "output": pr.get("output", 0),
+                                                                      "cache_read": pr.get("cached", 0), "cache_write": pr.get("input", 0)}}}}},
         "model": f"inferroute/{alias.short}",
         "small_model": f"inferroute/{alias.short}",
     }

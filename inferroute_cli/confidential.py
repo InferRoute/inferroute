@@ -177,7 +177,13 @@ def launch(args: list[str]) -> int:
             display.render_summary(session.receipt, console)
             return rc
 
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    except KeyboardInterrupt:
+        # Only reachable BEFORE claude starts (verification / instance discovery): after the
+        # launch the parent ignores SIGINT and claude owns it. Nothing has been sent yet.
+        console.print("\n[grey58]cancelled before anything was sent.[/]")
+        return 130
 
 
 # ───────────────────────── ir confidential … ─────────────────────────

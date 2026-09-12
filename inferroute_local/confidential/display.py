@@ -48,6 +48,11 @@ def _when(r: Receipt) -> str:
     return "on " + t.strftime("%Y-%m-%d at %H:%M UTC")
 
 
+def _width(console: Console) -> int:
+    """The panel is designed at 96 columns; on a narrower terminal it folds rather than overflows."""
+    return max(60, min(WIDTH, console.width))
+
+
 def _home(path: str) -> str:
     h = str(Path.home())
     return "~" + path[len(h):] if path.startswith(h) else path
@@ -147,7 +152,7 @@ def render_panel(r: Receipt, console: Console | None = None) -> None:
     )
     console.print(Panel(body, title="[bold]🔒 InferRoute · Confidential session[/]",
                         subtitle=f"[{DIM}]verified {r.verified_at or r.started_at} · session {r.session_id[:8]}[/]",
-                        border_style=ACCENT, box=box.ROUNDED, width=WIDTH, padding=(1, 2)))
+                        border_style=ACCENT, box=box.ROUNDED, width=_width(console), padding=(1, 2)))
 
 
 def render_refusal(r: Receipt, console: Console | None = None) -> None:
@@ -163,23 +168,23 @@ def render_refusal(r: Receipt, console: Console | None = None) -> None:
         Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)),
     )
     console.print(Panel(body, title="[bold red]⛔ InferRoute · Confidential session refused[/]",
-                        border_style="red", box=box.ROUNDED, width=WIDTH, padding=(1, 2)))
+                        border_style="red", box=box.ROUNDED, width=_width(console), padding=(1, 2)))
 
 
 def render_summary(r: Receipt, console: Console | None = None) -> None:
     console = console or Console()
     c = r.counters
-    t = Text()
-    t.append("🔒 Confidential session closed", style=f"bold {ACCENT}")
-    t.append(f"  ·  {c['requests']} request{'s' if c['requests'] != 1 else ''}", style="bold")
-    t.append(f"  ·  {_kb(c['plaintext_bytes_sealed_here'])} sealed on this device", style=DIM)
-    t.append(f"  ·  {_kb(c['response_bytes_opened_here'])} opened here", style=DIM)
+    head = Text()
+    head.append("🔒 Confidential session closed", style=f"bold {ACCENT}")
+    head.append(f"  ·  {c['requests']} request{'s' if c['requests'] != 1 else ''}", style="bold")
+    head.append(f"  ·  {_kb(c['plaintext_bytes_sealed_here'])} sealed here  ·  {_kb(c['response_bytes_opened_here'])} opened here", style=DIM)
     if c.get("instance_switches"):
-        t.append(f"  ·  {c['instance_switches']} instance switch(es)", style=AMBER)
+        head.append(f"  ·  {c['instance_switches']} instance switch(es)", style=AMBER)
     if c.get("errors"):
-        t.append(f"  ·  {c['errors']} error(s)", style="red")
-    t.append(f"\n   plaintext that left this device: 0 bytes  ·  receipt: {_home(str(r.path))}", style=DIM)
-    console.print(t)
+        head.append(f"  ·  {c['errors']} error(s)", style="red")
+    console.print(head, soft_wrap=True)
+    console.print(Text("   plaintext that left this device: 0 bytes", style=DIM), soft_wrap=True)
+    console.print(Text(f"   receipt: {_home(str(r.path))}", style=DIM), soft_wrap=True)
 
 
 def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> None:

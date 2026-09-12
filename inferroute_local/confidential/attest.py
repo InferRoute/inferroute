@@ -123,9 +123,10 @@ def situational_limitations(checks: dict) -> list[tuple[str, str]]:
     elif "recomputed here" in why:
         regs = why.split("recomputed here")[0].rsplit(";", 1)[-1].strip()
         out.append(("reproduced", f"For this build InferRoute recomputed {regs} on its own machine from artifacts "
-                                  "the operator publishes, and they matched. The remaining measurements, covering "
-                                  "the kernel command line and the root filesystem, are recorded and watched "
-                                  "rather than recomputed."))
+                                  "the operator publishes, and they matched — the firmware, the bootloader chain, "
+                                  "the kernel command line and the initial RAM filesystem. What is not recomputed "
+                                  "is the measurement over the root filesystem, which is encrypted in the "
+                                  "published image."))
     elif "PENDING" in why:
         out.append(("pending-build", "This enclave build was served to your client at run time rather than shipped in "
                                      "a released version of it. InferRoute has not reviewed it and has reproduced "

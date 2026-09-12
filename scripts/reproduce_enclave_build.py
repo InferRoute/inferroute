@@ -12,19 +12,24 @@ WITHOUT the operator's cooperation, from artifacts anyone can fetch:
          host RAM, vCPU count and ACPI, which is why one MRTD covers a whole fleet.
   RTMR1  the bootloader chain: GUID partition table, then the shim and GRUB binaries,
          Authenticode-hashed exactly as the firmware measures them at load.
+  RTMR2  the owner-key variables, then the kernel command line and the initramfs.
 
-Both are computed here from (a) the operator's published guest disk image, read over HTTPS
+All three are computed here from (a) the operator's published guest disk image, read over HTTPS
 with range requests so only ~1 GB of a multi-tens-of-GB image is transferred, and (b) the
 guest firmware binary published in the operator's open build repository. Neither input is
 privileged and neither is taken from the attestation path being checked.
 
+The RTMR2 model is worth stating because the obvious one is wrong. The bootloader measures
+NOTHING on a confidential VM: it only starts measuring when it finds a TPM protocol, and this
+firmware publishes the confidential-computing protocol instead. What lands in the register is
+three owner-key entries the bootloader synthesises from a certificate built into its own binary,
+then two entries from the kernel's boot stub. The command line is the one the bootloader passes,
+which carries a BOOT_IMAGE= prefix the configuration file does not show.
+
 NOT reproduced here, and deliberately not claimed:
   RTMR0  measures host firmware configuration and legitimately varies per host.
-  RTMR2  kernel command line and initramfs. The bootloader's own event log contributes
-         entries we do not yet model, so this one is still recorded rather than reproduced.
-  RTMR3  hashes a fixed list of root-filesystem files. The root filesystem is LUKS-encrypted
-         in the published image, and the per-file manifest shipped in the initramfs is not
-         exhaustive, so it cannot be recomputed from the download alone.
+  RTMR3  hashes a list of root-filesystem files. That filesystem is encrypted in the published
+         image, so it cannot be recomputed from the download alone.
 
 No operator name, host or URL is compiled in. Pass the image locator explicitly.
 
@@ -224,6 +229,68 @@ def rtmr1(gpt_data: bytes, shim: bytes, grub: bytes) -> tuple[str, list[tuple[st
     return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
 
 
+# ── RTMR2: the Machine-Owner-Key variables, then the kernel command line and initramfs ──
+#
+# The three MOK entries are NOT empty on a machine with no MOK variables set. The bootloader's
+# shim synthesises all three from data built into its own binary, so they are derivable from the
+# published image with nothing else. What reaches the register after that comes from the kernel's
+# own boot stub, not from GRUB: GRUB only measures when it finds a TPM protocol, and a confidential
+# VM's firmware publishes the confidential-computing protocol instead, so GRUB measures nothing at
+# all here. That is why a model built from GRUB's command trace does not match.
+
+def _guid(s: str) -> bytes:
+    a, b, c, d, e = s.split("-")
+    return struct.pack("<IHH", int(a, 16), int(b, 16), int(c, 16)) + bytes.fromhex(d) + bytes.fromhex(e)
+
+
+CERT_X509 = _guid("a5c059a1-94e4-4aa7-87b5-ab155c2bf072")
+CERT_SHA256 = _guid("c1c41626-504c-4092-aca9-41f936934328")
+SHIM_LOCK = _guid("605dab50-e046-4300-abb6-3dd810dd8b23")
+
+
+def _signature_list(sig_type: bytes, owner: bytes, data: bytes) -> bytes:
+    """One EFI_SIGNATURE_LIST holding one signature, packed as the bootloader packs it."""
+    sig_size = 16 + len(data)
+    return struct.pack("<16sIII", sig_type, 28 + sig_size, 0, sig_size) + owner + data
+
+
+def vendor_cert(shim: bytes) -> bytes:
+    """The certificate built into the bootloader's own binary, from its .vendor_cert section."""
+    pe = struct.unpack_from("<I", shim, 0x3C)[0]
+    n_sections = struct.unpack_from("<H", shim, pe + 6)[0]
+    symtab = struct.unpack_from("<I", shim, pe + 12)[0]
+    n_syms = struct.unpack_from("<I", shim, pe + 16)[0]
+    opt_size = struct.unpack_from("<H", shim, pe + 20)[0]
+    strtab = symtab + n_syms * 18
+    base = pe + 24 + opt_size
+    for i in range(n_sections):
+        e = shim[base + 40 * i: base + 40 * (i + 1)]
+        name = e[:8].rstrip(b"\0")
+        if name.startswith(b"/") and symtab:          # long name: an offset into the string table
+            off = strtab + int(name[1:])
+            name = shim[off: shim.index(b"\0", off)]
+        if name == b".vendor_cert":
+            raw, size = struct.unpack_from("<I", e, 20)[0], struct.unpack_from("<I", e, 16)[0]
+            table = shim[raw: raw + size]
+            a_size, _, a_off, _ = struct.unpack_from("<IIII", table, 0)
+            return table[a_off: a_off + a_size]
+    raise ValueError("no .vendor_cert section in the bootloader binary")
+
+
+def rtmr2(shim: bytes, cmdline: str, initrd: bytes) -> tuple[str, list[tuple[str, str]]]:
+    s = lambda b: hashlib.sha384(b).digest()
+    log = [
+        ("owner-key list (from the bootloader's built-in certificate)",
+         s(_signature_list(CERT_X509, SHIM_LOCK, vendor_cert(shim)))),
+        ("owner-key denial list (the empty placeholder)",
+         s(_signature_list(CERT_SHA256, SHIM_LOCK, bytes(32)))),
+        ("owner-key trust flag", s(b"\x01")),
+        ("kernel command line (UTF-16, no terminator)", s(cmdline.encode("utf-16-le"))),
+        ("initramfs", s(initrd)),
+    ]
+    return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
+
+
 def mrtd(firmware: str, tdx_measure: str, workdir: Path) -> str | None:
     """MRTD comes from the firmware image alone. The ACPI, vCPU and memory fields are
     required by the tool's schema but only feed RTMR0, so placeholders are honest here;
@@ -302,7 +369,10 @@ def main() -> int:
             w = line.split()
             if w[:1] == ["linux"] and cmdline is None:
                 boot_files.append(w[1].lstrip("/"))
-                cmdline = " ".join(w[2:])
+                # The bootloader prepends BOOT_IMAGE=<kernel path> to what the config lists, and
+                # that whole string is what the kernel measures. Omitting it gives a digest that is
+                # wrong in a way nothing else reveals.
+                cmdline = " ".join([f"BOOT_IMAGE={w[1]}"] + w[2:])
             elif w[:1] == ["initrd"] and len(boot_files) == 1:
                 boot_files.append(w[1].lstrip("/"))
                 break
@@ -324,6 +394,15 @@ def main() -> int:
     computed["rtmr1"] = r1
     for name, digest in log:
         print(f"    rtmr1 event  {digest[:24]}…  {name}")
+    initrd_path = next((p for p in sorted(tmp.glob("initrd.img-*"))), None)
+    cmdline = (tmp / "cmdline.txt").read_text().strip() if (tmp / "cmdline.txt").exists() else ""
+    if initrd_path and cmdline:
+        r2, log2 = rtmr2(shim, cmdline, initrd_path.read_bytes())
+        computed["rtmr2"] = r2
+        for name, digest in log2:
+            print(f"    rtmr2 event  {digest[:24]}…  {name}")
+    else:
+        print("    rtmr2 skipped: need both the initramfs and the command line from the boot partition")
     for k, v in computed.items():
         print(f"    {k.upper():5s} {v}")
 

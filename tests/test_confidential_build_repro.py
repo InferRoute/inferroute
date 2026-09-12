@@ -274,3 +274,16 @@ def test_the_signing_key_is_not_shipped_in_the_client():
         body = f.read_text()
         assert "PrivateFormat.Raw" not in body or "sign_build" in f.name, f
         assert "Ed25519PrivateKey.generate" not in body, f
+
+
+def test_the_mrtd_control_is_scoped_to_the_measured_volume():
+    """A control that overstates its own reach is worse than none: it invites the reader to believe
+    any firmware change is caught. Measured 2026-09-12: flipping a bit at 0x200000 or 0x300000
+    moves MRTD; flipping one at 0x1000 or 0x40000, in the configuration volume holding the variable
+    store, leaves it identical. MRTD covers the boot volume, not the whole 4 MB file."""
+    src = Path(repro.__file__).parent.parent / "inferroute_local" / "confidential" / "builds.py"
+    text = src.read_text()
+    assert "configuration volume" in text and "unchanged" in text
+    # and it must not make the unscoped claim
+    assert "any change to the firmware changes MRTD\" would be false" in text or \
+           "would be false" in text

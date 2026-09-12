@@ -41,7 +41,8 @@ def create_app(session: ConfidentialSession) -> FastAPI:
 
     @app.get("/v1/models")
     async def models():
-        return {"object": "list", "data": [{"id": session.model_short, "type": "model", "display_name": session.upstream_model}]}
+        shown = getattr(session, "shown_model", session.model_short)
+        return {"object": "list", "data": [{"id": shown, "type": "model", "display_name": f"{session.upstream_model} · confidential"}]}
 
     @app.get("/health")
     async def health():

@@ -179,4 +179,4 @@ def test_stream_upstream_error_frame_becomes_an_anthropic_error_event():
 
 def test_sse_line_reassembly_across_arbitrary_chunks():
     raw = b"data: {\"a\":1}\n\ndata: {\"b\":2}\n\n"
-    assert [l for l in T.iter_sse_lines([raw[:3], raw[3:17], raw[17:]]) if l.startswith("data:")] == ['data: {"a":1}', 'data: {"b":2}']
+    assert [line for line in T.iter_sse_lines([raw[:3], raw[3:17], raw[17:]]) if line.startswith("data:")] == ['data: {"a":1}', 'data: {"b":2}']

@@ -365,6 +365,13 @@ def handle(passthrough: list[str], model_override: str | None = None) -> int:
     if model is None:
         return _fallback(passthrough)
 
+    # A session opened on the confidential lane resumes on it — its transcript must not
+    # be replayed through the plaintext lane. (`--model` can switch enclave models.)
+    if (rec or {}).get("lane") == "confidential":
+        from . import confidential as confidential_mod, models as models_mod
+        short = models_mod.short_for_model_id(model) or model
+        return confidential_mod.launch(["--model", short, *rest, "--resume", target])
+
     # Tagging with `target` (== the session's inferroute id, for ir-origin
     # sessions) makes the resumed turns cumulative on the same dashboard + cost.
     return _launch(model, list(rest) + ["--resume", target], session_id=target)

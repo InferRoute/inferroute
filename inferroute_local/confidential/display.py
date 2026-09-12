@@ -20,6 +20,7 @@ from . import attest
 from .receipt import Receipt
 
 WIDTH = 96
+FONT_STACK = "font-family: Menlo, DejaVu Sans Mono, Consolas, Noto Sans Mono, Fira Code, monospace"
 ACCENT = "spring_green3"
 DIM = "grey58"
 AMBER = "dark_orange"
@@ -77,7 +78,7 @@ def checks_table(r: Receipt) -> Table:
                   Text(explain if ok else f"FAILED — {c.get('why', 'not checked')}"))
     e = r.e2ee or {}
     t.add_row(Text("✓", style=ACCENT), Text("Post-quantum key exchange", style="bold"),
-              Text(f"{e.get('kem', 'ML-KEM-768')} + {e.get('aead', 'ChaCha20-Poly1305')}, keys made on this device"))
+              Text(f"{e.get('kem', 'ML-KEM-768')} + {e.get('aead', 'ChaCha20-Poly1305')}, keys made here"))
     return t
 
 
@@ -92,7 +93,7 @@ def flow_diagram(r: Receipt) -> Text:
     line.append("Chutes ", style="bold")
     line.append("──────▶ ", style=DIM)
     line.append("🔒 enclave", style=f"bold {ACCENT}")
-    line.append("        every arrow carries ciphertext only", style=DIM)
+    line.append("\n  every arrow carries ciphertext only", style=DIM)
     line.append("\n  can read the words:  ", style=DIM)
     line.append("this device", style="bold")
     line.append(" · ")
@@ -110,8 +111,6 @@ def limitations_block(r: Receipt) -> Table:
     for lim in r.limitations:
         glyph, style = ("◐", AMBER) if lim["id"] == "attributed-key" else ("○", DIM)
         text = lim["text"]
-        if lim["id"] == "attributed-key":
-            text += " A one-line change on the provider's side closes this."
         t.add_row(Text(glyph, style=style), Text(text))
     return t
 
@@ -126,7 +125,7 @@ def facts_table(r: Receipt) -> Table:
     gpus = inst.get("gpu_count") or 0
     t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA GPU (confidential computing)")
     t.add_row("Instance", f"{_short(inst.get('id', ''))}  · pinned for this session · "
-                          f"{fleet.get('eligible', 0)} of {fleet.get('instances', 0)} instances verified and sealable")
+                          f"{fleet.get('eligible', 0)} of {fleet.get('instances', 0)} verified & sealable")
     t.add_row("Build", f"MRTD {(inst.get('mrtd') or '')[:16]}…  · matches the provider's published measurements")
     t.add_row("Carrier", r.transport)
     return t
@@ -213,4 +212,10 @@ def save_svg(r: Receipt, path: Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     console.save_svg(str(path), title="InferRoute · Confidential session")
+    # rich's template names Fira Code alone; viewers without it fall back to a font that may lack
+    # the box-drawing and check glyphs (rendered as boxes). Name common monospace faces that have
+    # them on each platform so the card looks right wherever it is opened.
+    svg = path.read_text()
+    svg = svg.replace("font-family: Fira Code, monospace", FONT_STACK).replace('font-family="Fira Code, monospace"', f'font-family="{FONT_STACK.split(": ", 1)[1]}"')
+    path.write_text(svg)
     return path

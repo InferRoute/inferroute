@@ -67,8 +67,8 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("attributed-key", "The encryption key is attributed to this enclave by the provider's API; "
-                       "the hardware quote itself does not commit to it."),
+    ("attributed-key", "The encryption key is attributed to this enclave by the provider's API; the "
+                       "hardware quote does not commit to it (a one-line provider change closes this)."),
     ("tcb-unchecked", "Intel's TCB and revocation status are not fetched (no PCS lookup)."),
     ("gpu-binding", "GPU attestation is counted, not verified against NVIDIA; its binding to the "
                     "CPU enclave is the provider's own claim."),

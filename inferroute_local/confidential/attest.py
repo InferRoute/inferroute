@@ -90,9 +90,11 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones; independent "
-                     "reproduction of the recorded image is in progress, so today the image's contents rest on the "
-                     "operator's published sources."),
+    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones. Of this "
+                     "build's four measurements, two — the firmware and the bootloader chain — were recomputed "
+                     "by InferRoute from published artifacts on its own machine. The other two, covering the "
+                     "kernel command line and the root filesystem, are recorded and watched rather than "
+                     "recomputed, so to that extent the image's contents still rest on the operator's sources."),
     ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
                          "the words are not."),
 )
@@ -288,7 +290,15 @@ def check_build_recorded(q: dict) -> Check:
     b = builds.lookup(q["mrtd"].hex(), rtmrs)
     if b is not None:
         st = b.get("status", "observed")
-        return Check(True, f"build {b.get('id', '?')} — {'reviewed by InferRoute' if st == 'reviewed' else 'recorded by InferRoute since ' + str(b.get('first_seen', '?'))}")
+        repro = b.get("reproduced") or []
+        if st == "reviewed":
+            how = "reviewed by InferRoute"
+        elif repro:
+            how = (f"recorded by InferRoute since {b.get('first_seen', '?')}; "
+                   f"{'+'.join(r.upper() for r in repro)} recomputed here from published artifacts")
+        else:
+            how = f"recorded by InferRoute since {b.get('first_seen', '?')}"
+        return Check(True, f"build {b.get('id', '?')} — {how}")
     if builds.allow_new_builds():
         return Check(True, "NEW BUILD — not yet recorded by InferRoute (allowed by IR_CONFIDENTIAL_ALLOW_NEW_BUILD)")
     return Check(False, "the operator is running an enclave build InferRoute has not recorded yet (usually recorded within hours; "

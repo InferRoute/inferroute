@@ -119,9 +119,27 @@ Rendered on screen as stated limitations, never as passed checks:
 * **Build review.** The one place the proof leans on the operator is the image: an operator who
   published *and ran* a backdoored enclave image would pass Intel's and NVIDIA's checks (they truthfully
   attest whatever runs). InferRoute therefore keeps its own record of the builds it has seen — one VM
-  image today, identical across every enclave-backed model — and refuses unrecorded ones. Independent
-  reproduction of that image from the operator's open sources is in progress; until it lands, the
-  image's contents rest on the operator's published sources plus the fact that any change is caught.
+  image today, identical across every enclave-backed model — and refuses unrecorded ones.
+
+  Two of that build's four measurements are no longer taken on trust. On 2026-09-12 InferRoute
+  recomputed them on its own machine from artifacts the operator publishes — the guest firmware
+  blob from the open build repository, and the bootloader chain read out of the published guest
+  disk image — and both matched the enclaves serving live traffic exactly:
+
+  | measurement | covers | status |
+  | --- | --- | --- |
+  | MRTD | the guest firmware, i.e. the trust domain's initial state | reproduced by InferRoute |
+  | RTMR1 | partition table, shim and GRUB, Authenticode-hashed as the firmware loads them | reproduced by InferRoute |
+  | RTMR2 | kernel command line and initramfs | recorded and watched |
+  | RTMR3 | a fixed list of root-filesystem files | recorded and watched |
+
+  `scripts/reproduce_enclave_build.py` is that computation, and it takes the image locator as an
+  argument rather than embedding one, so anyone can re-run it against any published image. It needs
+  no cooperation from the operator and no credentials: the disk image is a public download, and only
+  about a gigabyte of it is read, over HTTPS range requests. The remaining two measurements resist
+  this for concrete reasons — the bootloader adds event-log entries we do not model yet, and the root
+  filesystem is encrypted in the published image — so to that extent the image's contents still rest
+  on the operator's sources plus the fact that any change to them is caught.
   (GPU↔VM pairing, formerly listed here, is a sub-case: it depends only on the measured image.)
 * **Metadata is visible to relays**: message sizes, timing, model, instance id. The words are not.
 * **Server-side repair heuristics are off.** The normal lane applies model-specific fix-ups

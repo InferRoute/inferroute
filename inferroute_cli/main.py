@@ -257,6 +257,10 @@ def main(argv: list[str] | None = None) -> int:
         from . import setup as setup_mod
         return setup_mod.run(rest)
 
+    if cmd == "fix-clipboard":
+        from .agents import fix_clipboard
+        return fix_clipboard()
+
     if cmd == "status":
         from . import status as status_mod
         return status_mod.run()

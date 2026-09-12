@@ -31,7 +31,87 @@ INSTALL_HINT = {
 }
 
 
+# ────────────────────── clipboard preflight ──────────────────────
+# Terminal agents copy through a system clipboard helper. When none is installed they fall
+# back to an OSC 52 terminal escape, which most terminals ignore — so the agent reports
+# "copied to clipboard" and the paste is empty. That looks like an agent bug and isn't one.
+# We detect it and name the one package that fixes it. We never install anything ourselves:
+# it needs root, and silently touching a user's system packages is not ours to do.
+
+CLIPBOARD_TOOLS = ("wl-copy", "xclip", "xsel", "pbcopy", "termux-clipboard-set")
+CLIPBOARD_PACKAGE = {"wayland": "wl-clipboard", "x11": "xclip"}
+
+
+def clipboard_gap() -> str | None:
+    """Return the display server whose clipboard helper is missing, or None if fine."""
+    if sys.platform == "darwin" or any(shutil.which(t) for t in CLIPBOARD_TOOLS):
+        return None
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return "wayland"
+    if os.environ.get("DISPLAY"):
+        return "x11"
+    return None  # no display at all: nothing on this machine to copy into
+
+
+def clipboard_install_cmd(kind: str) -> list[str] | None:
+    """The install command for this distro, or None if we don't recognise the package manager."""
+    pkg = CLIPBOARD_PACKAGE[kind]
+    for mgr, argv in (("apt-get", ["apt-get", "install", "-y", pkg]),
+                      ("dnf", ["dnf", "install", "-y", pkg]),
+                      ("pacman", ["pacman", "-S", "--noconfirm", pkg]),
+                      ("zypper", ["zypper", "install", "-y", pkg]),
+                      ("apk", ["apk", "add", pkg])):
+        if shutil.which(mgr):
+            return ["sudo", *argv]
+    return None
+
+
+def _clipboard_marker() -> Path:
+    home = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute"))
+    return home / ".clipboard-notice"
+
+
+def warn_clipboard_once() -> None:
+    """Print the notice at most once per machine, so it informs without nagging."""
+    kind = clipboard_gap()
+    if not kind:
+        return
+    marker = _clipboard_marker()
+    if marker.exists():
+        return
+    cmd = clipboard_install_cmd(kind)
+    fix = "ir fix-clipboard" if cmd else f"install {CLIPBOARD_PACKAGE[kind]} with your package manager"
+    sys.stderr.write(
+        f"\n \033[33m•\033[0m no clipboard helper found, so copying from the agent will silently do nothing.\n"
+        f"   run `{fix}` once to fix it. (shown once)\n\n")
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("shown\n")
+    except OSError:
+        pass
+
+
+def fix_clipboard() -> int:
+    """`ir fix-clipboard` — install the missing helper, with the user's own sudo prompt."""
+    kind = clipboard_gap()
+    if not kind:
+        print(" ✓ a clipboard helper is already available.")
+        return 0
+    cmd = clipboard_install_cmd(kind)
+    if not cmd:
+        print(f" install `{CLIPBOARD_PACKAGE[kind]}` with your package manager, then re-run the agent.")
+        return 1
+    print(f" installing {CLIPBOARD_PACKAGE[kind]} ({kind} session): {' '.join(cmd)}")
+    import subprocess
+    rc = subprocess.call(cmd)
+    if rc == 0:
+        _clipboard_marker().unlink(missing_ok=True)
+        print(" ✓ done — copy in the agent will now reach your clipboard.")
+    return rc
+
+
 def binary_for(agent: str) -> str:
+    warn_clipboard_once()
     if agent == "claude":
         from .launch import _require_claude_binary
         return _require_claude_binary()

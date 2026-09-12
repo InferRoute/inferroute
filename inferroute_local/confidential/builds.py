@@ -14,6 +14,17 @@ firmware configuration and legitimately varies across hosts of one fleet (8 vari
 Statuses:
   reviewed  — InferRoute reproduced or audited the image behind these measurements.
   observed  — InferRoute has recorded this build in production and watches it; reproduction pending.
+
+`reproduced` lists the registers InferRoute has recomputed ITSELF, from artifacts published by
+the operator but fetched and measured on our own machine — not taken from the attestation path
+being checked. `scripts/reproduce_enclave_build.py` is that computation; anyone can re-run it.
+A register in this list no longer rests on the operator's word:
+  mrtd   derived from the guest firmware blob alone (independent of host RAM/vCPU/ACPI, which
+         is why one MRTD covers a whole fleet of differently-shaped hosts).
+  rtmr1  the bootloader chain: partition table, then shim and GRUB, Authenticode-hashed.
+Registers NOT listed are still recorded-and-watched rather than reproduced. For this image that
+is rtmr2 (kernel cmdline + initramfs: the bootloader contributes log entries we do not yet model)
+and rtmr3 (hashes root-filesystem files; that filesystem is encrypted in the published image).
   (absent)  — a build InferRoute has never seen: the session REFUSES unless
               IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1, in which case it opens with a warning on the panel.
 
@@ -36,6 +47,8 @@ BUNDLED: list[dict] = [
         "rtmr1": "9b8b2915351a3166f742024edafb6cce244c1df4056eb1f9eb608c3616b9d63729ae00c98d1dc108009c0978b19dc207",
         "rtmr2": "8471360414fe80b4343fb17dd59e442bdc55b5955df0adf610b1de15ad7b454e98fb8e9d38cc188b82369f4f620b6968",
         "rtmr3": "51204be641a2af357f5f4e6a121d348d6cb1cbe53c4c35d9dcc3364196b4d41a6e1de75025bb2e76f3b00cc7192f9433",
+        "reproduced": ["mrtd", "rtmr1"],
+        "reproduced_on": "2026-09-12",
         "note": "the single VM image serving every enclave-backed catalog model on 2026-09-12 (8 RTMR0 host variants)",
     },
 ]

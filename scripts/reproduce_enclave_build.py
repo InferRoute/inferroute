@@ -38,8 +38,9 @@ Usage
     reproduce_enclave_build.py --image <URL-or-path> --firmware <OVMF.fd> \
         [--tdx-measure <path>] [--build <id>] [--keep <dir>]
 
-Requires: qemu-img, debugfs (e2fsprogs), and for MRTD a build of tdx-measure
-(github.com/virtee/tdx-measure). Without tdx-measure the script still does RTMR1.
+Requires: qemu-img and debugfs (e2fsprogs). MRTD additionally needs a build of tdx-measure
+(github.com/virtee/tdx-measure); without it the script still does RTMR1 and RTMR2, which need
+nothing beyond the published image itself.
 """
 from __future__ import annotations
 
@@ -51,6 +52,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 SECTOR = 512
@@ -60,7 +62,7 @@ XBOOTLDR_TYPE = "bc13c2ff-59e6-4262-a352-b275fd6f7172"  # Linux extended boot ("
 
 # ---------------------------------------------------------------- disk plumbing
 
-def _qemu_slice(image: str, offset: int, size: int, out: Path) -> None:
+def _qemu_slice(image: str, offset: int, size: int, out: Path, read_timeout: float = 300) -> None:
     """Read [offset, offset+size) of the *virtual* disk. Over HTTPS this issues range
     requests, so an unencrypted boot partition costs a gigabyte, not the whole image."""
     remote = "://" in image
@@ -69,8 +71,23 @@ def _qemu_slice(image: str, offset: int, size: int, out: Path) -> None:
         + (f"file.driver=qcow2,file.file.driver=https,file.file.url={image}"
            if remote else f"file.driver=qcow2,file.filename={image}")
     )
-    subprocess.run(["qemu-img", "convert", "--image-opts", opts, "-O", "raw", str(out)],
-                   check=True, stdout=subprocess.DEVNULL)
+    # Wait for the reader to EXIT. Do not try to detect completion from the output's length:
+    # qemu-img sizes the file up front and fills it in afterwards, so the file reaches its final
+    # length long before the data is there. Cutting the read at that point yields a file of the
+    # right size containing partly zeroes, and a measurement that is wrong rather than missing —
+    # which is the worst possible failure for a tool whose whole job is to compare digests.
+    # Reading a remote image does occasionally hang after transferring everything (roughly one run
+    # in three against a cold cache). When that happens, fail and say so, so the answer is
+    # "unknown", never a quietly wrong digest. The timeout is generous against a real read, which
+    # takes well under two minutes for the largest partition here.
+    try:
+        subprocess.run(["qemu-img", "convert", "--image-opts", opts, "-O", "raw", str(out)],
+                       check=True, stdout=subprocess.DEVNULL, timeout=read_timeout)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(
+            f"reading {out.name} did not finish within {read_timeout}s. The remote read sometimes "
+            f"stalls after transferring the data; re-run, or fetch the image locally and pass its "
+            f"path to --image. Refusing to measure a possibly-partial read.")
 
 
 def read_gpt(head: bytes) -> tuple[bytes, list[dict]]:
@@ -407,11 +424,16 @@ def main() -> int:
         print(f"    {k.upper():5s} {v}")
 
     if a.out:
+        inputs = {n: hashlib.sha256((tmp / n).read_bytes()).hexdigest()
+                  for n in ("shimx64.efi", "grubx64.efi") if (tmp / n).exists()}
+        if initrd_path:
+            inputs["initrd"] = hashlib.sha256(initrd_path.read_bytes()).hexdigest()
         record = {
             "computed": computed,
-            "inputs": {n: hashlib.sha256((tmp / n).read_bytes()).hexdigest()
-                       for n in ("shimx64.efi", "grubx64.efi") if (tmp / n).exists()},
+            "inputs": inputs,
+            "cmdline": cmdline,
             "rtmr1_event_log": [{"event": n, "digest": d} for n, d in log],
+            "rtmr2_event_log": [{"event": n, "digest": d} for n, d in (log2 if "rtmr2" in computed else [])],
         }
         if a.firmware:
             record["inputs"]["firmware"] = hashlib.sha256(Path(a.firmware).read_bytes()).hexdigest()

@@ -38,6 +38,9 @@ ir                  open the model picker, then launch (same as `ir choose`)
 ir --model NAME     pin a model — short alias or canonical id; any claude flag passes through
 ir choose           interactive picker — pick a model, then launch
 ir anthropic        escape hatch — plain Claude, your own setup
+ir --confidential   confidential lane: verify a hardware enclave from this device,
+                    seal every request to it, launch  (docs/confidential-lane.md)
+ir confidential …   verify | show | card | models — inspect the lane, send nothing
 ir status           personal usage view (TUI)
 ir login            save / refresh your inferroute API key
 ir help             one-screen explainer
@@ -108,6 +111,14 @@ Whatever your `claude --model …` sends to whatever upstream is on you.
 
 `ir anthropic` is literally `exec claude` plus one flag — the inferroute
 service sees nothing.
+
+`ir --confidential` goes further than any of the above: your requests are
+encrypted **on your machine** to a hardware enclave (Intel TDX + NVIDIA
+confidential computing) whose attestation your machine verifies itself,
+against a fresh challenge, before the first byte is sent. The inferroute
+service relays ciphertext and sees sizes, timing and the model — never the
+words. What is checked, what is not, and the receipt every session writes:
+`docs/confidential-lane.md`. Requires `pip install 'inferroute[confidential]'`.
 
 ## Source
 

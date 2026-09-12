@@ -22,6 +22,8 @@ def run(args=None) -> int:
     lines.append("  ir --model NAME --agent goose")
     lines.append("                           Launch with the Goose agent instead of Claude Code")
     lines.append("  ir goose                 Shorthand for `ir --agent goose` — model picker, then Goose")
+    lines.append("  ir --confidential        Confidential lane: verify a hardware enclave from this device,")
+    lines.append("                           seal every request to it, launch (`ir confidential` to inspect)")
     lines.append("")
     lines.append("    NAME can be a short alias or the canonical id. Known short aliases:")
     for a in models.all_aliases():

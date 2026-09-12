@@ -110,12 +110,12 @@ async def _open_session(alias, session_id: str, http, console):
         except httpx.HTTPError as e:
             console.print(f"[red]cannot reach the carrier ({type(e).__name__})[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
-    chute_id = next((m["chute_id"] for m in catalog if m.get("name") == alias.ref_key), None)
-    if not chute_id:
+    fleet_id = next((m.get("fleet_id") or m.get("chute_id") for m in catalog if m.get("name") == alias.ref_key), None)
+    if not fleet_id:
         console.print(f"[red]{alias.ref_key} is not offered on the confidential lane right now[/]")
         sys.exit(3)
     session = ConfidentialSession(session_id=session_id, model_short=alias.short, upstream_model=alias.ref_key,
-                                  chute_id=chute_id, transport=transport, http=http)
+                                  fleet_id=fleet_id, transport=transport, http=http)
     status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
     status.start()
     try:

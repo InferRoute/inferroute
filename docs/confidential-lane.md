@@ -35,9 +35,9 @@ from facts rather than a guess about a vendor cloud. `ir --resume` recognises a 
 confidential lane; a sealed transcript is never replayed through the plaintext lane.
 
 1. **Attestation, fetched by you, from the provider, with your own challenge.** The client draws
-   a random 32-byte nonce and asks Chutes for the evidence of every running instance of the
-   model (`GET api.chutes.ai/chutes/{id}/evidence?nonce=…`, unauthenticated). This request never
-   goes through InferRoute: the point is that you do not have to trust InferRoute about it.
+   a random 32-byte nonce and asks the enclave operator for the evidence of every running instance
+   of the model (an unauthenticated, public endpoint). This request never goes through InferRoute:
+   the point is that you do not have to trust InferRoute about it.
 2. **Seven checks, on your device, no vendor SDK** (`inferroute_local/confidential/attest.py`):
 
    | check | what it proves |
@@ -46,7 +46,8 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    | signature valid | the body is signed by the key in the instance's certificate |
    | key bound to enclave | the Intel TDX quote's `report_data[32:64]` = SHA-256 of that certificate's public key → the hardware quote commits to the signer |
    | genuine TDX, debug off | `tee_type` 0x81, quote v4, TD DEBUG attribute clear |
-   | known build | MRTD + RTMR0–3 all appear in one config of the provider's published measurement registry |
+   | published build | MRTD + RTMR0–3 all appear in one config of the operator's published measurement registry |
+   | recorded build | MRTD + RTMR1–3 (the VM image) is a build InferRoute has recorded and watches; an unrecorded build is refused (`IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1` opens with a warning). RTMR0 — the host's boot-firmware configuration — legitimately varies across hosts and is not part of the identity |
    | certificate chain sound | every embedded PCK certificate verifies under the next, ending in a self-signed root |
    | **encryption key bound to enclave** | the quote's `report_data[0:32]` = SHA-256(your nonce ‖ the instance's ML-KEM public key) → the hardware quote commits to the very key your requests are sealed to |
 
@@ -65,17 +66,18 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
 
    What leaves your machine for these: the platform's FMSPC (6-byte family id) to Intel; the GPU
    reports and certificates (hardware measurements) plus the challenge to NVIDIA. Nothing about you
-   or the conversation. Unreachable services fail closed.
+   or the conversation. Unreachable services fail closed. The relay also serves the list of builds
+   InferRoute has recorded since this client shipped (additions only).
 
-   An instance is *verified* only if all fourteen pass. Fail-closed: a check that cannot be run is a
+   An instance is *verified* only if all fifteen pass. Fail-closed: a check that cannot be run is a
    failure, and an empty fleet is never "verified".
 3. **Pin.** The session picks one instance that is both verified and able to accept sealed
    requests, and keeps it for the whole session (this also keeps the enclave's own prefix cache
    warm — measured: cache hits on turn two, invisible to anyone outside the enclave).
 4. **Seal every request on your device** (`e2ee.py`): a fresh ML-KEM-768 encapsulation to the
    instance's key, HKDF-SHA256, ChaCha20-Poly1305. The response is encrypted by the enclave to
-   a per-request key that also never leaves your process. The byte format is the one Chutes'
-   own clients speak; it is re-implemented here so every byte can be read in one file.
+   a per-request key that also never leaves your process. The byte format is the one the
+   operator's own clients speak; it is re-implemented here so every byte can be read in one file.
 5. **Native dialects, translate only where the agent cannot.** The enclaves speak OpenAI Chat
    Completions. Pi, OpenCode and Goose speak it too, so their requests are sealed **as-is** through
    the local `/v1/chat/completions` — no translation anywhere. Claude Code speaks only the
@@ -84,10 +86,10 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    lane InferRoute cannot see the request, so the client does — including tools, tool results,
    images, streaming, and reasoning (`thinking` blocks). Claude Code's `metadata.user_id` is
    dropped before sealing: the model does not need it.
-6. **Relay.** The sealed blob travels `you → InferRoute → Chutes → enclave`. InferRoute's relay
+6. **Relay.** The sealed blob travels `you → InferRoute → enclave operator → enclave`. InferRoute's relay
    (`/confidential/invoke`) adds its provider credential and forwards bytes; it logs who, which
-   model and instance, sizes, timing and status — never a body. With your own Chutes key
-   (`IR_CHUTES_API_KEY`) InferRoute is not in the path at all.
+   model and instance, sizes, timing and status — never a body. With your own operator key
+   (`IR_OPERATOR_API_KEY`) InferRoute is not in the path at all.
 7. **Receipt.** `~/.inferroute/confidential/receipts/<time>-<session>.json` records every check
    with its reason, the instance's measurements, the counters (bytes sealed here, bytes opened
    here, tokens), every pin/switch/re-verification event, and the stated limitations.
@@ -102,19 +104,19 @@ Rendered on screen as stated limitations, never as passed checks:
 
 * ~~The encryption key is attributed, not attested~~ — **closed 2026-09-12.** It looked
   unbound because the obvious derivations (hash of the key, of the nonce, of both as bytes) did
-  not match. Chutes' evidence service in fact derives the quote's challenge as
+  not match. The operator's evidence service in fact derives the quote's challenge as
   `sha256((nonce + e2e_pubkey).encode())` — the nonce *string* concatenated with the base64 key
-  *string* (`chutes/entrypoint/verify.py`). Confirmed live on 8/8 instances across both model
+  *string* (visible in its open-source runtime). Confirmed live on 8/8 instances across both model
   families, with a negative result for every other instance's key. The client now fetches the
   instance keys first, verifies the quote against exactly those keys, and refuses to seal to any
   key the quote did not commit to. No change on the provider's side was needed.
-* **GPU ↔ VM pairing.** No single hardware certificate names both this VM and its GPUs — that
-  needs TDISP / Intel TDX Connect device attestation, which the provider does not yet expose. What
-  *is* established: the GPU reports were requested from inside the verified VM (only its measured
-  software knew the challenge), answered that challenge, and travel inside the VM's quote-signed
-  evidence; and in NVIDIA confidential-computing mode the GPU that signs a measurement report is
-  the GPU that holds the encrypted SPDM session the workload's data flows through — a report from
-  one device and computation on another is not a configuration the protocol allows.
+* **Build review.** The one place the proof leans on the operator is the image: an operator who
+  published *and ran* a backdoored enclave image would pass Intel's and NVIDIA's checks (they truthfully
+  attest whatever runs). InferRoute therefore keeps its own record of the builds it has seen — one VM
+  image today, identical across every enclave-backed model — and refuses unrecorded ones. Independent
+  reproduction of that image from the operator's open sources is in progress; until it lands, the
+  image's contents rest on the operator's published sources plus the fact that any change is caught.
+  (GPU↔VM pairing, formerly listed here, is a sub-case: it depends only on the measured image.)
 * **Metadata is visible to relays**: message sizes, timing, model, instance id. The words are not.
 * **Server-side repair heuristics are off.** The normal lane applies model-specific fix-ups
   (fenced-JSON early stops, tool-call text repairs). This lane cannot, because it cannot see the
@@ -140,7 +142,7 @@ inferroute_local/confidential/
   attest.py     evidence parsing + the six checks + LABELS/LIMITATIONS the display prints
   e2ee.py       ML-KEM-768 / HKDF / ChaCha20-Poly1305 envelope, streaming opener
   translate.py  Anthropic ⇄ OpenAI, request and streaming response
-  transport.py  InferRouteRelay and DirectChutes carriers
+  transport.py  InferRouteRelay and DirectOperator carriers
   session.py    verify → pin → seal → open → receipt; nonce pool; re-verification; refusal
   server.py     the per-session 127.0.0.1 endpoint Claude Code talks to
   receipt.py    the receipt on disk

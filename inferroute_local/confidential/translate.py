@@ -1,7 +1,7 @@
 """Anthropic Messages API ⇄ OpenAI Chat Completions, performed ON THIS DEVICE.
 
-Why this lives in the client: a Chutes TEE chute exposes OpenAI-shaped cords only
-(``/chat``, ``/chat_stream``… — no ``/v1/messages``), and on the confidential lane the
+Why this lives in the client: the enclaves expose OpenAI-shaped endpoints only (no
+``/v1/messages``), and on the confidential lane the
 InferRoute proxy sees ciphertext, so the translation the proxy normally does must happen
 before encryption — here.
 

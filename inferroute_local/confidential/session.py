@@ -41,16 +41,16 @@ class Pinned:
 
 
 class ConfidentialSession:
-    def __init__(self, *, session_id: str, model_short: str, upstream_model: str, chute_id: str,
+    def __init__(self, *, session_id: str, model_short: str, upstream_model: str, fleet_id: str,
                  transport: Transport, http: httpx.AsyncClient):
         self.session_id = session_id
         self.model_short = model_short
         self.upstream_model = upstream_model
-        self.chute_id = chute_id
+        self.fleet_id = fleet_id
         self.transport = transport
         self.http = http
         self.receipt = Receipt(session_id=session_id, model_short=model_short, upstream_model=upstream_model,
-                               chute_id=chute_id, transport=transport.name)
+                               fleet_id=fleet_id, transport=transport.name)
         self.receipt.e2ee = {"kem": "ML-KEM-768 (FIPS 203)", "aead": "ChaCha20-Poly1305", "kdf": "HKDF-SHA256",
                              "backend": e2ee.backend().name}
         self.fleet: attest.FleetReport | None = None
@@ -68,14 +68,18 @@ class ConfidentialSession:
         say = progress or (lambda s: None)
         say("asking which instances accept sealed requests, and for their encryption keys…")
         try:
-            e2 = await self.transport.instances(self.chute_id)
+            e2 = await self.transport.instances(self.fleet_id)
         except Exception as e:
             return self._refuse(f"could not list sealable enclaves via {self.transport.name}: {public_reason(e)}")
         keys = _keys_of(e2)
+        from . import builds as _builds
+        _builds.load_user_overrides()
+        if hasattr(self.transport, "builds"):
+            _builds.absorb_remote(await self.transport.builds())
         say("fetching the enclave fleet's attestation evidence (this is the slow part)…")
         try:
             # the quote is checked against the very keys we will seal to
-            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=keys)
+            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, e2e_pubkeys=keys)
             self._raw_evidence = self.fleet.raw
         except Exception as e:
             return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {public_reason(e)}")
@@ -159,7 +163,7 @@ class ConfidentialSession:
             return p, p.nonces.pop(0)
 
     async def _refresh_pool(self) -> None:
-        e2 = await self.transport.instances(self.chute_id)
+        e2 = await self.transport.instances(self.fleet_id)
         current = self.pinned.instance_id if self.pinned else None
         self._absorb_pool(e2)
         if current in self._pool and self._pool[current].nonces:
@@ -178,8 +182,8 @@ class ConfidentialSession:
 
     async def _reverify(self) -> None:
         try:
-            e2 = await self.transport.instances(self.chute_id)
-            self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=_keys_of(e2))
+            e2 = await self.transport.instances(self.fleet_id)
+            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, e2e_pubkeys=_keys_of(e2))
             self._raw_evidence = self.fleet.raw
             await self._online_pass(e2)
         except Exception as e:
@@ -215,7 +219,7 @@ class ConfidentialSession:
         c["ciphertext_bytes_sent"] += len(sealed.blob)
         try:
             status, headers, raw = await self.transport.invoke(
-                chute_id=self.chute_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
+                fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
         except httpx.HTTPError as e:
             c["errors"] += 1
             return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}")
@@ -253,7 +257,7 @@ class ConfidentialSession:
         c["ciphertext_bytes_sent"] += len(sealed.blob)
         try:
             status, headers, raw = await self.transport.invoke(
-                chute_id=self.chute_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
+                fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
         except httpx.HTTPError as e:
             c["errors"] += 1
             return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}", openai=True)
@@ -408,7 +412,7 @@ class ConfidentialSession:
             c[k] += int(usage.get(k) or 0)
         self.receipt.save()
         asyncio.ensure_future(self.transport.report_usage({
-            "session_id": self.session_id, "chute_id": self.chute_id, "model": self.upstream_model,
+            "session_id": self.session_id, "fleet_id": self.fleet_id, "model": self.upstream_model,
             "instance_id": self.pinned.instance_id if self.pinned else "", "usage": usage, "self_reported": True}))
 
     def _error(self, streaming: bool, status: int, message: str, openai: bool = False) -> tuple[int, dict, AsyncIterator[bytes]]:

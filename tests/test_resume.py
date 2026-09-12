@@ -161,7 +161,7 @@ def test_confidential_status_line_names_the_lane_and_shows_live_privacy_figures(
     import subprocess
     from inferroute_cli import confidential as C
     from inferroute_local.confidential.receipt import Receipt
-    r = Receipt(session_id="abcdef12", model_short="kimi-k2.6", upstream_model="m/Kimi-TEE", chute_id="c", transport="t")
+    r = Receipt(session_id="abcdef12", model_short="kimi-k2.6", upstream_model="m/Kimi-TEE", fleet_id="c", transport="t")
     r.instance = {"id": "d6af7f39-0000"}
     r.verified_at = "2026-09-12T01:04:38Z"
     r.verdict = "confidential"

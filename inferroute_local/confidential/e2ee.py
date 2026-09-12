@@ -1,7 +1,7 @@
-"""End-to-end encryption from THIS device to one Chutes TEE instance.
+"""End-to-end encryption from THIS device to one enclave instance.
 
-The wire format is the one Chutes' own clients speak (``chutes-e2ee-transport`` /
-``crypto.py``) and their in-enclave ``aegis`` library decrypts, re-implemented here so the
+The wire format is the one the enclave operator's own clients speak and its in-enclave
+runtime decrypts, re-implemented here so the
 ``ir`` client depends on no vendor SDK and every byte it sends can be read in this file:
 
     request blob   = mlkem_ct(1088) ‖ nonce(12) ‖ chacha_ct ‖ tag(16)
@@ -20,9 +20,8 @@ ChaCha20-Poly1305 (12-byte nonce, 16-byte tag).
 What this module can and cannot promise, stated once so the display never overstates it:
   * Only a holder of the private half of ``instance_pubkey`` can read the request. Whether
     that private key lives inside the attested enclave is NOT something this layer can
-    check — the instance's ML-KEM key is handed to us by Chutes' API and is not committed to
-    by the TDX quote (measured 2026-09-12). ``session.py`` records that as a stated
-    limitation; it is never rendered as a passed check.
+    check here — the binding of the instance's ML-KEM key to the TDX quote is established by
+    ``attest.check_e2e_key_bound`` (report_data[0:32] == SHA-256(nonce ‖ key)).
   * ML-KEM backend: ``cryptography`` ≥ 50 (bundled OpenSSL with ML-KEM) when available,
     else the pure-Python ``kyber-py``. Both are FIPS 203 ML-KEM-768; the bytes are identical.
 """

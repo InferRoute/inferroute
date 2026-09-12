@@ -1,10 +1,10 @@
-"""Verify a Chutes TEE instance's attestation ON THIS DEVICE, with no vendor SDK.
+"""Verify an enclave instance's attestation ON THIS DEVICE, with no vendor SDK.
 
-Evidence is fetched from Chutes directly — never through InferRoute, because the point of the
-check is that the user does not have to trust InferRoute (or Chutes) about it:
+Evidence is fetched from the enclave operator directly — never through InferRoute, because the
+point of the check is that the user does not have to trust InferRoute (or the operator) about it:
 
-    GET https://api.chutes.ai/chutes/{chute_id}/evidence?nonce={64 hex}   (unauthenticated)
-    GET https://api.chutes.ai/servers/tee/measurements                      (unauthenticated)
+    GET {OPERATOR_API}/chutes/{fleet_id}/evidence?nonce={64 hex}   (unauthenticated)
+    GET {OPERATOR_API}/servers/tee/measurements                    (unauthenticated)
 
 Per running instance the evidence carries an Intel TDX ``quote``, NVIDIA ``gpu_evidence``, a
 ``certificate``, a ``signature`` and a base64-JSON ``attested_body`` that embeds our nonce.
@@ -27,8 +27,8 @@ Each check states what it proves. The display prints these words; keep them hone
                   next, ending in a self-signed root → the chain is internally sound.
   e2e_key_bound   TDX report_data[0:32] == SHA-256(our nonce ‖ the instance's ML-KEM public key
                   as served by /e2e/instances) → the hardware quote COMMITS to the encryption
-                  key we seal to. Chutes' evidence service derives the quote's challenge exactly
-                  this way (chutes/entrypoint/verify.py: `sha256((nonce + e2e_pubkey).encode())`,
+                  key we seal to. The operator's evidence service derives the quote's challenge exactly
+                  this way (`sha256((nonce + e2e_pubkey).encode())` in its open-source runtime,
                   measured live 2026-09-12 on 8/8 instances, negative on every other key). This
                   closes the join between "attested" and "encrypted to": a substituted key
                   fails here before a byte is sent.
@@ -52,7 +52,7 @@ import json
 import secrets
 from dataclasses import dataclass, field
 
-API = "https://api.chutes.ai"
+from .transport import OPERATOR_API as API  # the operator's public endpoint; nothing else names the operator
 UA = "inferroute-confidential/1 (+native verifier, no SDK)"
 
 # TDX quote v4 (Intel DCAP): 48-byte header, then a 584-byte TD report body.
@@ -61,7 +61,7 @@ _OFF = {
     "td_attributes": (120, 128), "mrtd": (136, 184), "rtmr0": (328, 376),
     "rtmr1": (376, 424), "rtmr2": (424, 472), "rtmr3": (472, 520), "report_data": (520, 584),
 }
-REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "chain_ok")
+REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "build_recorded", "chain_ok")
 # Online checks (Intel PCS + NVIDIA NRAS), added by `verify_online`; an instance is verified only
 # when BOTH sets pass. Kept separate so the offline pass can run over a whole fleet cheaply and the
 # online pass only over the instances a session could actually use.
@@ -74,7 +74,8 @@ LABELS: dict[str, tuple[str, str]] = {
     "spki_bound": ("Signing key bound to enclave", "the hardware quote commits to that signing key"),
     "e2e_key_bound": ("Encryption key bound to enclave", "the quote commits to SHA-256(challenge ‖ the key you seal to)"),
     "tdx_shape": ("Genuine TDX, debug off", "a real confidential VM, not a debuggable one"),
-    "measurement_ok": ("Known build", "measurements match the provider's published registry"),
+    "measurement_ok": ("Published build", "measurements match the operator's published registry"),
+    "build_recorded": ("Recorded build", "a build InferRoute has recorded and watches — not only the operator's word"),
     "chain_ok": ("Certificate chain sound", "every link verifies up to a self-signed root"),
     "quote_sig": ("Quote signed by the hardware", "Intel's Quoting Enclave signed it; the signature verifies"),
     "root_pinned": ("Intel root of trust", "the chain ends in Intel's published SGX Root CA"),
@@ -86,8 +87,9 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("gpu-pairing", "The GPU–VM pairing is vouched for by the enclave's measured software, not by a separate "
-                    "hardware certificate (that needs TDISP / TDX Connect, not yet offered by the provider)."),
+    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones; independent "
+                     "reproduction of the recorded image is in progress, so today the image's contents rest on the "
+                     "operator's published sources."),
     ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
                          "the words are not."),
 )
@@ -129,7 +131,7 @@ class InstanceReport:
 
 @dataclass
 class FleetReport:
-    chute_id: str
+    fleet_id: str
     nonce: str
     instances: list[InstanceReport]
     failed_instance_ids: list = field(default_factory=list)
@@ -140,7 +142,7 @@ class FleetReport:
         return [i.instance_id for i in self.instances if i.verified]
 
     def as_dict(self) -> dict:
-        return {"chute_id": self.chute_id, "nonce": self.nonce,
+        return {"fleet_id": self.fleet_id, "nonce": self.nonce,
                 "verified": len(self.verified_ids), "instances": [i.as_dict() for i in self.instances],
                 "failed_instance_ids": self.failed_instance_ids}
 
@@ -250,7 +252,7 @@ def check_spki_bound(q: dict, cert_s: str) -> Check:
 
 def check_e2e_key_bound(q: dict, nonce: str, e2e_pubkey_b64: str | None) -> Check:
     """report_data[0:32] must equal SHA-256 of the nonce string concatenated with the base64
-    ML-KEM public key string — the exact derivation Chutes' evidence service uses."""
+    ML-KEM public key string — the exact derivation the operator's evidence service uses."""
     if not q:
         return Check(False, "no quote to bind")
     if not e2e_pubkey_b64:
@@ -271,6 +273,23 @@ def check_tdx_shape(q: dict) -> Check:
     if q["td_attributes"][0] & 0x01:
         return Check(False, "TD DEBUG bit is SET — a debuggable TD's measurements prove nothing")
     return Check(True, "TDX v4, debug bit clear")
+
+
+def check_build_recorded(q: dict) -> Check:
+    """MRTD + RTMR1..3 must be a build InferRoute has recorded (builds.py). Unknown → refused,
+    unless IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1 (then passes with a warning the panel shows)."""
+    from . import builds
+    if not q:
+        return Check(False, "no quote to match")
+    rtmrs = [q[k].hex() for k in ("rtmr0", "rtmr1", "rtmr2", "rtmr3")]
+    b = builds.lookup(q["mrtd"].hex(), rtmrs)
+    if b is not None:
+        st = b.get("status", "observed")
+        return Check(True, f"build {b.get('id', '?')} — {'reviewed by InferRoute' if st == 'reviewed' else 'recorded by InferRoute since ' + str(b.get('first_seen', '?'))}")
+    if builds.allow_new_builds():
+        return Check(True, "NEW BUILD — not yet recorded by InferRoute (allowed by IR_CONFIDENTIAL_ALLOW_NEW_BUILD)")
+    return Check(False, "the operator is running an enclave build InferRoute has not recorded yet (usually recorded within hours; "
+                        "IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1 opens anyway with a warning)")
 
 
 def check_measurements(q: dict, reference) -> Check:
@@ -346,6 +365,7 @@ def verify_instance(inst: dict, nonce: str, reference, e2e_pubkey_b64: str | Non
         "e2e_key_bound": check_e2e_key_bound(q, nonce, e2e_pubkey_b64),
         "tdx_shape": check_tdx_shape(q),
         "measurement_ok": check_measurements(q, reference),
+        "build_recorded": check_build_recorded(q),
         "chain_ok": check_chain(certs),
     }
     return InstanceReport(
@@ -360,7 +380,7 @@ def verify_instance(inst: dict, nonce: str, reference, e2e_pubkey_b64: str | Non
     )
 
 
-def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str,
+def verify_fleet(fleet_id: str, evidence_doc, reference, nonce: str,
                  e2e_pubkeys: dict[str, str] | None = None) -> FleetReport:
     """``e2e_pubkeys``: instance_id → base64 ML-KEM key as served by /e2e/instances. Without it
     the e2e_key_bound check cannot run and NO instance verifies (fail-closed)."""
@@ -368,32 +388,32 @@ def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str,
     keys = e2e_pubkeys or {}
     rows = [verify_instance(i, nonce, reference, keys.get(str(i.get("instance_id") or ""))) for i in (inst or [])]
     failed = evidence_doc.get("failed_instance_ids") if isinstance(evidence_doc, dict) else None
-    return FleetReport(chute_id=chute_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []), raw=list(inst or []))
+    return FleetReport(fleet_id=fleet_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []), raw=list(inst or []))
 
 
 def new_nonce() -> str:
     return secrets.token_hex(32)
 
 
-def evidence_url(chute_id: str, nonce: str) -> str:
-    return f"{API}/chutes/{chute_id}/evidence?nonce={nonce}"
+def evidence_url(fleet_id: str, nonce: str) -> str:
+    return f"{API}/chutes/{fleet_id}/evidence?nonce={nonce}"
 
 
 def measurements_url() -> str:
     return f"{API}/servers/tee/measurements"
 
 
-async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeout: float = 240.0,
+async def fetch_and_verify(fleet_id: str, http, nonce: str | None = None, timeout: float = 240.0,
                            e2e_pubkeys: dict[str, str] | None = None) -> FleetReport:
-    """Fetch evidence + registry FROM CHUTES DIRECTLY with a fresh nonce, then verify offline.
+    """Fetch evidence + registry FROM THE OPERATOR DIRECTLY with a fresh nonce, then verify offline.
     ``http`` is an ``httpx.AsyncClient``; the 1–2 MB evidence document takes ~10 s to arrive.
     ``e2e_pubkeys`` (instance_id → key) lets the quote be checked against the key we will seal
     to; the session passes the keys it just fetched, so the SAME key is verified and used."""
     nonce = nonce or new_nonce()
     h = {"User-Agent": UA}
     ref = (await _get_retry(http, measurements_url(), h, timeout)).json()
-    r = await _get_retry(http, evidence_url(chute_id, nonce), h, timeout)
-    return verify_fleet(chute_id, r.json(), ref, nonce, e2e_pubkeys)
+    r = await _get_retry(http, evidence_url(fleet_id, nonce), h, timeout)
+    return verify_fleet(fleet_id, r.json(), ref, nonce, e2e_pubkeys)
 
 
 async def _get_retry(http, url: str, headers: dict, timeout: float, attempts: int = 4):

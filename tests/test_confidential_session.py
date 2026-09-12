@@ -13,6 +13,7 @@ from tests.confidential_fake_enclave import FakeEnclave
 
 def _report(iid: str, ok: bool = True, e2e_pubkey: str = "") -> attest.InstanceReport:
     checks = {k: attest.Check(ok, "fixture") for k in attest.REQUIRED}
+    checks["build_recorded"] = attest.Check(ok, "build fixture — recorded by InferRoute since 2026-01-01")
     if not ok:
         checks["measurement_ok"] = attest.Check(False, "unknown MRTD")
     return attest.InstanceReport(iid, checks, gpu_count=8, mrtd="aa" * 48, rtmrs=["bb" * 48] * 4, verified=ok, chain="leaf → root",
@@ -20,7 +21,7 @@ def _report(iid: str, ok: bool = True, e2e_pubkey: str = "") -> attest.InstanceR
 
 
 class FakeCarrier:
-    """A carrier that behaves like Chutes' gateway: hands sealed blobs to the enclave and returns
+    """A carrier that behaves like the operator's gateway: hands sealed blobs to the enclave and returns
     the RAW response blob (non-stream) or e2e_init/e2e SSE frames (stream)."""
     name = "fake carrier"
 
@@ -35,15 +36,15 @@ class FakeCarrier:
         self.usage_reports = []
 
     async def models(self):
-        return [{"name": "fake/Model-TEE", "chute_id": "chute-1"}]
+        return [{"name": "fake/Model-TEE", "fleet_id": "chute-1"}]
 
-    async def instances(self, chute_id):
+    async def instances(self, fleet_id):
         self.instances_calls += 1
         return {"nonce_expires_in": self.expires_in,
                 "instances": [{"instance_id": i, "e2e_pubkey": e.pubkey_b64, "nonces": [f"n-{i}-{k}-{self.instances_calls}" for k in range(self.nonces_per)]}
                               for i, e in self.enclaves.items()]}
 
-    async def invoke(self, *, chute_id, instance_id, nonce, stream, blob, path="/v1/chat/completions"):
+    async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path="/v1/chat/completions"):
         self.calls.append((instance_id, nonce, stream))
         enc = self.enclaves[instance_id]
         body, client_pk = enc.open_request(blob)
@@ -71,12 +72,12 @@ def world(monkeypatch, tmp_path):
     encl = {"i-a": FakeEnclave(), "i-b": FakeEnclave()}
     verified = {"i-a": True, "i-b": True}
 
-    async def fake_fetch(chute_id, http, nonce=None, timeout=0, e2e_pubkeys=None):
+    async def fake_fetch(fleet_id, http, nonce=None, timeout=0, e2e_pubkeys=None):
         # the fake verifier "binds" whatever key the session handed it — exactly the real
         # contract: the report carries the key the quote committed to
         keys = e2e_pubkeys or {}
         world["keys_seen"] = dict(keys)
-        return attest.FleetReport(chute_id, nonce or "n" * 64,
+        return attest.FleetReport(fleet_id, nonce or "n" * 64,
                                   [_report(i, verified[i], keys.get(i, "")) for i in encl] + [_report("i-c", False)],
                                   raw=[{"instance_id": i} for i in list(encl) + ["i-c"]])
 
@@ -94,7 +95,7 @@ def world(monkeypatch, tmp_path):
 
 
 def _session(carrier):
-    return S.ConfidentialSession(session_id="s1", model_short="fake", upstream_model="fake/Model-TEE", chute_id="chute-1",
+    return S.ConfidentialSession(session_id="s1", model_short="fake", upstream_model="fake/Model-TEE", fleet_id="chute-1",
                                  transport=carrier, http=None)
 
 
@@ -132,8 +133,8 @@ def test_a_key_the_quote_did_not_commit_to_is_never_sealed_to(world):
     s = _session(carrier)
     orig = carrier.instances
 
-    async def swapped(chute_id):
-        e2 = await orig(chute_id)
+    async def swapped(fleet_id):
+        e2 = await orig(fleet_id)
         e2["instances"][0]["e2e_pubkey"] = FakeEnclave().pubkey_b64   # substituted AFTER verification
         return e2
     asyncio.run(s.open())
@@ -155,10 +156,10 @@ def test_refuses_when_verified_and_sealable_sets_are_disjoint(world):
 
 def test_refuses_when_evidence_cannot_be_fetched(world, monkeypatch):
     async def boom(*a, **k):
-        raise RuntimeError("chutes down")
+        raise RuntimeError("operator down")
     monkeypatch.setattr(attest, "fetch_and_verify", boom)
     r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
-    assert r.verdict == "refused" and "chutes down" in r.refusal
+    assert r.verdict == "refused" and "operator down" in r.refusal
 
 
 async def _msg(s, body):
@@ -303,12 +304,12 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
     for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
-                   "vouched for by the enclave's measured software"):
+                   "InferRoute records the enclave builds"):
         assert needle in pre, needle
     assert "attributed" not in pre
     # a refused session has no preamble to give (nothing verified)
     from inferroute_local.confidential.receipt import Receipt
-    assert lane_preamble(Receipt(session_id="x", model_short="m", upstream_model="m", chute_id="c", transport="t")) == ""
+    assert lane_preamble(Receipt(session_id="x", model_short="m", upstream_model="m", fleet_id="c", transport="t")) == ""
 
 
 def test_a_connection_dropped_mid_reply_is_a_clean_error_event_not_a_traceback(world):

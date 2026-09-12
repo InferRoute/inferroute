@@ -1,7 +1,6 @@
-"""The SERVER side of Chutes' e2ee protocol, re-implemented for tests.
+"""The SERVER side of the operator's e2ee protocol, re-implemented for tests.
 
-Mirrors what the in-enclave ``aegis`` library does (as read from ``chutes/entrypoint/run.py``
-0.6.9): decapsulate our request, gzip-decompress the JSON, pull ``e2e_response_pk``, then
+Mirrors what the in-enclave runtime does (as read from the operator's open-source SDK): decapsulate our request, gzip-decompress the JSON, pull ``e2e_response_pk``, then
 encapsulate to it for the response — as one blob or as an ``e2e_init`` + ``e2e`` SSE stream.
 A client that round-trips through this and through the real chute is speaking one protocol.
 """

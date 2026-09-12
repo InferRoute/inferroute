@@ -38,6 +38,15 @@ def _quote(report_data: bytes, *, tee=0x81, ver=4, debug=False, mrtd=b"\xAA" * 4
     return ver.to_bytes(2, "little") + b"\x00\x00" + tee.to_bytes(4, "little") + b"\x00" * 40 + bytes(body) + chain
 
 
+@pytest.fixture(autouse=True)
+def _record_fixture_build(monkeypatch):
+    """The synthetic quote's build (MRTD aa…, RTMR1-3 b1/b2/b3…) is a recorded build for these tests."""
+    from inferroute_local.confidential import builds
+    monkeypatch.setattr(builds, "BUNDLED", [{"id": "fixture", "status": "reviewed", "first_seen": "2026-01-01",
+                                            "mrtd": "aa" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}])
+    monkeypatch.setattr(builds, "_EXTRA", [])
+
+
 @pytest.fixture
 def world():
     key, cert = _cert()
@@ -168,3 +177,33 @@ def test_evidence_fetch_backs_off_on_429_then_succeeds_and_gives_up_after_attemp
             return R(429)
     with pytest.raises(RuntimeError):
         asyncio.run(A._get_retry(Dead(), "u", {}, 1.0, attempts=2))
+
+
+def test_an_unrecorded_build_is_refused_unless_explicitly_allowed(world, monkeypatch):
+    from inferroute_local.confidential import builds
+    q = base64.b64encode(_quote(world["rd"], mrtd=b"\xCC" * 48, chain=world["pem"].encode())).decode()
+    ref = {"configs": [{"name": "x", "mrtd": "cc" * 48, "rtmrs": ["b0" * 48, "b1" * 48, "b2" * 48, "b3" * 48]}]}
+    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    assert r.checks["measurement_ok"].ok, "published by the operator…"
+    assert not r.checks["build_recorded"].ok and "not recorded" in r.checks["build_recorded"].why and not r.verified
+    monkeypatch.setenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD", "1")
+    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    assert r.checks["build_recorded"].ok and "NEW BUILD" in r.checks["build_recorded"].why
+    monkeypatch.delenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD")
+    # the relay can ADD a build (as observed) but never promote one to reviewed
+    assert builds.absorb_remote([{"id": "later", "status": "reviewed", "mrtd": "cc" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 1
+    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    assert r.checks["build_recorded"].ok and "recorded by InferRoute" in r.checks["build_recorded"].why and "reviewed" not in r.checks["build_recorded"].why
+    assert builds.absorb_remote([{"id": "dup", "mrtd": "cc" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 0
+
+
+def test_rtmr0_is_not_part_of_the_build_identity(world):
+    """RTMR0 (host boot firmware config) varies across hosts of one fleet; a different RTMR0 with the
+    same image is the same recorded build."""
+    q = _quote(world["rd"], chain=world["pem"].encode())
+    body = bytearray(q[A._HDR:A._HDR + A._BODY])
+    body[328:376] = b"\x99" * 48
+    q2 = q[:A._HDR] + bytes(body) + q[A._HDR + A._BODY:]
+    ref = {"configs": [{"name": "h", "mrtd": "aa" * 48, "rtmrs": ["99" * 48, "b1" * 48, "b2" * 48, "b3" * 48]}]}
+    r = A.verify_instance(dict(world["inst"], quote=base64.b64encode(q2).decode()), NONCE, ref, world["e2e_pk"])
+    assert r.checks["build_recorded"].ok

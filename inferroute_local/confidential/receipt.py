@@ -29,7 +29,7 @@ class Receipt:
     session_id: str
     model_short: str
     upstream_model: str
-    chute_id: str
+    fleet_id: str
     transport: str
     started_at: str = field(default_factory=_now)
     ended_at: str = ""
@@ -82,10 +82,13 @@ def latest() -> Receipt | None:
 
 
 CLAIM_CONFIDENTIAL = (
-    "This session's requests were encrypted on this device with ML-KEM-768 + ChaCha20-Poly1305 to "
-    "an encryption key that an Intel TDX hardware quote, verified on this device against a fresh "
-    "challenge, commits to. No relay, and no provider, could substitute the key without failing that "
-    "check. The relay carried ciphertext only. Stated limitations apply and are listed in this receipt."
+    "This session's requests were encrypted on this device (ML-KEM-768 + ChaCha20-Poly1305) to an "
+    "encryption key that an Intel TDX hardware quote commits to. This device verified that quote against "
+    "a fresh challenge: Intel's Quoting Enclave signature, Intel's pinned root of trust, revocation lists, "
+    "the platform's TCB status and Quoting Enclave identity (from Intel), every GPU's report (by NVIDIA, for "
+    "this session's challenge), the operator's published measurements, and InferRoute's own record of the "
+    "enclave build. No relay, and no provider, could substitute the key or the hardware without failing a "
+    "check on this device. The relay carried ciphertext only. Stated limitations are listed in this receipt."
 )
 
 

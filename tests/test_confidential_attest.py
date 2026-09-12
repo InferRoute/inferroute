@@ -190,11 +190,28 @@ def test_an_unrecorded_build_is_refused_unless_explicitly_allowed(world, monkeyp
     r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
     assert r.checks["build_recorded"].ok and "NEW BUILD" in r.checks["build_recorded"].why
     monkeypatch.delenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD")
-    # the relay can ADD a build (as observed) but never promote one to reviewed
+    # A build served at run time is accepted so a genuine new operator build can be recorded in
+    # minutes — but it is NOT what "recorded by InferRoute" means, and it must not be able to
+    # claim that it is. It is the seam a compromised relay would use: every other check would pass
+    # truthfully against an enclave the attacker controls, so this row is the whole attack.
     assert builds.absorb_remote([{"id": "later", "status": "reviewed", "mrtd": "cc" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 1
     r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
-    assert r.checks["build_recorded"].ok and "recorded by InferRoute" in r.checks["build_recorded"].why and "reviewed" not in r.checks["build_recorded"].why
+    why = r.checks["build_recorded"].why
+    assert r.checks["build_recorded"].ok
+    assert "PENDING" in why and "run time" in why
+    assert "recorded by InferRoute since" not in why and "reviewed by InferRoute" not in why
+    assert builds.lookup("cc" * 48, ["", "b1" * 48, "b2" * 48, "b3" * 48])["origin"] == "relay"
     assert builds.absorb_remote([{"id": "dup", "mrtd": "cc" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 0
+
+
+def test_a_run_time_build_can_never_displace_our_own_record_of_the_same_measurements(world):
+    """The shipped entry must win, whatever the relay says about the same measurements."""
+    from inferroute_local.confidential import builds
+    b = builds.BUNDLED[0]
+    assert builds.absorb_remote([{"id": "impostor", "status": "reviewed", "mrtd": b["mrtd"],
+                                  "rtmr1": b["rtmr1"], "rtmr2": b["rtmr2"], "rtmr3": b["rtmr3"]}]) == 0
+    got = builds.lookup(b["mrtd"], ["", b["rtmr1"], b["rtmr2"], b["rtmr3"]])
+    assert got["id"] == b["id"] and got["origin"] == "bundled"
 
 
 def test_rtmr0_is_not_part_of_the_build_identity(world):
@@ -207,3 +224,40 @@ def test_rtmr0_is_not_part_of_the_build_identity(world):
     ref = {"configs": [{"name": "h", "mrtd": "aa" * 48, "rtmrs": ["99" * 48, "b1" * 48, "b2" * 48, "b3" * 48]}]}
     r = A.verify_instance(dict(world["inst"], quote=base64.b64encode(q2).decode()), NONCE, ref, world["e2e_pk"])
     assert r.checks["build_recorded"].ok
+
+
+def test_measurements_must_be_field_values_not_substrings_of_the_registry(world):
+    """The registry is fetched from a URL the relay supplies, so "the hex appears somewhere in
+    this JSON" is not a property worth checking. One field holding all five concatenated used to
+    pass."""
+    q = A.quote_fields(base64.b64decode(world["inst"]["quote"]))
+    mine = {k: q[k].hex() for k in ("mrtd", "rtmr0", "rtmr1", "rtmr2", "rtmr3")}
+    honest = {"configs": [{"name": "real", "mrtd": mine["mrtd"],
+                           "rtmrs": [mine["rtmr0"], mine["rtmr1"], mine["rtmr2"], mine["rtmr3"]]}]}
+    assert A.check_measurements(q, honest).ok
+    smuggled = {"configs": [{"name": "x", "notes": "".join(mine.values())}]}
+    assert not A.check_measurements(q, smuggled).ok
+    # nor may values be borrowed across two different images
+    split = {"configs": [{"name": "a", "mrtd": mine["mrtd"], "rtmrs": [mine["rtmr0"], mine["rtmr1"]]},
+                         {"name": "b", "rtmrs": [mine["rtmr2"], mine["rtmr3"]]}]}
+    assert not A.check_measurements(q, split).ok
+
+
+def test_a_session_caveat_becomes_a_limitation_so_it_reaches_the_receipt_and_the_model():
+    """A caveat that only reaches the screen does not reach the person reading the receipt later,
+    nor the assistant answering "is this private?"."""
+    def lims(why):
+        return dict(A.situational_limitations({"build_recorded": {"why": why}}))
+    assert "pending-build" in lims("build x — PENDING — served at run time, not shipped")
+    assert "new-build" in lims("NEW BUILD — not yet recorded by InferRoute")
+    repro = lims("build x — recorded by InferRoute since 2026-09-12; MRTD+RTMR1 recomputed here from published artifacts")
+    assert "reproduced" in repro and "MRTD+RTMR1" in repro["reproduced"]
+    # a plain recorded build makes no claim either way
+    assert lims("build x — recorded by InferRoute since 2026-09-12") == {}
+
+
+def test_the_standing_limitation_no_longer_claims_a_reproduction_for_every_build():
+    """It is written into every receipt, including sessions where nothing was recomputed."""
+    text = dict(A.LIMITATIONS)["build-review"]
+    assert "two" not in text and "firmware and the bootloader chain" not in text
+    assert "Except where a measurement has been independently recomputed" in text

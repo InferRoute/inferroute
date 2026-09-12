@@ -74,16 +74,27 @@ def key_of(mrtd: str, rtmrs: list[str]) -> tuple:
 
 def known() -> dict[tuple, dict]:
     out: dict[tuple, dict] = {}
-    for b in BUNDLED + _EXTRA:
+    for b in [{**x, "origin": "bundled"} for x in BUNDLED] + _EXTRA:
         k = key_of(b.get("mrtd", ""), ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")])
-        prev = out.get(k)
-        if prev is None or (prev.get("status") != "reviewed" and b.get("status") == "reviewed" and b.get("_bundled")):
+        # First writer wins, and BUNDLED is iterated first, so a run-time row can never displace
+        # our own record of the same measurements. (The previous condition referenced a `_bundled`
+        # key that nothing ever set, so it could not fire; the ordering was doing the work.)
+        if k not in out:
             out[k] = b
     return out
 
 
-def absorb_remote(rows) -> int:
-    """Merge builds served by the relay: additions only, never a status promotion to `reviewed`."""
+def absorb_remote(rows, origin: str = "relay") -> int:
+    """Merge builds served by the relay: additions only, never a status promotion to `reviewed`.
+
+    A build that arrives this way is marked `pending` and carries its origin, because it is NOT
+    what the label "recorded by InferRoute" is supposed to mean. Only the bundled list is our own
+    record, shipped in a released client and reviewable in the repository. Anything served at run
+    time is, at best, InferRoute vouching for InferRoute — and if our relay were compromised this
+    is the seam an attacker would use, since every other check would then pass truthfully against
+    an enclave they control. The session still opens, because refusing would break the ability to
+    record a genuine new operator build within minutes, but the panel, the receipt and the model
+    preamble all say plainly that this build is pending rather than recorded.""" 
     n = 0
     have = {key_of(b.get("mrtd", ""), ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")]) for b in BUNDLED + _EXTRA}
     for b in rows or []:
@@ -92,7 +103,7 @@ def absorb_remote(rows) -> int:
         k = key_of(b["mrtd"], ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")])
         if k in have:
             continue
-        _EXTRA.append({**b, "status": "observed" if b.get("status") not in ("observed",) else b["status"]})
+        _EXTRA.append({**b, "status": "pending", "origin": origin})
         have.add(k)
         n += 1
     return n

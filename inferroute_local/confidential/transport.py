@@ -15,14 +15,25 @@ evidence from, and the header names the operator's gateway routes on, arrive at 
 *operator profile* — from the relay (``GET /confidential/endpoints``) or, for direct mode, from a
 local JSON file. To this client they are opaque strings.
 
-That costs nothing in trust, which is the point worth stating precisely: the profile is a
-LOCATOR, not an authority. Everything fetched through it is verified independently on this
-device — the TDX quote chains to Intel's pinned root, the platform's TCB and the Quoting
-Enclave's identity come from Intel's own service, every GPU report from NVIDIA's, the encryption
-key is bound to our nonce inside the quote, and the image must be a build InferRoute has
-recorded. A tampered profile can therefore only point at a different *genuinely attested*
-enclave — which then fails the recorded-build check — or at nothing at all. It cannot make an
-unattested endpoint look attested.
+What that costs in trust, stated precisely, because the honest version is narrower than the
+tempting one. Everything fetched through the profile is verified independently on this device:
+the TDX quote chains to Intel's pinned root, the platform's TCB and the Quoting Enclave's
+identity come from Intel's own service, every GPU report from NVIDIA's, and the encryption key
+is bound to our nonce inside the quote. So the profile cannot make an unattested endpoint look
+attested, and it cannot get your ciphertext read by anything that is not a real TDX enclave.
+
+Against the ENCLAVE OPERATOR that is the whole story: a profile they tampered with could only
+point at some other genuinely attested enclave, whose build is not one InferRoute ships a record
+of, and the recorded-build check refuses it.
+
+Against INFERROUTE it is not, and the code should not pretend otherwise. The same relay that
+serves this profile also serves additions to the build list (see builds.absorb_remote). An
+attacker holding our relay could therefore point the client at a TDX enclave they control AND
+supply the row that makes it recognised. Every other check would pass truthfully. What stops
+that from being invisible is that such a build is marked `pending`, and the panel, the receipt
+and the model preamble all say so — it can never present itself as a build InferRoute shipped
+a record of. Closing it properly needs the build list signed by a key this client pins, which
+is the next step and is not done yet.
 
 Profile shape (every field a template or a literal; ``{fleet}`` / ``{nonce}`` are substituted)::
 

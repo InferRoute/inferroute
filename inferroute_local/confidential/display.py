@@ -76,9 +76,15 @@ def checks_table(r: Receipt) -> Table:
             continue                       # an older receipt without the online checks
         ok = bool(c.get("ok"))
         label, explain = attest.LABELS[name]
-        t.add_row(Text("✓" if ok else "✗", style=ACCENT if ok else "red"),
-                  Text(label, style="bold" if ok else "bold red"),
-                  Text(explain if ok else f"FAILED — {c.get('why', 'not checked')}"))
+        why = str(c.get("why", ""))
+        # A check can pass and still carry a caveat. Rendering only the static explanation in that
+        # case showed a green tick beside "recorded by InferRoute" for a build that was nothing of
+        # the sort — the one string that said so was never drawn.
+        caveat = ok and any(m in why for m in ("PENDING", "NEW BUILD"))
+        t.add_row(Text("✓" if ok else "✗", style=AMBER if caveat else (ACCENT if ok else "red")),
+                  Text(label, style=("bold " + AMBER) if caveat else ("bold" if ok else "bold red")),
+                  Text(why if caveat else (explain if ok else f"FAILED — {why or 'not checked'}"),
+                       style=AMBER if caveat else None))
     e = r.e2ee or {}
     t.add_row(Text("✓", style=ACCENT), Text("Post-quantum key exchange", style="bold"),
               Text(f"{e.get('kem', 'ML-KEM-768')} + {e.get('aead', 'ChaCha20-Poly1305')}, keys made here"))
@@ -102,8 +108,12 @@ def flow_diagram(r: Receipt) -> Text:
     line.append(" · ")
     line.append("the enclave", style=f"bold {ACCENT}")
     line.append("\n  cannot:              ", style=DIM)
-    parts = ([] if direct else ["InferRoute"]) + ["the enclave operator", "the cloud host", "the network"]
+    # Only the parties that never hold anything but ciphertext belong here unconditionally.
+    parts = ([] if direct else ["InferRoute"]) + ["the cloud host", "the network"]
     line.append(" · ".join(parts), style=DIM)
+    # The operator's inability is real but conditional: it follows from the enclave running the
+    # build measured above, which is the one thing on this panel that is not pure mathematics.
+    line.append("\n  nor the enclave operator, as long as the enclave runs the build measured above", style=DIM)
     return line
 
 
@@ -111,12 +121,14 @@ def limitations_block(r: Receipt) -> Table:
     t = Table(box=None, show_header=False, pad_edge=False, padding=(0, 1), expand=False)
     t.add_column(width=2)
     t.add_column(style=DIM, overflow="fold")
-    br = (r.checks or {}).get("build_recorded") or {}
-    if br.get("ok") and "NEW BUILD" in str(br.get("why", "")):
-        t.add_row(Text("◐", style=AMBER), Text("This enclave build is not yet recorded by InferRoute; you allowed it with "
-                                                "IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1.", style=AMBER))
+    # Situational caveats are limitations now (attest.situational_limitations), so they reach the
+    # receipt and the model preamble as well as this panel. Draw the ones that are warnings in
+    # amber; the standing limitations stay dim.
+    warn = {"new-build", "pending-build"}
     for lim in r.limitations:
-        t.add_row(Text("○", style=DIM), Text(lim["text"]))
+        hot = lim.get("id") in warn
+        t.add_row(Text("◐" if hot else "○", style=AMBER if hot else DIM),
+                  Text(lim["text"], style=AMBER if hot else None))
     return t
 
 

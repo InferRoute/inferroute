@@ -90,14 +90,43 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones. Of this "
-                     "build's four measurements, two — the firmware and the bootloader chain — were recomputed "
-                     "by InferRoute from published artifacts on its own machine. The other two, covering the "
-                     "kernel command line and the root filesystem, are recorded and watched rather than "
-                     "recomputed, so to that extent the image's contents still rest on the operator's sources."),
-    ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
+    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones. Except "
+                     "where a measurement has been independently recomputed — stated per session above — the "
+                     "image's contents rest on the operator's published sources, plus the fact that any change "
+                     "to them changes the measurements and is caught."),
+    ("gpu-binding", "The GPU reports are signed by the same quote-bound key as the rest of the evidence, so "
+                    "the enclave itself vouches that these are its GPUs — but NVIDIA provides no way to prove "
+                    "from the outside that an attested GPU is attached to an attested CPU enclave. That step "
+                    "rests on the enclave's measured software, like everything else inside it. NVIDIA also "
+                    "does not report a GPU's confidential-computing mode, so it cannot be checked here."),
+    ("metadata-visible", "Your account, session, the model, message sizes and timing are visible to relays; "
                          "the words are not."),
 )
+
+
+def situational_limitations(checks: dict) -> list[tuple[str, str]]:
+    """Limitations that depend on THIS session, not on the lane in general.
+
+    These used to live only in the panel's amber row, which meant the receipt on disk, the SVG
+    card and the preamble the model is given all described a session more strongly than it was.
+    A caveat that only reaches the screen is a caveat that does not reach the person reading the
+    receipt afterwards, or the assistant answering "is this private?"."""
+    out: list[tuple[str, str]] = []
+    why = str((checks.get("build_recorded") or {}).get("why", ""))
+    if "NEW BUILD" in why:
+        out.append(("new-build", "This enclave build is not recorded by InferRoute at all. You allowed it with "
+                                 "IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1; nothing about this image has been reviewed."))
+    elif "recomputed here" in why:
+        regs = why.split("recomputed here")[0].rsplit(";", 1)[-1].strip()
+        out.append(("reproduced", f"For this build InferRoute recomputed {regs} on its own machine from artifacts "
+                                  "the operator publishes, and they matched. The remaining measurements, covering "
+                                  "the kernel command line and the root filesystem, are recorded and watched "
+                                  "rather than recomputed."))
+    elif "PENDING" in why:
+        out.append(("pending-build", "This enclave build was served to your client at run time rather than shipped in "
+                                     "a released version of it. InferRoute has not reviewed it and has reproduced "
+                                     "nothing about it, so on this point you are trusting InferRoute's servers."))
+    return out
 
 
 @dataclass
@@ -291,7 +320,10 @@ def check_build_recorded(q: dict) -> Check:
     if b is not None:
         st = b.get("status", "observed")
         repro = b.get("reproduced") or []
-        if st == "reviewed":
+        if b.get("origin") != "bundled":
+            how = ("PENDING — served at run time, not part of InferRoute's shipped record. "
+                   "It has not been reviewed and nothing about it has been reproduced here")
+        elif st == "reviewed":
             how = "reviewed by InferRoute"
         elif repro:
             how = (f"recorded by InferRoute since {b.get('first_seen', '?')}; "
@@ -313,14 +345,39 @@ def check_measurements(q: dict, reference) -> Check:
     configs = reference.get("configs") if isinstance(reference, dict) else None
     if isinstance(configs, list) and configs:
         for cfg in configs:
-            blob = json.dumps(cfg).lower()
-            if all(v in blob for v in mine.values()):
+            if _config_matches(cfg, mine):
                 return Check(True, f"MRTD + RTMR0–3 all present in registry config '{cfg.get('name', '?')}'")
         return Check(False, f"no single registry config holds all five measurements ({len(configs)} configs)")
+    # No `configs` array: fall back to searching the whole document. This is weaker and we say so —
+    # five values found ANYWHERE in one document does not mean they belong to one image.
     blob = json.dumps(reference).lower()
     missing = [k for k, v in mine.items() if v not in blob]
-    return Check(not missing, "MRTD + RTMR0–3 all present in the registry" if not missing
+    return Check(not missing, "MRTD + RTMR0–3 all appear in the registry (unstructured document; "
+                              "their belonging to ONE image is not established)" if not missing
                  else f"not in the published registry: {', '.join(missing)}")
+
+
+def _config_matches(cfg, mine: dict) -> bool:
+    """Every measurement must be a FIELD VALUE of this config, not merely a substring of it.
+
+    The old test serialised the config and asked whether each hex string appeared anywhere in the
+    text. That is satisfied by a single field holding all five values concatenated, and by a
+    config that happens to embed another config. Since the registry is fetched from a URL the
+    relay supplies, "appears somewhere in the JSON" is not a property worth checking."""
+    values: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, str):
+            values.add(node.lower())
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                walk(v)
+
+    walk(cfg)
+    return all(v in values for v in mine.values())
 
 
 def embedded_chain(quote_b: bytes) -> list:

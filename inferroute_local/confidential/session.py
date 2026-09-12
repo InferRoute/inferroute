@@ -24,6 +24,11 @@ from .transport import Transport
 logger = logging.getLogger("inferroute_local.confidential")
 
 REVERIFY_EVERY_S = 30 * 60
+# How many consecutive re-verification failures to tolerate before refusing to continue. One
+# transient network blip should not end a working session; a sustained inability to re-check the
+# enclave must, because the alternative is sealing indefinitely to evidence we can no longer
+# confirm — which is exactly what an attacker who can drop our Intel and NVIDIA traffic wants.
+REVERIFY_FAILURES_ALLOWED = 3
 NONCE_SAFETY_S = 5.0
 
 
@@ -63,6 +68,7 @@ class ConfidentialSession:
         self._raw_evidence: list = []               # the evidence rows behind self.fleet (for the online pass)
         self._pool_expire = 0.0
         self._verified_at = 0.0
+        self._reverify_failures = 0
         self._lock = asyncio.Lock()
         self._closed = False
 
@@ -150,6 +156,10 @@ class ConfidentialSession:
                                  "e2ee_pubkey_sha256": _sha256_b64(p.pubkey_b64), "gpus": r.gpus}
         self.receipt.checks = {k: {"ok": c.ok, "why": c.why, "label": attest.LABELS[k][0], "explain": attest.LABELS[k][1]}
                                for k, c in r.checks.items()}
+        # Session-specific caveats first: they are the ones a reader most needs, and they are the
+        # ones that used to exist only on screen.
+        self.receipt.limitations = [{"id": k, "text": t} for k, t in
+                                    attest.situational_limitations(self.receipt.checks) + list(attest.LIMITATIONS)]
         self.receipt.note("pinned", f"{iid} — {why}")
 
     # ───────────────────────── nonces / re-verification ─────────────────────────
@@ -192,9 +202,21 @@ class ConfidentialSession:
             self._raw_evidence = self.fleet.raw
             await self._online_pass(e2)
         except Exception as e:
-            self.receipt.note("reverify-failed", public_reason(e))
+            # Failing open here was silent: the receipt got a note, the screen and the status line
+            # kept showing the original verification time, and the session sealed on indefinitely.
+            # The point of re-checking is to catch revocation and TCB movement, so a run of
+            # failures has to stop the session rather than be swallowed.
+            self._reverify_failures += 1
+            self.receipt.note("reverify-failed", f"{public_reason(e)} ({self._reverify_failures} in a row)")
+            self.receipt.save()
+            if self._reverify_failures >= REVERIFY_FAILURES_ALLOWED:
+                self.receipt.verdict = "refused"
+                self.receipt.save()
+                raise Refused("the enclave could not be re-verified "
+                              f"{self._reverify_failures} times in a row — refusing to continue on stale evidence")
             return
         self._verified_at = time.time()
+        self._reverify_failures = 0
         ok = set(self.fleet.verified_ids)
         self.receipt.note("reverified", f"{len(ok)}/{len(self.fleet.instances)} instances verified")
         if self.pinned and self.pinned.instance_id not in ok:

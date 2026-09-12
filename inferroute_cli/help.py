@@ -22,8 +22,11 @@ def run(args=None) -> int:
     lines.append("  ir --model NAME --agent goose")
     lines.append("                           Launch with the Goose agent instead of Claude Code")
     lines.append("  ir goose                 Shorthand for `ir --agent goose` — model picker, then Goose")
-    lines.append("  ir --confidential        Confidential lane: verify a hardware enclave from this device,")
-    lines.append("                           seal every request to it, launch (`ir confidential` to inspect)")
+    lines.append("  ir pi / ir opencode      Same, with Pi or OpenCode instead of Claude Code (`--model`, `--plain` apply)")
+    lines.append("")
+    lines.append("    Enclave-backed models (kimi, glm, deepseek) run on the CONFIDENTIAL lane by default:")
+    lines.append("    the enclave is verified from this device and every request is sealed to it.")
+    lines.append("    `--plain` uses the standard lane instead; `ir confidential show|card|models` inspect the lane.")
     lines.append("")
     lines.append("    NAME can be a short alias or the canonical id. Known short aliases:")
     for a in models.all_aliases():

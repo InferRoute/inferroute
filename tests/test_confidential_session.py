@@ -347,3 +347,34 @@ def test_a_connection_dropped_mid_reply_is_a_clean_error_event_not_a_traceback(w
     carrier.invoke = bad_status
     st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "z"}]}))
     assert st == 503 and b"body unreadable" in body
+
+
+def test_native_openai_round_trip_is_sealed_and_passed_through_untranslated(world):
+    """Agents that speak OpenAI (Pi, OpenCode) get the enclave's own dialect back, byte for byte."""
+    def reply(body):
+        return [{"id": "chatcmpl-n", "choices": [{"index": 0, "delta": {"reasoning_content": "hmm"}, "finish_reason": None}]},
+                {"id": "chatcmpl-n", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_7", "function": {"name": "bash", "arguments": "{}"}}]}, "finish_reason": None}]},
+                {"id": "chatcmpl-n", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 9, "completion_tokens": 2}}]
+    carrier = FakeCarrier(world["enclaves"], reply=reply)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    body = {"model": "x", "stream": True, "user": "secret-user", "messages": [{"role": "user", "content": "go"}]}
+    st, h, out = asyncio.run(_oai(s, body))
+    assert st == 200 and h["content-type"] == "text/event-stream"
+    lines = [line for line in out.decode().split("\n") if line.startswith("data: ")]
+    assert lines[-1] == "data: [DONE]"
+    first = json.loads(lines[0][6:])
+    assert first["choices"][0]["delta"]["reasoning_content"] == "hmm", "OpenAI shape untouched — no Anthropic events"
+    seen = world["enclaves"]["i-a"].last_plaintext
+    assert seen["model"] == "fake/Model-TEE" and "user" not in seen and seen["messages"][0]["role"] == "system"
+    assert "Confidential session" in seen["messages"][0]["content"] and seen["messages"][-1] == {"role": "user", "content": "go"}
+    assert s.receipt.counters["requests"] == 1 and s.receipt.counters["output_tokens"] == 2
+    # non-stream
+    carrier.reply = lambda body: {"id": "chatcmpl-1", "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 1}}
+    st, h, out = asyncio.run(_oai(s, {"model": "x", "stream": False, "messages": [{"role": "user", "content": "q"}]}))
+    assert st == 200 and json.loads(out)["choices"][0]["message"]["content"] == "ok"
+
+
+async def _oai(s, body):
+    st, h, it = await s.chat_completions(body)
+    return st, h, await _drain(it)

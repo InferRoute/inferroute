@@ -100,6 +100,18 @@ def _resolve_model_name(name: str) -> str:
     return alias.short if alias is not None else name
 
 
+def _extract_plain(args: list[str]) -> tuple[bool, list[str]]:
+    """Pull `--plain` / `--no-confidential` (opt out of the confidential lane)."""
+    flags = {"--plain", "--no-confidential"}
+    return any(a in flags for a in args), [a for a in args if a not in flags]
+
+
+def _is_confidential_model(model: str) -> bool:
+    """True when the pinned model runs inside an enclave (TEE-backed in the catalog)."""
+    a = models.get(model)
+    return bool(a and (a.ref_key or "").endswith("-TEE"))
+
+
 def _is_premium_anthropic(model: str) -> bool:
     """True for a pinned premium Anthropic model (sonnet / opus).
 
@@ -162,14 +174,26 @@ def main(argv: list[str] | None = None) -> int:
     # subcommand to dispatch on; if the user pinned a model we launch it, else
     # we open the picker. (No auto-route — the user always chooses.)
     if not args or args[0].startswith("-"):
-        # `ir --confidential [--model M] [claude flags]` → the confidential lane: the
-        # enclave is verified from this device and every request is sealed to it.
+        # The confidential lane is the DEFAULT for enclave-backed models (Henry, 2026-09-12): the
+        # enclave is verified from this device and every request is sealed to it. `--plain`
+        # (or `--no-confidential`) opts out onto the standard lane; `--confidential` forces it.
+        plain, args = _extract_plain(args)
         if "--confidential" in args:
             from . import confidential as confidential_mod
             return confidential_mod.launch(args)
         user_agent, passthrough = _extract_agent(args)
         user_model, passthrough = _extract_model_override(passthrough)
         agent = user_agent or "claude"
+        if agent in ("claude", "pi", "opencode", "goose") and not plain and not _is_resume(passthrough) \
+                and (user_model is None or _is_confidential_model(user_model)):
+            from . import confidential as confidential_mod
+            return confidential_mod.launch(passthrough if user_model is None else ["--model", user_model, *passthrough], agent=agent)
+        if user_model is not None and _is_confidential_model(user_model) and plain:
+            sys.stderr.write("  → standard lane (--plain): InferRoute can read this session's requests; "
+                             "drop --plain for the confidential lane.\n")
+        elif user_model is not None and not plain and not _is_premium_anthropic(user_model) and not _is_resume(passthrough):
+            sys.stderr.write(f"  → {user_model} is not enclave-backed: standard lane "
+                             "(`ir confidential models` lists the models that run confidentially).\n")
         # Resume/continue → resume.py: its own menu (inferroute sessions, annotated
         # with model · lane · cost, shown apart from native ones) for bare
         # `--resume`, the newest session for `-c`, or an explicit id — all resumed
@@ -276,11 +300,34 @@ def main(argv: list[str] | None = None) -> int:
         from . import cowork as cowork_mod
         return cowork_mod.cmd_cowork(rest)
 
+    if cmd in ("pi", "opencode"):
+        # `ir pi` / `ir opencode [--model M] [--plain] [agent args]` — other Anthropic-native
+        # coding agents on the same lanes: confidential by default, `--plain` for the standard lane.
+        plain, rest = _extract_plain(rest)
+        user_model, passthrough = _extract_model_override(rest)
+        if not plain and (user_model is None or _is_confidential_model(user_model)):
+            from . import confidential as confidential_mod
+            return confidential_mod.launch(passthrough if user_model is None else ["--model", user_model, *passthrough], agent=cmd)
+        if user_model is None:
+            from . import choose as choose_mod
+            return choose_mod.run(passthrough, agent=cmd)
+        creds = config.load()
+        if not creds.is_valid:
+            sys.stderr.write("\n  No inferroute key configured.\n  Run `ir login` to set one up.\n\n")
+            return 2
+        launch.launch_agent_plain(cmd, user_model, creds, extra_args=passthrough)
+        return 0  # never reached — exec replaces process
+
     if cmd == "goose":
         # `ir goose` — launch the Goose CLI agent through InferRoute.
         # Shorthand for `ir --agent goose`. Opens the model picker when no
-        # `--model` flag is supplied; otherwise launches directly.
+        # `--model` flag is supplied; otherwise launches directly. Confidential by
+        # default for enclave-backed models (Goose speaks OpenAI; the sealed endpoint does too).
+        plain, rest = _extract_plain(rest)
         user_model, passthrough = _extract_model_override(rest)
+        if not plain and (user_model is None or _is_confidential_model(user_model)):
+            from . import confidential as confidential_mod
+            return confidential_mod.launch(passthrough if user_model is None else ["--model", user_model, *passthrough], agent="goose")
         if user_model is None:
             from . import choose as choose_mod
             return choose_mod.run(passthrough, agent="goose")

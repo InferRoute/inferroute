@@ -235,7 +235,7 @@ class ChooseApp(App):
         self.exit()
 
 
-def run(extra_args=None, agent: str = "claude") -> int:
+def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
     extra_args = list(extra_args or [])
 
     # The picker is a full-screen TUI — it needs a real terminal. Bail clearly
@@ -280,8 +280,15 @@ def run(extra_args=None, agent: str = "claude") -> int:
         sys.stderr.write(f"  internal error: alias '{short}' missing\n")
         return 1
 
-    if agent == "goose":
+    if not plain and (alias.ref_key or "").endswith("-TEE"):
+        # enclave-backed pick → the confidential lane (the default), for every Anthropic-native agent
+        from . import confidential as confidential_mod
+        return confidential_mod.launch(["--model", alias.short, *extra_args], agent=agent)
+    elif agent == "goose":
         launch_goose(alias.short, load(), extra_args=extra_args)
+    elif agent in ("pi", "opencode"):
+        from .launch import launch_agent_plain
+        launch_agent_plain(agent, alias.short, load(), extra_args=extra_args)
     else:
         launch_through_inferroute(alias.short, load(), extra_args=extra_args)
     return 0  # never reached — exec replaces process

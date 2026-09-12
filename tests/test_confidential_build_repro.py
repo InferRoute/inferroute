@@ -281,9 +281,12 @@ def test_the_mrtd_control_is_scoped_to_the_measured_volume():
     any firmware change is caught. Measured 2026-09-12: flipping a bit at 0x200000 or 0x300000
     moves MRTD; flipping one at 0x1000 or 0x40000, in the configuration volume holding the variable
     store, leaves it identical. MRTD covers the boot volume, not the whole 4 MB file."""
+    import re
     src = Path(repro.__file__).parent.parent / "inferroute_local" / "confidential" / "builds.py"
-    text = src.read_text()
-    assert "configuration volume" in text and "unchanged" in text
-    # and it must not make the unscoped claim
-    assert "any change to the firmware changes MRTD\" would be false" in text or \
-           "would be false" in text
+    # Normalise wrapping and comment markers: this asserts on PROSE, which is line-wrapped, and a
+    # contiguous-substring check silently passes or fails on where the author happened to break.
+    text = re.sub(r"\s+", " ", src.read_text().replace("#", " "))
+    assert "configuration volume that holds the variable store" in text
+    assert "leaves it at 261ce538" in text and "unchanged" in text
+    assert '"any change to the firmware changes MRTD" would be false' in text
+    assert "reproduces the committed blob BYTE-IDENTICALLY" in text

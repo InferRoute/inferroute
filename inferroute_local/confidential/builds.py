@@ -49,6 +49,17 @@ BUNDLED: list[dict] = [
         "rtmr3": "51204be641a2af357f5f4e6a121d348d6cb1cbe53c4c35d9dcc3364196b4d41a6e1de75025bb2e76f3b00cc7192f9433",
         "reproduced": ["mrtd", "rtmr1"],
         "reproduced_on": "2026-09-12",
+        # SHA-256 of the exact inputs that produced the two reproduced registers, so the claim can
+        # be re-checked without re-deriving it, and so a silently changed artifact is detectable.
+        # Controls run the same day: one flipped bit in the firmware moves MRTD to 9f10f227…, and a
+        # stock Ubuntu OVMF gives e2fca2d0… — the measurement discriminates. The recorded values
+        # themselves came from live production quotes at 09:24, before the published image was ever
+        # fetched (10:05), so the match is not circular.
+        "reproduced_from": {
+            "firmware": "01731a86fa3665caccaa4a1906cdd9276b0a53fc5921dbcc70970219ac942169",
+            "shim": "6fe6e1bcbe6cf6baec8e056d40361ca1aa715cc04ddcc2855351de060b84350b",
+            "grub": "a831af01e4fb5e3c9457120e1d08ea13d98a0a47b62728c284b7f502d535965c",
+        },
         "note": "the single VM image serving every enclave-backed catalog model on 2026-09-12 (8 RTMR0 host variants)",
     },
 ]

@@ -257,6 +257,7 @@ def main() -> int:
                     help="path to a tdx-measure binary; omit to skip MRTD")
     ap.add_argument("--build", help="recorded build id to compare against (default: every one)")
     ap.add_argument("--keep", help="directory to keep the extracted artifacts in")
+    ap.add_argument("--out", help="write a machine-readable record of the run to this JSON file")
     a = ap.parse_args()
     if not a.image:
         ap.error("--image is required (no image locator is compiled into this tool)")
@@ -325,6 +326,18 @@ def main() -> int:
         print(f"    rtmr1 event  {digest[:24]}…  {name}")
     for k, v in computed.items():
         print(f"    {k.upper():5s} {v}")
+
+    if a.out:
+        record = {
+            "computed": computed,
+            "inputs": {n: hashlib.sha256((tmp / n).read_bytes()).hexdigest()
+                       for n in ("shimx64.efi", "grubx64.efi") if (tmp / n).exists()},
+            "rtmr1_event_log": [{"event": n, "digest": d} for n, d in log],
+        }
+        if a.firmware:
+            record["inputs"]["firmware"] = hashlib.sha256(Path(a.firmware).read_bytes()).hexdigest()
+        Path(a.out).write_text(json.dumps(record, indent=2) + "\n")
+        print(f"    record written to {a.out}")
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from inferroute_local.confidential import builds  # noqa: E402

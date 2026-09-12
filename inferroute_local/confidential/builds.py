@@ -50,12 +50,23 @@ BUNDLED: list[dict] = [
         "rtmr3": "51204be641a2af357f5f4e6a121d348d6cb1cbe53c4c35d9dcc3364196b4d41a6e1de75025bb2e76f3b00cc7192f9433",
         "reproduced": ["mrtd", "rtmr1", "rtmr2"],
         "reproduced_on": "2026-09-12",
-        # SHA-256 of the exact inputs that produced the two reproduced registers, so the claim can
-        # be re-checked without re-deriving it, and so a silently changed artifact is detectable.
-        # Controls run the same day: one flipped bit in the firmware moves MRTD to 9f10f227…, and a
-        # stock Ubuntu OVMF gives e2fca2d0… — the measurement discriminates. The recorded values
-        # themselves came from live production quotes at 09:24, before the published image was ever
-        # fetched (10:05), so the match is not circular.
+        # SHA-256 of the exact inputs that produced the reproduced registers, so the claim can be
+        # re-checked without re-deriving it, and so a silently changed artifact is detectable.
+        #
+        # Controls, measured the same day, INCLUDING WHERE THEY STOP. MRTD covers the firmware's
+        # BOOT volume, not the whole 4 MB file: a flipped bit at 0x200000 or 0x300000 moves it
+        # (9f10f227…, 93f0195c…), while a flipped bit at 0x1000 or 0x40000 — the configuration
+        # volume that holds the variable store — leaves it at 261ce538…, unchanged. Only RTMR0
+        # moves there. So "any change to the firmware changes MRTD" would be false; the true
+        # statement is that any change to the MEASURED volume does. A stock Ubuntu OVMF gives
+        # e2fca2d0…, so the measurement does discriminate between firmwares.
+        #
+        # The recorded values came from live production quotes at 09:24, before the published image
+        # was ever fetched (10:05), so the match is not circular. And the firmware itself is not
+        # taken on trust: rebuilding upstream edk2 at tag edk2-stable202605 (which resolves to
+        # b03a21a63e3bd001f52c527e5a57feddb53a690b, the tag the operator's own build script pins)
+        # with the platform that script names reproduces the committed blob BYTE-IDENTICALLY, so
+        # MRTD traces to public source rather than to a binary we were handed.
         "reproduced_from": {
             "firmware": "01731a86fa3665caccaa4a1906cdd9276b0a53fc5921dbcc70970219ac942169",
             "shim": "6fe6e1bcbe6cf6baec8e056d40361ca1aa715cc04ddcc2855351de060b84350b",

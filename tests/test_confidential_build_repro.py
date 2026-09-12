@@ -37,6 +37,15 @@ def test_the_recorded_build_declares_what_we_reproduced_ourselves():
         assert b.get(reg), f"claimed {reg} reproduced but no recorded value"
 
 
+def test_the_reproduction_inputs_are_pinned_so_the_claim_can_be_rechecked():
+    """Naming the registers we reproduced is not enough: a reader must be able to check WHICH
+    artifacts produced them, and notice if one is quietly swapped."""
+    src = builds.BUNDLED[0]["reproduced_from"]
+    assert set(src) == {"firmware", "shim", "grub"}
+    for name, digest in src.items():
+        assert len(digest) == 64 and int(digest, 16) >= 0, name
+
+
 def test_rtmr1_fold_reproduces_the_recorded_value_from_the_measured_event_log():
     import hashlib
     s = lambda x: hashlib.sha384(x).digest()

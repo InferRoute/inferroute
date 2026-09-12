@@ -51,6 +51,29 @@ def _resolve_model(short: str | None):
     return alias
 
 
+def _interactive(passthrough: list[str]) -> bool:
+    """A human at a terminal (not `-p`/`--print`, not a pipe): the picker and the pause apply."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not any(a in ("-p", "--print") or a.startswith("--print=") for a in passthrough)
+
+
+async def _pause(prompt: str, timeout: float = 20.0) -> None:
+    """Wait for Enter or `timeout` seconds, whichever first; never blocks a non-tty."""
+    import select
+    sys.stdout.write(f"\033[90m  {prompt}\033[0m ")
+    sys.stdout.flush()
+    loop = asyncio.get_running_loop()
+
+    def _wait() -> None:
+        r, _, _ = select.select([sys.stdin], [], [], timeout)
+        if r:
+            try:
+                sys.stdin.readline()
+            except Exception:
+                pass
+    await loop.run_in_executor(None, _wait)
+    sys.stdout.write("\n")
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -104,6 +127,32 @@ async def _open_session(alias, session_id: str, http, console):
     return session, receipt
 
 
+def _strip_prefix(receipt) -> str:
+    """The static half of the status line: `🔒 confidential · kimi-k2.6 · enclave d6af7f39 verified 01:04Z`."""
+    inst = (receipt.instance or {}).get("id", "")[:8]
+    when = (receipt.verified_at or receipt.started_at or "")[11:16]
+    return f"🔒 confidential · {receipt.model_short} · enclave {inst} verified {when}Z"
+
+
+def _attach_counter(status_args: list[str], receipt_path: str) -> None:
+    """Append ` · N sealed` to the status-line command, read from the receipt on every render
+    (the session rewrites it after each turn). Dependency-free shell; exit status stays 0."""
+    import json
+    import shlex
+    if len(status_args) != 2 or not receipt_path:
+        return
+    try:
+        settings = json.loads(status_args[1])
+        cmd = settings["statusLine"]["command"]
+    except (ValueError, KeyError, TypeError):
+        return
+    rp = shlex.quote(receipt_path)
+    cmd += (f"; n=$(grep -o '\"requests\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
+            f"[ -n \"$n\" ] && printf ' · %s sealed' \"$n\" || true")
+    settings["statusLine"]["command"] = cmd
+    status_args[1] = json.dumps(settings)
+
+
 # ───────────────────────── ir --confidential ─────────────────────────
 
 def launch(args: list[str]) -> int:
@@ -118,6 +167,14 @@ def launch(args: list[str]) -> int:
     from . import resume as resume_mod
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
+    if user_model is None and _interactive(passthrough):
+        # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.
+        from . import choose as choose_mod
+        user_model = choose_mod.pick(choose_mod.confidential_options(),
+                                     "confidential lane · choose an enclave model · USD per 1M tokens")
+        if user_model is None:
+            return 130
+        sys.stderr.write(f"\n  Run this next time directly:  ir --confidential --model {user_model}\n\n")
     alias = _resolve_model(user_model)
     if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
         sys.stderr.write("\n  ir: refusing to launch a nested Claude Code session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
@@ -143,8 +200,13 @@ def launch(args: list[str]) -> int:
             display.render_panel(receipt, console)
             if not receipt.is_confidential:
                 return 3
+            if _interactive(passthrough):
+                # Claude Code's full-screen TUI replaces this screen the moment it starts, so give
+                # the panel a beat: Enter (or 20 s) to continue. The 🔒 status line inside Claude
+                # Code and `ir confidential show` carry the proof from there on.
+                await _pause("Enter to open Claude Code · the 🔒 status line and `ir confidential show` keep this proof")
             port = _free_port()
-            server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="warning"))
+            server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
             server_task = asyncio.create_task(server.serve())
             while not server.started:
                 if server_task.done():
@@ -160,10 +222,16 @@ def launch(args: list[str]) -> int:
                 [h for h in [env.get("ANTHROPIC_CUSTOM_HEADERS", "").strip()] if h] + [f"x-inferroute-session: {session_id}"])
             launch_mod._apply_autocompact_env(env, alias.model_id)
             session.shown_model = shown_model
+            # Pinned inside Claude Code's TUI for the whole session (the pre-launch panel scrolls
+            # away in fullscreen mode): lane · model · enclave · when verified, plus a live
+            # "N sealed" count read from the receipt the session keeps updating. No network.
+            status_args = launch_mod._product_strip_settings_args(
+                _strip_prefix(receipt), passthrough, disable_connectors=True)
+            _attach_counter(status_args, receipt.path)
             if resuming:
-                argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough]
+                argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough, *status_args]
             else:
-                argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough]
+                argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
                 launch_mod._record_launch(session_id, alias.model_id, "confidential")
             console.print(f"[grey58]{'resuming' if resuming else 'launching'} claude on the confidential lane · "
                           f"local endpoint 127.0.0.1:{port} · Ctrl-C twice in claude to leave[/]\n")

@@ -180,3 +180,16 @@ def test_stream_upstream_error_frame_becomes_an_anthropic_error_event():
 def test_sse_line_reassembly_across_arbitrary_chunks():
     raw = b"data: {\"a\":1}\n\ndata: {\"b\":2}\n\n"
     assert [line for line in T.iter_sse_lines([raw[:3], raw[3:17], raw[17:]]) if line.startswith("data:")] == ['data: {"a":1}', 'data: {"b":2}']
+
+
+def test_lane_preamble_is_prepended_to_the_system_prompt_for_both_shapes():
+    pre = "# Confidential session\nYou are inside an enclave."
+    r = T.to_openai(_cc_request(), KIMI, system_prefix=pre)
+    assert r["messages"][0]["role"] == "system"
+    assert r["messages"][0]["content"].startswith(pre) and r["messages"][0]["content"].endswith("You are Claude Code.")
+    r = T.to_openai(_cc_request(system="plain string"), KIMI, system_prefix=pre)
+    assert r["messages"][0]["content"] == pre + "\n\nplain string"
+    r = T.to_openai(_cc_request(system=None), KIMI, system_prefix=pre)
+    assert r["messages"][0] == {"role": "system", "content": pre}
+    r = T.to_openai(_cc_request(system=None), KIMI)
+    assert r["messages"][0]["role"] == "user", "no preamble, no system → no system message"

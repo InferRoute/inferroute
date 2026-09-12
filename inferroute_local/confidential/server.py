@@ -23,7 +23,15 @@ def create_app(session: ConfidentialSession) -> FastAPI:
             body = await request.json()
         except Exception:
             return JSONResponse(status_code=400, content={"type": "error", "error": {"type": "invalid_request_error", "message": "Invalid JSON"}})
-        status, headers, stream = await session.messages(body)
+        try:
+            status, headers, stream = await session.messages(body)
+        except Exception as e:  # never let a traceback reach the terminal; Claude Code shows this text instead
+            session.receipt.counters["errors"] += 1
+            msg = f"confidential lane: unexpected failure ({type(e).__name__}: {e}); nothing left this device in the clear"
+            if body.get("stream"):
+                return StreamingResponse(iter([f"event: error\ndata: {json.dumps({'type': 'error', 'error': {'type': 'api_error', 'message': msg}})}\n\n".encode()]),
+                                         status_code=500, media_type="text/event-stream")
+            return JSONResponse(status_code=500, content={"type": "error", "error": {"type": "api_error", "message": msg}})
         if body.get("stream"):
             return StreamingResponse(stream, status_code=status, headers=headers, media_type="text/event-stream")
         chunks = []

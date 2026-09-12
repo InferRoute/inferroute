@@ -22,9 +22,10 @@ A register in this list no longer rests on the operator's word:
   mrtd   derived from the guest firmware blob alone (independent of host RAM/vCPU/ACPI, which
          is why one MRTD covers a whole fleet of differently-shaped hosts).
   rtmr1  the bootloader chain: partition table, then shim and GRUB, Authenticode-hashed.
+  rtmr2  the owner-key variables, then the kernel command line and the initramfs.
 Registers NOT listed are still recorded-and-watched rather than reproduced. For this image that
-is rtmr2 (kernel cmdline + initramfs: the bootloader contributes log entries we do not yet model)
-and rtmr3 (hashes root-filesystem files; that filesystem is encrypted in the published image).
+is rtmr3, which hashes a list of root-filesystem files — and that filesystem is encrypted in the
+published image, so it cannot be recomputed from the download.
   (absent)  — a build InferRoute has never seen: the session REFUSES unless
               IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1, in which case it opens with a warning on the panel.
 
@@ -47,7 +48,7 @@ BUNDLED: list[dict] = [
         "rtmr1": "9b8b2915351a3166f742024edafb6cce244c1df4056eb1f9eb608c3616b9d63729ae00c98d1dc108009c0978b19dc207",
         "rtmr2": "8471360414fe80b4343fb17dd59e442bdc55b5955df0adf610b1de15ad7b454e98fb8e9d38cc188b82369f4f620b6968",
         "rtmr3": "51204be641a2af357f5f4e6a121d348d6cb1cbe53c4c35d9dcc3364196b4d41a6e1de75025bb2e76f3b00cc7192f9433",
-        "reproduced": ["mrtd", "rtmr1"],
+        "reproduced": ["mrtd", "rtmr1", "rtmr2"],
         "reproduced_on": "2026-09-12",
         # SHA-256 of the exact inputs that produced the two reproduced registers, so the claim can
         # be re-checked without re-deriving it, and so a silently changed artifact is detectable.

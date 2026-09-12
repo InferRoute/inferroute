@@ -31,7 +31,7 @@ def _recorded(reg: str) -> str:
 
 def test_the_recorded_build_declares_what_we_reproduced_ourselves():
     b = builds.BUNDLED[0]
-    assert b["reproduced"] == ["mrtd", "rtmr1"]
+    assert b["reproduced"] == ["mrtd", "rtmr1", "rtmr2"]
     # every claimed register must actually be recorded, or the claim points at nothing
     for reg in b["reproduced"]:
         assert b.get(reg), f"claimed {reg} reproduced but no recorded value"
@@ -141,3 +141,41 @@ def test_install_command_is_never_run_implicitly(agents, monkeypatch):
     monkeypatch.setattr(agents.shutil, "which", lambda n: "/usr/bin/apt-get" if n == "apt-get" else None)
     cmd = agents.clipboard_install_cmd("wayland")
     assert cmd[0] == "sudo" and "wl-clipboard" in cmd
+
+
+# The RTMR2 event log measured out of the operator's published image on 2026-09-12, and confirmed
+# against a real boot. The bootloader measures nothing on a confidential VM — it only starts when
+# it finds a TPM protocol, and this firmware publishes the confidential-computing one instead — so
+# the register holds three owner-key entries the bootloader synthesises from a certificate inside
+# its own binary, then the command line and the initramfs from the kernel's boot stub.
+RTMR2_EVENTS = [
+    "053357ea65185f010b8caa1fc265cfd5e80c7cc781254fa3f1e5ea9d345a87003cf761472a2f0423f15297f55cfe248f",
+    "80ee2571334a57bf90238d21964447e542079d4805fa87887817a97dcb720906683a09b1ac634c76c0c0be1177f76110",
+    "8d2ce87d86f55fcfab770a047b090da23270fa206832dfea7e0c946fff451f819add242374be551b0d6318ed6c7d41d8",
+    "ca9be8ed063ebe5ddb9c6925cc30085c512cb25788effcf375618311a2a3872978b0dbb48d6a4528e9836f1487cbf785",
+    "6c9ae139e17ea07cc32460ab2d1a31ca1ced8b68df9c0204ea69e030aa8f5de2c5135b9f239c8eb3d39e73e9dacde638",
+]
+
+
+def test_rtmr2_fold_reproduces_the_recorded_value():
+    assert repro._fold([bytes.fromhex(d) for d in RTMR2_EVENTS]) == _recorded("rtmr2")
+
+
+def test_a_changed_initramfs_changes_rtmr2():
+    """The whole point of reproducing this register: it pins the initial RAM filesystem, which is
+    what unlocks the disk and takes the application measurement."""
+    swapped = RTMR2_EVENTS[:-1] + ["ab" * 48]
+    assert repro._fold([bytes.fromhex(d) for d in swapped]) != _recorded("rtmr2")
+
+
+def test_the_command_line_is_measured_with_the_bootloader_prefix():
+    """The config file does not show the BOOT_IMAGE= prefix the bootloader prepends; leaving it
+    out gives a digest that is wrong in a way nothing else reveals."""
+    import hashlib
+    base = ("root=UUID=b8d533cc-73cc-45e5-996e-6f003cfd03c1 ro console=ttyS0,115200n8 "
+            "systemd.mask=getty@tty1.service systemd.mask=serial-getty@ttyS0.service "
+            "systemd.mask=serial-getty@hvc0.service systemd.mask=emergency.service "
+            "systemd.mask=rescue.service console=tty1 console=ttyS0")
+    with_prefix = "BOOT_IMAGE=/vmlinuz-6.17.0-35-generic " + base
+    assert hashlib.sha384(with_prefix.encode("utf-16-le")).hexdigest() == RTMR2_EVENTS[3]
+    assert hashlib.sha384(base.encode("utf-16-le")).hexdigest() != RTMR2_EVENTS[3]

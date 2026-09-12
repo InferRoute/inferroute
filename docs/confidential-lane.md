@@ -121,17 +121,18 @@ Rendered on screen as stated limitations, never as passed checks:
   attest whatever runs). InferRoute therefore keeps its own record of the builds it has seen — one VM
   image today, identical across every enclave-backed model — and refuses unrecorded ones.
 
-  Two of that build's four measurements are no longer taken on trust. On 2026-09-12 InferRoute
+  Three of that build's four measurements are no longer taken on trust. On 2026-09-12 InferRoute
   recomputed them on its own machine from artifacts the operator publishes — the guest firmware
-  blob from the open build repository, and the bootloader chain read out of the published guest
-  disk image — and both matched the enclaves serving live traffic exactly:
+  blob from the open build repository, and the bootloader chain, kernel command line and initial
+  RAM filesystem read out of the published guest disk image — and all three matched the enclaves
+  serving live traffic exactly:
 
   | measurement | covers | status |
   | --- | --- | --- |
   | MRTD | the guest firmware, i.e. the trust domain's initial state | reproduced by InferRoute |
   | RTMR1 | partition table, shim and GRUB, Authenticode-hashed as the firmware loads them | reproduced by InferRoute |
-  | RTMR2 | kernel command line and initramfs | recorded and watched |
-  | RTMR3 | a fixed list of root-filesystem files | recorded and watched |
+  | RTMR2 | owner-key variables, the kernel command line and the initramfs | reproduced by InferRoute |
+  | RTMR3 | a list of root-filesystem files | recorded and watched |
 
   `scripts/reproduce_enclave_build.py` is that computation, and it takes the image locator as an
   argument rather than embedding one, so anyone can re-run it against any published image. It needs

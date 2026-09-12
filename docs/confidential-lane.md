@@ -18,8 +18,16 @@ ir confidential card                    # export the last panel as an SVG card
 ir confidential models                  # models that can run confidentially
 ```
 
-Inside Claude Code the model reads `kimi-k2.6 [confidential]` — the one persistent on-screen
-reminder of the lane. `ir --resume` recognises a confidential session and resumes it on the
+Inside Claude Code the model reads `kimi-k2.6 [confidential]` and the status line at the bottom
+stays pinned for the whole session: `🔒 confidential · kimi-k2.6 · enclave d6af7f39 verified 01:04Z · N sealed`
+(the count comes from the receipt, which the session rewrites after every turn). Without `--model`
+the usual picker opens, narrowed to enclave-capable models; before Claude Code takes the screen the
+panel waits for Enter (or 20 s).
+
+The model itself is told the truth about where it runs: every request carries a short preamble
+derived from the receipt (model, instance, which checks passed, the receipt path, the stated
+limitations, and that the session is not on Anthropic's servers), so "is this private?" is answered
+from facts rather than a guess about a vendor cloud. `ir --resume` recognises a confidential session and resumes it on the
 confidential lane; a sealed transcript is never replayed through the plaintext lane.
 
 1. **Attestation, fetched by you, from the provider, with your own challenge.** The client draws

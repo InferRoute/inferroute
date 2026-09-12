@@ -168,7 +168,11 @@ class ChooseApp(App):
         Binding("down", "cursor_down", "down", show=False),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, options: list[tuple] | None = None, tagline: str | None = None) -> None:
+        # `options`/`tagline` let a caller narrow the list (the confidential lane offers only
+        # the models that can run inside an enclave) and re-label the header.
+        self._options = options
+        self._tagline = tagline or "choose a model · USD per 1M tokens"
         super().__init__()
         self.selected_short: str | None = None
 
@@ -192,10 +196,10 @@ class ChooseApp(App):
                 yield Static(f"[b {mark_color}]{_MARK}[/]", id="mark")
                 with Vertical(id="title"):
                     yield Static(wordmark, id="wordmark")
-                    yield Static("choose a model · USD per 1M tokens", id="tagline")
+                    yield Static(self._tagline, id="tagline")
             yield Static("─" * 76, id="divider")
             items = []
-            for i, (short, badge, color, name, desc) in enumerate(_options()):
+            for i, (short, badge, color, name, desc) in enumerate(self._options if self._options is not None else _options()):
                 body = _row_markup(badge, color, name, desc, _price_markup(short))
                 # Textual widget ids forbid '.' (versioned shorts like kimi-k2.6 have
                 # one), so use a positional id and carry the real short on `name`.
@@ -281,3 +285,20 @@ def run(extra_args=None, agent: str = "claude") -> int:
     else:
         launch_through_inferroute(alias.short, load(), extra_args=extra_args)
     return 0  # never reached — exec replaces process
+
+
+def pick(options: list[tuple], tagline: str) -> str | None:
+    """Run the picker over `options` and return the chosen short (None if the user quit).
+    Unlike `run()` this launches nothing — the caller decides what to do with the choice."""
+    if not sys.stdout.isatty():
+        return None
+    app = ChooseApp(options=options, tagline=tagline)
+    app.run()
+    return app.selected_short
+
+
+def confidential_options() -> list[tuple]:
+    """Picker rows for the models that can run on the confidential lane (TEE-backed), in the
+    picker's own order; badge/accent/desc come from the catalog like the normal picker."""
+    tee = {a.short for a in models.all_aliases() if (a.ref_key or "").endswith("-TEE")}
+    return [row for row in _options() if row[0] in tee]

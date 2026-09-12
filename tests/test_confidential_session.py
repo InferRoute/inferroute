@@ -166,7 +166,8 @@ def test_non_stream_round_trip_seals_here_and_opens_here(world):
     assert out["usage"]["input_tokens"] == 5 and out["id"].startswith("msg_")
     # the enclave saw the translated OpenAI body, never the Anthropic one
     seen = world["enclaves"]["i-a"].last_plaintext
-    assert seen["model"] == "fake/Model-TEE" and seen["messages"] == [{"role": "user", "content": "there"}]
+    assert seen["model"] == "fake/Model-TEE" and seen["messages"][-1] == {"role": "user", "content": "there"}
+    assert seen["messages"][0]["role"] == "system" and "Confidential session" in seen["messages"][0]["content"]
     c = s.receipt.counters
     assert c["requests"] == 1 and c["plaintext_bytes_sealed_here"] > 0 and c["input_tokens"] == 5
     assert carrier.calls[0][0] == "i-a" and carrier.calls[0][2] is False
@@ -274,3 +275,64 @@ def test_receipt_round_trips_through_disk_and_close_stamps_the_end(world):
     assert r.ended_at
     again = Receipt.load(r.path)
     assert again.instance == r.instance and again.checks == r.checks and latest().session_id == "s1"
+
+
+def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
+    """The lane preamble rides on the system prompt, derived from the receipt: it names the model,
+    the pinned instance, the checks that passed, the receipt path and the limitations — and says
+    the session is NOT on Anthropic's servers."""
+    from inferroute_local.confidential.receipt import lane_preamble
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, {"stream": False, "system": "You are Claude Code.", "messages": [{"role": "user", "content": "is this private?"}]}))
+    seen = world["enclaves"]["i-a"].last_plaintext
+    sysmsg = seen["messages"][0]
+    assert sysmsg["role"] == "system"
+    pre = lane_preamble(s.receipt)
+    assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
+    for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
+                   "Intel's TCB and revocation status are not fetched"):
+        assert needle in pre, needle
+    assert "attributed" not in pre
+    # a refused session has no preamble to give (nothing verified)
+    from inferroute_local.confidential.receipt import Receipt
+    assert lane_preamble(Receipt(session_id="x", model_short="m", upstream_model="m", chute_id="c", transport="t")) == ""
+
+
+def test_a_connection_dropped_mid_reply_is_a_clean_error_event_not_a_traceback(world):
+    """Seen live 2026-09-12: httpx RemoteProtocolError ('incomplete chunked read') escaped as an
+    ASGI traceback into the user's terminal. Every read of the upstream stream must turn a
+    transport failure into an Anthropic-shaped error the client can show — and count it."""
+    import httpx
+    carrier = FakeCarrier(world["enclaves"])
+
+    async def dropping(**kw):
+        async def broken():
+            yield b'data: {"e2e_init": "AA=="}\n'
+            raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+        return 200, {"content-type": "text/event-stream"}, broken()
+    carrier.invoke = dropping
+    s = _session(carrier)
+    asyncio.run(s.open())
+    st, _, body = asyncio.run(_msg(s, {"stream": True, "messages": [{"role": "user", "content": "x"}]}))
+    assert st == 200 and b"event: error" in body and b"dropped mid-reply" in body
+    assert s.receipt.counters["errors"] == 1
+
+    async def dropping_json(**kw):
+        async def broken():
+            raise httpx.ReadError("boom")
+            yield b""
+        return 200, {"content-type": "application/octet-stream"}, broken()
+    carrier.invoke = dropping_json
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "y"}]}))
+    assert b"dropped mid-reply" in body and s.receipt.counters["errors"] == 2
+
+    async def bad_status(**kw):
+        async def broken():
+            raise httpx.ReadError("cut")
+            yield b""
+        return 503, {}, broken()
+    carrier.invoke = bad_status
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "z"}]}))
+    assert st == 503 and b"body unreadable" in body

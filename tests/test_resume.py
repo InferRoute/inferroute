@@ -154,3 +154,41 @@ def test_a_confidential_session_resumes_on_the_confidential_lane(tmp_path, monke
     rc = resume.handle(["--resume", "sess-1", "--verbose"])
     assert rc == 0 and "hit" not in plain
     assert called["args"] == ["--model", "kimi-k2.6", "--verbose", "--resume", "sess-1"]
+
+
+def test_confidential_status_line_names_the_lane_and_counts_sealed_requests(tmp_path):
+    import json
+    import subprocess
+    from inferroute_cli import confidential as C
+    from inferroute_local.confidential.receipt import Receipt
+    r = Receipt(session_id="abcdef12", model_short="kimi-k2.6", upstream_model="m/Kimi-TEE", chute_id="c", transport="t")
+    r.instance = {"id": "d6af7f39-0000"}
+    r.verified_at = "2026-09-12T01:04:38Z"
+    r.verdict = "confidential"
+    r.counters["requests"] = 7
+    r.path = str(tmp_path / "receipt.json")
+    r.save()
+    assert C._strip_prefix(r) == "🔒 confidential · kimi-k2.6 · enclave d6af7f39 verified 01:04Z"
+    args = ["--settings", json.dumps({"statusLine": {"type": "command", "command": "printf '%s' 'X'"}})]
+    C._attach_counter(args, r.path)
+    cmd = json.loads(args[1])["statusLine"]["command"]
+    out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout == "X · 7 sealed"
+    C._attach_counter(args := ["--settings", "{}"], r.path)   # malformed settings: untouched, no crash
+    assert args[1] == "{}"
+
+
+def test_confidential_picker_offers_only_enclave_models_and_bare_launch_uses_it(monkeypatch):
+    from inferroute_cli import choose, confidential as C, models
+    rows = choose.confidential_options()
+    tee = {a.short for a in models.all_aliases() if (a.ref_key or "").endswith("-TEE")}
+    assert rows and {r[0] for r in rows} <= tee and "kimi-k2.6" in {r[0] for r in rows}
+    assert "anthropic" not in {r[0] for r in rows}
+    # bare `ir --confidential` at a tty → picker; a quit (None) exits 130 before anything else runs
+    monkeypatch.setattr(C, "_interactive", lambda passthrough: True)
+    monkeypatch.setattr(C, "_need_extra", lambda: None)
+    monkeypatch.setattr(choose, "pick", lambda options, tagline: None)
+    assert C.launch(["--confidential"]) == 130
+    # `-p` is never interactive: no picker, falls to the default model resolution
+    monkeypatch.undo()
+    assert C._interactive(["-p", "hi"]) is False

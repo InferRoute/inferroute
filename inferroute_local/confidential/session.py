@@ -18,7 +18,7 @@ from typing import AsyncIterator, Callable
 import httpx
 
 from . import attest, e2ee, translate
-from .receipt import CLAIM_CONFIDENTIAL, Receipt
+from .receipt import CLAIM_CONFIDENTIAL, Receipt, lane_preamble
 from .transport import Transport
 
 logger = logging.getLogger("inferroute_local.confidential")
@@ -187,7 +187,7 @@ class ConfidentialSession:
         c = self.receipt.counters
         streaming = bool(body.get("stream"))
         try:
-            oai = translate.to_openai(body, self.upstream_model)
+            oai = translate.to_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
             pinned, nonce = await self._take_nonce()
             sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
         except Refused as e:
@@ -207,7 +207,10 @@ class ConfidentialSession:
             return self._error(streaming, 502, f"the relay is unreachable: {e}")
         if status != 200:
             c["errors"] += 1
-            detail = (await _drain(raw))[:400].decode("utf-8", "replace")
+            try:
+                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
+            except Exception as e:                       # the error body itself may be cut short
+                detail = f"(body unreadable: {type(e).__name__})"
             return self._error(streaming, status, f"upstream {status}: {detail}")
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed)
@@ -248,6 +251,10 @@ class ConfidentialSession:
             c["errors"] += 1
             yield translate.sse("error", translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
+        except (httpx.HTTPError, OSError) as e:          # connection dropped mid-stream: a clean error, never a traceback
+            c["errors"] += 1
+            yield translate.sse("error", translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
+            return
         finally:
             c["ciphertext_frames_received"] += opener.frames
         for ev in tr.finish_events():
@@ -256,7 +263,12 @@ class ConfidentialSession:
 
     async def _open_json(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest) -> AsyncIterator[bytes]:
         c = self.receipt.counters
-        data = await _drain(raw)
+        try:
+            data = await _drain(raw)
+        except (httpx.HTTPError, OSError) as e:
+            c["errors"] += 1
+            yield json.dumps(translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
+            return
         try:
             # The gateway hands the response blob back RAW (application/octet-stream, measured
             # 2026-09-12); the chute-side envelope {"e2e": b64} is also accepted in case it ever

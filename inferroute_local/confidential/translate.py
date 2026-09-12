@@ -135,16 +135,23 @@ def _tool_id() -> str:
     return "call_" + secrets.token_hex(8)
 
 
-def to_openai(body: dict, upstream_model: str) -> dict:
-    """Anthropic Messages request → OpenAI Chat Completions request for ``upstream_model``."""
+def to_openai(body: dict, upstream_model: str, system_prefix: str = "") -> dict:
+    """Anthropic Messages request → OpenAI Chat Completions request for ``upstream_model``.
+
+    ``system_prefix`` is prepended to the system prompt (the lane preamble: the model is told,
+    truthfully, where it is running and what was verified, so it can answer "is this private?"
+    from facts instead of guessing it is talking to a vendor's cloud)."""
     messages: list = []
     system = body.get("system")
-    if isinstance(system, str) and system.strip():
-        messages.append({"role": "system", "content": system})
+    if isinstance(system, str):
+        s = system
     elif isinstance(system, list):
         s = "\n".join((b.get("text") or "") for b in system if isinstance(b, dict) and b.get("type") == "text")
-        if s.strip():
-            messages.append({"role": "system", "content": s})
+    else:
+        s = ""
+    s = (system_prefix.rstrip() + "\n\n" + s.lstrip()) if system_prefix.strip() else s
+    if s.strip():
+        messages.append({"role": "system", "content": s.strip()})
     for msg in body.get("messages") or []:
         if not isinstance(msg, dict):
             continue

@@ -3,8 +3,12 @@
 Evidence is fetched from the enclave operator directly — never through InferRoute, because the
 point of the check is that the user does not have to trust InferRoute (or the operator) about it:
 
-    GET {OPERATOR_API}/chutes/{fleet_id}/evidence?nonce={64 hex}   (unauthenticated)
-    GET {OPERATOR_API}/servers/tee/measurements                    (unauthenticated)
+    GET <operator evidence endpoint>?nonce={64 hex}   (unauthenticated)
+    GET <operator measurement registry>                (unauthenticated)
+
+Both addresses come from the operator profile the carrier hands us (see ``transport.py``); none
+is compiled into this client, and none needs to be trusted — every byte they return is checked
+below against Intel's pinned root, Intel's and NVIDIA's own services, and our recorded builds.
 
 Per running instance the evidence carries an Intel TDX ``quote``, NVIDIA ``gpu_evidence``, a
 ``certificate``, a ``signature`` and a base64-JSON ``attested_body`` that embeds our nonce.
@@ -52,7 +56,6 @@ import json
 import secrets
 from dataclasses import dataclass, field
 
-from .transport import OPERATOR_API as API  # the operator's public endpoint; nothing else names the operator
 UA = "inferroute-confidential/1 (+native verifier, no SDK)"
 
 # TDX quote v4 (Intel DCAP): 48-byte header, then a 584-byte TD report body.
@@ -395,24 +398,20 @@ def new_nonce() -> str:
     return secrets.token_hex(32)
 
 
-def evidence_url(fleet_id: str, nonce: str) -> str:
-    return f"{API}/chutes/{fleet_id}/evidence?nonce={nonce}"
 
 
-def measurements_url() -> str:
-    return f"{API}/servers/tee/measurements"
 
-
-async def fetch_and_verify(fleet_id: str, http, nonce: str | None = None, timeout: float = 240.0,
+async def fetch_and_verify(fleet_id: str, http, profile, nonce: str | None = None, timeout: float = 240.0,
                            e2e_pubkeys: dict[str, str] | None = None) -> FleetReport:
     """Fetch evidence + registry FROM THE OPERATOR DIRECTLY with a fresh nonce, then verify offline.
-    ``http`` is an ``httpx.AsyncClient``; the 1–2 MB evidence document takes ~10 s to arrive.
+    ``http`` is an ``httpx.AsyncClient``; ``profile`` is the carrier's operator profile (where the
+    evidence lives); the 1–2 MB evidence document takes ~10 s to arrive.
     ``e2e_pubkeys`` (instance_id → key) lets the quote be checked against the key we will seal
     to; the session passes the keys it just fetched, so the SAME key is verified and used."""
     nonce = nonce or new_nonce()
     h = {"User-Agent": UA}
-    ref = (await _get_retry(http, measurements_url(), h, timeout)).json()
-    r = await _get_retry(http, evidence_url(fleet_id, nonce), h, timeout)
+    ref = (await _get_retry(http, profile.measurements_url(), h, timeout)).json()
+    r = await _get_retry(http, profile.evidence_url(fleet_id, nonce), h, timeout)
     return verify_fleet(fleet_id, r.json(), ref, nonce, e2e_pubkeys)
 
 

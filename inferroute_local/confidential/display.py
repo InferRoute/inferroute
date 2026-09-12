@@ -199,7 +199,7 @@ FLEET_COLS = {"nonce_in_body": "nonce", "sig_ok": "sig", "spki_bound": "spki", "
 
 def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> None:
     console = console or Console()
-    t = Table(title=f"Attestation — chute {fleet.fleet_id[:8]}… · nonce {fleet.nonce[:8]}…", box=box.SIMPLE_HEAD,
+    t = Table(title=f"Attestation — fleet {fleet.fleet_id[:8]}… · nonce {fleet.nonce[:8]}…", box=box.SIMPLE_HEAD,
               title_style="bold", header_style=DIM)
     t.add_column("instance")
     t.add_column("GPUs", justify="right")

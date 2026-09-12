@@ -76,6 +76,7 @@ class ConfidentialSession:
         except Exception as e:
             return self._refuse(f"could not list sealable enclaves via {self.transport.name}: {public_reason(e)}")
         keys = _keys_of(e2)
+        profile = await self.transport.profile()
         from . import builds as _builds
         _builds.load_user_overrides()
         if hasattr(self.transport, "builds"):
@@ -83,7 +84,7 @@ class ConfidentialSession:
         say("fetching the enclave fleet's attestation evidence (this is the slow part)…")
         try:
             # the quote is checked against the very keys we will seal to
-            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, e2e_pubkeys=keys)
+            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, profile, e2e_pubkeys=keys)
             self._raw_evidence = self.fleet.raw
         except Exception as e:
             return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {public_reason(e)}")
@@ -187,7 +188,7 @@ class ConfidentialSession:
     async def _reverify(self) -> None:
         try:
             e2 = await self.transport.instances(self.fleet_id)
-            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, e2e_pubkeys=_keys_of(e2))
+            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, await self.transport.profile(), e2e_pubkeys=_keys_of(e2))
             self._raw_evidence = self.fleet.raw
             await self._online_pass(e2)
         except Exception as e:
@@ -396,7 +397,7 @@ class ConfidentialSession:
             return
         try:
             # The gateway hands the response blob back RAW (application/octet-stream, measured
-            # 2026-09-12); the chute-side envelope {"e2e": b64} is also accepted in case it ever
+            # 2026-09-12); the enclave-side envelope {"e2e": b64} is also accepted in case it ever
             # reaches us unwrapped.
             if data[:1] == b"{":
                 blob = base64.b64decode(json.loads(data)["e2e"])

@@ -291,3 +291,24 @@ def test_gpu_reports_are_taken_from_the_signed_body_and_a_divergent_loose_copy_i
     nogpu = dict(inst, attested_body=b64.b64encode(json.dumps({"evidence": {}, "nonce": NONCE}).encode()).decode())
     out = asyncio.run(A.verify_online(rep, nogpu, NONCE, Http()))
     assert "carries no GPU evidence" in out.checks["gpu_in_signed_evidence"].why
+
+
+def test_operator_profile_is_required_and_is_only_a_locator():
+    """The client compiles in no operator address: a profile must be supplied, it is templated,
+    and the relay carrier sends NEUTRAL header names (the operator's names never appear here)."""
+    import inspect
+    from inferroute_local.confidential import transport as T
+    src = inspect.getsource(T) + inspect.getsource(A)
+    assert "chutes" not in src.lower(), "no operator name in the client's transport/attest source"
+    with pytest.raises(T.ProfileUnavailable):
+        T.OperatorProfile.from_dict({"measurements": "https://x/m"})     # no evidence endpoint
+    with pytest.raises(T.ProfileUnavailable):
+        T.load_profile_file("/nonexistent/profile.json")
+    p = T.OperatorProfile.from_dict({"evidence": "https://op/{fleet}/e?nonce={nonce}", "measurements": "https://op/m",
+                                     "instances": "https://op/i/{fleet}", "headers": {"fleet": "X-Op-Fleet"}})
+    assert p.evidence_url("F", "N") == "https://op/F/e?nonce=N" and p.instances_url("F") == "https://op/i/F"
+    assert p.headers["fleet"] == "X-Op-Fleet" and p.headers["nonce"] == T.NEUTRAL_HEADERS["nonce"]
+    h = T.invoke_headers(T.NEUTRAL_HEADERS, fleet_id="F", instance_id="I", nonce="N", stream=True)
+    assert h["X-IR-Fleet"] == "F" and h["X-IR-Stream"] == "true" and h["X-IR-Path"] == T.INVOKE_PATH
+    h2 = T.invoke_headers(p.headers, fleet_id="F", instance_id="I", nonce="N", stream=False)
+    assert h2["X-Op-Fleet"] == "F", "direct mode uses the profile's own header names"

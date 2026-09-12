@@ -1,34 +1,109 @@
-"""How sealed requests reach the enclave. Two carriers, one contract.
+"""How sealed requests reach the enclave, and where the client looks up the enclave operator.
+
+Two carriers, one contract:
 
   InferRouteRelay  — the product path. ``api.inferroute.ai/confidential/…`` forwards the
                      sealed blob to the enclave operator's invoke endpoint under InferRoute's
                      credential and streams the (still encrypted) answer back. InferRoute sees
                      ciphertext, sizes, timing, the model and the instance id — never the words.
-  DirectOperator   — bring-your-own operator key (``IR_OPERATOR_API_KEY``). InferRoute is not in
-                     the path at all; used for development and by users who prefer it.
+  DirectOperator   — bring-your-own operator key (``IR_OPERATOR_API_KEY`` + an operator profile
+                     in ``IR_OPERATOR_PROFILE``). InferRoute is not in the path at all; used for
+                     development and by users who prefer it.
 
-Neither carrier is trusted with anything: the attestation is fetched from the operator directly
-by ``attest.py``, and the blob is sealed before it is handed to either.
+**No operator endpoint is compiled into this client.** The addresses to fetch attestation
+evidence from, and the header names the operator's gateway routes on, arrive at run time as an
+*operator profile* — from the relay (``GET /confidential/endpoints``) or, for direct mode, from a
+local JSON file. To this client they are opaque strings.
+
+That costs nothing in trust, which is the point worth stating precisely: the profile is a
+LOCATOR, not an authority. Everything fetched through it is verified independently on this
+device — the TDX quote chains to Intel's pinned root, the platform's TCB and the Quoting
+Enclave's identity come from Intel's own service, every GPU report from NVIDIA's, the encryption
+key is bound to our nonce inside the quote, and the image must be a build InferRoute has
+recorded. A tampered profile can therefore only point at a different *genuinely attested*
+enclave — which then fails the recorded-build check — or at nothing at all. It cannot make an
+unattested endpoint look attested.
+
+Profile shape (every field a template or a literal; ``{fleet}`` / ``{nonce}`` are substituted)::
+
+    {"evidence": "https://…/{fleet}/evidence?nonce={nonce}",
+     "measurements": "https://…/measurements",
+     "models": "https://…/v1/models",              # direct mode only
+     "instances": "https://…/instances/{fleet}",   # direct mode only
+     "invoke": "https://…/invoke",                 # direct mode only
+     "fleet_field": "…",                           # direct mode only: the id field in `models`
+     "headers": {"fleet": "X-…", "instance": "X-…", "nonce": "X-…", "stream": "X-…", "path": "X-…"}}
 """
 from __future__ import annotations
 
+import json
 import os
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import AsyncIterator
 
 import httpx
 
-# The enclave operator's public endpoints. This is the one place they appear; everything
-# user-facing says "the enclave operator".
-OPERATOR_API = "https://api.chutes.ai"
-OPERATOR_MODELS = "https://llm.chutes.ai/v1/models"
 INVOKE_PATH = "/v1/chat/completions"
 UA = "inferroute-confidential/1"
 
+# What THIS client sends to the InferRoute relay. The relay maps these onto whatever the operator's
+# gateway expects, so the operator's own header names never appear here.
+NEUTRAL_HEADERS = {"fleet": "X-IR-Fleet", "instance": "X-IR-Instance", "nonce": "X-IR-Nonce",
+                   "stream": "X-IR-Stream", "path": "X-IR-Path"}
 
-def invoke_headers(*, fleet_id: str, instance_id: str, nonce: str, stream: bool, path: str = INVOKE_PATH) -> dict:
-    """The five headers the operator's gateway routes on (its own e2ee transport, verbatim names)."""
-    return {"X-Chute-Id": fleet_id, "X-Instance-Id": instance_id, "X-E2E-Nonce": nonce,
-            "X-E2E-Stream": "true" if stream else "false", "X-E2E-Path": path,
+
+class ProfileUnavailable(Exception):
+    """No operator profile: the client does not know where to fetch attestation evidence."""
+
+
+@dataclass
+class OperatorProfile:
+    evidence: str = ""
+    measurements: str = ""
+    models: str = ""
+    instances: str = ""
+    invoke: str = ""
+    headers: dict = field(default_factory=lambda: dict(NEUTRAL_HEADERS))
+    # Which field of the operator's model listing carries the fleet id (direct mode only; the
+    # relay normalises it to `fleet_id` before we see it). Operator naming stays in the profile.
+    fleet_field: str = "fleet_id"
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "OperatorProfile":
+        if not isinstance(d, dict) or not d.get("evidence") or not d.get("measurements"):
+            raise ProfileUnavailable("operator profile lacks the attestation endpoints")
+        h = {**NEUTRAL_HEADERS, **(d.get("headers") or {})}
+        return cls(evidence=d["evidence"], measurements=d["measurements"], models=d.get("models", ""),
+                   instances=d.get("instances", ""), invoke=d.get("invoke", ""), headers=h,
+                   fleet_field=d.get("fleet_field") or "fleet_id")
+
+    def evidence_url(self, fleet_id: str, nonce: str) -> str:
+        return self.evidence.replace("{fleet}", fleet_id).replace("{nonce}", nonce)
+
+    def measurements_url(self) -> str:
+        return self.measurements
+
+    def instances_url(self, fleet_id: str) -> str:
+        return self.instances.replace("{fleet}", fleet_id)
+
+
+def load_profile_file(path: str | None = None) -> OperatorProfile:
+    """The operator profile for direct mode: ``IR_OPERATOR_PROFILE`` (a JSON file)."""
+    p = Path(path or os.environ.get("IR_OPERATOR_PROFILE", ""))
+    if not p or not str(p) or not p.is_file():
+        raise ProfileUnavailable("direct mode needs an operator profile in IR_OPERATOR_PROFILE (a JSON file)")
+    try:
+        return OperatorProfile.from_dict(json.loads(p.read_text()))
+    except (OSError, ValueError) as e:
+        raise ProfileUnavailable(f"operator profile could not be read: {type(e).__name__}") from e
+
+
+def invoke_headers(names: dict, *, fleet_id: str, instance_id: str, nonce: str, stream: bool,
+                   path: str = INVOKE_PATH) -> dict:
+    """The five routing headers, under whichever names this carrier wants them."""
+    return {names["fleet"]: fleet_id, names["instance"]: instance_id, names["nonce"]: nonce,
+            names["stream"]: "true" if stream else "false", names["path"]: path,
             "Content-Type": "application/octet-stream", "User-Agent": UA}
 
 
@@ -38,6 +113,11 @@ class Transport:
 
     def __init__(self, http: httpx.AsyncClient):
         self.http = http
+        self._profile: OperatorProfile | None = None
+
+    async def profile(self) -> OperatorProfile:
+        """Where attestation evidence lives, for this carrier. Cached per session."""
+        raise NotImplementedError
 
     async def models(self) -> list[dict]:
         raise NotImplementedError
@@ -70,31 +150,36 @@ class Transport:
 class DirectOperator(Transport):
     name = "direct to the enclave operator (your own key — InferRoute is not in the path)"
 
-    def __init__(self, http: httpx.AsyncClient, api_key: str | None = None, api_base: str = OPERATOR_API):
+    def __init__(self, http: httpx.AsyncClient, api_key: str | None = None, profile: OperatorProfile | None = None):
         super().__init__(http)
         self.api_key = api_key or os.environ.get("IR_OPERATOR_API_KEY", "")
-        self.api_base = api_base.rstrip("/")
         if not self.api_key:
             raise ValueError("direct carrier needs an operator API key (IR_OPERATOR_API_KEY)")
+        self._profile = profile or load_profile_file()
+
+    async def profile(self) -> OperatorProfile:
+        return self._profile
 
     def _auth(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}", "User-Agent": UA}
 
     async def models(self) -> list[dict]:
-        r = await self.http.get(OPERATOR_MODELS, headers={"User-Agent": UA}, timeout=30)
+        r = await self.http.get(self._profile.models, headers={"User-Agent": UA}, timeout=30)
         r.raise_for_status()
-        return [{"name": m.get("id"), "fleet_id": m.get("fleet_id"), "quantization": m.get("quantization"),
+        f = self._profile.fleet_field
+        return [{"name": m.get("id"), "fleet_id": m.get(f), "quantization": m.get("quantization"),
                  "context_length": m.get("context_length")}
-                for m in r.json().get("data", []) if m.get("fleet_id") and str(m.get("id", "")).endswith("-TEE")]
+                for m in r.json().get("data", []) if m.get(f) and str(m.get("id", "")).endswith("-TEE")]
 
     async def instances(self, fleet_id: str) -> dict:
-        r = await self.http.get(f"{self.api_base}/e2e/instances/{fleet_id}", headers=self._auth(), timeout=30)
+        r = await self.http.get(self._profile.instances_url(fleet_id), headers=self._auth(), timeout=30)
         r.raise_for_status()
         return r.json()
 
     async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path=INVOKE_PATH):
-        h = {**self._auth(), **invoke_headers(fleet_id=fleet_id, instance_id=instance_id, nonce=nonce, stream=stream, path=path)}
-        return await self._send(f"{self.api_base}/e2e/invoke", h, blob)
+        h = {**self._auth(), **invoke_headers(self._profile.headers, fleet_id=fleet_id, instance_id=instance_id,
+                                              nonce=nonce, stream=stream, path=path)}
+        return await self._send(self._profile.invoke, h, blob)
 
 
 class InferRouteRelay(Transport):
@@ -111,6 +196,15 @@ class InferRouteRelay(Transport):
         if self.session_id:
             h["x-inferroute-session"] = self.session_id
         return h
+
+    async def profile(self) -> OperatorProfile:
+        if self._profile is None:
+            r = await self.http.get(f"{self.base}/confidential/endpoints", headers=self._auth(), timeout=30)
+            if r.status_code == 404:
+                raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
+            r.raise_for_status()
+            self._profile = OperatorProfile.from_dict(r.json())
+        return self._profile
 
     async def builds(self) -> list:
         """Builds InferRoute has recorded since this client was released (additions only)."""
@@ -135,7 +229,8 @@ class InferRouteRelay(Transport):
         return r.json()
 
     async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path=INVOKE_PATH):
-        h = {**self._auth(), **invoke_headers(fleet_id=fleet_id, instance_id=instance_id, nonce=nonce, stream=stream, path=path)}
+        h = {**self._auth(), **invoke_headers(NEUTRAL_HEADERS, fleet_id=fleet_id, instance_id=instance_id,
+                                              nonce=nonce, stream=stream, path=path)}
         return await self._send(f"{self.base}/confidential/invoke", h, blob)
 
     async def report_usage(self, payload: dict) -> None:

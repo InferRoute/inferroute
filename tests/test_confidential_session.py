@@ -38,6 +38,11 @@ class FakeCarrier:
     async def models(self):
         return [{"name": "fake/Model-TEE", "fleet_id": "chute-1"}]
 
+    async def profile(self):
+        from inferroute_local.confidential.transport import OperatorProfile
+        return OperatorProfile.from_dict({"evidence": "https://op.test/{fleet}/evidence?nonce={nonce}",
+                                          "measurements": "https://op.test/measurements"})
+
     async def instances(self, fleet_id):
         self.instances_calls += 1
         return {"nonce_expires_in": self.expires_in,
@@ -72,7 +77,8 @@ def world(monkeypatch, tmp_path):
     encl = {"i-a": FakeEnclave(), "i-b": FakeEnclave()}
     verified = {"i-a": True, "i-b": True}
 
-    async def fake_fetch(fleet_id, http, nonce=None, timeout=0, e2e_pubkeys=None):
+    async def fake_fetch(fleet_id, http, profile=None, nonce=None, timeout=0, e2e_pubkeys=None):
+        world["profile_seen"] = profile
         # the fake verifier "binds" whatever key the session handed it — exactly the real
         # contract: the report carries the key the quote committed to
         keys = e2e_pubkeys or {}
@@ -384,7 +390,7 @@ async def _oai(s, body):
 def test_public_reason_never_leaks_urls_or_hosts():
     import httpx
     from inferroute_local.confidential.session import public_reason
-    req = httpx.Request("GET", "https://api.example-provider.ai/chutes/abc/evidence?nonce=deadbeef")
+    req = httpx.Request("GET", "https://api.example-provider.ai/fleets/abc/evidence?nonce=deadbeef")
     e = httpx.HTTPStatusError("Client error '429 Too Many Requests' for url 'https://api.example-provider.ai/x'", request=req, response=httpx.Response(429, request=req))
     r = public_reason(e)
     assert r == "the attestation service answered 429 (rate-limited — try again in a minute)"
@@ -397,8 +403,8 @@ def test_public_reason_never_leaks_urls_or_hosts():
 def test_a_429_on_evidence_refuses_with_a_clean_reason(world, monkeypatch):
     import httpx
     async def boom(*a, **k):
-        req = httpx.Request("GET", "https://api.example-provider.ai/chutes/abc/evidence")
-        raise httpx.HTTPStatusError("429 for url 'https://api.example-provider.ai/chutes/abc/evidence'", request=req, response=httpx.Response(429, request=req))
+        req = httpx.Request("GET", "https://api.example-provider.ai/fleets/abc/evidence")
+        raise httpx.HTTPStatusError("429 for url 'https://api.example-provider.ai/fleets/abc/evidence'", request=req, response=httpx.Response(429, request=req))
     monkeypatch.setattr(attest, "fetch_and_verify", boom)
     r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
     assert r.verdict == "refused" and "answered 429" in r.refusal and "http" not in r.refusal and "example-provider" not in r.refusal
@@ -415,3 +421,13 @@ def test_usage_is_priced_locally_and_reported_with_model_short_and_latency(world
     rep = carrier.usage_reports[-1]
     assert rep["model_short"] == "fake" and rep["model"] == "fake/Model-TEE" and rep["economy"] is False
     assert rep["usage"]["input_tokens"] == 5 and "latency_ms" in rep["usage"]
+
+
+def test_the_evidence_endpoint_comes_from_the_carrier_not_from_this_client(world):
+    """No operator address is compiled in: the session asks its carrier where the evidence lives."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    prof = world["profile_seen"]
+    assert prof is not None
+    assert prof.evidence_url("F", "N") == "https://op.test/F/evidence?nonce=N"
+    assert prof.measurements_url() == "https://op.test/measurements"

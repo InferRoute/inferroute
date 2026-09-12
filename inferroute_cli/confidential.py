@@ -117,7 +117,7 @@ async def _open_session(alias, session_id: str, http, console):
         except httpx.HTTPError as e:
             console.print(f"[red]cannot reach the carrier ({type(e).__name__})[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
-    fleet_id = next((m.get("fleet_id") or m.get("chute_id") for m in catalog if m.get("name") == alias.ref_key), None)
+    fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == alias.ref_key), None)
     if not fleet_id:
         console.print(f"[red]{alias.ref_key} is not offered on the confidential lane right now[/]")
         sys.exit(3)

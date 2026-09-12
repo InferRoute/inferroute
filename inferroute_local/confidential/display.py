@@ -60,8 +60,9 @@ def _home(path: str) -> str:
 
 
 def _title_model(r: Receipt) -> str:
+    """The catalog name only — the upstream model key is the provider's naming, and stays on the receipt."""
     fam = r.upstream_model.split("/")[-1].replace("-TEE", "")
-    return f"{fam}  [{DIM}]({r.upstream_model})[/]"
+    return f"{fam}  [{DIM}](ir --model {r.model_short})[/]"
 
 
 def checks_table(r: Receipt) -> Table:
@@ -127,8 +128,8 @@ def facts_table(r: Receipt) -> Table:
     per = inst.get("gpus") or {}
     model = "/".join(sorted({str(g.get("hwmodel") or "") for g in per.values()} - {""})) if per else ""
     t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA {model + ' ' if model else ''}GPU (confidential computing)")
-    t.add_row("Instance", f"{_short(inst.get('id', ''))}  · verified, then pinned for this whole session")
-    t.add_row("Build", f"MRTD {(inst.get('mrtd') or '')[:16]}…  · matches the provider's published measurements")
+    t.add_row("Instance", "one enclave, verified, then pinned for this whole session")
+    t.add_row("Build", "the enclave's measured image matches the provider's published measurements")
     t.add_row("Carrier", r.transport)
     return t
 

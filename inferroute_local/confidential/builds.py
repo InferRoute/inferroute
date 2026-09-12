@@ -65,6 +65,23 @@ BUNDLED: list[dict] = [
     },
 ]
 
+# ── the signing key that makes a run-time build OUR record rather than our server's ──
+#
+# The relay serves build additions so a genuine new operator build can be recognised within
+# minutes of appearing, without waiting for a client release. That convenience is also the one
+# seam an attacker holding our relay could use: point the client at an enclave they control and
+# supply the row that legitimises it, and every other check passes truthfully.
+#
+# A signature closes it. The private half NEVER goes near the relay — it lives offline, and a new
+# build is signed deliberately. The relay can then only carry what was already signed: it cannot
+# mint one. An unsigned addition is still accepted (an operator rolling a build at 3am should not
+# take the lane down) but it is marked `pending`, which the panel, the receipt and the model
+# preamble all report as "not InferRoute's record".
+#
+# Rotation: add the new key here alongside the old one, ship a release, then stop signing with
+# the old. Verification accepts any key in this tuple, so the two overlap without a flag day.
+SIGNING_KEYS: tuple[str, ...] = ()   # Ed25519 public keys, hex, 32 bytes each
+
 _EXTRA: list[dict] = []          # builds fetched from the relay this process
 
 
@@ -83,6 +100,38 @@ def known() -> dict[tuple, dict]:
         if k not in out:
             out[k] = b
     return out
+
+
+def signed_bytes(row: dict) -> bytes:
+    """The exact bytes a signature covers: the measurements and the identity, nothing else.
+
+    Deliberately narrow. Signing the whole row would mean a re-sign whenever a note or a
+    timestamp changed, and would let anything we later add to the shape ride along unexamined.
+    What must not be forgeable is WHICH ENCLAVE this row blesses — that is the four measurements
+    — plus the id, so one signature cannot be replayed onto a different entry."""
+    fields = ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3")
+    return json.dumps({k: str(row.get(k, "")).lower() for k in fields},
+                      sort_keys=True, separators=(",", ":")).encode()
+
+
+def verify_signature(row: dict) -> bool:
+    """True when the row carries a signature by a key this client ships."""
+    sig = row.get("sig")
+    if not sig or not SIGNING_KEYS:
+        return False
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        raw, msg = bytes.fromhex(str(sig)), signed_bytes(row)
+    except (ImportError, ValueError):
+        return False
+    for pub in SIGNING_KEYS:
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub)).verify(raw, msg)
+            return True
+        except (InvalidSignature, ValueError):
+            continue
+    return False
 
 
 def absorb_remote(rows, origin: str = "relay") -> int:
@@ -104,7 +153,9 @@ def absorb_remote(rows, origin: str = "relay") -> int:
         k = key_of(b["mrtd"], ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")])
         if k in have:
             continue
-        _EXTRA.append({**b, "status": "pending", "origin": origin})
+        signed = verify_signature(b)
+        _EXTRA.append({**b, "status": "signed" if signed else "pending",
+                       "origin": ("signed" if signed else origin)})
         have.add(k)
         n += 1
     return n

@@ -201,3 +201,76 @@ def test_a_partial_read_must_never_be_measured(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         repro._qemu_slice("https://example/x.qcow2", 0, 1024, out, read_timeout=1)
     assert "partial" in str(e.value).lower()
+
+
+# ───────────── signing: a run-time build that only InferRoute could have authorised ─────────────
+
+@pytest.fixture
+def signing(monkeypatch):
+    """A throwaway keypair, with the public half installed as if we shipped it."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization as ser
+    k = Ed25519PrivateKey.generate()
+    pub = k.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()
+    monkeypatch.setattr(builds, "SIGNING_KEYS", (pub,))
+    monkeypatch.setattr(builds, "_EXTRA", [])
+    return k
+
+
+def _row(**over):
+    r = {"id": "r", "mrtd": "aa" * 48, "rtmr1": "bb" * 48, "rtmr2": "cc" * 48, "rtmr3": "dd" * 48}
+    r.update(over)
+    return r
+
+
+def _sign(k, row):
+    return {**row, "sig": k.sign(builds.signed_bytes(row)).hex()}
+
+
+def test_a_signed_build_is_our_record_an_unsigned_one_is_only_pending(signing):
+    builds.absorb_remote([_sign(signing, _row(id="signed-one"))])
+    builds.absorb_remote([_row(id="unsigned-one", mrtd="11" * 48)])
+    by_id = {e["id"]: e for e in builds._EXTRA}
+    assert by_id["signed-one"]["status"] == "signed"
+    assert by_id["unsigned-one"]["status"] == "pending"
+
+
+def test_changing_any_measurement_invalidates_the_signature(signing):
+    """The point of signing: a compromised relay must not be able to bless another enclave."""
+    signed = _sign(signing, _row())
+    assert builds.verify_signature(signed)
+    for field in ("mrtd", "rtmr1", "rtmr2", "rtmr3"):
+        assert not builds.verify_signature({**signed, field: "ee" * 48}), field
+
+
+def test_a_signature_cannot_be_replayed_onto_a_different_entry(signing):
+    signed = _sign(signing, _row(id="original"))
+    assert not builds.verify_signature({**signed, "id": "someone-elses"})
+
+
+def test_a_cosmetic_field_can_change_without_re_signing(signing):
+    """Notes and dates are not security-relevant; requiring a re-sign for them would push
+    people towards keeping the key somewhere convenient, which is the whole risk."""
+    signed = _sign(signing, _row())
+    assert builds.verify_signature({**signed, "note": "added later", "first_seen": "2026-01-01"})
+
+
+def test_a_signature_from_the_wrong_key_is_refused(signing):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    assert not builds.verify_signature(_sign(Ed25519PrivateKey.generate(), _row()))
+
+
+def test_with_no_shipped_key_nothing_verifies(monkeypatch, signing):
+    """Until a key is shipped, every run-time build must stay pending — never silently trusted."""
+    signed = _sign(signing, _row())
+    monkeypatch.setattr(builds, "SIGNING_KEYS", ())
+    assert not builds.verify_signature(signed)
+
+
+def test_the_signing_key_is_not_shipped_in_the_client():
+    """A private key in the package would defeat the entire mechanism."""
+    import inferroute_local.confidential as pkg
+    for f in Path(pkg.__file__).parent.rglob("*.py"):
+        body = f.read_text()
+        assert "PrivateFormat.Raw" not in body or "sign_build" in f.name, f
+        assert "Ed25519PrivateKey.generate" not in body, f

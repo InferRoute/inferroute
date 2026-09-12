@@ -256,8 +256,20 @@ def test_a_session_caveat_becomes_a_limitation_so_it_reaches_the_receipt_and_the
     assert lims("build x — recorded by InferRoute since 2026-09-12") == {}
 
 
-def test_the_standing_limitation_no_longer_claims_a_reproduction_for_every_build():
-    """It is written into every receipt, including sessions where nothing was recomputed."""
+def test_the_standing_limitation_states_the_real_coverage_of_the_measurements():
+    """Written into every receipt. It must not claim a per-build reproduction, and it must not
+    claim that any change to the image is caught: the measured set covers the firmware, the boot
+    chain and a short config list, not the filesystem the model runs from, and the operator holds
+    the disk key. Verified against the operator's own published image on 2026-09-12."""
     text = dict(A.LIMITATIONS)["build-review"]
-    assert "two" not in text and "firmware and the bootloader chain" not in text
-    assert "Except where a measurement has been independently recomputed" in text
+    assert "NOT the whole" in text
+    assert "without changing any measurement" in text
+    # and it must not make the older, stronger claim
+    assert "any change" not in text.replace("without changing any measurement", "")
+
+
+def test_the_gpu_limitation_does_not_imply_a_binding_nvidia_does_not_provide():
+    text = dict(A.LIMITATIONS)["gpu-binding"]
+    assert "no way to prove from the outside" in text.replace("\n", " ").replace("  ", " ") or \
+           "provides no way" in text
+    assert "confidential-computing mode" in text

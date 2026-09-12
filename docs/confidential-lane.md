@@ -136,11 +136,24 @@ Rendered on screen as stated limitations, never as passed checks:
   `scripts/reproduce_enclave_build.py` is that computation, and it takes the image locator as an
   argument rather than embedding one, so anyone can re-run it against any published image. It needs
   no cooperation from the operator and no credentials: the disk image is a public download, and only
-  about a gigabyte of it is read, over HTTPS range requests. The remaining two measurements resist
-  this for concrete reasons — the bootloader adds event-log entries we do not model yet, and the root
-  filesystem is encrypted in the published image — so to that extent the image's contents still rest
-  on the operator's sources plus the fact that any change to them is caught.
-  (GPU↔VM pairing, formerly listed here, is a sub-case: it depends only on the measured image.)
+  about a gigabyte of it is read, over HTTPS range requests.
+
+  **What the measurements do not cover, stated plainly.** We audited the operator's published image
+  on 2026-09-12 and found three things a reader should know. The measured set is the firmware, the
+  boot chain, and roughly two dozen configuration paths — it does not include `/usr`, the systemd
+  units, the container images, or the libraries the model loads. The operator holds the disk
+  encryption key themselves; it is not sealed to the measurement. And the root filesystem is
+  decrypted and mounted before the application-level measurement is taken, through a stock overlay
+  mechanism whose own configuration file is not in the measured set. Taken together: an operator
+  who wanted to change the code the model runs could do so without changing any measurement this
+  device checks.
+
+  So the honest boundary is this. The hardware proves your words reach a genuine, non-debuggable
+  Intel TDX enclave, that the key you sealed to is held inside it, and that nothing in transit can
+  read them. That the enclave's own software does not retain your words is a claim about the
+  operator's published image. It is a checkable claim — the image is public and we recompute what
+  we can — but it is not one the attestation itself establishes.
+  (GPU↔VM pairing, formerly listed here, is a related case: see the GPU limitation.)
 * **Metadata is visible to relays**: message sizes, timing, model, instance id. The words are not.
 * **Server-side repair heuristics are off.** The normal lane applies model-specific fix-ups
   (fenced-JSON early stops, tool-call text repairs). This lane cannot, because it cannot see the

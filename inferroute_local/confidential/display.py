@@ -113,7 +113,7 @@ def flow_diagram(r: Receipt) -> Text:
     line.append(" · ".join(parts), style=DIM)
     # The operator's inability is real but conditional: it follows from the enclave running the
     # build measured above, which is the one thing on this panel that is not pure mathematics.
-    line.append("\n  nor the enclave operator, as long as the enclave runs the build measured above", style=DIM)
+    line.append("\n  nor the enclave operator, if their enclave software is what they publish — see below", style=DIM)
     return line
 
 

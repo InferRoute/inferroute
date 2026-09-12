@@ -309,7 +309,7 @@ def test_a_connection_dropped_mid_reply_is_a_clean_error_event_not_a_traceback(w
 
     async def dropping(**kw):
         async def broken():
-            yield b'data: {"e2e_init": "AA=="}\n'
+            yield b": keep-alive\n"          # a frame that needs no key, then the wire dies
             raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
         return 200, {"content-type": "text/event-stream"}, broken()
     carrier.invoke = dropping

@@ -68,11 +68,21 @@ async def _open_session(alias, session_id: str, http, console):
     except ValueError as e:
         console.print(f"[red]{e}[/]")
         sys.exit(2)
+    import httpx
     with console.status(f"[bold]resolving {alias.ref_key} on the confidential lane…", spinner="dots"):
         try:
             catalog = await transport.models()
         except RelayUnavailable as e:
             console.print(f"[red]{e}[/]\n[grey58]For now set IR_CHUTES_API_KEY to use your own Chutes key directly.[/]")
+            sys.exit(3)
+        except httpx.HTTPStatusError as e:
+            body = (e.response.text or "")[:200].replace("\n", " ")
+            console.print(f"[red]the carrier answered {e.response.status_code} while listing confidential models[/]"
+                          f"\n[grey58]{transport.name} · {body}[/]\n[grey58]Nothing was sent. Try again in a minute, "
+                          f"or set IR_CHUTES_API_KEY to go direct.[/]")
+            sys.exit(3)
+        except httpx.HTTPError as e:
+            console.print(f"[red]cannot reach the carrier ({type(e).__name__}: {e})[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
     chute_id = next((m["chute_id"] for m in catalog if m.get("name") == alias.ref_key), None)
     if not chute_id:
@@ -84,6 +94,10 @@ async def _open_session(alias, session_id: str, http, console):
     status.start()
     try:
         receipt = await session.open(progress=lambda s: status.update(f"[bold]{s}"))
+    except Exception as e:  # session.open() refuses on expected failures; anything else is a bug, shown cleanly
+        status.stop()
+        console.print(f"[red]could not open the confidential session ({type(e).__name__}: {e})[/]\n[grey58]Nothing was sent.[/]")
+        sys.exit(3)
     finally:
         status.stop()
     return session, receipt

@@ -34,10 +34,16 @@ limitations, and that the session is not on Anthropic's servers), so "is this pr
 from facts rather than a guess about a vendor cloud. `ir --resume` recognises a confidential session and resumes it on the
 confidential lane; a sealed transcript is never replayed through the plaintext lane.
 
-1. **Attestation, fetched by you, from the provider, with your own challenge.** The client draws
+1. **Attestation, fetched by you, from the operator, with your own challenge.** The client draws
    a random 32-byte nonce and asks the enclave operator for the evidence of every running instance
    of the model (an unauthenticated, public endpoint). This request never goes through InferRoute:
-   the point is that you do not have to trust InferRoute about it.
+   the point is that you do not have to trust InferRoute about it. *Where* that endpoint is comes
+   from the operator profile the carrier serves (`GET /confidential/endpoints`) — no operator
+   address is compiled into the client. That transfers no trust: the profile is a locator, and
+   every byte fetched through it is verified below against Intel's pinned root, Intel's and
+   NVIDIA's own services, your nonce, and InferRoute's recorded builds. A tampered profile can
+   only point at another genuinely attested enclave — which then fails the recorded-build check —
+   or at nothing.
 2. **Seven checks, on your device, no vendor SDK** (`inferroute_local/confidential/attest.py`):
 
    | check | what it proves |
@@ -88,8 +94,8 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    dropped before sealing: the model does not need it.
 6. **Relay.** The sealed blob travels `you → InferRoute → enclave operator → enclave`. InferRoute's relay
    (`/confidential/invoke`) adds its provider credential and forwards bytes; it logs who, which
-   model and instance, sizes, timing and status — never a body. With your own operator key
-   (`IR_OPERATOR_API_KEY`) InferRoute is not in the path at all.
+   model and instance, sizes, timing and status — never a body. With your own operator key and profile
+   (`IR_OPERATOR_API_KEY` + `IR_OPERATOR_PROFILE`) InferRoute is not in the path at all.
 7. **Receipt.** `~/.inferroute/confidential/receipts/<time>-<session>.json` records every check
    with its reason, the instance's measurements, the counters (bytes sealed here, bytes opened
    here, tokens), every pin/switch/re-verification event, and the stated limitations.
@@ -142,7 +148,7 @@ inferroute_local/confidential/
   attest.py     evidence parsing + the six checks + LABELS/LIMITATIONS the display prints
   e2ee.py       ML-KEM-768 / HKDF / ChaCha20-Poly1305 envelope, streaming opener
   translate.py  Anthropic ⇄ OpenAI, request and streaming response
-  transport.py  InferRouteRelay and DirectOperator carriers
+  transport.py  InferRouteRelay and DirectOperator carriers; the operator profile (run-time locator)
   session.py    verify → pin → seal → open → receipt; nonce pool; re-verification; refusal
   server.py     the per-session 127.0.0.1 endpoint Claude Code talks to
   receipt.py    the receipt on disk

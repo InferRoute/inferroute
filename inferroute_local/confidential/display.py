@@ -69,8 +69,10 @@ def checks_table(r: Receipt) -> Table:
     t.add_column(width=2)
     t.add_column(width=31)
     t.add_column(style=DIM)
-    for name in attest.REQUIRED:
-        c = r.checks.get(name) or {}
+    for name in attest.REQUIRED + attest.REQUIRED_ONLINE:
+        c = r.checks.get(name)
+        if c is None:
+            continue                       # an older receipt without the online checks
         ok = bool(c.get("ok"))
         label, explain = attest.LABELS[name]
         t.add_row(Text("✓" if ok else "✗", style=ACCENT if ok else "red"),
@@ -122,7 +124,9 @@ def facts_table(r: Receipt) -> Table:
     inst = r.instance or {}
     t.add_row("Model", Text.from_markup(_title_model(r)))
     gpus = inst.get("gpu_count") or 0
-    t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA GPU (confidential computing)")
+    per = inst.get("gpus") or {}
+    model = "/".join(sorted({str(g.get("hwmodel") or "") for g in per.values()} - {""})) if per else ""
+    t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA {model + ' ' if model else ''}GPU (confidential computing)")
     t.add_row("Instance", f"{_short(inst.get('id', ''))}  · verified, then pinned for this whole session")
     t.add_row("Build", f"MRTD {(inst.get('mrtd') or '')[:16]}…  · matches the provider's published measurements")
     t.add_row("Carrier", r.transport)
@@ -184,25 +188,33 @@ def render_summary(r: Receipt, console: Console | None = None) -> None:
     console.print(Text(f"   receipt: {_home(str(r.path))}", style=DIM), soft_wrap=True)
 
 
+# Short column heads for the operator fleet table (offline | online), in check order.
+FLEET_COLS = {"nonce_in_body": "nonce", "sig_ok": "sig", "spki_bound": "spki", "e2e_key_bound": "key", "tdx_shape": "tdx",
+              "measurement_ok": "build", "chain_ok": "chain", "quote_sig": "qsig", "root_pinned": "root", "not_revoked": "crl",
+              "tcb_current": "tcb", "qe_current": "qe", "gpu_verified": "gpu"}
+
+
 def render_fleet(fleet: attest.FleetReport, console: Console | None = None) -> None:
     console = console or Console()
     t = Table(title=f"Attestation — chute {fleet.chute_id[:8]}… · nonce {fleet.nonce[:8]}…", box=box.SIMPLE_HEAD,
               title_style="bold", header_style=DIM)
     t.add_column("instance")
     t.add_column("GPUs", justify="right")
-    for name in attest.REQUIRED:
-        t.add_column(attest.LABELS[name][0].split()[0].lower(), justify="center")
-    t.add_column("verdict")
+    for name in attest.REQUIRED + attest.REQUIRED_ONLINE:
+        t.add_column(FLEET_COLS.get(name, name), justify="center")
+    t.add_column("verdict", no_wrap=True)
     for i in fleet.instances:
-        cells = [Text("✓", style=ACCENT) if i.checks[n].ok else Text("✗", style="red") for n in attest.REQUIRED]
+        cells = [(Text("✓", style=ACCENT) if i.checks[n].ok else Text("✗", style="red")) if n in i.checks else Text("·", style=DIM)
+                 for n in attest.REQUIRED + attest.REQUIRED_ONLINE]
         if i.verified:
             verdict = Text("verified", style=f"bold {ACCENT}")
         elif i.failing == ["e2e_key_bound"] and "no encryption key" in i.checks["e2e_key_bound"].why:
-            verdict = Text("attested, not sealable (no key offered)", style=DIM)   # not a fault, just not usable
+            verdict = Text("no key offered", style=DIM)   # attested but not sealable — not a fault, just not usable
         else:
             verdict = Text("FAILED " + ",".join(i.failing), style="red")
-        t.add_row(_short(i.instance_id, 12), str(i.gpu_count), *cells, verdict)
+        t.add_row(_short(i.instance_id, 8), str(i.gpu_count), *cells, verdict)
     console.print(t)
+    console.print(Text("offline: nonce sig spki key tdx build chain · online: qsig root crl tcb qe gpu · '·' = not run (no sealing key)", style=DIM))
     if fleet.failed_instance_ids:
         console.print(Text(f"instances the provider itself reports as failed: {fleet.failed_instance_ids}", style=DIM))
 

@@ -77,9 +77,18 @@ def world(monkeypatch, tmp_path):
         keys = e2e_pubkeys or {}
         world["keys_seen"] = dict(keys)
         return attest.FleetReport(chute_id, nonce or "n" * 64,
-                                  [_report(i, verified[i], keys.get(i, "")) for i in encl] + [_report("i-c", False)])
+                                  [_report(i, verified[i], keys.get(i, "")) for i in encl] + [_report("i-c", False)],
+                                  raw=[{"instance_id": i} for i in list(encl) + ["i-c"]])
 
     monkeypatch.setattr(attest, "fetch_and_verify", fake_fetch)
+
+    async def fake_online(report, inst, nonce, http, timeout=0):
+        world["online_seen"] = world.get("online_seen", []) + [report.instance_id]
+        for k in attest.REQUIRED_ONLINE:
+            report.checks[k] = attest.Check(True, "fixture-online")
+        report.verified = report.verified and True
+        return report
+    monkeypatch.setattr(attest, "verify_online", fake_online)
     world = {"enclaves": encl, "verified": verified}
     return world
 
@@ -98,8 +107,10 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     s = _session(carrier)
     r = asyncio.run(s.open())
     assert r.verdict == "confidential" and r.instance["id"] == "i-a"
+    assert sorted(world["online_seen"]) == ["i-a", "i-b"], "online checks run only for offline-verified, sealable instances"
+    assert all(r.checks[k]["ok"] for k in attest.REQUIRED_ONLINE)
     assert r.fleet == {"instances": 3, "verified": 2, "e2ee_capable": 2, "eligible": 2, "failed_instance_ids": []}
-    assert all(c["ok"] for c in r.checks.values()) and set(r.checks) == set(attest.REQUIRED)
+    assert all(c["ok"] for c in r.checks.values()) and set(r.checks) == set(attest.REQUIRED) | set(attest.REQUIRED_ONLINE)
     assert r.claim and r.path and r.e2ee["kem"].startswith("ML-KEM-768")
     assert not any(lim["id"] == "attributed-key" for lim in r.limitations), "the key binding is a check, not a limitation"
     assert r.checks["e2e_key_bound"]["ok"] and "commits to" in r.checks["e2e_key_bound"]["explain"]
@@ -292,7 +303,7 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
     for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
-                   "Intel's TCB and revocation status are not fetched"):
+                   "no separate hardware proof of the pairing"):
         assert needle in pre, needle
     assert "attributed" not in pre
     # a refused session has no preamble to give (nothing verified)

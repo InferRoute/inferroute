@@ -56,6 +56,7 @@ class ConfidentialSession:
         self.fleet: attest.FleetReport | None = None
         self.pinned: Pinned | None = None
         self._pool: dict[str, Pinned] = {}          # instance_id → pool entry (verified instances only)
+        self._raw_evidence: list = []               # the evidence rows behind self.fleet (for the online pass)
         self._pool_expire = 0.0
         self._verified_at = 0.0
         self._lock = asyncio.Lock()
@@ -75,9 +76,12 @@ class ConfidentialSession:
         try:
             # the quote is checked against the very keys we will seal to
             self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=keys)
+            self._raw_evidence = self.fleet.raw
         except Exception as e:
             return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {e}")
         self._verified_at = time.time()
+        say("checking the platform with Intel and the GPUs with NVIDIA…")
+        await self._online_pass(e2)
         verified = self.fleet.verified_ids
         say("evidence verified; pinning an enclave for this session…")
         self._absorb_pool(e2)
@@ -95,6 +99,14 @@ class ConfidentialSession:
         self.receipt.verified_at = self.receipt.started_at
         self.receipt.save()
         return self.receipt
+
+    async def _online_pass(self, e2: dict) -> None:
+        """Intel + NVIDIA checks for every instance that passed offline AND offers a sealing key —
+        the only ones a session could pin — run concurrently (each ~1–3 s)."""
+        keys = _keys_of(e2)
+        by_id = {str(i.get("instance_id")): i for i in (self._raw_evidence or [])}
+        todo = [r for r in self.fleet.instances if r.verified and r.instance_id in keys and r.instance_id in by_id]
+        await asyncio.gather(*(attest.verify_online(r, by_id[r.instance_id], self.fleet.nonce, self.http) for r in todo))
 
     def _refuse(self, why: str) -> Receipt:
         self.receipt.verdict, self.receipt.refusal = "refused", why
@@ -126,7 +138,7 @@ class ConfidentialSession:
         self.pinned = p
         r = p.report
         self.receipt.instance = {"id": iid, "gpu_count": r.gpu_count, "mrtd": r.mrtd, "rtmrs": r.rtmrs, "chain": r.chain,
-                                 "e2ee_pubkey_sha256": _sha256_b64(p.pubkey_b64)}
+                                 "e2ee_pubkey_sha256": _sha256_b64(p.pubkey_b64), "gpus": r.gpus}
         self.receipt.checks = {k: {"ok": c.ok, "why": c.why, "label": attest.LABELS[k][0], "explain": attest.LABELS[k][1]}
                                for k, c in r.checks.items()}
         self.receipt.note("pinned", f"{iid} — {why}")
@@ -168,6 +180,8 @@ class ConfidentialSession:
         try:
             e2 = await self.transport.instances(self.chute_id)
             self.fleet = await attest.fetch_and_verify(self.chute_id, self.http, e2e_pubkeys=_keys_of(e2))
+            self._raw_evidence = self.fleet.raw
+            await self._online_pass(e2)
         except Exception as e:
             self.receipt.note("reverify-failed", str(e))
             return

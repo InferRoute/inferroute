@@ -34,11 +34,12 @@ Each check states what it proves. The display prints these words; keep them hone
                   fails here before a byte is sent.
 
 What this does NOT prove (rendered by the display as stated limitations, never as checks):
-  * ``chain_ok`` does not pin the root to Intel's published SGX Root CA and fetches no Intel
-    PCS collateral: TCB status and revocation are UNCHECKED.
-  * GPU evidence is counted, not attested against NVIDIA's service; Chutes' own claim string
-    concedes it attests "a genuine CC GPU, not its binding to" the CPU TEE.
-  * Nothing here consults NVIDIA or Intel online services; see the two points above.
+  * that the attested GPUs are physically the ones serving this VM — their reports answered this
+    session's challenge and travel inside the enclave-signed evidence, so the attested software
+    vouches for the pairing; there is no separate hardware proof of it.
+  Online (attest_intel.py / attest_nvidia.py, added by `verify_online`): quote signature and QE
+  binding, Intel root pin, CRLs, TCB and QE currency from Intel PCS; every GPU's report verified
+  by NVIDIA's attestation service for this session's challenge.
 
 Fail-closed: a check that cannot be performed is False with a reason, never absent, and an
 instance is ``verified`` only when every REQUIRED check passed.
@@ -61,6 +62,10 @@ _OFF = {
     "rtmr1": (376, 424), "rtmr2": (424, 472), "rtmr3": (472, 520), "report_data": (520, 584),
 }
 REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "chain_ok")
+# Online checks (Intel PCS + NVIDIA NRAS), added by `verify_online`; an instance is verified only
+# when BOTH sets pass. Kept separate so the offline pass can run over a whole fleet cheaply and the
+# online pass only over the instances a session could actually use.
+REQUIRED_ONLINE = ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current", "gpu_verified")
 
 # Plain-language labels + the one line of "why it matters" the display prints beside each.
 LABELS: dict[str, tuple[str, str]] = {
@@ -71,12 +76,17 @@ LABELS: dict[str, tuple[str, str]] = {
     "tdx_shape": ("Genuine TDX, debug off", "a real confidential VM, not a debuggable one"),
     "measurement_ok": ("Known build", "measurements match the provider's published registry"),
     "chain_ok": ("Certificate chain sound", "every link verifies up to a self-signed root"),
+    "quote_sig": ("Quote signed by the hardware", "Intel's Quoting Enclave signed it; the signature verifies"),
+    "root_pinned": ("Intel root of trust", "the chain ends in Intel's published SGX Root CA"),
+    "not_revoked": ("Nothing revoked", "no certificate in the chain is on Intel's revocation lists"),
+    "tcb_current": ("Platform firmware current", "Intel's signed TCB status for this platform is up to date"),
+    "qe_current": ("Quoting Enclave current", "matches Intel's signed identity, at an up-to-date version"),
+    "gpu_verified": ("GPUs verified by NVIDIA", "each GPU's report checked by NVIDIA for this session's challenge"),
 }
 
 LIMITATIONS = (
-    ("tcb-unchecked", "Intel's TCB and revocation status are not fetched (no PCS lookup)."),
-    ("gpu-binding", "GPU attestation is counted, not verified against NVIDIA; its binding to the "
-                    "CPU enclave is the provider's own claim."),
+    ("gpu-pairing", "That these GPUs are the ones serving this VM rests on the enclave's own attested "
+                    "software (its measured, known build) reporting them; there is no separate hardware proof of the pairing."),
     ("metadata-visible", "Message sizes, timing, model and instance id are visible to relays; "
                          "the words are not."),
 )
@@ -98,15 +108,20 @@ class InstanceReport:
     verified: bool
     chain: str = ""
     e2e_pubkey: str = ""     # the ML-KEM key (base64) the quote was found to commit to; "" if unchecked
+    gpus: dict = field(default_factory=dict)   # per-GPU {hwmodel, ueid, driver, vbios} once NVIDIA verified them
 
     @property
     def failing(self) -> list[str]:
-        return [k for k in REQUIRED if not self.checks[k].ok]
+        return [k for k in REQUIRED + REQUIRED_ONLINE if k in self.checks and not self.checks[k].ok]
+
+    @property
+    def online_done(self) -> bool:
+        return all(k in self.checks for k in REQUIRED_ONLINE)
 
     def as_dict(self) -> dict:
         return {
             "instance_id": self.instance_id, "verified": self.verified, "gpu_count": self.gpu_count,
-            "mrtd": self.mrtd, "rtmrs": self.rtmrs, "chain": self.chain, "e2e_pubkey": self.e2e_pubkey,
+            "mrtd": self.mrtd, "rtmrs": self.rtmrs, "chain": self.chain, "e2e_pubkey": self.e2e_pubkey, "gpus": self.gpus,
             "checks": {k: {"ok": c.ok, "why": c.why} for k, c in self.checks.items()},
         }
 
@@ -117,6 +132,7 @@ class FleetReport:
     nonce: str
     instances: list[InstanceReport]
     failed_instance_ids: list = field(default_factory=list)
+    raw: list = field(default_factory=list)      # the evidence rows, for the online pass
 
     @property
     def verified_ids(self) -> list[str]:
@@ -351,7 +367,7 @@ def verify_fleet(chute_id: str, evidence_doc, reference, nonce: str,
     keys = e2e_pubkeys or {}
     rows = [verify_instance(i, nonce, reference, keys.get(str(i.get("instance_id") or ""))) for i in (inst or [])]
     failed = evidence_doc.get("failed_instance_ids") if isinstance(evidence_doc, dict) else None
-    return FleetReport(chute_id=chute_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []))
+    return FleetReport(chute_id=chute_id, nonce=nonce, instances=rows, failed_instance_ids=list(failed or []), raw=list(inst or []))
 
 
 def new_nonce() -> str:
@@ -378,3 +394,32 @@ async def fetch_and_verify(chute_id: str, http, nonce: str | None = None, timeou
     r = await http.get(evidence_url(chute_id, nonce), headers=h, timeout=timeout)
     r.raise_for_status()
     return verify_fleet(chute_id, r.json(), ref, nonce, e2e_pubkeys)
+
+
+async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, timeout: float = 120.0) -> InstanceReport:
+    """Add the Intel PCS + NVIDIA NRAS checks to an offline-verified report (in place) and recompute
+    `verified`. Never raises: an unreachable service is a failed check with the reason named."""
+    from . import attest_intel, attest_nvidia
+    quote_b = _b64(inst.get("quote") or "")
+    certs = embedded_chain(quote_b)
+    ck = report.checks
+    try:
+        ck["quote_sig"] = attest_intel.check_quote_signature(quote_b, certs)
+        ext = attest_intel.pck_extension(certs[0]) if certs else {}
+        if not ext.get("fmspc"):
+            for k in ("root_pinned", "not_revoked", "tcb_current", "qe_current"):
+                ck[k] = Check(False, "PCK certificate has no SGX extension (no FMSPC)")
+        else:
+            col = await attest_intel.fetch_collateral(http, ext["fmspc"], attest_intel.ca_kind(certs), timeout=timeout)
+            ck.update(attest_intel.platform_checks(quote_b, certs, col))
+    except Exception as e:
+        for k in ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current"):
+            ck.setdefault(k, Check(False, f"Intel collateral unavailable: {type(e).__name__}: {str(e)[:80]}"))
+    try:
+        v = await attest_nvidia.attest_gpus(http, inst.get("gpu_evidence") or [], nonce, report.e2e_pubkey, timeout=timeout)
+        ck["gpu_verified"] = attest_nvidia.check_from(v)
+        report.gpus = v.per_gpu if v.ok else {}
+    except Exception as e:
+        ck["gpu_verified"] = Check(False, f"NVIDIA attestation service unavailable: {type(e).__name__}: {str(e)[:80]}")
+    report.verified = all(ck[k].ok for k in REQUIRED + REQUIRED_ONLINE if k in ck) and report.online_done
+    return report

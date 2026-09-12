@@ -46,7 +46,23 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    | certificate chain sound | every embedded PCK certificate verifies under the next, ending in a self-signed root |
    | **encryption key bound to enclave** | the quote's `report_data[0:32]` = SHA-256(your nonce ‖ the instance's ML-KEM public key) → the hardware quote commits to the very key your requests are sealed to |
 
-   An instance is *verified* only if all seven pass. Fail-closed: a check that cannot be run is a
+   Then six online checks, against Intel's and NVIDIA's own services (`attest_intel.py`,
+   `attest_nvidia.py`), run only for the instances a session could pin:
+
+   | check | what it proves |
+   |---|---|
+   | quote signed by the hardware | the quote's ECDSA signature verifies under its attestation key; the Quoting Enclave report commits to that key and is signed by the PCK certificate |
+   | Intel root of trust | the PCK chain ends in Intel's published SGX Root CA (public key pinned in the client) |
+   | nothing revoked | no certificate in the chain is on Intel's PCK CRL or Root CRL (CRLs verified under their issuers, within validity) |
+   | platform firmware current | the platform's CPU/PCE SVNs and the TD's TEE TCB SVN match a level in Intel's signed TCB Info (verified under Intel's TCB signing chain) whose status is UpToDate / SWHardeningNeeded |
+   | Quoting Enclave current | MRSIGNER / ISVPRODID / attributes / miscselect match Intel's signed QE Identity, ISVSVN at an up-to-date level |
+   | GPUs verified by NVIDIA | every GPU's attestation report submitted to NVIDIA's Remote Attestation Service for **this session's challenge** (SHA-256(nonce ‖ enclave key) — the same value the TDX quote commits to); NVIDIA's ES384 verdict verified against its JWKS; per GPU: signature, cert chain, nonce match, driver + VBIOS measurements match NVIDIA's reference manifests, secure boot on, debug off |
+
+   What leaves your machine for these: the platform's FMSPC (6-byte family id) to Intel; the GPU
+   reports and certificates (hardware measurements) plus the challenge to NVIDIA. Nothing about you
+   or the conversation. Unreachable services fail closed.
+
+   An instance is *verified* only if all thirteen pass. Fail-closed: a check that cannot be run is a
    failure, and an empty fleet is never "verified".
 3. **Pin.** The session picks one instance that is both verified and able to accept sealed
    requests, and keeps it for the whole session (this also keeps the enclave's own prefix cache
@@ -84,10 +100,9 @@ Rendered on screen as stated limitations, never as passed checks:
   families, with a negative result for every other instance's key. The client now fetches the
   instance keys first, verifies the quote against exactly those keys, and refuses to seal to any
   key the quote did not commit to. No change on the provider's side was needed.
-* **Intel TCB / revocation are not checked** — no Intel PCS lookup; the chain is verified for
-  internal soundness and its root named, not pinned to Intel's published root key.
-* **GPU attestation is counted, not verified** against NVIDIA's service; its binding to the CPU
-  enclave is the provider's own claim (their claim string says so).
+* **GPU ↔ VM pairing.** The GPUs' reports answered this session's challenge and travel inside
+  the enclave-signed evidence, so the enclave's attested software (measured, known build) vouches
+  that these are its GPUs; there is no separate hardware proof of the pairing.
 * **Metadata is visible to relays**: message sizes, timing, model, instance id. The words are not.
 * **Server-side repair heuristics are off.** The normal lane applies model-specific fix-ups
   (fenced-JSON early stops, tool-call text repairs). This lane cannot, because it cannot see the

@@ -179,3 +179,25 @@ def test_the_command_line_is_measured_with_the_bootloader_prefix():
     with_prefix = "BOOT_IMAGE=/vmlinuz-6.17.0-35-generic " + base
     assert hashlib.sha384(with_prefix.encode("utf-16-le")).hexdigest() == RTMR2_EVENTS[3]
     assert hashlib.sha384(base.encode("utf-16-le")).hexdigest() != RTMR2_EVENTS[3]
+
+
+def test_a_partial_read_must_never_be_measured(tmp_path, monkeypatch):
+    """A reader that stalls must make the answer "unknown", never a quietly wrong digest.
+
+    qemu-img sizes its output up front and fills it in afterwards, so the file reaches its final
+    length long before the data is there. An earlier version of this script treated that length as
+    proof the read was done; it produced a file of exactly the right size containing partly zeroes,
+    and therefore a measurement that was WRONG rather than missing. That is the worst failure a
+    digest-comparison tool can have, so it gets a test.
+    """
+    import subprocess as sp
+    out = tmp_path / "boot.img"
+
+    def fake_run(argv, **kw):
+        out.write_bytes(b"\x00" * 1024)          # right length, no data — the trap
+        raise sp.TimeoutExpired(argv, kw.get("timeout", 1))
+
+    monkeypatch.setattr(repro.subprocess, "run", fake_run)
+    with pytest.raises(SystemExit) as e:
+        repro._qemu_slice("https://example/x.qcow2", 0, 1024, out, read_timeout=1)
+    assert "partial" in str(e.value).lower()

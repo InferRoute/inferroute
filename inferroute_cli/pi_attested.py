@@ -83,6 +83,13 @@ REFUSED_FLAGS = {
     "--models": "adds models outside the enclave",
     "-t": "changes the tool allowlist", "--tools": "changes the tool allowlist",
     "-a": "trusts project-local Pi files", "--approve": "trusts project-local Pi files",
+    # D2: sessions are writable and persistent, so resuming one could re-inject an edited transcript.
+    # v1 is a fresh session per launch; continuity belongs to the host-held matter docket, not Pi transcripts.
+    "-r": "resumes a persisted transcript (disabled in attested mode)",
+    "--resume": "resumes a persisted transcript (disabled in attested mode)",
+    "-c": "continues a persisted transcript (disabled in attested mode)",
+    "--continue": "continues a persisted transcript (disabled in attested mode)",
+    "--fork": "forks a persisted transcript (disabled in attested mode)",
 }
 _HELPERS = ("fd", "rg")
 
@@ -259,6 +266,11 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         argv += ["--cutoff", str(cfg["cutoff_date"])]
     if cfg.get("state_file"):
         argv += ["--state-file", cfg["state_file"]]
+    # The disclosure record is written by the verifier to a file under confidential/, which the fs
+    # confinement denies the agent (D1). One file per launch.
+    rec_dir = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    argv += ["--record-file", str(rec_dir / f"{os.getpid()}-{int(__import__('time').time())}.json")]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):

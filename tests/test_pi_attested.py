@@ -98,7 +98,8 @@ def test_loopback_is_never_proxied_under_either_spelling(user_pi):
     assert env["PI_OFFLINE"] == "1"
 
 
-@pytest.mark.parametrize("flag", ["-e", "--extension=x.ts", "--provider", "--api-key", "--models", "-t", "--tools=bash", "-a", "--approve"])
+@pytest.mark.parametrize("flag", ["-e", "--extension=x.ts", "--provider", "--api-key", "--models", "-t",
+                                  "--tools=bash", "-a", "--approve", "-r", "--resume", "-c", "--continue", "--fork"])
 def test_refuses_flags_that_load_code_reroute_or_widen_tools(user_pi, flag):
     with pytest.raises(PA.Refused):
         _argv({}, passthrough=[flag, "x"])

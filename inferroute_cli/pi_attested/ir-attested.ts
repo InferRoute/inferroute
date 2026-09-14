@@ -23,6 +23,7 @@ const PROVIDER = process.env.IR_ATTESTED_PROVIDER ?? "inferroute";
 const TOOLS = new Set((process.env.IR_ATTESTED_TOOLS ?? "").split(",").map((t) => t.trim()).filter(Boolean));
 const STATUS_KEY = "ir-model-enclave";
 const SEARCH_STATUS_KEY = "ir-search-enclave";
+const LIFECYCLE_STATUS_KEY = "ir-enclave-lifecycle";
 const PROOF_ENTRY = "ir-attested-proof";
 const SEARCH_PROOF_ENTRY = "ir-search-proof";
 const REFRESH_MS = 30_000;
@@ -229,6 +230,50 @@ async function searchCall(path: string, body: unknown, signal: AbortSignal | und
 	return (await res.json()) as SearchVerdict;
 }
 
+interface LifecycleStatus {
+	managed?: boolean;
+	running?: boolean;
+	started_at?: number;
+	container_hours?: number;
+	cost_estimate?: number;
+	budget_hours?: number;
+	budget_hours_remaining?: number;
+	over_budget?: boolean;
+	seconds_until_idle_reap?: number | null;
+}
+
+// The enclave lifecycle is host-managed by the verifier. The extension reads it back only to show the
+// attorney the budget and to keep the container warm while they read; it never manages Azure itself.
+async function lifecycleCall(path: string, post: boolean): Promise<LifecycleStatus | null> {
+	if (!SEARCH) return null;
+	try {
+		const res = await fetch(`${SEARCH}${path}`, {
+			method: post ? "POST" : "GET",
+			headers: post ? { "content-type": "application/json" } : undefined,
+			body: post ? "{}" : undefined,
+			signal: AbortSignal.timeout(10_000),
+		});
+		return (await res.json()) as LifecycleStatus;
+	} catch {
+		return null;
+	}
+}
+
+function lifecycleLine(s: LifecycleStatus): string {
+	const hrs = typeof s.container_hours === "number" ? s.container_hours.toFixed(2) : "?";
+	const budget = typeof s.budget_hours === "number" ? ` / ${s.budget_hours.toFixed(1)}h ceiling` : "";
+	const started = s.started_at ? ` · up since ${new Date(s.started_at * 1000).toLocaleTimeString()}` : "";
+	const over = s.over_budget ? " ⚠ over ceiling" : "";
+	return `search enclave: ${s.running ? "running" : "not running"}${started} · ${hrs}h used${budget}${over}`;
+}
+
+function showLifecycle(ctx: ExtensionContext, s: LifecycleStatus | null): void {
+	if (!ctx.hasUI || !s || !s.managed) return;
+	const t = ctx.ui.theme;
+	const text = lifecycleLine(s);
+	ctx.ui.setStatus(LIFECYCLE_STATUS_KEY, t ? t.fg(s.over_budget ? "warning" : "dim", text) : text);
+}
+
 function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	if (!ctx.hasUI) return;
 	const t = ctx.ui.theme;
@@ -418,6 +463,7 @@ export default function (pi: ExtensionAPI) {
 			const t = ctx.ui.theme;
 			const text = "search enclave: verified before the first sealed query";
 			ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg("dim", text) : text);
+			showLifecycle(ctx, await lifecycleCall("/lifecycle", false));
 		}
 		if (timer) clearInterval(timer);
 		timer = setInterval(async () => showStatus(ctx, await readVerdict()), REFRESH_MS);
@@ -446,6 +492,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("turn_end", async (_event, ctx) => {
 		showStatus(ctx, await readVerdict());
+	});
+
+	pi.on("turn_start", async (_event, ctx) => {
+		// User input is activity: keep the container warm and refresh the budget line. Best-effort.
+		if (SEARCH) showLifecycle(ctx, await lifecycleCall("/activity", true));
 	});
 
 	pi.registerCommand("proof", {
@@ -632,6 +683,44 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("relevant", { description: "Mark a patent (by publication number) as relevant prior art", handler: markCommand("relevant") });
 	pi.registerCommand("not-relevant", { description: "Mark a patent (by publication number) as not relevant", handler: markCommand("not-relevant") });
 	pi.registerCommand("known", { description: "Mark a patent (by publication number) as known art", handler: markCommand("known") });
+
+	pi.registerCommand("keep-warm", {
+		description: "Keep the search enclave running (reset its idle countdown) and show the budget",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+			const s = await lifecycleCall("/keep-warm", true);
+			if (!s || !s.managed) {
+				ctx.ui.notify("No managed enclave lifecycle this session — nothing to keep warm.", "info");
+				return;
+			}
+			showLifecycle(ctx, s);
+			ctx.ui.notify(
+				[lifecycleLine(s), "Idle countdown reset.",
+					"The enclave operator sees when your containers start and stop (timing and size), never their content."].join("\n"),
+				"info",
+			);
+		},
+	});
+
+	pi.registerCommand("enclave", {
+		description: "Show the search enclave's status: whether it is running, hours used, budget remaining",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+			const s = await lifecycleCall("/lifecycle", false);
+			if (!s || !s.managed) {
+				ctx.ui.notify("No managed enclave lifecycle this session.", "info");
+				return;
+			}
+			showLifecycle(ctx, s);
+			const idle = typeof s.seconds_until_idle_reap === "number"
+				? `\nReaps in ${Math.round(s.seconds_until_idle_reap / 60)} min if idle (use /keep-warm to hold it).` : "";
+			ctx.ui.notify(
+				[lifecycleLine(s), idle.trim(),
+					"The operator sees when your containers start and stop (timing and size), never their content."].filter(Boolean).join("\n"),
+				"info",
+			);
+		},
+	});
 
 	pi.registerCommand("marks", {
 		description: "List this matter's relevance marks (held on this machine, your judgements)",

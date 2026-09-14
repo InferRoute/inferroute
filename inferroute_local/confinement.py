@@ -198,3 +198,37 @@ def preexec(ports: List[int], *, min_landlock_abi: int = 4):
     def _fn():
         apply(ports, min_landlock_abi=min_landlock_abi)
     return _fn
+
+
+# ───────────────────────── address-level confinement availability ─────────────────────────
+#
+# Port-level (apply, above) confines by PORT: a remote host on an allowed port number is still
+# reachable. Address-level confinement puts the agent in an empty network namespace with no route off
+# the machine, so only the local proxies are reachable — but on Ubuntu-family systems that restrict
+# unprivileged user namespaces it needs the one-time AppArmor profile (scripts/install-confine-profile.sh).
+# This only reports whether that path is AVAILABLE; the netns wrapper that uses it is built separately
+# and is exercised only once the profile is installed, since it cannot run without it.
+
+def userns_restricted() -> bool:
+    try:
+        with open("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") as fh:
+            return fh.read().strip() == "1"
+    except OSError:
+        return False
+
+
+def netns_available() -> bool:
+    """True when an unprivileged empty network namespace can actually be created here (bubblewrap can
+    bring up loopback in a fresh net namespace). Probed, not inferred, because the AppArmor profile,
+    a reboot, or a policy reload all change the answer."""
+    import shutil
+    import subprocess
+    bwrap = shutil.which("bwrap")
+    if sys.platform != "linux" or not bwrap:
+        return False
+    try:
+        r = subprocess.run([bwrap, "--unshare-net", "--dev-bind", "/", "/", "true"],
+                           capture_output=True, timeout=20)
+        return r.returncode == 0 and b"Operation not permitted" not in (r.stderr or b"")
+    except (OSError, subprocess.SubprocessError):
+        return False

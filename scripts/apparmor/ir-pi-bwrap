@@ -1,0 +1,27 @@
+# AppArmor profile: let bubblewrap create the user+network namespace that the attested `ir pi`
+# launcher uses to confine the agent's egress by ADDRESS (an empty network namespace with only
+# loopback, so there is no route off the machine except through the two local verifying proxies).
+#
+# WHY THIS EXISTS. Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which refuses
+# unprivileged user-namespace creation unless the creating binary has a profile granting `userns`.
+# Without this profile `bwrap --unshare-net` fails ("loopback: Failed RTM_NEWADDR: Operation not
+# permitted") and the launcher can only fall back to the port-level Landlock+seccomp confinement,
+# which matches port, not address. Installing this profile lets the launcher confine by address.
+#
+# SCOPE. This grants the namespace capability to bubblewrap generally, and stacks the stock
+# `unprivileged_userns` profile onto whatever bwrap runs, so a process inside a bwrap sandbox is no
+# more privileged than any other unprivileged-userns process on this system. It does not grant the
+# sandboxed process network reach: the launcher gives Pi an EMPTY netns, and the two proxies are the
+# only channel out.
+#
+# INSTALL (one time, needs sudo): scripts/install-confine-profile.sh
+abi <abi/4.0>,
+include <tunables/global>
+
+profile ir-pi-bwrap /usr/bin/bwrap flags=(unconfined) {
+    userns,
+
+    # bubblewrap itself
+    /usr/bin/bwrap mr,
+    include if exists <local/ir-pi-bwrap>
+}

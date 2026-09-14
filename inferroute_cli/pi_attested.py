@@ -208,20 +208,33 @@ def preexec_confine(ports: list[int], then=None):
     return then if then is not None else (lambda: None)
 
 
-def confine_notice(ports: list[int]) -> str | None:
-    """What to tell the user about confinement before launch: the ports allowed, or why it is off. Returns
-    None when confinement is disabled by the user."""
+def confine_precheck() -> tuple[bool, str]:
+    """(ok_to_launch, notice). In require mode the launch must refuse unless egress can be confined by
+    ADDRESS (an empty network namespace); it names the one-time install that provides it. Otherwise the
+    port-level Landlock+seccomp confinement is used and its residual is stated."""
     import sys
-    if confine_disabled():
-        return None
     from inferroute_local import confinement
+    if confine_disabled():
+        return True, ""
+    linux = sys.platform == "linux"
     try:
-        abi = confinement.landlock_abi(__import__("ctypes").CDLL(None, use_errno=True)) if sys.platform == "linux" else 0
+        abi = confinement.landlock_abi(__import__("ctypes").CDLL(None, use_errno=True)) if linux else 0
     except Exception:                                       # noqa: BLE001
         abi = 0
-    if sys.platform == "linux" and abi >= 4:
-        return f"network confined to the local proxies (ports {', '.join(str(p) for p in ports if p)})"
+    address_level = linux and confinement.netns_available()
     if confine_required():
-        return "IR_ATTESTED_CONFINE=require but this platform cannot confine egress; the launch will refuse"
-    return ("this platform cannot confine the agent's network (needs Linux with Landlock ABI 4); "
-            "the agent could reach the network directly — set IR_ATTESTED_CONFINE=require to refuse instead")
+        if address_level:
+            return True, "network confined to the local proxies by ADDRESS (empty network namespace)"
+        if linux and confinement.userns_restricted():
+            return False, ("IR_ATTESTED_CONFINE=require, but address-level confinement needs the one-time "
+                           "AppArmor profile — run scripts/install-confine-profile.sh once (sudo), then retry. "
+                           "Refusing to launch with only port-level confinement.")
+        return False, ("IR_ATTESTED_CONFINE=require, but this platform cannot confine egress by address "
+                       "(needs Linux with bubblewrap and unprivileged network namespaces). Refusing to launch.")
+    if linux and abi >= 4:
+        residual = " (port-level: a remote host on an allowed port number is still reachable; install the "
+        residual += "AppArmor profile and set IR_ATTESTED_CONFINE=require for address-level)" if not address_level else ""
+        base = "network confined to the local proxies by ADDRESS" if address_level else "network confined to the local proxies"
+        return True, base + residual
+    return True, ("this platform cannot confine the agent's network (needs Linux with Landlock ABI 4); "
+                  "the agent could reach the network directly — set IR_ATTESTED_CONFINE=require to refuse instead")

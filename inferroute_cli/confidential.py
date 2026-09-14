@@ -283,9 +283,16 @@ def launch(args: list[str], agent: str = "claude") -> int:
             preexec = reset_sigint
             if agent == "pi":
                 from . import pi_attested
-                notice = pi_attested.confine_notice(pi_confine_ports)
+                ok_confine, notice = pi_attested.confine_precheck()
                 if notice:
                     console.print(f"[grey58]{notice}[/]")
+                if not ok_confine:
+                    if agent == "pi":
+                        pi_attested.stop_search_proxy()
+                    server.should_exit = True
+                    await server_task
+                    session.close()
+                    return 2
                 preexec = pi_attested.preexec_confine(pi_confine_ports, then=reset_sigint)
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)

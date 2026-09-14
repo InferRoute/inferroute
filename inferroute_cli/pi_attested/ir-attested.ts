@@ -387,9 +387,6 @@ class SessionRecord {
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
 	const disclosure = new SessionRecord();
-	// Publication numbers surfaced by a sealed search this session — so a relevance mark can note whether the
-	// document the attorney names was actually returned here (a mark is still recorded either way).
-	const seenHits = new Map<string, { year?: number; title?: string }>();
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
 	pi.registerEntryRenderer<SearchProof>(SEARCH_PROOF_ENTRY, (entry, { expanded }, theme) => renderSearchProof(entry.data, expanded, theme));
@@ -575,9 +572,6 @@ export default function (pi: ExtensionAPI) {
 				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
 				throw new Error(`the sealed search was refused (${sp.refusal})`);
 			}
-			for (const h of out.result?.hits ?? []) {
-				if (h.key) seenHits.set(String(h.key).toUpperCase(), { year: h.year, title: h.title });
-			}
 			return { content: [{ type: "text", text: hitsText(out) }], details: sp };
 		},
 
@@ -592,6 +586,16 @@ export default function (pi: ExtensionAPI) {
 	// the time; it is never written from the workspace. These become labels later, and only human marks are used.
 	const MARK_LABEL: Record<string, string> = { relevant: "relevant", "not-relevant": "not relevant", known: "known art" };
 	const PUB_RE = /^[A-Z]{2}[-A-Z0-9]{2,}$/;
+	// The exposure of a marked document is computed HOST-SIDE by the verifier from what its searches opened;
+	// the extension only reads it back to word the confirmation (M1).
+	const EXPOSURE_NOTE: Record<string, string> = {
+		this_session: "this session's search results",
+		earlier_session: "an earlier session's search results",
+		not_surfaced: "not surfaced by any search on this matter",
+	};
+
+	interface MarkEntry { value?: string; at?: string; surfaced?: string; rank?: number }
+	interface MatterMarks { marks?: Record<string, { latest?: MarkEntry }> }
 
 	function markCommand(value: "relevant" | "not-relevant" | "known") {
 		return async (args: string, ctx: ExtensionContext) => {
@@ -606,14 +610,21 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify(`"${raw}" is not a publication number. Mark a document by its number, e.g. /${value} US-7000-B2.`, "error");
 				return;
 			}
+			let resp: MatterMarks;
 			try {
-				await searchCall("/matter/mark", { key, mark: value, session_id: disclosure.sessionId }, undefined);
+				resp = (await searchCall("/matter/mark", { key, mark: value }, undefined)) as unknown as MatterMarks;
 			} catch {
 				ctx.ui.notify("could not record the mark: the local search verifier did not answer.", "error");
 				return;
 			}
-			const note = seenHits.has(key) ? "" : " (not among this session's search results)";
-			ctx.ui.notify(`Marked ${key} as ${MARK_LABEL[value]}${note}. Held with the matter on this machine, as your judgement.`, "info");
+			const latest = resp.marks?.[key]?.latest;
+			const exposure = latest?.surfaced ? EXPOSURE_NOTE[latest.surfaced] ?? latest.surfaced : "";
+			const rank = latest?.surfaced === "this_session" && latest.rank ? ` (rank ${latest.rank})` : "";
+			ctx.ui.notify(
+				`Marked ${key} as ${MARK_LABEL[value]}${exposure ? ` — ${exposure}${rank}` : ""}. ` +
+					"Held with the matter on this machine, as your judgement.",
+				"info",
+			);
 		};
 	}
 
@@ -625,9 +636,9 @@ export default function (pi: ExtensionAPI) {
 		description: "List this matter's relevance marks (held on this machine, your judgements)",
 		handler: async (_args, ctx) => {
 			if (!ctx.hasUI) return;
-			let state: { marks?: Record<string, { value?: string; at?: string }> } = {};
+			let state: MatterMarks = {};
 			try {
-				state = (await searchCall("/matter/state", undefined, undefined)) as unknown as typeof state;
+				state = (await searchCall("/matter/state", undefined, undefined)) as unknown as MatterMarks;
 			} catch {
 				ctx.ui.notify("could not read the matter's marks: the local search verifier did not answer.", "error");
 				return;
@@ -637,7 +648,11 @@ export default function (pi: ExtensionAPI) {
 				ctx.ui.notify("No relevance marks yet. Mark a document with /relevant, /not-relevant or /known.", "info");
 				return;
 			}
-			const lines = entries.map(([k, m]) => `  ${k}: ${MARK_LABEL[String(m.value)] ?? m.value}${m.at ? ` · ${m.at}` : ""}`);
+			const lines = entries.map(([k, m]) => {
+				const l = m.latest ?? {};
+				const exp = l.surfaced ? ` · ${EXPOSURE_NOTE[l.surfaced] ?? l.surfaced}` : "";
+				return `  ${k}: ${MARK_LABEL[String(l.value)] ?? l.value}${l.at ? ` · ${l.at}` : ""}${exp}`;
+			});
 			ctx.ui.notify(["Relevance marks for this matter (your judgements, held on this machine):", ...lines].join("\n"), "info");
 		},
 	});

@@ -592,6 +592,7 @@ export default function (pi: ExtensionAPI) {
 		this_session: "this session's search results",
 		earlier_session: "an earlier session's search results",
 		not_surfaced: "not surfaced by any search on this matter",
+		unknown_prior: "not in this session's results (earlier sessions were not consulted)",
 	};
 
 	interface MarkEntry { value?: string; at?: string; surfaced?: string; rank?: number }

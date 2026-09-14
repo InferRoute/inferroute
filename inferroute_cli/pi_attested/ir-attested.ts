@@ -387,6 +387,9 @@ class SessionRecord {
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
 	const disclosure = new SessionRecord();
+	// Publication numbers surfaced by a sealed search this session — so a relevance mark can note whether the
+	// document the attorney names was actually returned here (a mark is still recorded either way).
+	const seenHits = new Map<string, { year?: number; title?: string }>();
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
 	pi.registerEntryRenderer<SearchProof>(SEARCH_PROOF_ENTRY, (entry, { expanded }, theme) => renderSearchProof(entry.data, expanded, theme));
@@ -572,11 +575,70 @@ export default function (pi: ExtensionAPI) {
 				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
 				throw new Error(`the sealed search was refused (${sp.refusal})`);
 			}
+			for (const h of out.result?.hits ?? []) {
+				if (h.key) seenHits.set(String(h.key).toUpperCase(), { year: h.year, title: h.title });
+			}
 			return { content: [{ type: "text", text: hitsText(out) }], details: sp };
 		},
 
 		renderResult(result, { expanded }, theme) {
 			return renderSearchProof(result.details as SearchProof | undefined, expanded, theme);
+		},
+	});
+
+	// Relevance marks. A mark is a human judgement on a document, typed by the attorney — the model has no
+	// way to reach the /matter/mark endpoint, so every mark is a human row. It is stored by the host verifier
+	// in the matter state under confidential/ (write-denied to the agent), stamped there with actor=human and
+	// the time; it is never written from the workspace. These become labels later, and only human marks are used.
+	const MARK_LABEL: Record<string, string> = { relevant: "relevant", "not-relevant": "not relevant", known: "known art" };
+	const PUB_RE = /^[A-Z]{2}[-A-Z0-9]{2,}$/;
+
+	function markCommand(value: "relevant" | "not-relevant" | "known") {
+		return async (args: string, ctx: ExtensionContext) => {
+			if (!ctx.hasUI) return;
+			const raw = (args ?? "").trim();
+			const key = raw.toUpperCase();
+			if (!key) {
+				ctx.ui.notify(`Usage: /${value} <publication-number>   e.g. /${value} US-7000-B2`, "error");
+				return;
+			}
+			if (!PUB_RE.test(key)) {
+				ctx.ui.notify(`"${raw}" is not a publication number. Mark a document by its number, e.g. /${value} US-7000-B2.`, "error");
+				return;
+			}
+			try {
+				await searchCall("/matter/mark", { key, mark: value, session_id: disclosure.sessionId }, undefined);
+			} catch {
+				ctx.ui.notify("could not record the mark: the local search verifier did not answer.", "error");
+				return;
+			}
+			const note = seenHits.has(key) ? "" : " (not among this session's search results)";
+			ctx.ui.notify(`Marked ${key} as ${MARK_LABEL[value]}${note}. Held with the matter on this machine, as your judgement.`, "info");
+		};
+	}
+
+	pi.registerCommand("relevant", { description: "Mark a patent (by publication number) as relevant prior art", handler: markCommand("relevant") });
+	pi.registerCommand("not-relevant", { description: "Mark a patent (by publication number) as not relevant", handler: markCommand("not-relevant") });
+	pi.registerCommand("known", { description: "Mark a patent (by publication number) as known art", handler: markCommand("known") });
+
+	pi.registerCommand("marks", {
+		description: "List this matter's relevance marks (held on this machine, your judgements)",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+			let state: { marks?: Record<string, { value?: string; at?: string }> } = {};
+			try {
+				state = (await searchCall("/matter/state", undefined, undefined)) as unknown as typeof state;
+			} catch {
+				ctx.ui.notify("could not read the matter's marks: the local search verifier did not answer.", "error");
+				return;
+			}
+			const entries = Object.entries(state.marks ?? {});
+			if (!entries.length) {
+				ctx.ui.notify("No relevance marks yet. Mark a document with /relevant, /not-relevant or /known.", "info");
+				return;
+			}
+			const lines = entries.map(([k, m]) => `  ${k}: ${MARK_LABEL[String(m.value)] ?? m.value}${m.at ? ` · ${m.at}` : ""}`);
+			ctx.ui.notify(["Relevance marks for this matter (your judgements, held on this machine):", ...lines].join("\n"), "info");
 		},
 	});
 }

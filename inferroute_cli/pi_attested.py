@@ -289,6 +289,9 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
     rec_dir.mkdir(parents=True, exist_ok=True)
     argv += ["--record-file", str(rec_dir / f"{sess_id}.json")]
+    # The confinement line is stamped host-side by the verifier from this label (F1 / d3): a dev-unconfined
+    # session cannot ship looking confined, because the extension never gets to assert this field.
+    argv += ["--confinement", confinement_label()]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):
@@ -329,6 +332,19 @@ def confine_disabled() -> bool:
 
 def confine_required() -> bool:
     return os.environ.get("IR_ATTESTED_CONFINE", "").strip().lower() in ("1", "require", "required", "strict")
+
+
+def confinement_label() -> str:
+    """The confinement line the verifier stamps into every disclosure record — asserted host-side from the
+    launch env, not from anything the sandbox composes. In require mode the launch refuses unless the
+    sandbox actually applies, so by the time any search runs the line is accurate."""
+    if os.environ.get("IR_SURVEYOR_DEV_UNCONFINED") == "1":
+        return "unconfined (developer override)"
+    if confine_disabled():
+        return "not confined"
+    if confine_required():
+        return "require (address-level egress enforced or the session does not start)"
+    return "best-effort (port-level; not required)"
 
 
 def confine_write_paths(cfg_dir: str, cwd: str) -> list[str]:

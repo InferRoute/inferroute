@@ -80,6 +80,22 @@ def test_no_trust_state_when_confine_off(rig, tmp_path, monkeypatch):
     assert "--trust-state" not in rig["argv"]
 
 
+def test_confinement_label_is_passed_and_reflects_the_mode(rig, tmp_path, monkeypatch):
+    # require mode
+    monkeypatch.setenv("IR_ATTESTED_CONFINE", "require")
+    PA.start_search_proxy()
+    argv = rig["argv"]
+    assert "--confinement" in argv
+    assert "require" in argv[argv.index("--confinement") + 1]
+    # dev-unconfined override wins over anything else
+    monkeypatch.setattr(PA, "_SEARCH_PROXIES", [])
+    monkeypatch.setenv("IR_SURVEYOR_DEV_UNCONFINED", "1")
+    monkeypatch.setenv("IR_ATTESTED_CONFINE", "off")
+    PA.start_search_proxy()
+    argv = rig["argv"]
+    assert argv[argv.index("--confinement") + 1] == "unconfined (developer override)"
+
+
 def test_record_file_is_unique_per_session(rig, tmp_path, monkeypatch):
     monkeypatch.setenv("IR_MATTER_RECORD_DIR", str(tmp_path / "recs"))
     PA.start_search_proxy()

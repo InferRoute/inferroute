@@ -14,6 +14,8 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
 const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
@@ -273,9 +275,82 @@ function hitsText(out: SearchVerdict): string {
 
 // ───────────────────────── the extension ─────────────────────────
 
+// ───────────────────────── per-session disclosure record ─────────────────────────
+//
+// The spine of the product, stated for one session: which surface saw what. Written to
+// INFERROUTE_HOME/confidential/attested-sessions/<session>.json on shutdown and after each search.
+
+const HOME = process.env.INFERROUTE_HOME ?? "";
+const CONFINED = (process.env.IR_ATTESTED_CONFINE ?? "").trim().toLowerCase() !== "off";
+
+interface SearchRecord {
+	at: string;
+	ok: boolean;
+	testRoots: boolean;
+	measurement: string;
+	policy: string;
+	index: string;
+	hits: number;
+	refusal: string;
+}
+
+class SessionRecord {
+	sessionId = "";
+	startedAt = new Date().toISOString();
+	modelOk = false;
+	modelChecks = "";
+	modelReceipt = "";
+	searchOffered = false;
+	searches: SearchRecord[] = [];
+
+	surfaces() {
+		return {
+			this_device: "opened everything: the conversation, the model's replies, and the sealed search results",
+			model_enclave: this.modelOk
+				? "saw the conversation content, inside an enclave this device verified; nothing else could read it in transit"
+				: "not verified; no request was sent to it",
+			search_enclave: this.searches.length
+				? `saw ${this.searches.length} query(ies), each sealed on this device to a key its hardware report committed to; not their surrounding conversation`
+				: "saw nothing (no sealed search ran)",
+			inferroute_and_cloud_hosts: "saw ciphertext, message sizes and timing only — never the words",
+			user_extensions: "saw nothing: extension discovery was disabled for this session",
+			network: CONFINED
+				? "the agent's process tree was confined to the two local verifying proxies (see the residual in the model panel)"
+				: "not confined this session",
+		};
+	}
+
+	toJSON() {
+		return {
+			schema: "inferroute.attested-session/1",
+			session_id: this.sessionId,
+			started_at: this.startedAt,
+			written_at: new Date().toISOString(),
+			model_lane: { verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt },
+			search_lane: { offered: this.searchOffered, searches: this.searches },
+			which_surface_saw_what: this.surfaces(),
+			note: "A per-surface disclosure record for one attested session. Each line is a checked fact, not a promise.",
+		};
+	}
+
+	write(): string | null {
+		if (!HOME || !this.sessionId) return null;
+		try {
+			const dir = join(HOME, "confidential", "attested-sessions");
+			mkdirSync(dir, { recursive: true });
+			const path = join(dir, `${this.sessionId}.json`);
+			writeFileSync(path, `${JSON.stringify(this.toJSON(), null, 1)}\n`);
+			return path;
+		} catch {
+			return null;
+		}
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
 	const approved = new Set<string>();
+	const disclosure = new SessionRecord();
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
 	pi.registerEntryRenderer<SearchProof>(SEARCH_PROOF_ENTRY, (entry, { expanded }, theme) => renderSearchProof(entry.data, expanded, theme));
@@ -284,11 +359,21 @@ export default function (pi: ExtensionAPI) {
 		const v = await readVerdict();
 		showStatus(ctx, v);
 		pi.appendEntry<Verdict>(PROOF_ENTRY, v);
+		disclosure.modelOk = v.ok;
+		disclosure.modelChecks = v.total ? `${v.passed}/${v.total}` : "";
+		disclosure.modelReceipt = v.receiptPath;
+		disclosure.write();
 		return v;
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (TOOLS.size) pi.setActiveTools(pi.getActiveTools().filter((t) => TOOLS.has(t)));
+		try {
+			disclosure.sessionId = ctx.sessionManager.getSessionId() ?? "";
+		} catch {
+			disclosure.sessionId = "";
+		}
+		disclosure.searchOffered = Boolean(SEARCH);
 		await record(ctx);
 		if (SEARCH && ctx.hasUI) {
 			const t = ctx.ui.theme;
@@ -303,6 +388,21 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_shutdown", async () => {
 		if (timer) clearInterval(timer);
 		timer = undefined;
+		disclosure.write();
+	});
+
+	pi.registerCommand("disclosure", {
+		description: "Show and write this session's record of which surface saw what",
+		handler: async (_args, ctx) => {
+			const path = disclosure.write();
+			if (!ctx.hasUI) return;
+			const s = disclosure.surfaces();
+			const lines = Object.entries(s).map(([k, v]) => `  ${k.replace(/_/g, " ")}: ${v}`);
+			ctx.ui.notify(
+				["Which surface saw what, this session:", ...lines, path ? `written to ${path}` : "(not written: no session id or home)"].join("\n"),
+				"info",
+			);
+		},
 	});
 
 	pi.on("turn_end", async (_event, ctx) => {
@@ -410,6 +510,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			const sp = searchProofOf(out, "search");
 			searchStatus(ctx, sp);
+			disclosure.searches.push({
+				at: sp.at, ok: sp.ok, testRoots: sp.testRoots, measurement: sp.measurement, policy: sp.policy,
+				index: sp.index, hits: sp.hits, refusal: sp.refusal,
+			});
+			disclosure.write();
 			if (!out.ok) {
 				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
 				throw new Error(`the sealed search was refused (${sp.refusal})`);

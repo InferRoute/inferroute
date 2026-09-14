@@ -262,15 +262,24 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         argv += ["--expect-index", cfg["expect_index"]]
     if cfg.get("pins"):
         argv += ["--pins", cfg["pins"]]
-    if cfg.get("cutoff_date"):
-        argv += ["--cutoff", str(cfg["cutoff_date"])]
-    if cfg.get("state_file"):
-        argv += ["--state-file", cfg["state_file"]]
+    # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir surveyor open` sets
+    # them in the env from the host-held matter record, so the shared search.json is never mutated per
+    # launch (no race, no writable date bound). Fall back to search.json only when no matter is open.
+    cutoff = os.environ.get("IR_MATTER_CUTOFF") or cfg.get("cutoff_date")
+    if cutoff:
+        argv += ["--cutoff", str(cutoff)]
+    state_file = os.environ.get("IR_MATTER_STATE_FILE") or cfg.get("state_file")
+    if state_file:
+        argv += ["--state-file", state_file]
     # The disclosure record is written by the verifier to a file under confidential/, which the fs
-    # confinement denies the agent (D1). One file per launch.
-    rec_dir = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
-    rec_dir.mkdir(parents=True, exist_ok=True)
-    argv += ["--record-file", str(rec_dir / f"{os.getpid()}-{int(__import__('time').time())}.json")]
+    # confinement denies the agent (D1). Per-matter path if a matter is open, else one file per launch.
+    rec_file = os.environ.get("IR_MATTER_RECORD_FILE")
+    if not rec_file:
+        rec_dir = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
+        rec_dir.mkdir(parents=True, exist_ok=True)
+        rec_file = str(rec_dir / f"{os.getpid()}-{int(__import__('time').time())}.json")
+    Path(rec_file).parent.mkdir(parents=True, exist_ok=True)
+    argv += ["--record-file", rec_file]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):

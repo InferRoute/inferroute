@@ -263,7 +263,8 @@ def launch(args: list[str], agent: str = "claude") -> int:
             elif agent == "pi":
                 from . import pi_attested
                 argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
-                                            alias=alias, upstream_name=f"{alias.model_id} [confidential]")
+                                            alias=alias, upstream_name=f"{alias.model_id} [confidential]",
+                                            search_endpoint=pi_attested.start_search_proxy())
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                                     alias=alias, upstream_name=f"{alias.model_id} [confidential]")
@@ -280,6 +281,9 @@ def launch(args: list[str], agent: str = "claude") -> int:
             proc = await asyncio.create_subprocess_exec(
                 *argv, env=env, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
             rc = await proc.wait()
+            if agent == "pi":
+                from . import pi_attested
+                pi_attested.stop_search_proxy()
             server.should_exit = True
             await server_task
             session.close()

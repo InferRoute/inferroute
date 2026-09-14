@@ -212,6 +212,47 @@ def test_verdict_is_read_locally_and_never_reaches_the_model(tmp_path, user_pi):
     assert cards[0]["receiptPath"].endswith(RECEIPT_MARK)
 
 
+def _system_message(bodies) -> str:
+    for m in bodies[0].get("messages", []):
+        if m.get("role") == "system":
+            c = m.get("content")
+            return c if isinstance(c, str) else json.dumps(c)
+    return ""
+
+
+def test_contract_loader_strips_comments_and_matches_pinned_sha():
+    c = PA.load_contract()
+    assert c["modified"] is False, "the shipped contract must match its pinned sha"
+    assert "<!--" not in c["text"] and "DRAFT" not in c["text"]
+    assert c["text"].startswith("# You are a prior-art research assistant")
+    assert "from your own knowledge" in c["text"] and "novel" in c["text"]
+
+
+@needs_pi
+def test_the_mission_contract_is_the_system_prompt_and_never_the_coding_persona(tmp_path, user_pi):
+    proc, session, env = _run_pi(tmp_path, _receipt())
+    assert proc.returncode == 0, proc.stderr[-800:]
+    sysmsg = _system_message(session.bodies)
+    # the contract is the system prompt: its rules are present, comments and Pi's coding persona are not
+    assert "prior-art research assistant" in sysmsg and "from your own knowledge" in sysmsg
+    assert "<!--" not in sysmsg and "DRAFT" not in sysmsg
+    assert "coding assistant" not in sysmsg.lower() and "you help users by reading" not in sysmsg.lower()
+    # stamped in the session record when there is a session id (RPC/print with an id); at minimum the env carries it
+    assert env["IR_CONTRACT_MODIFIED"] == "0"
+    assert len(env["IR_CONTRACT_SHA"]) == 64 and len(env["IR_CONFIG_HASH"]) == 16
+
+
+@needs_pi
+def test_a_modified_contract_is_flagged_not_silently_run(tmp_path, user_pi, monkeypatch):
+    # point the loader at a tampered contract; the launch must carry the modified flag
+    tampered = tmp_path / "contract.md"
+    tampered.write_text(PA.CONTRACT_FILE.read_text() + "\nAN EXTRA LINE THAT CHANGES THE HASH\n")
+    monkeypatch.setattr(PA, "CONTRACT_FILE", tampered)
+    proc, session, env = _run_pi(tmp_path, _receipt())
+    assert env["IR_CONTRACT_MODIFIED"] == "1"
+    assert "AN EXTRA LINE THAT CHANGES THE HASH" in _system_message(session.bodies)
+
+
 @needs_pi
 @pytest.mark.parametrize("verdict,failing", [("refused", None), ("degraded", None), ("confidential", "gpu_verified")])
 def test_an_unverified_session_sends_nothing(tmp_path, user_pi, verdict, failing):

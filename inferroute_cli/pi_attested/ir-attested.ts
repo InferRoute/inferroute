@@ -139,6 +139,11 @@ function renderModelProof(v: Verdict | undefined, expanded: boolean, theme: Them
 		? theme.fg("success", theme.bold(`🔒 Model enclave verified by this machine at ${v.verifiedAt}`))
 		: theme.fg("error", theme.bold(`⛔ Model enclave NOT verified: ${v.reason}. Model requests are blocked.`)));
 	line(theme.fg("dim", "Read from ir's local endpoint on this machine, not from the model. Not sent to the model."));
+	if (CONTRACT.modified) {
+		line(theme.fg("warning", theme.bold("⚠ contract modified: the mission contract on disk differs from the pinned version.")));
+	} else if (CONTRACT.contract_sha) {
+		line(`${theme.fg("muted", "contract ")} ${CONTRACT.contract_sha.slice(0, 12)}… (pinned)`);
+	}
 	if (v.model) line(`${theme.fg("muted", "model    ")} ${v.model}${v.gpus ? ` · ${v.gpus} GPUs` : ""}${v.instance ? ` · instance ${v.instance}` : ""}`);
 	if (v.sealing) line(`${theme.fg("muted", "sealing  ")} ${v.sealing}, keys made on this machine`);
 	if (v.transport) line(`${theme.fg("muted", "carrier  ")} ${v.transport}`);
@@ -282,6 +287,13 @@ function hitsText(out: SearchVerdict): string {
 
 const HOME = process.env.INFERROUTE_HOME ?? "";
 const CONFINED = (process.env.IR_ATTESTED_CONFINE ?? "").trim().toLowerCase() !== "off";
+const CONTRACT = {
+	contract_sha: process.env.IR_CONTRACT_SHA ?? "",
+	preamble_sha: process.env.IR_PREAMBLE_SHA ?? "",
+	modified: (process.env.IR_CONTRACT_MODIFIED ?? "0") === "1",
+	config_hash: process.env.IR_CONFIG_HASH ?? "",
+	pi_version: process.env.IR_PI_VERSION ?? "",
+};
 
 interface SearchRecord {
 	at: string;
@@ -326,6 +338,14 @@ class SessionRecord {
 			session_id: this.sessionId,
 			started_at: this.startedAt,
 			written_at: new Date().toISOString(),
+			contract: {
+				contract_sha: CONTRACT.contract_sha,
+				preamble_sha: CONTRACT.preamble_sha,
+				modified: CONTRACT.modified,
+				config_hash: CONTRACT.config_hash,
+				pi_version: CONTRACT.pi_version,
+				index_snapshot: this.searches[0]?.index ?? "",
+			},
 			model_lane: { verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt },
 			search_lane: { offered: this.searchOffered, searches: this.searches },
 			which_surface_saw_what: this.surfaces(),
@@ -374,6 +394,9 @@ export default function (pi: ExtensionAPI) {
 			disclosure.sessionId = "";
 		}
 		disclosure.searchOffered = Boolean(SEARCH);
+		if (CONTRACT.modified && ctx.hasUI) {
+			ctx.ui.notify("The mission contract on disk differs from the pinned version — running as modified. This is recorded.", "warning");
+		}
 		await record(ctx);
 		if (SEARCH && ctx.hasUI) {
 			const t = ctx.ui.theme;

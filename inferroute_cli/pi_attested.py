@@ -289,6 +289,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
     rec_dir.mkdir(parents=True, exist_ok=True)
     argv += ["--record-file", str(rec_dir / f"{sess_id}.json")]
+    # The enclave-signed statements, kept verbatim host-side per session for the export (step 6).
+    argv += ["--statements-file", str(rec_dir / f"{sess_id}.statements.jsonl")]
     # The confinement line is stamped host-side by the verifier from this label (F1 / d3): a dev-unconfined
     # session cannot ship looking confined, because the extension never gets to assert this field.
     argv += ["--confinement", confinement_label()]

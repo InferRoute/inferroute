@@ -289,8 +289,13 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
     rec_dir.mkdir(parents=True, exist_ok=True)
     argv += ["--record-file", str(rec_dir / f"{sess_id}.json")]
-    # The enclave-signed statements, kept verbatim host-side per session for the export (step 6).
-    argv += ["--statements-file", str(rec_dir / f"{sess_id}.statements.jsonl")]
+    # The per-search archive (signed statement + opened result + attestation evidence), kept verbatim
+    # host-side per session so the export can rebuild each search's report and prove its binding (step 6).
+    argv += ["--archive-file", str(rec_dir / f"{sess_id}.searches.jsonl")]
+    if os.environ.get("IR_REPORT_MATTER"):
+        argv += ["--report-matter", os.environ["IR_REPORT_MATTER"]]
+    if os.environ.get("IR_REPORT_FIRM"):
+        argv += ["--report-firm", os.environ["IR_REPORT_FIRM"]]
     # The confinement line is stamped host-side by the verifier from this label (F1 / d3): a dev-unconfined
     # session cannot ship looking confined, because the extension never gets to assert this field.
     argv += ["--confinement", confinement_label()]

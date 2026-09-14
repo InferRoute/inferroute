@@ -34,7 +34,8 @@ def rig(tmp_path, monkeypatch):
     (cfg_dir / "search.json").write_text(json.dumps({
         "python": "/usr/bin/python3", "enclave": "http://enclave.invalid",
         "expect_host_data": "aa" * 32, "cwd": str(tmp_path)}))
-    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_ATTESTED_CONFINE"):
+    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_ATTESTED_CONFINE",
+              "IR_SURVEYOR_DEV_UNCONFINED", "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
         monkeypatch.delenv(k, raising=False)
     captured = {}
 

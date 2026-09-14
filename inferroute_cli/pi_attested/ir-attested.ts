@@ -1,23 +1,32 @@
 /**
  * ir attested session for Pi.
  *
- * Shows the user what this machine verified about the model enclave, in Pi's own UI: a footer status
- * for the whole session and a proof card in the transcript. Both are read from ir's local sealed
- * endpoint, never from anything the model produced, and neither is sent to the model (the card is a
- * custom entry, which Pi keeps out of model context).
+ * Shows the user what this machine verified, in Pi's own UI, for both remote legs:
+ *  - the model enclave: a footer status and a proof card, read from ir's local sealed endpoint;
+ *  - the search enclave: a footer status and a proof card per search, read from the local search verifier.
+ * Verification text is never produced by the model and never sent to it: proof cards are custom entries
+ * or tool `details`, which Pi keeps out of model context.
  *
- * Refuses to send a model request unless the session is verified and the request is addressed to
- * this session's local sealed endpoint. Tools outside the launch allowlist are refused.
+ * Refuses a model request unless the model session is verified and addressed to this session's local
+ * endpoint. `prior_art_search` verifies the search enclave, asks the user before the first sealed query to
+ * that enclave, and fails on any refused check. Tools outside the launch allowlist are refused.
  */
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
+const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
 const PROVIDER = process.env.IR_ATTESTED_PROVIDER ?? "inferroute";
 const TOOLS = new Set((process.env.IR_ATTESTED_TOOLS ?? "").split(",").map((t) => t.trim()).filter(Boolean));
 const STATUS_KEY = "ir-model-enclave";
+const SEARCH_STATUS_KEY = "ir-search-enclave";
 const PROOF_ENTRY = "ir-attested-proof";
+const SEARCH_PROOF_ENTRY = "ir-search-proof";
 const REFRESH_MS = 30_000;
+const SEARCH_TIMEOUT_MS = 300_000;
+
+// ───────────────────────── model enclave ─────────────────────────
 
 interface ReceiptCheck {
 	ok?: boolean;
@@ -107,7 +116,7 @@ function statusText(v: Verdict): string {
 function showStatus(ctx: ExtensionContext, v: Verdict): void {
 	if (!ctx.hasUI) return;
 	const theme = ctx.ui.theme;
-	ctx.ui.setStatus(STATUS_KEY, theme.fg(v.ok ? "success" : "error", statusText(v)));
+	ctx.ui.setStatus(STATUS_KEY, theme ? theme.fg(v.ok ? "success" : "error", statusText(v)) : statusText(v));
 }
 
 function refuse(ctx: ExtensionContext, why: string): void {
@@ -117,38 +126,159 @@ function refuse(ctx: ExtensionContext, why: string): void {
 	ctx.abort();
 }
 
+function renderModelProof(v: Verdict | undefined, expanded: boolean, theme: Theme) {
+	const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+	const line = (s: string) => box.addChild(new Text(s, 0, 0));
+	if (!v) {
+		line(theme.fg("error", "no verification record"));
+		return box;
+	}
+	line(v.ok
+		? theme.fg("success", theme.bold(`🔒 Model enclave verified by this machine at ${v.verifiedAt}`))
+		: theme.fg("error", theme.bold(`⛔ Model enclave NOT verified: ${v.reason}. Model requests are blocked.`)));
+	line(theme.fg("dim", "Read from ir's local endpoint on this machine, not from the model. Not sent to the model."));
+	if (v.model) line(`${theme.fg("muted", "model    ")} ${v.model}${v.gpus ? ` · ${v.gpus} GPUs` : ""}${v.instance ? ` · instance ${v.instance}` : ""}`);
+	if (v.sealing) line(`${theme.fg("muted", "sealing  ")} ${v.sealing}, keys made on this machine`);
+	if (v.transport) line(`${theme.fg("muted", "carrier  ")} ${v.transport}`);
+	if (v.total) {
+		line(`${theme.fg("muted", "checks   ")} ${v.passed}/${v.total} passed${expanded ? "" : " (expand to list)"}`);
+		for (const c of v.checks) {
+			if (!expanded && c.ok) continue;
+			line(`  ${c.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${c.label}${expanded && c.why ? theme.fg("dim", ` · ${c.why}`) : ""}`);
+		}
+	}
+	if (v.limitations.length) {
+		line(theme.fg("warning", `not proven (${v.limitations.length})${expanded ? ":" : ", expand to read"}`));
+		if (expanded) for (const l of v.limitations) line(theme.fg("dim", `  ○ ${l}`));
+	}
+	if (v.receiptPath) line(theme.fg("dim", `receipt  ${v.receiptPath}`));
+	return box;
+}
+
+// ───────────────────────── search enclave ─────────────────────────
+
+interface SearchStep {
+	ok: boolean;
+	step: string;
+	detail: string;
+}
+
+interface SearchVerdict {
+	ok: boolean;
+	refusal?: string | null;
+	test_roots?: boolean;
+	steps: SearchStep[];
+	enclave?: {
+		measurement?: string;
+		host_data?: string;
+		uvm_svn?: number;
+		index_snapshot?: string;
+		lifetime_id?: string;
+		enclave_key?: string;
+		pipeline_version?: string;
+	};
+	statement?: { hits_n?: number; outcome?: string; refusal?: string; search_seconds?: number; pipeline_version?: string };
+	result?: { hits?: { key: string; year?: number; title?: string; score?: number }[]; claim_boundary?: string; candidates?: number };
+}
+
+interface SearchProof {
+	ok: boolean;
+	refusal: string;
+	testRoots: boolean;
+	phase: "verify" | "search" | "declined";
+	steps: SearchStep[];
+	measurement: string;
+	policy: string;
+	index: string;
+	enclaveKey: string;
+	hits: number;
+	at: string;
+}
+
+function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"]): SearchProof {
+	return {
+		ok: out.ok && phase !== "declined",
+		refusal: phase === "declined" ? "the user declined to send a sealed query" : String(out.refusal ?? ""),
+		testRoots: out.test_roots === true,
+		phase,
+		steps: out.steps ?? [],
+		measurement: String(out.enclave?.measurement ?? ""),
+		policy: String(out.enclave?.host_data ?? ""),
+		index: String(out.enclave?.index_snapshot ?? ""),
+		enclaveKey: String(out.enclave?.enclave_key ?? ""),
+		hits: Number(out.statement?.hits_n ?? 0),
+		at: new Date().toISOString(),
+	};
+}
+
+async function searchCall(path: string, body: unknown, signal: AbortSignal | undefined): Promise<SearchVerdict> {
+	const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+	const res = await fetch(`${SEARCH}${path}`, {
+		method: body === undefined ? "GET" : "POST",
+		headers: body === undefined ? undefined : { "content-type": "application/json" },
+		body: body === undefined ? undefined : JSON.stringify(body),
+		signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+	});
+	return (await res.json()) as SearchVerdict;
+}
+
+function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
+	if (!ctx.hasUI) return;
+	const t = ctx.ui.theme;
+	const passed = p.steps.filter((s) => s.ok).length;
+	const text = p.ok
+		? `🔒 search enclave verified${p.testRoots ? " (TEST ROOTS)" : ""} · policy ${p.policy.slice(0, 8)}… · ${passed}/${p.steps.length} checks`
+		: `⛔ search enclave: ${p.refusal}`;
+	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
+}
+
+function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme: Theme) {
+	const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+	const line = (s: string) => box.addChild(new Text(s, 0, 0));
+	if (!p) {
+		line(theme.fg("error", "no search verification record"));
+		return box;
+	}
+	const passed = p.steps.filter((s) => s.ok).length;
+	if (p.ok) {
+		line(theme.fg("success", theme.bold(p.phase === "search"
+			? `🔒 Sealed prior-art search: enclave verified by this machine, ${p.hits} results opened here`
+			: "🔒 Search enclave verified by this machine")));
+	} else {
+		line(theme.fg("error", theme.bold(`⛔ Sealed prior-art search refused: ${p.refusal}`)));
+	}
+	if (p.testRoots) line(theme.fg("warning", theme.bold("TEST ROOTS PINNED: this is a test enclave, not a production one")));
+	line(theme.fg("dim", "Checked by the local search verifier on this machine, not by the model. Not sent to the model."));
+	if (p.measurement) line(`${theme.fg("muted", "utility VM ")} ${p.measurement.slice(0, 24)}…`);
+	if (p.policy) line(`${theme.fg("muted", "policy     ")} ${p.policy.slice(0, 24)}…`);
+	if (p.index) line(`${theme.fg("muted", "index      ")} ${p.index}`);
+	if (p.enclaveKey) line(`${theme.fg("muted", "sealed to  ")} ${p.enclaveKey}…`);
+	line(`${theme.fg("muted", "checks     ")} ${passed}/${p.steps.length} passed${expanded ? "" : " (expand to list)"}`);
+	for (const s of p.steps) {
+		if (!expanded && s.ok) continue;
+		line(`  ${s.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${s.step}${expanded ? theme.fg("dim", ` · ${s.detail}`) : ""}`);
+	}
+	return box;
+}
+
+function hitsText(out: SearchVerdict): string {
+	const hits = out.result?.hits ?? [];
+	const lines = [
+		`${hits.length} references surfaced by a sealed search over ${out.enclave?.index_snapshot ?? "the index"}. ` +
+		`${out.result?.claim_boundary ?? "It surfaces related art; it does not certify completeness or absence."}`,
+	];
+	hits.forEach((h, i) => lines.push(`${i + 1}. ${h.key}${h.year ? ` (${h.year})` : ""}${h.title ? ` ${h.title}` : ""}`));
+	return lines.join("\n");
+}
+
+// ───────────────────────── the extension ─────────────────────────
+
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
+	const approved = new Set<string>();
 
-	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => {
-		const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
-		const v = entry.data;
-		const line = (s: string) => box.addChild(new Text(s, 0, 0));
-		if (!v) {
-			line(theme.fg("error", "no verification record"));
-			return box;
-		}
-		line(v.ok
-			? theme.fg("success", theme.bold(`🔒 Model enclave verified by this machine at ${v.verifiedAt}`))
-			: theme.fg("error", theme.bold(`⛔ Model enclave NOT verified: ${v.reason}. Model requests are blocked.`)));
-		line(theme.fg("dim", "Read from ir's local endpoint on this machine, not from the model. Not sent to the model."));
-		if (v.model) line(`${theme.fg("muted", "model    ")} ${v.model}${v.gpus ? ` · ${v.gpus} GPUs` : ""}${v.instance ? ` · instance ${v.instance}` : ""}`);
-		if (v.sealing) line(`${theme.fg("muted", "sealing  ")} ${v.sealing}, keys made on this machine`);
-		if (v.transport) line(`${theme.fg("muted", "carrier  ")} ${v.transport}`);
-		if (v.total) {
-			line(`${theme.fg("muted", "checks   ")} ${v.passed}/${v.total} passed${expanded ? "" : " (expand to list)"}`);
-			for (const c of v.checks) {
-				if (!expanded && c.ok) continue;
-				line(`  ${c.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${c.label}${expanded && c.why ? theme.fg("dim", ` · ${c.why}`) : ""}`);
-			}
-		}
-		if (v.limitations.length) {
-			line(theme.fg("warning", `not proven (${v.limitations.length})${expanded ? ":" : ", expand to read"}`));
-			if (expanded) for (const l of v.limitations) line(theme.fg("dim", `  ○ ${l}`));
-		}
-		if (v.receiptPath) line(theme.fg("dim", `receipt  ${v.receiptPath}`));
-		return box;
-	});
+	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
+	pi.registerEntryRenderer<SearchProof>(SEARCH_PROOF_ENTRY, (entry, { expanded }, theme) => renderSearchProof(entry.data, expanded, theme));
 
 	async function record(ctx: ExtensionContext): Promise<Verdict> {
 		const v = await readVerdict();
@@ -160,6 +290,11 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (TOOLS.size) pi.setActiveTools(pi.getActiveTools().filter((t) => TOOLS.has(t)));
 		await record(ctx);
+		if (SEARCH && ctx.hasUI) {
+			const t = ctx.ui.theme;
+			const text = "search enclave: verified before the first sealed query";
+			ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg("dim", text) : text);
+		}
 		if (timer) clearInterval(timer);
 		timer = setInterval(async () => showStatus(ctx, await readVerdict()), REFRESH_MS);
 		timer.unref?.();
@@ -203,5 +338,87 @@ export default function (pi: ExtensionAPI) {
 		if (TOOLS.size && !TOOLS.has(event.toolName)) {
 			return { block: true, reason: `${event.toolName} is not available in an attested session` };
 		}
+	});
+
+	if (!SEARCH) return;
+
+	pi.registerTool({
+		name: "prior_art_search",
+		label: "Prior-art search (sealed)",
+		description:
+			"Search published patents for prior art related to a technical description. The description is sealed on " +
+			"the user's machine to a search enclave that this machine verifies first; the user approves the first query " +
+			"to each enclave. Returns references with publication numbers and titles. It surfaces related art; it does " +
+			"not certify completeness or absence.",
+		promptSnippet: "Search published patents for related prior art (sealed, user-approved)",
+		promptGuidelines: [
+			"Use prior_art_search when the user asks for prior art, related patents, or novelty context for a technical idea; pass a self-contained technical description of at least a few sentences.",
+			"Do not describe prior_art_search results as proving novelty or the absence of prior art.",
+		],
+		parameters: Type.Object({
+			text: Type.String({ description: "A self-contained technical description to search for (20 characters or more)" }),
+			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "How many references to return (default 10)" })),
+			cutoff_date: Type.Optional(Type.Integer({ description: "Only art published before this date, as YYYYMMDD" })),
+		}),
+
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			if (!ctx.hasUI) {
+				throw new Error("prior_art_search needs the user at this machine to approve sealed queries; refused without sending anything");
+			}
+			let verified: SearchVerdict;
+			try {
+				verified = await searchCall("/enclave", undefined, signal);
+			} catch {
+				throw new Error("the local search verifier did not answer; nothing was sent");
+			}
+			const vp = searchProofOf(verified, "verify");
+			searchStatus(ctx, vp);
+			if (!verified.ok) {
+				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+				throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
+			}
+			const e = verified.enclave ?? {};
+			const key = `${e.lifetime_id}|${e.host_data}|${e.measurement}`;
+			if (!approved.has(key)) {
+				const ok = await ctx.ui.confirm(
+					"Send a sealed prior-art query?",
+					[
+						vp.testRoots ? "TEST ROOTS PINNED: this is a test enclave, not a production one.\n" : "",
+						"This machine verified the search enclave: AMD SEV-SNP hardware, the utility VM Microsoft endorses, ",
+						"and the container policy this client pins.\n",
+						`  utility VM   ${String(e.measurement ?? "").slice(0, 24)}…\n`,
+						`  policy       ${String(e.host_data ?? "").slice(0, 24)}…\n`,
+						`  index        ${e.index_snapshot ?? ""}\n`,
+						`  enclave key  ${e.enclave_key ?? ""}…\n`,
+						"The model's search text will be sealed here to that key. The host sees its size and timing, not its words. ",
+						"Approve queries to this enclave for this session?",
+					].join(""),
+				);
+				if (!ok) {
+					pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, searchProofOf(verified, "declined"));
+					throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
+				}
+				approved.add(key);
+			}
+			let out: SearchVerdict;
+			try {
+				out = await searchCall("/search", {
+					text: params.text, k: params.k ?? 10, cutoff_date: params.cutoff_date ?? null, expect_lifetime_id: e.lifetime_id,
+				}, signal);
+			} catch {
+				throw new Error("the local search verifier did not answer; the search did not complete");
+			}
+			const sp = searchProofOf(out, "search");
+			searchStatus(ctx, sp);
+			if (!out.ok) {
+				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
+				throw new Error(`the sealed search was refused (${sp.refusal})`);
+			}
+			return { content: [{ type: "text", text: hitsText(out) }], details: sp };
+		},
+
+		renderResult(result, { expanded }, theme) {
+			return renderSearchProof(result.details as SearchProof | undefined, expanded, theme);
+		},
 	});
 }

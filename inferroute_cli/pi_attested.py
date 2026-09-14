@@ -94,17 +94,81 @@ def _provision_helpers(bin_dir: Path, sources: list[Path]) -> None:
 
 
 def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-             headers: dict | None = None) -> list[str]:
+             headers: dict | None = None, search_endpoint: str | None = None) -> list[str]:
+    """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers)
+    tools = TOOLS + ((SEARCH_TOOL,) if search_endpoint else ())
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
     env["PI_SKIP_VERSION_CHECK"] = "1"
     env["PI_TELEMETRY"] = "0"
     env["IR_ATTESTED_ENDPOINT"] = base_url.rstrip("/")
     env["IR_ATTESTED_PROVIDER"] = PROVIDER
-    env["IR_ATTESTED_TOOLS"] = ",".join(TOOLS)
+    env["IR_ATTESTED_TOOLS"] = ",".join(tools)
+    if search_endpoint:
+        env["IR_SEARCH_ENDPOINT"] = search_endpoint.rstrip("/")
+    else:
+        env.pop("IR_SEARCH_ENDPOINT", None)
     for name in ("no_proxy", "NO_PROXY"):
         env[name] = _with_loopback(env.get("no_proxy") if env.get("no_proxy") is not None else env.get("NO_PROXY"))
-    return [binary, "-ne", "-e", str(EXTENSION), "-na", "--tools", ",".join(TOOLS),
+    return [binary, "-ne", "-e", str(EXTENSION), "-na", "--tools", ",".join(tools),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
+
+
+# ───────────────────────── the local search verifier ─────────────────────────
+#
+# A sibling of Pi, started by this launcher, so it stays outside anything applied to Pi's process tree.
+# Configured by INFERROUTE_HOME/confidential/search.json:
+#   {"python": ".../bin/python", "cwd": "<dir holding the verifier package>", "enclave": "<address>",
+#    "expect_host_data": "<pinned container policy hash>", "expect_index": optional, "pins": optional test roots}
+
+SEARCH_TOOL = "prior_art_search"
+_SEARCH_PROXIES: list = []
+
+
+def search_config_path() -> Path:
+    return Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "search.json"
+
+
+def start_search_proxy(timeout: float = 30.0) -> str | None:
+    """Start the verifier and return its loopback address, or None (the session then has no search tool)."""
+    import select
+    import subprocess
+    import sys
+    try:
+        cfg = json.loads(search_config_path().read_text())
+    except (OSError, ValueError):
+        return None
+    argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
+            "--expect-host-data", cfg["expect_host_data"], "--port", "0"]
+    if cfg.get("expect_index"):
+        argv += ["--expect-index", cfg["expect_index"]]
+    if cfg.get("pins"):
+        argv += ["--pins", cfg["pins"]]
+    try:
+        proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except (OSError, KeyError):
+        sys.stderr.write("\n  prior-art search is unavailable this session: the local search verifier did not start.\n\n")
+        return None
+    ready, _, _ = select.select([proc.stdout], [], [], timeout)
+    try:
+        port = int(json.loads(proc.stdout.readline())["listening"]) if ready else 0
+    except (ValueError, KeyError, TypeError):
+        port = 0
+    if not port:
+        proc.terminate()
+        sys.stderr.write("\n  prior-art search is unavailable this session: the local search verifier did not start.\n\n")
+        return None
+    _SEARCH_PROXIES.append(proc)
+    return f"http://127.0.0.1:{port}"
+
+
+def stop_search_proxy() -> None:
+    while _SEARCH_PROXIES:
+        proc = _SEARCH_PROXIES.pop()
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:                                   # noqa: BLE001
+            proc.kill()

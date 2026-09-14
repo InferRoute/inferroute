@@ -369,7 +369,6 @@ class SessionRecord {
 
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
-	const approved = new Set<string>();
 	const disclosure = new SessionRecord();
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
@@ -478,10 +477,10 @@ export default function (pi: ExtensionAPI) {
 			"Use prior_art_search when the user asks for prior art, related patents, or novelty context for a technical idea; pass a self-contained technical description of at least a few sentences.",
 			"Do not describe prior_art_search results as proving novelty or the absence of prior art.",
 		],
+		// No cutoff parameter: the date bound is the matter's, held by the host verifier, not the model's to set.
 		parameters: Type.Object({
 			text: Type.String({ description: "A self-contained technical description to search for (20 characters or more)" }),
 			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "How many references to return (default 10)" })),
-			cutoff_date: Type.Optional(Type.Integer({ description: "Only art published before this date, as YYYYMMDD" })),
 		}),
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -501,33 +500,47 @@ export default function (pi: ExtensionAPI) {
 				throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
 			}
 			const e = verified.enclave ?? {};
-			const key = `${e.lifetime_id}|${e.host_data}|${e.measurement}`;
-			if (!approved.has(key)) {
+			// Approval is owned by the host verifier, not by in-sandbox memory or a workspace file the agent
+			// could forge. Ask it whether this enclave measurement is already approved for the matter.
+			let matter: { approved?: string[]; cutoff_date?: number | null } = {};
+			try {
+				matter = (await searchCall("/matter/state", undefined, signal)) as unknown as typeof matter;
+			} catch {
+				matter = {};
+			}
+			const measurement = String(e.measurement ?? "");
+			if (!(matter.approved ?? []).includes(measurement)) {
+				const bound = matter.cutoff_date ? `art published before ${matter.cutoff_date}` : "the matter's date bound";
 				const ok = await ctx.ui.confirm(
 					"Send a sealed prior-art query?",
 					[
 						vp.testRoots ? "TEST ROOTS PINNED: this is a test enclave, not a production one.\n" : "",
 						"This machine verified the search enclave: AMD SEV-SNP hardware, the utility VM Microsoft endorses, ",
 						"and the container policy this client pins.\n",
-						`  utility VM   ${String(e.measurement ?? "").slice(0, 24)}…\n`,
+						`  utility VM   ${measurement.slice(0, 24)}…\n`,
 						`  policy       ${String(e.host_data ?? "").slice(0, 24)}…\n`,
 						`  index        ${e.index_snapshot ?? ""}\n`,
 						`  enclave key  ${e.enclave_key ?? ""}…\n`,
+						`  date bound   ${bound}\n`,
 						"The model's search text will be sealed here to that key. The host sees its size and timing, not its words. ",
-						"Approve queries to this enclave for this session?",
+						"Approve queries to this enclave for this matter?",
 					].join(""),
 				);
 				if (!ok) {
 					pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, searchProofOf(verified, "declined"));
 					throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
 				}
-				approved.add(key);
+				// Record the approval host-side (survives the session, per matter per measurement).
+				try {
+					await searchCall("/matter/approve", { measurement }, signal);
+				} catch {
+					/* approval recording is best-effort; the confirm above is the gate */
+				}
 			}
 			let out: SearchVerdict;
 			try {
-				out = await searchCall("/search", {
-					text: params.text, k: params.k ?? 10, cutoff_date: params.cutoff_date ?? null, expect_lifetime_id: e.lifetime_id,
-				}, signal);
+				// No cutoff here: the host verifier applies the matter's date bound.
+				out = await searchCall("/search", { text: params.text, k: params.k ?? 10, expect_lifetime_id: e.lifetime_id }, signal);
 			} catch {
 				throw new Error("the local search verifier did not answer; the search did not complete");
 			}

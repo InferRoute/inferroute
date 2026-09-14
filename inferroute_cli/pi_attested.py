@@ -177,7 +177,9 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
 # A sibling of Pi, started by this launcher, so it stays outside anything applied to Pi's process tree.
 # Configured by INFERROUTE_HOME/confidential/search.json:
 #   {"python": ".../bin/python", "cwd": "<dir holding the verifier package>", "enclave": "<address>",
-#    "expect_host_data": "<pinned container policy hash>", "expect_index": optional, "pins": optional test roots}
+#    "expect_host_data": "<pinned container policy hash>", "expect_index": optional, "pins": optional,
+#    "cutoff_date": optional YYYYMMDD (the matter's date bound; host-held), "state_file": optional path
+#    to the matter state file OUTSIDE the sandbox (approvals/marks/cutoff the agent must not forge)}
 
 SEARCH_TOOL = "prior_art_search"
 _SEARCH_PROXIES: list = []
@@ -202,6 +204,10 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         argv += ["--expect-index", cfg["expect_index"]]
     if cfg.get("pins"):
         argv += ["--pins", cfg["pins"]]
+    if cfg.get("cutoff_date"):
+        argv += ["--cutoff", str(cfg["cutoff_date"])]
+    if cfg.get("state_file"):
+        argv += ["--state-file", cfg["state_file"]]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):

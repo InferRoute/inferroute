@@ -357,11 +357,26 @@ class SessionRecord {
 	}
 
 	write(): string | null {
+		const rec = this.toJSON();
+		// D1: when there is a host verifier, IT writes the record to a file outside the sandbox — the agent
+		// can neither reach this endpoint (no HTTP tool) nor write that file (confinement). We only post the
+		// content, composed from the model receipt and search proofs the agent does not control.
+		if (SEARCH) {
+			fetch(`${SEARCH}/record`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ record: rec }),
+				signal: AbortSignal.timeout(5_000),
+			}).catch(() => {});
+			return `${SEARCH}/record (host-written)`;
+		}
+		// No search enclave (developer model-only session): fall back to a local file, agent-writable —
+		// there is no host verifier to own it. Not the attorney path.
 		if (!RECORD_DIR || !this.sessionId) return null;
 		try {
 			mkdirSync(RECORD_DIR, { recursive: true });
 			const path = join(RECORD_DIR, `${this.sessionId}.json`);
-			writeFileSync(path, `${JSON.stringify(this.toJSON(), null, 1)}\n`);
+			writeFileSync(path, `${JSON.stringify(rec, null, 1)}\n`);
 			return path;
 		} catch {
 			return null;

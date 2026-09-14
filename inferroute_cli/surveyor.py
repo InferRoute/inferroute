@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import html
 import json
 import os
 import re
@@ -221,273 +220,19 @@ def _read_jsonl(p: Path) -> list:
     return rows
 
 
-def _load_sessions(client: str, matter: str) -> list:
-    """Each attested session's host-written disclosure record, plus its per-search archive (signed statement,
-    opened result, rendered report, attestation evidence)."""
-    rdir = records_dir(client, matter)
-    sessions = []
-    if rdir.is_dir():
-        for f in sorted(rdir.glob("*.json")):
-            if f.name.endswith(".tmp"):
-                continue
-            try:
-                rec = json.loads(f.read_text())
-            except (OSError, ValueError):
-                continue
-            sid = f.stem
-            searches = _read_jsonl(rdir / f"{sid}.searches.jsonl")
-            sessions.append({"session_id": sid, "record": rec, "searches": searches})
-    return sessions
-
-
-def _sha256_hex(data: bytes) -> str:
-    import hashlib
-    return hashlib.sha256(data).hexdigest()
-
-
-_EXPOSURE_WORD = {
-    "this_session": "surfaced by this session's search",
-    "earlier_session": "surfaced by an earlier session's search",
-    "not_surfaced": "not surfaced by any search on this matter",
-    "unknown_prior": "not in this session's results (earlier sessions not consulted)",
-}
-
-
-def _e(s) -> str:
-    return html.escape(str(s if s is not None else ""))
-
-
-def build_export_html(client: str, matter: str) -> tuple[str, dict]:
-    """Returns (html, evidence_bundles) where evidence_bundles maps a sha256 → the JSON bytes of one
-    attestation-evidence bundle, to be written beside the HTML and referenced by that sha (X2)."""
-    rec = load_record(client, matter)
-    ws = Path(rec["workspace"])
-    try:
-        state = json.loads(state_path(client, matter).read_text())
-    except (OSError, ValueError):
-        state = {}
-    sessions = _load_sessions(client, matter)
-    disclosure_md, disclosure_sha, disclosure_mtime = "", "", ""
-    dp = ws / "disclosure.md"
-    if dp.exists():
-        try:
-            raw = dp.read_bytes()
-            disclosure_md = raw.decode("utf-8", "replace")
-            disclosure_sha = _sha256_hex(raw)
-            disclosure_mtime = dt.datetime.fromtimestamp(dp.stat().st_mtime, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        except OSError:
-            disclosure_md = ""
-    usage = [r for r in _read_jsonl(usage_ledger_path()) if r.get("matter") == f"{client}/{matter}"]
-    matter_hours = round(sum(float(u.get("hours", 0)) for u in usage if u.get("event") == "stop"), 3)
-    evidence_bundles: dict = {}
-
-    out: list = []
-    A = out.append
-    A("<!doctype html><html lang=en><head><meta charset=utf-8>")
-    A(f"<title>Prior-art record — {_e(client)}/{_e(matter)}</title>")
-    A("<style>"
-      "body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}"
-      "h1{font-size:1.5rem;margin:.2rem 0}h2{font-size:1.15rem;border-bottom:2px solid #eee;padding-bottom:.2rem;margin-top:2rem}"
-      ".sub{color:#666}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid #ddd;padding:.4rem .6rem;text-align:left;vertical-align:top}"
-      "th{background:#f6f6f6}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#f6f8fa;padding:.8rem;border-radius:6px;overflow:auto;font-size:12px}"
-      ".ok{color:#127a2b}.warn{color:#b25000;font-weight:600}.bad{color:#b00020;font-weight:600}"
-      ".pill{display:inline-block;background:#eef;border-radius:10px;padding:.05rem .5rem;font-size:12px}"
-      ".note{color:#666;font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}"
-      "</style></head><body>")
-
-    A(f"<h1>Prior-art research record</h1>")
-    A(f"<div class=sub>{_e(client)} / {_e(matter)}</div>")
-    A("<h2>Matter</h2><table>")
-    A(f"<tr><th>Date bound (priority date)</th><td>{_e(rec.get('date_bound'))}"
-      f"{' <span class=note>(pre-filing default = creation date; not yet set to a real priority date)</span>' if rec.get('pre_filing_default') else ''}</td></tr>")
-    A(f"<tr><th>Created</th><td>{_e(rec.get('created_at'))}</td></tr>")
-    A(f"<tr><th>Workspace</th><td class=mono>{_e(rec.get('workspace'))}</td></tr>")
-    if rec.get("changes"):
-        rows = "".join(f"<li>{_e(c.get('at'))}: date bound {_e(c.get('old'))} → {_e(c.get('new'))}</li>" for c in rec["changes"])
-        A(f"<tr><th>Date-bound changes</th><td><ul>{rows}</ul></td></tr>")
-    A("</table>")
-    A("<p class=note>Every statement below is a fact this device checked or recorded, not a promise. A sealed "
-      "prior-art search surfaces related art; it does not certify novelty or the absence of prior art.</p>")
-
-    A("<h2>Disclosure</h2>")
-    A("<p class=note>The workspace file <code>disclosure.md</code> as it stood at export time — an "
-      "agent-writable file, not a sealed record. Its content-hash and modification time are given so a later "
-      "change is detectable.</p>")
-    if disclosure_md:
-        A(f"<p class=note>sha256 <span class=mono>{_e(disclosure_sha)}</span> · last modified {_e(disclosure_mtime)}</p>")
-    A(f"<pre>{_e(disclosure_md) or '<span class=note>(no disclosure.md in the workspace)</span>'}</pre>")
-
-    A("<h2>Relevance marks</h2>")
-    marks = state.get("marks") or {}
-    if not marks:
-        A("<p class=note>No relevance marks were recorded for this matter.</p>")
-    else:
-        A("<table><tr><th>Publication</th><th>Mark</th><th>Exposure</th><th>By</th><th>When</th><th>History</th></tr>")
-        for k in sorted(marks):
-            latest = (marks[k] or {}).get("latest") or {}
-            hist = (marks[k] or {}).get("history") or []
-            rank = f" (rank {_e(latest.get('rank'))})" if latest.get("rank") else ""
-            hist_s = "; ".join(f"{_e(h.get('value'))} @ {_e(h.get('at'))}" for h in hist)
-            A(f"<tr><td class=mono>{_e(k)}</td><td>{_e(latest.get('value'))}</td>"
-              f"<td>{_e(_EXPOSURE_WORD.get(latest.get('surfaced'), latest.get('surfaced')))}{rank}</td>"
-              f"<td>{_e(latest.get('actor'))}</td><td>{_e(latest.get('at'))}</td><td class=note>{hist_s}</td></tr>")
-        A("</table>")
-        A("<p class=note>Marks are the attorney's own judgements, typed at this machine. The model cannot make "
-          "one. 'Exposure' records whether this matter's search actually returned the document.</p>")
-
-    A("<h2>Attested sessions</h2>")
-    if matter_hours:
-        A(f"<p class=note>Search-enclave container time for this matter, across all sessions: "
-          f"<b>{matter_hours} h</b> (from the host usage ledger).</p>")
-    if not sessions:
-        A("<p class=note>No attested sessions were recorded for this matter yet.</p>")
-    for s in sessions:
-        r = s["record"]
-        conf = r.get("confinement")
-        if not conf:                                          # a missing stamp is not a good value (R12)
-            conf, conf_cls = "confinement not recorded", "warn"
-        else:
-            conf_cls = "bad" if "unconfined" in str(conf) else "ok"
-        model = r.get("model_lane") or {}
-        search = r.get("search_lane") or {}
-        contract = r.get("contract") or {}
-        A(f"<h3>Session <span class=mono>{_e(s['session_id'])}</span></h3><table>")
-        A(f"<tr><th>Started</th><td>{_e(r.get('started_at'))}</td></tr>")
-        A(f"<tr><th>Confinement</th><td class={conf_cls}>{_e(conf)}</td></tr>")
-        A(f"<tr><th>Model enclave verified</th><td class={'ok' if model.get('verified') else 'bad'}>"
-          f"{'yes' if model.get('verified') else 'no'} <span class=note>{_e(model.get('checks'))}</span></td></tr>")
-        A(f"<tr><th>Contract governing this session</th><td>"
-          f"contract <span class=mono>{_e((contract.get('contract_sha') or '?')[:16])}</span>, "
-          f"preamble <span class=mono>{_e((contract.get('preamble_sha') or '?')[:16])}</span>"
-          f"{' <span class=warn>— modified from the pinned version</span>' if contract.get('modified') else ''}</td></tr>")
-        searches = search.get("searches") or []
-        if searches:
-            rows = "".join(
-                f"<tr><td>{_e(x.get('at'))}</td><td>{_e(x.get('hits'))}</td>"
-                f"<td class=mono>{_e((x.get('measurement') or '')[:24])}…</td>"
-                f"<td class=mono>{_e((x.get('policy') or '')[:24])}…</td><td>{_e(x.get('index'))}</td></tr>"
-                for x in searches)
-            A(f"<tr><th>Sealed searches</th><td><table><tr><th>at</th><th>hits</th><th>utility VM</th><th>policy</th><th>index</th></tr>{rows}</table></td></tr>")
-        else:
-            A("<tr><th>Sealed searches</th><td class=note>none</td></tr>")
-        surf = r.get("which_surface_saw_what") or {}
-        if surf:
-            rows = "".join(f"<tr><td>{_e(k.replace('_',' '))}</td><td>{_e(v)}</td></tr>" for k, v in surf.items())
-            A(f"<tr><th>Which surface saw what</th><td><table>{rows}</table></td></tr>")
-        A("</table>")
-
-    # X1: the deliverable report — the Form-1503-shaped citations + passages + corpus currency, rendered at
-    # search time from the exact opened result and kept verbatim, embedded per search in an isolated frame.
-    A("<h2>Prior-art search reports</h2>")
-    any_report = False
-    for s in sessions:
-        for x in s["searches"]:
-            rp = x.get("report_html")
-            if not rp:
-                continue
-            any_report = True
-            A(f"<p class=note>Search recorded {_e(x.get('at'))}, session <span class=mono>{_e(s['session_id'])}</span>:</p>")
-            A(f'<iframe title="prior-art search report" style="width:100%;height:640px;border:1px solid #ccc;border-radius:6px" '
-              f'sandbox srcdoc="{_e(rp)}"></iframe>')
-    if not any_report:
-        A("<p class=note>No search report was rendered (no sealed search returned results).</p>")
-
-    # X2: the signed statements verbatim AND the evidence that binds each signing key to an enclave.
-    A("<h2>Enclave-signed statements and attestation evidence</h2>")
-    any_stmt = False
-    for s in sessions:
-        for x in s["searches"]:
-            stmt = x.get("statement") or {}
-            if not stmt.get("sig"):
-                continue
-            any_stmt = True
-            A(f"<p class=note>Session <span class=mono>{_e(s['session_id'])}</span>, recorded {_e(x.get('at'))}. "
-              f"Ed25519 signature over the canonical JSON below (minus <code>sig</code>), by the signing key "
-              f"<span class=mono>{_e(x.get('signer_pub'))}</span>:</p>")
-            A(f"<pre>{_e(json.dumps(stmt, indent=1, ensure_ascii=False))}</pre>")
-            ev = x.get("evidence")
-            if ev is not None:
-                blob = json.dumps(ev, indent=1, ensure_ascii=False).encode("utf-8")
-                sha = _sha256_hex(blob)
-                evidence_bundles[sha] = blob.decode("utf-8")
-                A(f"<p class=note>Attestation evidence bundle <span class=mono>{_e(sha)}</span> is written beside "
-                  f"this file as <code>{_e(sha[:16])}.evidence.json</code>. From it alone a third party can, "
-                  f"without trusting this device: recompute REPORT_DATA = sha256(runtime_data) and find the "
-                  f"signing key committed in it; verify the SEV-SNP report chains to AMD's root and the utility-VM "
-                  f"endorsement to Microsoft's; and check HOST_DATA = sha256(the container policy).</p>")
-            else:
-                A("<p class=warn>No attestation evidence was recorded for this search — the signature can be "
-                  "checked but not bound to an enclave from this file.</p>")
-    if not any_stmt:
-        A("<p class=note>No enclave-signed statements were recorded (no sealed search completed).</p>")
-
-    A("<h2>This device's record</h2>")
-    A("<p class=note>This file was assembled on the attorney's own machine. Each remote enclave was verified "
-      "here, by this device — not by the model, and the verification was never sent to the model. The date "
-      "bound was held here, not the model's to change. The disclosure section above is the workspace file as "
-      "it stood at export time (an agent-writable file, hashed above), not a sealed record.</p>")
-    # X3: the "out of the agent's reach" claim is true only for a confined session — state it per session.
-    reach = []
-    for s in sessions:
-        conf = str((s["record"] or {}).get("confinement") or "")
-        if not conf:
-            reach.append(f"{s['session_id']}: confinement not recorded — cannot claim these records were out of reach")
-        elif "unconfined" in conf:
-            reach.append(f"{s['session_id']}: UNCONFINED (developer override) — the agent could have altered these records")
-        else:
-            reach.append(f"{s['session_id']}: held outside the agent's write access (require-mode confinement)")
-    if reach:
-        A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")
-    A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))}.</p>")
-    A("</body></html>")
-    return "".join(out), evidence_bundles
-
-
-def _is_within(child: Path, parent: Path) -> bool:
-    try:
-        c, p = os.path.abspath(child), os.path.abspath(parent)
-    except OSError:
-        return False
-    return c == p or c.startswith(p.rstrip("/") + "/")
-
-
-def cmd_export(spec: str, out_path: str | None) -> int:
+def cmd_export(spec: str, out_path: str | None, anchor: bool = False) -> int:
+    """The one-directory record: see surveyor_export. Refuses the workspace and sync roots (plaintext invention)."""
+    from . import surveyor_export
     client, matter = _split_matter(spec)
-    rec = load_record(client, matter)
-    ws = Path(rec["workspace"])
-    htmltext, evidence_bundles = build_export_html(client, matter)
-    if out_path:
-        dest = Path(out_path)
-        # X4: the export holds the invention in plain text — refuse to write it where a later session can alter
-        # it (the matter workspace) or where a sync daemon would copy it out (a cloud-sync folder).
-        if _is_within(dest, ws) or _is_within(dest.parent, ws):
-            raise SurveyorError("refusing to write the export inside the matter workspace, where a later session "
-                                "could alter it before it is filed. Choose a path outside the workspace.")
-        sync = _under_sync_root(dest)
-        if sync:
-            raise SurveyorError(f"refusing to write the export under a cloud-sync folder ({sync}): it holds the "
-                                "invention in plain text. Choose a local path outside any synced folder.")
-    else:
-        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dest = surveyor_root() / client / "exports" / f"{matter}-prior-art-record-{stamp}.html"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(htmltext)
-    try:
-        os.chmod(dest, 0o600)
-    except OSError:
-        pass
-    for sha, content in evidence_bundles.items():
-        ep = dest.parent / f"{sha[:16]}.evidence.json"
-        ep.write_text(content)
-        try:
-            os.chmod(ep, 0o600)
-        except OSError:
-            pass
-    print(f"wrote {dest}")
-    if evidence_bundles:
-        print(f"  plus {len(evidence_bundles)} attestation-evidence bundle(s) beside it")
-    print("  contains the disclosure in plain text — store it accordingly")
+    load_record(client, matter)                              # exists?
+    surveyor_export.write_bundle(client, matter, out_path, anchor=anchor)
     return 0
+
+
+def cmd_verify_export(bundle_dir: str) -> int:
+    """Run the bundle's own independent verifier over it (convenience; the bundle needs no `ir` to verify)."""
+    from . import surveyor_export
+    return surveyor_export.verify_bundle(bundle_dir)
 
 
 def cmd_open(spec: str, dev_unconfined: bool = False) -> int:
@@ -536,6 +281,8 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--dev-unconfined", action="store_true",
                    help="developer override: open UNCONFINED (no sandbox, no trusted state). Never for a real matter.")
     x = sub.add_parser("export"); x.add_argument("matter"); x.add_argument("-o", "--out", default=None)
+    x.add_argument("--anchor", action="store_true", help="OpenTimestamps-anchor MANIFEST.json (publishes only a hash)")
+    ve = sub.add_parser("verify-export"); ve.add_argument("bundle")
     sub.add_parser("list")
     a = p.parse_args(argv)
     try:
@@ -546,7 +293,9 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "open":
             return cmd_open(a.matter, dev_unconfined=a.dev_unconfined)
         if a.cmd == "export":
-            return cmd_export(a.matter, a.out)
+            return cmd_export(a.matter, a.out, anchor=a.anchor)
+        if a.cmd == "verify-export":
+            return cmd_verify_export(a.bundle)
         if a.cmd == "list":
             return cmd_list()
     except SurveyorError as e:

@@ -360,6 +360,9 @@ class SessionRecord {
 	modelOk = false;
 	modelChecks = "";
 	modelReceipt = "";
+	modelCheckList: { label: string; ok: boolean; why: string }[] = [];
+	modelLimitations: string[] = [];
+	modelDetail: Record<string, unknown> = {};
 	searchOffered = false;
 	searches: SearchRecord[] = [];
 
@@ -394,7 +397,10 @@ class SessionRecord {
 				pi_version: CONTRACT.pi_version,
 				index_snapshot: this.searches[0]?.index ?? "",
 			},
-			model_lane: { verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt },
+			model_lane: {
+				verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt,
+				check_list: this.modelCheckList, limitations: this.modelLimitations, ...this.modelDetail,
+			},
 			search_lane: { offered: this.searchOffered, searches: this.searches },
 			which_surface_saw_what: this.surfaces(),
 			note: "A per-surface disclosure record for one attested session. Each line is a checked fact, not a promise.",
@@ -443,6 +449,12 @@ export default function (pi: ExtensionAPI) {
 		disclosure.modelOk = v.ok;
 		disclosure.modelChecks = v.total ? `${v.passed}/${v.total}` : "";
 		disclosure.modelReceipt = v.receiptPath;
+		// The full check list and the receipt's own stated limitations, so the export can show exactly what
+		// was and was not proven for the model lane — not just a pass count.
+		disclosure.modelCheckList = v.checks.map((c) => ({ label: c.label, ok: c.ok, why: c.why }));
+		disclosure.modelLimitations = [...v.limitations];
+		disclosure.modelDetail = { model: v.model, verified_at: v.verifiedAt, instance: v.instance, gpus: v.gpus,
+			transport: v.transport, sealing: v.sealing, reason: v.reason };
 		disclosure.write();
 		return v;
 	}

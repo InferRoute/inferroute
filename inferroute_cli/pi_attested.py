@@ -292,6 +292,10 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     # The per-search archive (signed statement + opened result + attestation evidence), kept verbatim
     # host-side per session so the export can rebuild each search's report and prove its binding (step 6).
     argv += ["--archive-file", str(rec_dir / f"{sess_id}.searches.jsonl")]
+    # The deployed container policy (base64), so each search's evidence bundle can prove HOST_DATA = sha256(policy)
+    # to a third party. Optional: search.json "policy_file" names the file holding the base64 policy.
+    if cfg.get("policy_file"):
+        argv += ["--policy-file", str(cfg["policy_file"])]
     if os.environ.get("IR_REPORT_MATTER"):
         argv += ["--report-matter", os.environ["IR_REPORT_MATTER"]]
     if os.environ.get("IR_REPORT_FIRM"):

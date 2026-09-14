@@ -293,7 +293,8 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     await server_task
                     session.close()
                     return 2
-                preexec = pi_attested.preexec_confine(pi_confine_ports, then=reset_sigint)
+                write_paths = pi_attested.confine_write_paths(env["PI_CODING_AGENT_DIR"], os.getcwd())
+                preexec = pi_attested.preexec_confine(pi_confine_ports, write_paths=write_paths, then=reset_sigint)
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
             rc = await proc.wait()

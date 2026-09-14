@@ -104,38 +104,82 @@ def _with_loopback(value: str | None) -> str:
     return ",".join(list(LOOPBACK) + [h for h in have if h not in LOOPBACK])
 
 
+# The only entries an attested config dir may hold. Anything else — a planted AGENTS.md, a rogue
+# extension, a settings override — is removed on every launch, so a previous session cannot leave
+# something the next session's Pi would load. cfg is writable under confinement, so this matters.
+_CFG_KEEP = ("models.json", "settings.json", "bin", "sessions", "tmp", "attested-sessions")
+
+
 def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None) -> Path:
-    """A stable ir-owned Pi config dir, rewritten on every launch. Keeps `bin/` (Pi's helper binaries)
-    so offline launches still have them; shares the user's sessions; mirrors nothing else."""
+    """A stable ir-owned Pi config dir, scrubbed on every launch to exactly the known-good entries. Keeps
+    `bin/` (Pi's helper binaries) so offline launches still have them; sessions are a REAL dir here (not a
+    symlink out), so Pi can write them under the filesystem confinement; nothing of the user's is mirrored."""
     user_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or (Path.home() / ".pi" / "agent"))
     home = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute"))
     d = home / "pi-attested"
     d.mkdir(parents=True, exist_ok=True)
     for entry in d.iterdir():
-        if entry.is_symlink() or entry.name in ("models.json", "settings.json"):
-            entry.unlink()
+        if entry.name not in _CFG_KEEP:
+            (shutil.rmtree if entry.is_dir() and not entry.is_symlink() else (lambda p: p.unlink()))(entry)
+        elif entry.name == "sessions" and entry.is_symlink():
+            entry.unlink()                    # a prior symlink-out; replace with a real dir below
     doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None)
     (d / "models.json").write_text(json.dumps(doc, indent=1))
     (d / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "defaultProjectTrust": "never"}, indent=1))
-    sessions = d / "sessions"
-    if not sessions.exists():
-        if (user_dir / "sessions").is_dir() and user_dir.resolve() != d.resolve():
-            os.symlink(user_dir / "sessions", sessions)
-        else:
-            sessions.mkdir()
-    _provision_helpers(d / "bin", [user_dir / "bin", home / "pi-agent" / "bin"])
+    (d / "sessions").mkdir(exist_ok=True)     # real dir, writable under confinement (was a symlink to ~/.pi)
+    (d / "attested-sessions").mkdir(exist_ok=True)
+    # cfg/bin helpers run inside the sandbox and are agent-writable; re-copy them each launch so a prior
+    # session cannot leave a tampered fd/rg that a later session's grep/find would run.
+    _provision_helpers(d / "bin", [user_dir / "bin", home / "pi-agent" / "bin"], force=True)
     return d
 
 
-def _provision_helpers(bin_dir: Path, sources: list[Path]) -> None:
+def _provision_helpers(bin_dir: Path, sources: list[Path], force: bool = False) -> None:
     bin_dir.mkdir(exist_ok=True)
     for name in _HELPERS:
-        if (bin_dir / name).exists():
+        if (bin_dir / name).exists() and not force:
             continue
         for src in sources:
             if (src / name).is_file() and os.access(src / name, os.X_OK):
                 shutil.copy2(src / name, bin_dir / name)
                 break
+
+
+# ── W1: the workspace is writable under confinement, so it must never be a protected tree ──
+class UnsafeWorkspace(ValueError):
+    """The launch directory would make a protected tree writable under the sandbox."""
+
+
+def _protected() -> tuple[set, list]:
+    """(exact_deny, tree_deny). exact: cwd must not BE these. tree: cwd must not be, be inside, or contain
+    these. Home is exact-only so an ordinary ~/subdir is fine, but its sensitive children are trees, and
+    so is INFERROUTE_HOME (which holds the config dir and the state/search.json the agent must not write)."""
+    def rp(p: Path) -> Path:
+        try:
+            return p.resolve()
+        except OSError:
+            return p
+    home = rp(Path.home())
+    irhome = rp(Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")))
+    exact = {rp(Path("/")), home}
+    trees = [irhome] + [rp(home / n) for n in (".ssh", ".config", ".aws", ".gnupg", ".pi")]
+    return exact, trees
+
+
+def check_workspace(cwd: str) -> str:
+    """Resolve `cwd` (so a symlink to ~ is caught) and refuse it if it would expose a protected tree once
+    added to the write allow-set — launching from ~ or ~/.inferroute reopens the plant-and-run escape.
+    An ordinary project or matter folder under home is fine. Returns the resolved path or raises."""
+    real = Path(cwd).resolve()
+    exact, trees = _protected()
+    if real in exact:
+        raise UnsafeWorkspace(f"refusing to run in {real}: run from a project or matter folder, not your "
+                              "home or filesystem root.")
+    for t in trees:
+        if real == t or t in real.parents or real in t.parents:
+            raise UnsafeWorkspace(f"refusing to run here: {real} is, is inside, or contains {t}. "
+                                  "Run from a project or matter folder, not a config or key directory.")
+    return str(real)
 
 
 def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
@@ -171,7 +215,10 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # confinement allows rather than in /tmp.
     (cfg / "tmp").mkdir(exist_ok=True)
     env["TMPDIR"] = str(cfg / "tmp")
-    return [binary, "-ne", "-e", str(EXTENSION), "-na", "--tools", ",".join(tools),
+    # The disclosure record goes to a writable, ir-owned dir (cfg is in the write allow-set), NOT under
+    # confidential/ which the filesystem confinement denies the agent.
+    env["IR_ATTESTED_RECORD_DIR"] = str(cfg / "attested-sessions")
+    return [binary, "-ne", "-e", str(EXTENSION), "-na", "-nc", "--tools", ",".join(tools),
             "--system-prompt", str(sp),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
 

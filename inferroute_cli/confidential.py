@@ -262,6 +262,14 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
                 from . import pi_attested
+                try:
+                    pi_attested.check_workspace(os.getcwd())      # W1: never make a protected tree writable
+                except pi_attested.UnsafeWorkspace as e:
+                    console.print(f"[red]{e}[/]")
+                    server.should_exit = True
+                    await server_task
+                    session.close()
+                    return 2
                 search_endpoint = pi_attested.start_search_proxy()
                 argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                             alias=alias, upstream_name=f"{alias.model_id} [confidential]",

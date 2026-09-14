@@ -1,9 +1,9 @@
-"""`ir surveyor export` — the one-file record the attorney hands a client: the disclosure (hashed), the
-relevance marks with their exposure, every attested session with its confinement stamp and governing
-contract, the Form-1503 search report rendered verbatim, the enclave-signed statements with the attestation
-evidence that binds each signing key, and an honest per-session note about what was out of the agent's reach.
-Built entirely from host-held files under confidential/.
+"""`ir surveyor export` — the one-directory record the attorney hands a client, built so a stranger can
+re-derive its claims from the bundle alone. Checks the bundle's shape (record.html, searches.json, evidence
+files, MANIFEST.json, VERIFY.md, the standalone verify_record.py), the honest per-session reach note, the
+model lane's full check list and limitations, the query-text binding, and the output-path safety.
 """
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,7 +16,8 @@ from inferroute_cli import surveyor as S
 def matter(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "Surveyor"))
-    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR"):
+    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_SURVEYOR_DEV_UNCONFINED",
+              "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
         monkeypatch.delenv(k, raising=False)
     assert S.main(["new", "AcmeCorp", "battery-cooling", "--priority-date", "2020-01-15"]) == 0
     (Path(S.load_record("AcmeCorp", "battery-cooling")["workspace"]) / "disclosure.md").write_text(
@@ -40,89 +41,114 @@ def _full_session():
     _write_session("sess-1", {
         "started_at": "2026-09-14T10:00:00Z",
         "confinement": "require (address-level egress enforced or the session does not start)",
-        "model_lane": {"verified": True, "checks": "15/15 passed"},
-        "search_lane": {"searches": [{"at": "2026-09-14T10:05:00Z", "hits": 3, "measurement": "a" * 40,
-                                      "policy": "b" * 40, "index": "us-2026-09"}]},
+        "model_lane": {"verified": True, "checks": "2/2", "model": "kimi-k2.6", "sealing": "ML-KEM-768 + ChaCha20-Poly1305",
+                       "check_list": [{"label": "Genuine TDX, debug off", "ok": True, "why": "quote verified"},
+                                      {"label": "GPUs verified by NVIDIA", "ok": True, "why": "NRAS ok"}],
+                       "limitations": ["GPU-to-CPU binding is not proven by this receipt"]},
+        "search_lane": {"searches": [{"at": "2026-09-14T10:05:00Z", "hits": 1}]},
         "which_surface_saw_what": {"model_enclave": "saw the conversation, inside a verified enclave"},
         "contract": {"contract_sha": "c0ffee1234567890abcdef", "preamble_sha": "beadfeed1234567890", "modified": False},
-    }, searches=[{"at": "2026-09-14T10:05:01Z", "signer_pub": "ed25519-pub-hex",
-                  "statement": {"hits_n": 3, "cutoff_date": 20200115, "request": "r1", "sig": "SIGNATUREHEX"},
+    }, searches=[{"at": "2026-09-14T10:05:01Z", "signer_pub": "ed25519-pub-hex", "cutoff_date": 20200115,
+                  "index_snapshot": "us-2026-09", "measurement": "m" * 40, "host_data": "h" * 40,
+                  "query_text": "A battery housing with QUERY-MARKER channels.",
+                  "statement": {"hits_n": 1, "cutoff_date": 20200115, "request_id": "r1", "sig": "SIGNATUREHEX"},
                   "result": {"hits": [{"key": "US-7000-B2"}]},
                   "report_html": "<!doctype html><html><body>REPORT-BODY-MARKER: US-7000-B2</body></html>",
-                  "evidence": {"offer": {"runtime_data": "b64rd", "report": "snp-report-bytes"}},
-                  "evidence_sha256": "x"}])
+                  "evidence": {"offer": {"runtime_data": "b64rd", "evidence": "snp-report-b64"}, "policy_b64": "cG9saWN5"}}])
     _write_state({"US-7000-B2": {"latest": {"value": "relevant", "actor": "human", "at": "2026-09-14T10:06:00Z",
                                             "surfaced": "this_session", "rank": 1},
                                  "history": [{"value": "relevant", "at": "2026-09-14T10:06:00Z"}]}})
 
 
-def test_export_renders_report_statements_evidence_and_marks(matter):
+def test_export_writes_a_verifiable_bundle(matter):
     _full_session()
-    out = matter / "out.html"
+    out = matter / "bundle"
     assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
-    h = out.read_text()
-    # matter + date bound + disclosure with hash (X5)
-    assert "AcmeCorp" in h and "2020-01-15" in h and "COOLANT-MARKER" in h and "sha256" in h
-    # the mark with host-computed exposure and human actor
-    assert "US-7000-B2" in h and "surfaced by this session" in h and "human" in h
-    # X8: the governing contract's sha shown, not only a modified flag
-    assert "c0ffee1234567890" in h and "beadfeed12345678" in h
-    # X1: the rendered report is embedded (in an isolated frame)
-    assert "REPORT-BODY-MARKER" in h and "srcdoc=" in h and "iframe" in h
-    # X2: the signed statement verbatim + a referenced evidence bundle + the redoable-checks sentence
-    assert "SIGNATUREHEX" in h and "ed25519-pub-hex" in h
-    assert ".evidence.json" in h and "REPORT_DATA = sha256(runtime_data)" in h
-    # the evidence bundle was written beside the HTML
-    sidecars = list(out.parent.glob("*.evidence.json"))
-    assert sidecars and "snp-report-bytes" in sidecars[0].read_text()
-    # X3: per-session reach note is honest for a require-mode session
-    assert "held outside the agent" in h and "write access (require-mode confinement)" in h
-    # self-contained: no external resource loads
-    assert "<script" not in h and "src=\"http" not in h and "<link " not in h
+    names = sorted(p.name for p in out.iterdir())
+    assert "record.html" in names and "searches.json" in names and "MANIFEST.json" in names
+    assert "VERIFY.md" in names and "verify_record.py" in names
+    assert any(n.endswith(".evidence.json") for n in names)
+    # the bundle's own verifier is the real standalone file, unmodified
+    src = (Path(S.__file__).resolve().parent / "pi_attested" / "verify_record.py").read_bytes()
+    assert (out / "verify_record.py").read_bytes() == src
+    # MANIFEST covers every file and carries the matter's date bound
+    m = json.loads((out / "MANIFEST.json").read_text())
+    assert m["matter_cutoff"] == 20200115
+    for name, sha in m["files"].items():
+        assert hashlib.sha256((out / name).read_bytes()).hexdigest() == sha
+    assert set(m["files"]) == set(names) - {"MANIFEST.json"}
+    # searches.json binds statement, result, query text and names the evidence file by sha
+    rows = json.loads((out / "searches.json").read_text())
+    assert rows[0]["query_text"].startswith("A battery housing with QUERY-MARKER")
+    assert rows[0]["statement"]["sig"] == "SIGNATUREHEX" and rows[0]["result"]["hits"][0]["key"] == "US-7000-B2"
+    assert (out / rows[0]["evidence_file"]).exists()
+    assert hashlib.sha256((out / rows[0]["evidence_file"]).read_bytes()).hexdigest() == rows[0]["evidence_sha256"]
+    # the evidence file carries the policy so HOST_DATA = sha256(policy) is redoable
+    assert json.loads((out / rows[0]["evidence_file"]).read_text())["policy_b64"] == "cG9saWN5"
+    # permissions: 0700 dir, 0600 files
+    assert (out.stat().st_mode & 0o777) == 0o700
+    assert all((p.stat().st_mode & 0o777) == 0o600 for p in out.iterdir())
+
+
+def test_record_html_shows_report_query_statement_model_checks_and_honest_reach(matter):
+    _full_session()
+    out = matter / "b2"
+    S.cmd_export("AcmeCorp/battery-cooling", str(out))
+    h = (out / "record.html").read_text()
+    assert "COOLANT-MARKER" in h and "sha256" in h                                  # disclosure, hashed
+    assert "QUERY-MARKER" in h and "query_sha256" in h                              # the text actually searched
+    assert "REPORT-BODY-MARKER" in h and "srcdoc=" in h                             # the report, isolated
+    assert "SIGNATUREHEX" in h and "ed25519-pub-hex" in h                           # statement verbatim
+    assert ".evidence.json" in h and "REPORT_DATA = SHA-256(runtime_data)" in h    # evidence + redo sentence
+    assert "Genuine TDX, debug off" in h and "GPU-to-CPU binding is not proven" in h  # model lane, verbatim
+    assert "c0ffee1234567890" in h                                                  # governing contract
+    assert "held outside the agent" in h and "self-report" in h                     # honest reach
+    assert "does and does not prove" in h and "Not claimed" in h
+    assert "<script" not in h and 'src="http' not in h and "<link " not in h
 
 
 def test_export_is_honest_about_a_dev_unconfined_session(matter):
-    _write_session("sess-dev", {
-        "started_at": "2026-09-14T11:00:00Z",
-        "confinement": "unconfined (developer override)",
-        "model_lane": {"verified": True, "checks": "15/15"},
-        "search_lane": {"searches": []},
-        "contract": {"contract_sha": "c0ffee", "preamble_sha": "beadfeed"},
-    })
-    out = matter / "dev.html"
-    assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
-    h = out.read_text()
-    assert "class=bad>unconfined (developer override)" in h
-    assert "the agent could have altered these records" in h
+    _write_session("sess-dev", {"started_at": "t", "confinement": "unconfined (developer override)",
+                                "model_lane": {"verified": True, "checks": "1/1"}, "search_lane": {"searches": []},
+                                "contract": {"contract_sha": "c0ffee", "preamble_sha": "beadfeed"}})
+    out = matter / "b3"
+    S.cmd_export("AcmeCorp/battery-cooling", str(out))
+    h = (out / "record.html").read_text()
+    assert "class=bad>unconfined (developer override)" in h and "the agent could have altered these records" in h
 
 
 def test_export_flags_a_missing_confinement_stamp_as_warn(matter):
     _write_session("sess-x", {"started_at": "t", "model_lane": {"verified": True}, "search_lane": {"searches": []}})
-    out = matter / "x.html"
-    assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
-    h = out.read_text()
-    assert "class=warn>confinement not recorded" in h          # X6: missing is not green
+    out = matter / "b4"
+    S.cmd_export("AcmeCorp/battery-cooling", str(out))
+    assert "class=warn>confinement not recorded" in (out / "record.html").read_text()
 
 
-def test_export_refuses_a_path_inside_the_workspace_or_a_sync_root(matter, monkeypatch):
+def test_export_refuses_workspace_and_sync_root(matter):
     ws = Path(S.load_record("AcmeCorp", "battery-cooling")["workspace"])
-    assert S.main(["export", "AcmeCorp/battery-cooling", "-o", str(ws / "record.html")]) == 2   # X4 workspace
-    assert S.main(["export", "AcmeCorp/battery-cooling", "-o", str(matter / "OneDrive" / "r.html")]) == 2  # sync root
+    assert S.main(["export", "AcmeCorp/battery-cooling", "-o", str(ws / "rec")]) == 2
+    assert S.main(["export", "AcmeCorp/battery-cooling", "-o", str(matter / "OneDrive" / "rec")]) == 2
 
 
-def test_export_default_path_is_outside_the_workspace_and_locked_down(matter, capsys):
+def test_export_default_path_is_outside_the_workspace_and_warns_plaintext(matter, capsys):
     assert S.main(["export", "AcmeCorp/battery-cooling"]) == 0
-    exports = S.surveyor_root() / "AcmeCorp" / "exports"
-    files = list(exports.glob("*.html"))
-    assert files and (files[0].stat().st_mode & 0o777) == 0o600
+    dirs = list((S.surveyor_root() / "AcmeCorp" / "exports").iterdir())
+    assert dirs and (dirs[0] / "record.html").exists()
     assert "plain text" in capsys.readouterr().out
 
 
+def test_verify_export_runs_the_bundled_verifier(matter):
+    # with no sealed searches the bundle verifies trivially (integrity only) — the command wiring is what's tested
+    out = matter / "b5"
+    S.cmd_export("AcmeCorp/battery-cooling", str(out))
+    assert S.main(["verify-export", str(out)]) == 0
+
+
 def test_export_of_a_matter_with_no_sessions_still_renders(matter):
-    out = matter / "empty.html"
+    out = matter / "empty"
     assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
-    h = out.read_text()
-    assert "No attested sessions" in h and "No relevance marks" in h
+    h = (out / "record.html").read_text()
+    assert "No attested sessions" in h and "No relevance marks" in h and "No sealed search completed" in h
 
 
 def test_export_of_unknown_matter_refuses(matter):

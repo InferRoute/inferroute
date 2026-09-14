@@ -20,8 +20,10 @@ endpoint, or that would be sent while the session's verdict is anything but veri
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -31,6 +33,49 @@ EXTENSION = Path(__file__).resolve().parent / "pi_attested" / "ir-attested.ts"
 PROVIDER = "inferroute"
 TOOLS = ("read", "edit", "write", "grep", "find", "ls")
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+# ── the mission contract (see pi_attested/{preamble,contract}.md and the decision record) ──
+# The model's whole system prompt is preamble then contract, with HTML comments stripped. The prompt
+# REPLACES Pi's default persona (--system-prompt), verified by capture to leave only a "cwd" line.
+# The expected sha of each, over the SENT (stripped) bytes, is pinned here: the contract is fixed and
+# changed only deliberately. A drifted on-disk sha is not silently run — the panel and session record
+# say "contract modified" and the launch carries the flag.
+PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
+CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
+PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
+PINNED_CONTRACT_SHA = "08a79e5159d8097a6507111f9dfc06dc5fa62136fd7456ba0755cc2a69a459ab"
+
+
+def _strip_comments(text: str) -> str:
+    """The bytes actually sent to the model: HTML comments removed, one trailing newline."""
+    return re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL).strip() + "\n"
+
+
+def load_contract() -> dict:
+    """Return {text, preamble_sha, contract_sha, modified} for the launch. `text` is preamble then
+    contract, comments stripped. `modified` is True if either sha differs from the pinned value."""
+    preamble = _strip_comments(PREAMBLE_FILE.read_text())
+    contract = _strip_comments(CONTRACT_FILE.read_text())
+    p_sha = hashlib.sha256(preamble.encode()).hexdigest()
+    c_sha = hashlib.sha256(contract.encode()).hexdigest()
+    return {"text": preamble + "\n" + contract, "preamble_sha": p_sha, "contract_sha": c_sha,
+            "modified": p_sha != PINNED_PREAMBLE_SHA or c_sha != PINNED_CONTRACT_SHA}
+
+
+def config_hash(alias, tools: tuple) -> str:
+    """A hash of the launch config that shapes what the assistant is and can do — model, tool
+    allowlist, provider — so the session record can pin the configuration it ran under."""
+    payload = json.dumps({"model": getattr(alias, "short", ""), "provider": PROVIDER, "tools": sorted(tools)},
+                         sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def pi_version(binary: str) -> str:
+    import subprocess
+    try:
+        return subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=10).stdout.strip()[:40]
+    except Exception:                                       # noqa: BLE001
+        return "unknown"
 # Passthrough flags that would load other code, change where requests go, or widen the tool set.
 REFUSED_FLAGS = {
     "-e": "loads another extension", "--extension": "loads another extension",
@@ -112,7 +157,18 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         env.pop("IR_SEARCH_ENDPOINT", None)
     for name in ("no_proxy", "NO_PROXY"):
         env[name] = _with_loopback(env.get("no_proxy") if env.get("no_proxy") is not None else env.get("NO_PROXY"))
+    # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
+    # config dir; its stamps go to the extension for the panel and the session record.
+    contract = load_contract()
+    sp = cfg / "system-prompt.txt"
+    sp.write_text(contract["text"])
+    env["IR_CONTRACT_SHA"] = contract["contract_sha"]
+    env["IR_PREAMBLE_SHA"] = contract["preamble_sha"]
+    env["IR_CONTRACT_MODIFIED"] = "1" if contract["modified"] else "0"
+    env["IR_CONFIG_HASH"] = config_hash(alias, tools)
+    env["IR_PI_VERSION"] = pi_version(binary)
     return [binary, "-ne", "-e", str(EXTENSION), "-na", "--tools", ",".join(tools),
+            "--system-prompt", str(sp),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
 
 

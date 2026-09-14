@@ -172,3 +172,56 @@ def stop_search_proxy() -> None:
             proc.wait(timeout=5)
         except Exception:                                   # noqa: BLE001
             proc.kill()
+
+
+# ───────────────────────── egress confinement ─────────────────────────
+#
+# Confine Pi's whole process tree to the local verifying proxies and nothing else, so a compromised or
+# injected agent still cannot reach the network except through them. On a platform that cannot do it,
+# warn and launch unconfined unless IR_ATTESTED_CONFINE=require, which refuses instead.
+
+def confine_disabled() -> bool:
+    return os.environ.get("IR_ATTESTED_CONFINE", "").strip().lower() in ("0", "off", "no", "none")
+
+
+def confine_required() -> bool:
+    return os.environ.get("IR_ATTESTED_CONFINE", "").strip().lower() in ("1", "require", "required", "strict")
+
+
+def preexec_confine(ports: list[int], then=None):
+    """A preexec_fn that confines the child to `ports` then runs `then` (e.g. reset SIGINT). Confinement
+    failure raises only when IR_ATTESTED_CONFINE=require; otherwise the child launches unconfined and a
+    one-line notice is printed once from the parent (see confine_notice)."""
+    import sys
+    from inferroute_local import confinement
+
+    def _fn():
+        try:
+            confinement.apply([p for p in ports if p])
+        except confinement.Unavailable:
+            if confine_required():
+                raise
+        if then is not None:
+            then()
+    if not confine_disabled():
+        return _fn
+    return then if then is not None else (lambda: None)
+
+
+def confine_notice(ports: list[int]) -> str | None:
+    """What to tell the user about confinement before launch: the ports allowed, or why it is off. Returns
+    None when confinement is disabled by the user."""
+    import sys
+    if confine_disabled():
+        return None
+    from inferroute_local import confinement
+    try:
+        abi = confinement.landlock_abi(__import__("ctypes").CDLL(None, use_errno=True)) if sys.platform == "linux" else 0
+    except Exception:                                       # noqa: BLE001
+        abi = 0
+    if sys.platform == "linux" and abi >= 4:
+        return f"network confined to the local proxies (ports {', '.join(str(p) for p in ports if p)})"
+    if confine_required():
+        return "IR_ATTESTED_CONFINE=require but this platform cannot confine egress; the launch will refuse"
+    return ("this platform cannot confine the agent's network (needs Linux with Landlock ABI 4); "
+            "the agent could reach the network directly — set IR_ATTESTED_CONFINE=require to refuse instead")

@@ -262,9 +262,11 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
                 from . import pi_attested
+                search_endpoint = pi_attested.start_search_proxy()
                 argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                             alias=alias, upstream_name=f"{alias.model_id} [confidential]",
-                                            search_endpoint=pi_attested.start_search_proxy())
+                                            search_endpoint=search_endpoint)
+                pi_confine_ports = [port] + ([int(search_endpoint.rsplit(":", 1)[1])] if search_endpoint else [])
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                                     alias=alias, upstream_name=f"{alias.model_id} [confidential]")
@@ -277,9 +279,16 @@ def launch(args: list[str], agent: str = "claude") -> int:
                 launch_mod._record_launch(session_id, alias.model_id, "confidential", agent=agent)
             console.print(f"[grey58]{'resuming' if resuming else 'launching'} {agent} on the confidential lane · "
                           f"local endpoint 127.0.0.1:{port}[/]\n")
+            reset_sigint = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)  # noqa: E731
+            preexec = reset_sigint
+            if agent == "pi":
+                from . import pi_attested
+                notice = pi_attested.confine_notice(pi_confine_ports)
+                if notice:
+                    console.print(f"[grey58]{notice}[/]")
+                preexec = pi_attested.preexec_confine(pi_confine_ports, then=reset_sigint)
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
-            proc = await asyncio.create_subprocess_exec(
-                *argv, env=env, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+            proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
             rc = await proc.wait()
             if agent == "pi":
                 from . import pi_attested

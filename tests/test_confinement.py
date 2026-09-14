@@ -150,3 +150,63 @@ def _try_remote():
         return True
     except Exception:                                           # noqa: BLE001
         return False
+
+
+@needs_landlock
+def test_write_scoping_confines_writes_but_not_reads():
+    """Only the given trees are writable; the plant-and-run escape paths are denied; reads stay open."""
+    import tempfile
+    d = tempfile.mkdtemp()
+    ws, cfg, deny = os.path.join(d, "ws"), os.path.join(d, "cfg"), os.path.join(d, "deny")
+    for p in (ws, cfg, deny):
+        os.makedirs(p)
+    with open(os.path.join(deny, "search.json"), "w") as fh:
+        fh.write("orig")
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    def attempts(allowed):
+        out = []
+
+        def a(label, fn):
+            try:
+                fn(); out.append(f"{label}=OK")
+            except Exception:                                          # noqa: BLE001
+                out.append(f"{label}=DENIED")
+        a("write_ws", lambda: open(os.path.join(ws, "e.txt"), "w").write("x"))
+        a("mkdir_ws", lambda: os.mkdir(os.path.join(ws, "sub")))
+        a("write_cfg", lambda: open(os.path.join(cfg, "s.jsonl"), "w").write("x"))
+        a("write_devnull", lambda: open("/dev/null", "w").write("x"))
+        a("escape_write_searchjson", lambda: open(os.path.join(deny, "search.json"), "w").write("PWNED"))
+        a("read_etc_passwd", lambda: open("/etc/passwd").read())
+        return "\n".join(out)
+
+    def child(ports, _attempts, allowed_port):
+        r, w = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            os.close(r)
+            try:
+                C.apply(ports, write_paths=[ws, cfg, "/dev/null"])
+                os.write(w, attempts(allowed_port).encode())
+                os._exit(0)
+            except BaseException as e:                                 # noqa: BLE001
+                os.write(w, f"SETUP-FAILED:{type(e).__name__}".encode()); os._exit(3)
+        os.close(w)
+        buf = b""
+        while True:
+            c = os.read(r, 4096)
+            if not c:
+                break
+            buf += c
+        os.waitpid(pid, 0)
+        return buf.decode()
+
+    out = child([port], attempts, port)
+    assert "SETUP-FAILED" not in out, out
+    got = dict(line.split("=", 1) for line in out.splitlines())
+    assert got["write_ws"] == "OK" and got["mkdir_ws"] == "OK" and got["write_cfg"] == "OK" and got["write_devnull"] == "OK"
+    assert got["escape_write_searchjson"] == "DENIED"
+    assert got["read_etc_passwd"] == "OK"                               # reads are NOT confined
+    assert open(os.path.join(deny, "search.json")).read() == "orig"     # the escape file is untouched

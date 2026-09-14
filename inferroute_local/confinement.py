@@ -37,10 +37,42 @@ _NR = {"x86_64": {"landlock_create_ruleset": 444, "landlock_add_rule": 445, "lan
                    "seccomp": 277, "socket": 198, "io_uring_setup": 425, "AUDIT_ARCH": 0xC00000B7}}
 
 PR_SET_NO_NEW_PRIVS = 38
+LANDLOCK_RULE_PATH_BENEATH = 1
 LANDLOCK_RULE_NET_PORT = 2
 LANDLOCK_ACCESS_NET_BIND_TCP = 1 << 0
 LANDLOCK_ACCESS_NET_CONNECT_TCP = 1 << 1
 LANDLOCK_CREATE_RULESET_VERSION = 1 << 0
+
+# Filesystem access rights (linux/landlock.h). We handle only the WRITE-class rights: reads and execs
+# are left UNHANDLED, so everything the agent can read or run today it still can — no allow-list of
+# Node's libraries, CA bundles or /proc. Only writes are confined, to the few paths the agent legitimately
+# writes. This closes the sandbox ESCAPE where the write tool plants search.json, ~/.bashrc, a git hook or
+# authorized_keys that then runs OUTSIDE the network confinement.
+FS_WRITE_FILE = 1 << 1
+FS_REMOVE_DIR = 1 << 4
+FS_REMOVE_FILE = 1 << 5
+FS_MAKE_CHAR = 1 << 6
+FS_MAKE_DIR = 1 << 7
+FS_MAKE_REG = 1 << 8
+FS_MAKE_SOCK = 1 << 9
+FS_MAKE_FIFO = 1 << 10
+FS_MAKE_BLOCK = 1 << 11
+FS_MAKE_SYM = 1 << 12
+FS_REFER = 1 << 13          # ABI >= 2
+FS_TRUNCATE = 1 << 14       # ABI >= 3
+O_PATH = 0o10000000
+
+
+def fs_write_mask(abi: int) -> int:
+    """The write-class rights to HANDLE (restrict), for this ABI. Only rights the running kernel knows
+    may be in `handled_access_fs`, or landlock_create_ruleset returns EINVAL."""
+    m = (FS_WRITE_FILE | FS_REMOVE_DIR | FS_REMOVE_FILE | FS_MAKE_CHAR | FS_MAKE_DIR | FS_MAKE_REG
+         | FS_MAKE_SOCK | FS_MAKE_FIFO | FS_MAKE_BLOCK | FS_MAKE_SYM)
+    if abi >= 2:
+        m |= FS_REFER
+    if abi >= 3:
+        m |= FS_TRUNCATE
+    return m
 
 SECCOMP_SET_MODE_FILTER = 1
 SECCOMP_RET_ERRNO = 0x00050000
@@ -69,6 +101,11 @@ class _NetPortAttr(ctypes.Structure):
     _fields_ = [("allowed_access", ctypes.c_uint64), ("port", ctypes.c_uint64)]
 
 
+class _PathBeneathAttr(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
+
+
 class _SockFprog(ctypes.Structure):
     _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.c_void_p)]
 
@@ -77,11 +114,12 @@ class _SockFprog(ctypes.Structure):
 class Confinement:
     ports: List[int]
     landlock_abi: int
+    write_paths: List[str] = field(default_factory=list)
     residuals: List[str] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {"mechanism": "landlock+seccomp", "allowed_tcp_ports": self.ports,
-                "landlock_abi": self.landlock_abi, "residuals": self.residuals}
+                "landlock_abi": self.landlock_abi, "writable_paths": self.write_paths, "residuals": self.residuals}
 
 
 def _arch() -> str:
@@ -144,7 +182,7 @@ def _seccomp_program(arch: str) -> bytes:
     return b"".join(prog)
 
 
-def apply(ports: List[int], *, min_landlock_abi: int = 4) -> Confinement:
+def apply(ports: List[int], *, write_paths: List[str] | None = None, min_landlock_abi: int = 4) -> Confinement:
     """Confine THIS process and its children to TCP connect on `ports` only. Call in a child, after
     fork and before exec (a preexec_fn), or in a process about to become the agent.
 
@@ -166,15 +204,35 @@ def apply(ports: List[int], *, min_landlock_abi: int = 4) -> Confinement:
     if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
         raise Unavailable(f"PR_SET_NO_NEW_PRIVS failed (errno {ctypes.get_errno()})")
 
-    attr = _RulesetAttr(0, LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP, 0)
+    # We restrict TCP connect (net) AND write-class filesystem access (fs), in one ruleset. Reads and
+    # execs are NOT handled, so they stay exactly as they are; only writes are confined to `write_paths`.
+    fs_mask = fs_write_mask(abi) if write_paths is not None else 0
+    net_mask = LANDLOCK_ACCESS_NET_BIND_TCP | LANDLOCK_ACCESS_NET_CONNECT_TCP
+    attr = _RulesetAttr(fs_mask, net_mask, 0)
     fd = libc.syscall(a["landlock_create_ruleset"], ctypes.byref(attr), ctypes.c_size_t(ctypes.sizeof(attr)), ctypes.c_uint32(0))
     if fd < 0:
         raise Unavailable(f"landlock_create_ruleset failed (errno {ctypes.get_errno()})")
+    granted: List[str] = []
     try:
         for port in ports:
             rule = _NetPortAttr(LANDLOCK_ACCESS_NET_CONNECT_TCP, int(port))
             if libc.syscall(a["landlock_add_rule"], fd, LANDLOCK_RULE_NET_PORT, ctypes.byref(rule), ctypes.c_uint32(0)) != 0:
                 raise Unavailable(f"landlock_add_rule for port {port} failed (errno {ctypes.get_errno()})")
+        # Directories may hold dir-class rights (MAKE_*/REMOVE_*); a plain file may only hold file rights
+        # (WRITE_FILE, TRUNCATE). Granting dir rights on a file returns EINVAL.
+        file_mask = FS_WRITE_FILE | (FS_TRUNCATE if abi >= 3 else 0)
+        for path in (write_paths or []):
+            if not os.path.exists(path):
+                continue
+            pfd = os.open(path, O_PATH | os.O_CLOEXEC)
+            try:
+                allowed = fs_mask if os.path.isdir(path) else file_mask
+                rule = _PathBeneathAttr(allowed, pfd)
+                if libc.syscall(a["landlock_add_rule"], fd, LANDLOCK_RULE_PATH_BENEATH, ctypes.byref(rule), ctypes.c_uint32(0)) != 0:
+                    raise Unavailable(f"landlock_add_rule (write) for {path} failed (errno {ctypes.get_errno()})")
+                granted.append(path)
+            finally:
+                os.close(pfd)
         if libc.syscall(a["landlock_restrict_self"], fd, ctypes.c_uint32(0)) != 0:
             raise Unavailable(f"landlock_restrict_self failed (errno {ctypes.get_errno()})")
     finally:
@@ -186,17 +244,25 @@ def apply(ports: List[int], *, min_landlock_abi: int = 4) -> Confinement:
     if libc.syscall(a["seccomp"], SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(fprog)) != 0:
         raise Unavailable(f"seccomp filter install failed (errno {ctypes.get_errno()})")
 
+    residuals = ["Landlock matches port, not address: a remote server on an allowed port number is "
+                 "reachable; close with a network namespace (one-time AppArmor profile), a "
+                 "connect-inspecting supervisor, or sandbox-exec on macOS."]
+    if write_paths is None:
+        residuals.append("Filesystem writes are NOT confined (write_paths not set): the agent can write "
+                         "outside the workspace.")
+    else:
+        residuals.append("File READS are not confined; an agent can read other files into model context "
+                         "until the matter-only bind-mount ships.")
     return Confinement(ports=sorted(set(int(p) for p in ports)), landlock_abi=abi,
-                       residuals=["Landlock matches port, not address: a remote server on an allowed "
-                                  "port number is reachable; close with a network namespace (one-time "
-                                  "AppArmor profile), a connect-inspecting supervisor, or sandbox-exec on macOS."])
+                       write_paths=granted, residuals=residuals)
 
 
-def preexec(ports: List[int], *, min_landlock_abi: int = 4):
+def preexec(ports: List[int], *, write_paths: List[str] | None = None, min_landlock_abi: int = 4):
     """A preexec_fn for subprocess/asyncio that confines the child before exec. On Unavailable it raises,
-    so the parent's subprocess call fails loudly rather than launching an unconfined agent."""
+    so the parent's subprocess call fails loudly rather than launching an unconfined agent. Pass
+    `write_paths` to confine writes to exactly those trees (reads/execs stay unrestricted)."""
     def _fn():
-        apply(ports, min_landlock_abi=min_landlock_abi)
+        apply(ports, write_paths=write_paths, min_landlock_abi=min_landlock_abi)
     return _fn
 
 

@@ -167,6 +167,10 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     env["IR_CONTRACT_MODIFIED"] = "1" if contract["modified"] else "0"
     env["IR_CONFIG_HASH"] = config_hash(alias, tools)
     env["IR_PI_VERSION"] = pi_version(binary)
+    # A private tmp inside the (writable) config dir, so Node's temp files land somewhere the write
+    # confinement allows rather than in /tmp.
+    (cfg / "tmp").mkdir(exist_ok=True)
+    env["TMPDIR"] = str(cfg / "tmp")
     return [binary, "-ne", "-e", str(EXTENSION), "-na", "--tools", ",".join(tools),
             "--system-prompt", str(sp),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
@@ -250,16 +254,23 @@ def confine_required() -> bool:
     return os.environ.get("IR_ATTESTED_CONFINE", "").strip().lower() in ("1", "require", "required", "strict")
 
 
-def preexec_confine(ports: list[int], then=None):
-    """A preexec_fn that confines the child to `ports` then runs `then` (e.g. reset SIGINT). Confinement
-    failure raises only when IR_ATTESTED_CONFINE=require; otherwise the child launches unconfined and a
-    one-line notice is printed once from the parent (see confine_notice)."""
-    import sys
+def confine_write_paths(cfg_dir: str, cwd: str) -> list[str]:
+    """The only trees the confined agent may WRITE: its own config/session dir, the matter workspace, a
+    private tmp, and the two device files Pi needs. Everything else — search.json, the matter state file,
+    ~/.bashrc, ~/.ssh, git hooks — is write-denied, closing the plant-and-run-later escape."""
+    cfg = Path(cfg_dir)
+    return [str(cfg), cwd, str(cfg / "tmp"), "/dev/null", "/dev/tty"]
+
+
+def preexec_confine(ports: list[int], write_paths: list[str] | None = None, then=None):
+    """A preexec_fn that confines the child to `ports` (TCP) and `write_paths` (filesystem writes), then
+    runs `then` (e.g. reset SIGINT). Confinement failure raises only when IR_ATTESTED_CONFINE=require;
+    otherwise the child launches unconfined and a one-line notice is printed once from the parent."""
     from inferroute_local import confinement
 
     def _fn():
         try:
-            confinement.apply([p for p in ports if p])
+            confinement.apply([p for p in ports if p], write_paths=write_paths)
         except confinement.Unavailable:
             if confine_required():
                 raise

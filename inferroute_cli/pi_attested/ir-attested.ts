@@ -285,7 +285,10 @@ function hitsText(out: SearchVerdict): string {
 // The spine of the product, stated for one session: which surface saw what. Written to
 // INFERROUTE_HOME/confidential/attested-sessions/<session>.json on shutdown and after each search.
 
-const HOME = process.env.INFERROUTE_HOME ?? "";
+// The record dir the launcher provides (writable under the fs confinement); falls back to the old
+// location only when the launcher did not set it.
+const RECORD_DIR = process.env.IR_ATTESTED_RECORD_DIR
+	?? (process.env.INFERROUTE_HOME ? join(process.env.INFERROUTE_HOME, "confidential", "attested-sessions") : "");
 const CONFINED = (process.env.IR_ATTESTED_CONFINE ?? "").trim().toLowerCase() !== "off";
 const CONTRACT = {
 	contract_sha: process.env.IR_CONTRACT_SHA ?? "",
@@ -354,11 +357,10 @@ class SessionRecord {
 	}
 
 	write(): string | null {
-		if (!HOME || !this.sessionId) return null;
+		if (!RECORD_DIR || !this.sessionId) return null;
 		try {
-			const dir = join(HOME, "confidential", "attested-sessions");
-			mkdirSync(dir, { recursive: true });
-			const path = join(dir, `${this.sessionId}.json`);
+			mkdirSync(RECORD_DIR, { recursive: true });
+			const path = join(RECORD_DIR, `${this.sessionId}.json`);
 			writeFileSync(path, `${JSON.stringify(this.toJSON(), null, 1)}\n`);
 			return path;
 		} catch {

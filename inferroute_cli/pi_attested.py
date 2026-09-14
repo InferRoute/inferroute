@@ -292,6 +292,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     # The confinement line is stamped host-side by the verifier from this label (F1 / d3): a dev-unconfined
     # session cannot ship looking confined, because the extension never gets to assert this field.
     argv += ["--confinement", confinement_label()]
+    # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
+    argv += ["--session-id", sess_id]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):

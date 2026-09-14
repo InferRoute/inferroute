@@ -193,6 +193,13 @@ def launch(args: list[str], agent: str = "claude") -> int:
         hint = f"ir {agent} --model {user_model}" if agent != "claude" else f"ir --model {user_model}"
         sys.stderr.write(f"\n  Run this next time directly:  {hint}\n\n")
     alias = _resolve_model(user_model)
+    if agent == "pi":
+        from . import pi_attested
+        try:
+            pi_attested.check_passthrough(passthrough)       # refuse before verifying, not after
+        except pi_attested.Refused as e:
+            sys.stderr.write(f"\n  ir: {e}\n\n")
+            return 2
     if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
         sys.stderr.write("\n  ir: refusing to launch a nested agent session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
         return 2
@@ -254,8 +261,9 @@ def launch(args: list[str], agent: str = "claude") -> int:
                 else:
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
-                argv = agents_mod.pi_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
-                                              alias=alias, upstream_name=f"{alias.model_id} [confidential]")
+                from . import pi_attested
+                argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
+                                            alias=alias, upstream_name=f"{alias.model_id} [confidential]")
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                                     alias=alias, upstream_name=f"{alias.model_id} [confidential]")

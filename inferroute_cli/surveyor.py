@@ -74,8 +74,10 @@ def state_path(client: str, matter: str) -> Path:
     return matters_dir() / client / f"{matter}.state.json"
 
 
-def record_file(client: str, matter: str) -> Path:
-    return matters_dir() / client / f"{matter}.record.json"
+def records_dir(client: str, matter: str) -> Path:
+    # One directory per matter under confidential/attested-records; each session writes its own file
+    # here (Q2). The export (step 6) lists them all. Under confidential/, write-denied to the agent.
+    return _irhome() / "confidential" / "attested-records" / client / matter
 
 
 def _under_sync_root(p: Path) -> str | None:
@@ -182,7 +184,7 @@ def cmd_list() -> int:
     return 0
 
 
-def cmd_open(spec: str) -> int:
+def cmd_open(spec: str, dev_unconfined: bool = False) -> int:
     client, matter = _split_matter(spec)
     rec = load_record(client, matter)
     ws = Path(rec["workspace"])
@@ -198,8 +200,19 @@ def cmd_open(spec: str) -> int:
     # the shared search.json. All three live under confidential/, write-denied to the agent (S1).
     os.environ["IR_MATTER_CUTOFF"] = str(_to_yyyymmdd(rec["date_bound"]))
     os.environ["IR_MATTER_STATE_FILE"] = str(state_path(client, matter))
-    os.environ["IR_MATTER_RECORD_FILE"] = str(record_file(client, matter))
-    os.environ["IR_ATTESTED_CONFINE"] = os.environ.get("IR_ATTESTED_CONFINE") or "require"   # attorney: address-level
+    os.environ["IR_MATTER_RECORD_DIR"] = str(records_dir(client, matter))     # per-session record files (Q2)
+    # F1: an attorney session is confined at address level, FULL STOP — never inherit a leftover
+    # IR_ATTESTED_CONFINE=off from the shell (that would silently run unconfined and, under trusted state,
+    # trust forgeable approvals). Force require. The only way down is an explicit developer override, which
+    # is banner-loud, recorded as unconfined, and (in the verifier) never granted trusted state.
+    if dev_unconfined:
+        os.environ["IR_ATTESTED_CONFINE"] = "off"
+        os.environ["IR_SURVEYOR_DEV_UNCONFINED"] = "1"
+        sys.stderr.write("\n  ⚠  DEVELOPER OVERRIDE: opening this matter UNCONFINED. The agent is NOT sandboxed;\n"
+                         "     approvals are NOT persisted/trusted; this is recorded as an unconfined session.\n"
+                         "     Never use this on a real client matter.\n\n")
+    else:
+        os.environ["IR_ATTESTED_CONFINE"] = "require"
     os.chdir(ws)
     print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     from . import confidential as confidential_mod
@@ -212,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
     d = sub.add_parser("set-date"); d.add_argument("matter"); d.add_argument("date")
     o = sub.add_parser("open"); o.add_argument("matter")
+    o.add_argument("--dev-unconfined", action="store_true",
+                   help="developer override: open UNCONFINED (no sandbox, no trusted state). Never for a real matter.")
     sub.add_parser("list")
     a = p.parse_args(argv)
     try:
@@ -220,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "set-date":
             return cmd_set_date(a.matter, a.date)
         if a.cmd == "open":
-            return cmd_open(a.matter)
+            return cmd_open(a.matter, dev_unconfined=a.dev_unconfined)
         if a.cmd == "list":
             return cmd_list()
     except SurveyorError as e:

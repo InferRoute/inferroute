@@ -21,9 +21,23 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "Surveyor"))
     # A clean slate for the per-matter env the launcher sets.
-    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_FILE", "IR_ATTESTED_CONFINE"):
+    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR",
+              "IR_ATTESTED_CONFINE", "IR_SURVEYOR_DEV_UNCONFINED"):
         monkeypatch.delenv(k, raising=False)
     return tmp_path
+
+
+def _patch_launch(monkeypatch, captured):
+    def fake_launch(args, agent="claude"):
+        captured["args"] = args
+        captured["agent"] = agent
+        captured["env"] = {k: os.environ.get(k) for k in
+                           ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR",
+                            "IR_ATTESTED_CONFINE", "IR_SURVEYOR_DEV_UNCONFINED")}
+        captured["cwd"] = os.getcwd()
+        return 0
+    import inferroute_cli.confidential as confidential_mod
+    monkeypatch.setattr(confidential_mod, "launch", fake_launch)
 
 
 def _rec(tmp, client, matter):
@@ -93,26 +107,39 @@ def test_bad_date_is_refused(home):
 def test_open_passes_per_matter_env_and_never_touches_search_json(home, monkeypatch):
     S.main(["new", "Acme", "m7", "--priority-date", "2021-07-08"])
     captured = {}
-
-    def fake_launch(args, agent="claude"):
-        captured["args"] = args
-        captured["agent"] = agent
-        captured["env"] = {k: os.environ.get(k) for k in
-                           ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_FILE", "IR_ATTESTED_CONFINE")}
-        captured["cwd"] = os.getcwd()
-        return 0
-
-    import inferroute_cli.confidential as confidential_mod
-    monkeypatch.setattr(confidential_mod, "launch", fake_launch)
+    _patch_launch(monkeypatch, captured)
     assert S.main(["open", "Acme/m7"]) == 0
     assert captured["agent"] == "pi" and captured["args"] == []
     env = captured["env"]
     # S2: the cutoff/state/record are per-matter env from the host record, and all live under confidential/.
     assert env["IR_MATTER_CUTOFF"] == "20210708"
-    assert "confidential" in env["IR_MATTER_STATE_FILE"] and "confidential" in env["IR_MATTER_RECORD_FILE"]
+    assert "confidential" in env["IR_MATTER_STATE_FILE"] and "confidential" in env["IR_MATTER_RECORD_DIR"]
+    assert Path(env["IR_MATTER_RECORD_DIR"]).name == "m7" and "attested-records" in env["IR_MATTER_RECORD_DIR"]
     assert env["IR_ATTESTED_CONFINE"] == "require"             # attorney default: address-level egress
     # open chdir'd into the matter workspace.
     assert captured["cwd"] == str(Path(_rec(home, "Acme", "m7")["workspace"]))
+
+
+def test_open_forces_require_even_when_the_shell_set_confine_off(home, monkeypatch):
+    # F1: a leftover IR_ATTESTED_CONFINE=off from dev work must NOT make an attorney session unconfined.
+    monkeypatch.setenv("IR_ATTESTED_CONFINE", "off")
+    S.main(["new", "Acme", "m7b"])
+    captured = {}
+    _patch_launch(monkeypatch, captured)
+    assert S.main(["open", "Acme/m7b"]) == 0
+    assert captured["env"]["IR_ATTESTED_CONFINE"] == "require"
+    assert captured["env"]["IR_SURVEYOR_DEV_UNCONFINED"] is None
+
+
+def test_dev_unconfined_override_is_loud_and_untrusted(home, monkeypatch, capsys):
+    # The only way down from require: an explicit flag, recorded as unconfined, never granted trusted state.
+    S.main(["new", "Acme", "m7c"])
+    captured = {}
+    _patch_launch(monkeypatch, captured)
+    assert S.main(["open", "Acme/m7c", "--dev-unconfined"]) == 0
+    assert captured["env"]["IR_ATTESTED_CONFINE"] == "off"
+    assert captured["env"]["IR_SURVEYOR_DEV_UNCONFINED"] == "1"
+    assert "DEVELOPER OVERRIDE" in capsys.readouterr().err
 
 
 def test_open_refuses_a_git_repo_in_the_workspace(home, monkeypatch):

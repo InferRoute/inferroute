@@ -271,15 +271,24 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     state_file = os.environ.get("IR_MATTER_STATE_FILE") or cfg.get("state_file")
     if state_file:
         argv += ["--state-file", state_file]
+        # Trust approvals persisted in the state file (no re-prompt each session) ONLY when this launch is
+        # confined in require mode (Q1): forging an approval needs a WRITE to the state file, and require
+        # mode means the write-scoped Landlock is enforced (confidential/ is not in the write set) or Pi
+        # does not start. Never trust disk under a dev override or a port-level fallback where the sandbox
+        # may not apply — there, approvals stay memory-only and are re-prompted.
+        if confine_required() and not confine_disabled():
+            argv += ["--trust-state"]
     # The disclosure record is written by the verifier to a file under confidential/, which the fs
-    # confinement denies the agent (D1). Per-matter path if a matter is open, else one file per launch.
-    rec_file = os.environ.get("IR_MATTER_RECORD_FILE")
-    if not rec_file:
-        rec_dir = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
-        rec_dir.mkdir(parents=True, exist_ok=True)
-        rec_file = str(rec_dir / f"{os.getpid()}-{int(__import__('time').time())}.json")
-    Path(rec_file).parent.mkdir(parents=True, exist_ok=True)
-    argv += ["--record-file", rec_file]
+    # confinement denies the agent (D1). One file PER SESSION (Q2): a fresh, unique path each launch, so a
+    # later session never overwrites what an earlier one disclosed. When a matter is open the file lands in
+    # that matter's records dir; otherwise in the flat attested-records dir.
+    import time as _time
+    sess_id = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime()) + "-" + os.urandom(4).hex()
+    rec_dir = os.environ.get("IR_MATTER_RECORD_DIR")
+    rec_dir = Path(rec_dir) if rec_dir else \
+        Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    argv += ["--record-file", str(rec_dir / f"{sess_id}.json")]
     try:
         proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     except (OSError, KeyError):

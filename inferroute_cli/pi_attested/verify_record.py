@@ -26,16 +26,33 @@ What it re-derives, per sealed search, from the bundle alone:
   content   query_sha256 == SHA-256(request_id ‖ canonical(query text)); result_sha256 == SHA-256(request_id
             ‖ canonical(result)); hits_n == len(hits); cutoff_date == the matter's date bound
 
-What it does NOT do, and how to redo those parts with independent tools:
-  * It does not fetch anything. Certificate validity dates are reported, not enforced (endorsements outlive
-    their signing certificates; the reference verifiers behave the same).
-  * For a fully independent redo of the AMD chain use AMD's `snpguest verify` (github.com/virtee/snpguest)
-    or Google's `go-sev-guest` (github.com/google/go-sev-guest) on <sha>.evidence.json → offer.evidence +
-    offer.endorsements; for the COSE endorsement, `go-cose` or `pycose`; to tie the policy to a container
-    image, regenerate it with `az confcom acipolicygen` from the image digest and compare its hash.
-  * It cannot verify the attorney's OWN machine was confined — that is the device's self-report.
+  identity  ONLY WITH --reference: HOST_DATA (the container policy hash) and the index / encoder manifest
+            hashes equal values obtained from InferRoute OUT OF BAND. Without this the bundle proves a genuine
+            Azure confidential container — NOT that it was InferRoute's code or index — and this check FAILS.
 
-Exit status 0 iff every applicable check passes. Output is plain text: one line per check.
+READ THIS: a SEV-SNP report plus Microsoft's endorsement prove that SOME confidential container ran on a
+genuine AMD chip inside Microsoft's utility VM. Anyone with an Azure account can produce such a bundle with
+their own signer key, their own statement over any query and result, and their own policy. The MEASUREMENT
+endorses Microsoft's utility VM, not our container. What identifies InferRoute's enclave is the policy hash
+(HOST_DATA) and the manifest hashes — and those mean nothing unless you compare them against values you got
+from InferRoute independently of this bundle. Pass that file with --reference; until then, treat the record
+as "a genuine confidential container searched this text", no more.
+
+What it does NOT do:
+  * It does not fetch anything. AMD certificate validity dates ARE enforced (as in the live verifier); the
+    Microsoft COSE chain's are not (endorsements outlive their signing certificates; Microsoft's own
+    reference verifier behaves the same). No revocation checking; no basicConstraints / keyUsage / path
+    length validation — trust is two root pins plus signature links, nothing more.
+  * It cannot verify the attorney's OWN machine was confined — that is the device's self-report.
+  * It proves what the record SHOWS, never that the record shows every search that ran (statements carry
+    no sequence numbers; a deleted search row is undetectable).
+  * MANIFEST.json is an index, not a seal: it is unsigned. The enclave-signed statements are the seal.
+  * `--extract DIR` writes each search's raw evidence (report.bin, vcek.pem, ask_ark.pem,
+    uvm_endorsement.cose, runtime_data.json, policy.rego) for independent tools; VERIFY.md names them
+    honestly as tools that consume these bytes, without claiming invocations we have run here.
+
+Exit status 0 iff every check passes (a bundle with no sealed searches, or without --reference, does not).
+Output is plain text: one line per check.
 """
 from __future__ import annotations
 
@@ -62,6 +79,10 @@ MS_UVM_ROOT_SHA256_B64URL = "I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s"
 UVM_EKU = "1.3.6.1.4.1.311.76.59.1.2"
 UVM_FEED = "ContainerPlat-AMD-UVM"
 UVM_MIN_SVN = 100
+
+MIN_CRYPTOGRAPHY = 42            # not_valid_before_utc needs 42+; signature_algorithm_parameters 41+
+REQUIRED_FILES = ("record.html", "searches.json", "verify_record.py", "VERIFY.md")
+UNLISTED_OK = {"MANIFEST.json", "MANIFEST.json.ots", "SHA256SUMS"}
 
 _AMD = "1.3.6.1.4.1.3704.1."
 OID_PRODUCT, OID_HWID = _AMD + "2", _AMD + "4"
@@ -228,6 +249,7 @@ def parse_report(report: bytes) -> Dict[str, Any]:
     flags, = struct.unpack("<I", g("flags", 4))
     policy, = struct.unpack("<Q", g("policy", 8))
     return {"version": struct.unpack("<I", g("version", 4))[0], "policy": policy,
+            "vmpl": struct.unpack("<I", g("vmpl", 4))[0],
             "debug_allowed": bool((policy >> 19) & 1), "mask_chip_id": bool((flags >> 1) & 1),
             "signing_key": SIGNING_KEY.get((flags >> 2) & 0x7, "reserved"),
             "report_data": g("report_data", 64), "measurement": g("measurement", 48), "host_data": g("host_data", 32),
@@ -328,7 +350,8 @@ def report_signature_ok(p: Dict[str, Any], cert) -> bool:
 # ───────────────────────────── the checks ─────────────────────────────
 
 
-def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, pins: Dict[str, str]) -> None:
+def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, pins: Dict[str, str],
+              min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> None:
     import datetime as dt
     c.add(p["version"] >= 2 and p["signature"] != b"\x00" * 512, "hardware report",
           f"SNP report version {p['version']}, {'signed' if p['signature'] != b'\x00' * 512 else 'UNSIGNED'}")
@@ -336,6 +359,7 @@ def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, p
           else "guest policy ALLOWS debugging — the host could inspect this VM")
     if not c.add(p["signing_key"] == "VCEK", "signed by a chip key", f"signing key is {p['signing_key']} (only VCEK accepted)"):
         return
+    c.add(p["vmpl"] == 0, "report from VMPL 0", f"VMPL {p['vmpl']}" + ("" if p["vmpl"] == 0 else " — ACI runs the guest at VMPL 0; a higher VMPL is not the container's own report"))
     try:
         vcek = load_certs(vcek_pem)[0]
         chain = load_certs(chain_pem)
@@ -357,8 +381,8 @@ def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, p
     c.add(signed_by(vcek, ask), "VCEK signed by ASK", "chip endorsement key under the product signing key")
     now = dt.datetime.now(dt.timezone.utc)
     outside = [_cn(x) or "VCEK" for x in (vcek, ask, ark) if not (x.not_valid_before_utc <= now <= x.not_valid_after_utc)]
-    c.add(None if outside else True, "certificate dates", "all valid now" if not outside
-          else f"outside validity now: {outside} (reported, not enforced — endorsements outlive certificates)")
+    c.add(not outside, "AMD certificates in date", "VCEK, ASK and ARK all valid now" if not outside
+          else f"outside validity now: {outside} (enforced for the AMD chain, as in the live verifier; the Microsoft COSE chain is date-exempt by design)")
     hwid = _ext(vcek, OID_HWID) or b""
     chip = p["chip_id"]
     same = bool(hwid) and not p["mask_chip_id"] and chip[:len(hwid)] == hwid and not any(chip[len(hwid):])
@@ -366,6 +390,14 @@ def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, p
     want = tcb_params(p["reported_tcb"], zen5=product in ZEN5)
     mismatch = [k for k, v in want.items() if _der_int(_ext(vcek, OID_TCB[k])) != v]
     c.add(not mismatch, "VCEK is for this firmware", f"reported TCB {want}" + ("" if not mismatch else f"; certificate differs on {mismatch}"))
+    # A minimum firmware TCB, same shape as the UVM SVN floor: a VCEK that agrees with the report still
+    # passes on known-vulnerable firmware unless a floor is pinned.
+    floor = (min_tcb or {}).get(product)
+    if floor:
+        low = {k: (want.get(k), v) for k, v in floor.items() if want.get(k) is None or want[k] < v}
+        c.add(not low, "firmware TCB at or above minimum", f"minimum {floor}" + ("" if not low else f"; BELOW on {low}"))
+    else:
+        c.add(None, "firmware TCB at or above minimum", f"no minimum pinned for {product} (pass --min-tcb {product}=snpSPL:N,ucodeSPL:N); reported {want}")
     ok = report_signature_ok(p, vcek)
     c.add(ok, "report signature", "ECDSA P-384 over the report verifies under the VCEK" if ok else "does NOT verify under the VCEK")
 
@@ -447,42 +479,61 @@ def check_uvm(c: Checks, blob: bytes, root_b64url: str, min_svn: int) -> Optiona
     return meas
 
 
+ZERO32 = "0" * 64
+
+
+def _is_hex32(v: Any) -> bool:
+    return isinstance(v, str) and len(v) == 64 and all(ch in "0123456789abcdef" for ch in v.lower())
+
+
 def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[str, str], uvm_root: str,
-                  uvm_min_svn: int, matter_cutoff: Optional[int]) -> Checks:
-    """All checks for one sealed search. `row` is the searches.json entry; `evidence` the bundle it names."""
+                  uvm_min_svn: int, matter_cutoff: Optional[int], reference: Optional[Dict[str, Any]],
+                  min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
+    """All checks for one sealed search. `row` is the searches.json entry; `evidence` the bundle it names;
+    `reference` the values obtained from InferRoute out of band (None = identity cannot be established)."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     c = Checks()
-    st = dict(row.get("statement") or {})
+    st = dict(row.get("statement") or {}) if isinstance(row.get("statement"), dict) else {}
     sig_hex = st.pop("sig", None)
-    signer = row.get("signer_pub") or ""
+    signer = row.get("signer_pub") if isinstance(row.get("signer_pub"), str) else ""
 
-    # 1. statement signature
+    # 1. statement signature — under the STATED signer; whether that signer is hardware-bound is check 2
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(signer)).verify(bytes.fromhex(sig_hex or ""), canonical(st))
         c.add(True, "statement signature", f"Ed25519 over the canonical statement verifies under {signer[:16]}…")
     except Exception:                                       # noqa: BLE001
-        c.add(False, "statement signature", "does NOT verify under the stated signer key")
+        c.add(False, "statement signature", "does NOT verify under the stated signer key (or key/signature malformed)")
 
-    # 2. runtime data and its commitments
-    offer = (evidence or {}).get("offer") or {}
+    # 2. runtime data and its commitments — these rows ALWAYS appear; a missing or malformed runtime data is a FAIL,
+    #    never a silent absence, because an unbound signer is exactly what a forger would ship.
+    offer = (evidence or {}).get("offer") if isinstance((evidence or {}).get("offer"), dict) else {}
+    rd: Dict[str, Any] = {}
+    rd_bytes = b""
     try:
         rd_bytes = base64.b64decode(offer["runtime_data"], validate=True)
-        rd = json.loads(rd_bytes)
-    except Exception:                                       # noqa: BLE001
-        c.add(False, "runtime data present", "the evidence bundle carries no readable runtime_data")
-        rd, rd_bytes = {}, b""
-    if rd:
-        c.add(rd.get("statement_signer_pub") == signer, "signer key committed in runtime data",
-              "the signing key is the one the hardware report binds" if rd.get("statement_signer_pub") == signer
-              else "the signing key is NOT the one in the runtime data")
-        c.add(st.get("runtime_data_sha256") == sha256_hex(rd_bytes), "statement names this runtime data",
-              f"runtime_data_sha256 {sha256_hex(rd_bytes)[:16]}…")
-        same = (st.get("lifetime_id") == rd.get("lifetime_id") and st.get("index_manifest_sha256") == rd.get("index_manifest_sha256")
-                and st.get("model_manifest_sha256") == rd.get("model_manifest_sha256"))
-        c.add(same, "statement matches enclave commitments",
-              f"lifetime {str(rd.get('lifetime_id'))[:12]}…, index manifest {str(rd.get('index_manifest_sha256'))[:12]}…, encoders {str(rd.get('model_manifest_sha256'))[:12]}…")
+        parsed = json.loads(rd_bytes)
+        if not isinstance(parsed, dict):
+            raise ValueError("runtime data is not a JSON object")
+        rd = parsed
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "runtime data present", f"no readable runtime_data object in the evidence bundle ({type(exc).__name__})")
+    rd_signer = rd.get("statement_signer_pub")
+    c.add(bool(rd) and _is_hex32(rd_signer) and rd_signer.lower() != ZERO32 and rd_signer == signer,
+          "signer key committed in runtime data",
+          "the signing key is the one the hardware report binds" if rd and rd_signer == signer and _is_hex32(rd_signer) and rd_signer.lower() != ZERO32
+          else ("runtime data carries no valid, non-zero statement_signer_pub" if not (_is_hex32(rd_signer) and str(rd_signer).lower() != ZERO32)
+                else "the signing key is NOT the one in the runtime data"))
+    c.add(bool(rd) and st.get("runtime_data_sha256") == sha256_hex(rd_bytes), "statement names this runtime data",
+          f"runtime_data_sha256 {sha256_hex(rd_bytes)[:16]}…" if rd else "no runtime data to compare")
+    idx, mdl = rd.get("index_manifest_sha256"), rd.get("model_manifest_sha256")
+    commits_ok = (bool(rd) and _is_hex32(idx) and idx.lower() != ZERO32 and _is_hex32(mdl) and mdl.lower() != ZERO32
+                  and st.get("lifetime_id") == rd.get("lifetime_id") and st.get("index_manifest_sha256") == idx
+                  and st.get("model_manifest_sha256") == mdl)
+    c.add(commits_ok, "statement matches enclave commitments",
+          f"lifetime {str(rd.get('lifetime_id'))[:12]}…, index manifest {str(idx)[:12]}…, encoders {str(mdl)[:12]}… (all non-zero)"
+          if commits_ok else "lifetime / index manifest / encoder manifest are missing, zero, or differ from the statement")
 
-    # 3. hardware report binds the runtime data; AMD chain; UVM; policy
+    # 3. hardware report binds the runtime data; AMD chain; UVM; policy consistency
     p = None
     try:
         report = base64.b64decode(offer["evidence"], validate=True)
@@ -491,14 +542,15 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
         c.add(False, "SNP report", f"missing or unparsable ({type(exc).__name__})")
     if p is not None:
         want = hashlib.sha256(rd_bytes).digest() + b"\x00" * 32
-        c.add(rd_bytes != b"" and p["report_data"] == want, "REPORT_DATA binds runtime data",
-              "REPORT_DATA == SHA-256(runtime data) ‖ zeros: the chip signed over this runtime data" if p["report_data"] == want
-              else "REPORT_DATA does NOT equal SHA-256(runtime data) ‖ zeros")
+        bound = bool(rd) and p["report_data"] == want
+        c.add(bound, "REPORT_DATA binds runtime data",
+              "REPORT_DATA == SHA-256(runtime data) ‖ zeros: the chip signed over this runtime data" if bound
+              else "REPORT_DATA does NOT equal SHA-256(runtime data) ‖ zeros (or no runtime data)")
         try:
             certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
             from cryptography.hazmat.primitives import serialization
             pem = lambda cs: b"".join(x.public_bytes(serialization.Encoding.PEM) for x in cs)  # noqa: E731
-            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins)
+            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins, min_tcb)
         except Exception as exc:                            # noqa: BLE001
             c.add(False, "AMD endorsements", f"missing or unparsable ({type(exc).__name__})")
         try:
@@ -508,25 +560,42 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
             c.add(False, "UVM endorsement", f"missing or unparsable ({type(exc).__name__})")
         if meas is not None:
             c.add(p["measurement"] == meas, "MEASUREMENT is the endorsed utility VM",
-                  f"report MEASUREMENT {p['measurement'].hex()[:16]}… {'==' if p['measurement'] == meas else '!='} endorsed launch measurement")
+                  f"report MEASUREMENT {p['measurement'].hex()[:16]}… {'==' if p['measurement'] == meas else '!='} endorsed launch measurement "
+                  "(this endorses Microsoft's utility VM, not InferRoute's container)")
         pol = (evidence or {}).get("policy_b64")
         if pol:
             try:
                 hd = sha256_hex(base64.b64decode(pol))
-                c.add(hd == p["host_data"].hex(), "HOST_DATA is the container policy",
-                      f"SHA-256(policy) {hd[:16]}… {'==' if hd == p['host_data'].hex() else '!='} HOST_DATA")
+                c.add(hd == p["host_data"].hex(), "archived policy matches the report (consistency)",
+                      f"SHA-256(archived policy) {hd[:16]}… {'==' if hd == p['host_data'].hex() else '!='} HOST_DATA — agreement within the bundle, not identity")
             except Exception:                               # noqa: BLE001
-                c.add(False, "HOST_DATA is the container policy", "policy in bundle is not valid base64")
+                c.add(False, "archived policy matches the report (consistency)", "policy in bundle is not valid base64")
         else:
-            c.add(None, "HOST_DATA is the container policy",
-                  f"policy not in bundle; HOST_DATA is {p['host_data'].hex()} — obtain the deployed policy and compare SHA-256(base64-decoded policy)")
+            c.add(None, "archived policy matches the report (consistency)", "no policy archived in the bundle")
 
-    # 4. content bindings
+    # 4. IDENTITY — the only check that separates InferRoute's enclave from any other Azure confidential
+    #    container. Mirrors the live verifier's ruling (aci_evidence: an unpinned policy is a FAILING step).
+    if reference is None:
+        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
+              "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT InferRoute's; "
+              "obtain InferRoute's published reference out of band and rerun with --reference")
+    else:
+        pols = {str(x).lower() for x in reference.get("policy_sha256", [])}
+        idxs = {str(x).lower() for x in reference.get("index_manifest_sha256", [])}
+        mdls = {str(x).lower() for x in reference.get("model_manifest_sha256", [])}
+        pol_ok = p is not None and p["host_data"].hex() in pols
+        idx_ok = bool(rd) and str(idx).lower() in idxs
+        mdl_ok = bool(rd) and str(mdl).lower() in mdls
+        c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
+              f"policy {'✓' if pol_ok else '✗'} index manifest {'✓' if idx_ok else '✗'} encoder manifest {'✓' if mdl_ok else '✗'} "
+              f"against reference {reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}")
+
+    # 5. content bindings
     rid = str(st.get("request_id") or "")
     q = row.get("query_text")
-    if q is not None:
-        c.add(salted(rid, q) == st.get("query_sha256"), "query text is the one searched",
-              "SHA-256(request_id ‖ canonical(query)) == query_sha256" if salted(rid, q) == st.get("query_sha256") else "query text does NOT match query_sha256")
+    if isinstance(q, str):
+        ok = salted(rid, q) == st.get("query_sha256")
+        c.add(ok, "query text is the one searched", "SHA-256(request_id ‖ canonical(query)) == query_sha256" if ok else "query text does NOT match query_sha256")
     else:
         c.add(None, "query text is the one searched", "query text not in bundle; query_sha256 cannot be opened")
     res = row.get("result")
@@ -536,9 +605,13 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
         c.add(len(res.get("hits") or []) == st.get("hits_n"), "hit count as signed", f"{len(res.get('hits') or [])} hits, statement says {st.get('hits_n')}")
     else:
         c.add(None, "result is the signed result", "opened result not in bundle")
+    # The enclave-SIGNED cutoff is the fact; the MANIFEST's is the record's unsigned claim about the matter.
     if matter_cutoff is not None:
-        c.add(st.get("cutoff_date") == matter_cutoff, "date bound as recorded",
-              f"statement cutoff {st.get('cutoff_date')}, matter date bound {matter_cutoff}")
+        c.add(st.get("cutoff_date") == matter_cutoff, "date bound the enclave was given",
+              f"signed statement cutoff_date {st.get('cutoff_date')}; the record claims the matter's date bound was {matter_cutoff} "
+              "(consistency with an unsigned value — the signed number is the fact)")
+    else:
+        c.add(None, "date bound the enclave was given", f"signed statement cutoff_date {st.get('cutoff_date')}; the record states no matter date bound")
     return c
 
 
@@ -546,6 +619,9 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
 
 
 def check_manifest(bundle_dir: str) -> Tuple[Checks, Dict[str, Any]]:
+    """MANIFEST.json is an INDEX, not a seal (it is unsigned). It lets a reader detect a file changed after
+    export; it cannot prove the export was honest. Membership is enforced both ways: every required file must
+    be listed and present, and every file present must be listed."""
     c = Checks()
     mp = os.path.join(bundle_dir, "MANIFEST.json")
     try:
@@ -553,8 +629,9 @@ def check_manifest(bundle_dir: str) -> Tuple[Checks, Dict[str, Any]]:
     except Exception as exc:                                # noqa: BLE001
         c.add(False, "MANIFEST.json", f"missing or unreadable ({type(exc).__name__})")
         return c, {}
-    bad = []
-    for name, want in (manifest.get("files") or {}).items():
+    listed = manifest.get("files") or {}
+    bad, missing = [], [f for f in REQUIRED_FILES if f not in listed]
+    for name, want in listed.items():
         try:
             got = sha256_hex(open(os.path.join(bundle_dir, name), "rb").read())
         except OSError:
@@ -562,66 +639,172 @@ def check_manifest(bundle_dir: str) -> Tuple[Checks, Dict[str, Any]]:
             continue
         if got != want:
             bad.append(name)
-    c.add(not bad, "bundle integrity", f"{len(manifest.get('files') or {})} files match MANIFEST.json" if not bad else f"MISMATCH: {bad}")
+    present = {n for n in os.listdir(bundle_dir) if os.path.isfile(os.path.join(bundle_dir, n))}
+    unlisted = sorted(present - set(listed) - UNLISTED_OK)
+    ok = not bad and not missing and not unlisted
+    c.add(ok, "bundle integrity (MANIFEST is an index, not a seal)",
+          f"{len(listed)} files match MANIFEST.json; all required files listed; no unlisted files" if ok
+          else f"MISMATCH {bad}; required-but-unlisted {missing}; present-but-unlisted {unlisted}")
     return c, manifest
 
 
+def extract(bundle_dir: str, out_dir: str, searches: List[Dict[str, Any]]) -> None:
+    """Write each search's raw evidence as files for independent tools (snpguest, go-sev-guest, go-cose…)."""
+    os.makedirs(out_dir, exist_ok=True)
+    for i, row in enumerate(searches, 1):
+        ef = row.get("evidence_file")
+        if not ef:
+            continue
+        try:
+            ev = json.load(open(os.path.join(bundle_dir, ef)))
+        except Exception:                                   # noqa: BLE001
+            continue
+        offer = ev.get("offer") or {}
+        d = os.path.join(out_dir, f"search-{i}")
+        os.makedirs(d, exist_ok=True)
+        try:
+            open(os.path.join(d, "report.bin"), "wb").write(base64.b64decode(offer.get("evidence", ""), validate=True))
+            certs = load_certs(base64.b64decode(offer.get("endorsements", ""), validate=True))
+            from cryptography.hazmat.primitives import serialization
+            open(os.path.join(d, "vcek.pem"), "wb").write(certs[0].public_bytes(serialization.Encoding.PEM))
+            open(os.path.join(d, "ask_ark.pem"), "wb").write(b"".join(x.public_bytes(serialization.Encoding.PEM) for x in certs[1:]))
+            open(os.path.join(d, "uvm_endorsement.cose"), "wb").write(base64.b64decode(offer.get("uvm_endorsements", ""), validate=True))
+            open(os.path.join(d, "runtime_data.json"), "wb").write(base64.b64decode(offer.get("runtime_data", ""), validate=True))
+            if ev.get("policy_b64"):
+                open(os.path.join(d, "policy.rego"), "wb").write(base64.b64decode(ev["policy_b64"]))
+            open(os.path.join(d, "statement.json"), "w").write(json.dumps(row.get("statement"), indent=1, sort_keys=True))
+        except Exception as exc:                            # noqa: BLE001
+            open(os.path.join(d, "EXTRACT-FAILED.txt"), "w").write(f"{type(exc).__name__}: {exc}\n")
+    print(f"extracted raw evidence under {out_dir}/search-N/ (report.bin, vcek.pem, ask_ark.pem, uvm_endorsement.cose, runtime_data.json, policy.rego, statement.json)")
+
+
+def _parse_min_tcb(items: List[str]) -> Dict[str, Dict[str, int]]:
+    out: Dict[str, Dict[str, int]] = {}
+    for it in items:
+        product, _, spec = it.partition("=")
+        floor: Dict[str, int] = {}
+        for kv in spec.split(","):
+            k, _, v = kv.partition(":")
+            if k and v.isdigit():
+                floor[k] = int(v)
+        out[product] = floor
+    return out
+
+
 def main(argv: Optional[List[str]] = None) -> int:
+    """Exit codes: 0 every check passed under production roots; 1 one or more checks failed (or nothing to
+    verify); 2 usage / refused; 3 every check passed but under TEST roots (never a verification of Azure)."""
     import argparse
     ap = argparse.ArgumentParser(description="Independently verify an attested prior-art record bundle.")
-    ap.add_argument("bundle", help="the export directory (holds record.html, searches.json, MANIFEST.json, *.evidence.json)")
-    ap.add_argument("--amd-pin", action="append", default=[], metavar="PRODUCT=SPKI_SHA256_HEX",
-                    help="override an AMD root pin (TEST ROOTS ONLY — printed loudly)")
-    ap.add_argument("--uvm-root", default=None, help="override the Microsoft UVM root fingerprint (TEST ROOTS ONLY)")
+    ap.add_argument("bundle", help="the export directory (record.html, searches.json, MANIFEST.json, *.evidence.json)")
+    ap.add_argument("--reference", default=None, metavar="FILE",
+                    help="InferRoute's published reference (policy_sha256, index_manifest_sha256, model_manifest_sha256), obtained OUT OF BAND; without it identity FAILS")
+    ap.add_argument("--min-tcb", action="append", default=[], metavar="PRODUCT=snpSPL:N,ucodeSPL:N",
+                    help="minimum firmware TCB per product line (same shape as the UVM SVN floor)")
+    ap.add_argument("--extract", default=None, metavar="DIR", help="also write each search's raw evidence as files for independent tools")
+    ap.add_argument("--amd-pin", action="append", default=[], metavar="PRODUCT=SPKI_SHA256_HEX", help="TEST ROOTS ONLY; requires --i-am-testing")
+    ap.add_argument("--uvm-root", default=None, help="TEST ROOTS ONLY; requires --i-am-testing")
     ap.add_argument("--uvm-min-svn", type=int, default=UVM_MIN_SVN)
+    ap.add_argument("--i-am-testing", action="store_true", help="acknowledge that pin overrides make this a TEST run, never a verification of Azure (exit 3 at best)")
     a = ap.parse_args(argv)
 
+    try:
+        import cryptography
+        major = int(str(cryptography.__version__).split(".")[0])
+    except Exception:                                       # noqa: BLE001
+        print("REFUSED: the `cryptography` package is required (pip install cryptography>=42)")
+        return 2
+    if major < MIN_CRYPTOGRAPHY:
+        print(f"REFUSED: cryptography {cryptography.__version__} is too old; this verifier needs >= {MIN_CRYPTOGRAPHY} (pip install -U cryptography). Not a verdict on the record.")
+        return 2
+
+    test_roots = bool(a.amd_pin) or a.uvm_root is not None
+    if test_roots and not a.i_am_testing:
+        print("REFUSED: --amd-pin / --uvm-root replace the production roots; a run with them can never verify an Azure record. "
+              "Add --i-am-testing if that is what you mean (the exit code will then be 3, not 0).")
+        return 2
     pins = dict(AMD_ARK_SPKI_SHA256)
-    test_roots = False
     for kv in a.amd_pin:
         k, _, v = kv.partition("=")
         pins[k] = v.lower()
-        test_roots = True
     uvm_root = a.uvm_root or MS_UVM_ROOT_SHA256_B64URL
-    if a.uvm_root:
-        test_roots = True
+    reference = None
+    if a.reference:
+        try:
+            reference = json.load(open(a.reference))
+            if not isinstance(reference, dict):
+                raise ValueError("not an object")
+        except Exception as exc:                            # noqa: BLE001
+            print(f"REFUSED: --reference {a.reference} unreadable ({type(exc).__name__})")
+            return 2
 
     print(f"Attested prior-art record: {os.path.abspath(a.bundle)}")
+    print("Trust model: two root pins (AMD ARK per product line, Microsoft Supply Chain RSA Root CA 2022) plus signature links. "
+          "No revocation checking; no basicConstraints / keyUsage / path-length validation. Identity comes only from --reference.")
     if test_roots:
-        print("!!! NON-PRODUCTION ROOTS PINNED: this run can only verify a TEST enclave, never Azure. !!!")
+        print("!!! NON-PRODUCTION ROOTS PINNED (--i-am-testing): this run verifies a TEST enclave, never Azure. Exit code 3 at best. !!!")
     c0, manifest = check_manifest(a.bundle)
     c0.dump()
-    all_ok = not c0.failed
+    fails = len(c0.failed)
     try:
         searches = json.load(open(os.path.join(a.bundle, "searches.json")))
+        if not isinstance(searches, list):
+            raise ValueError("not a list")
     except Exception as exc:                                # noqa: BLE001
         print(f"  FAIL searches.json: missing or unreadable ({type(exc).__name__})")
         return 1
-    cutoff = manifest.get("matter_cutoff")
+    cutoff = manifest.get("matter_cutoff") if isinstance(manifest.get("matter_cutoff"), int) else None
+    min_tcb = _parse_min_tcb(a.min_tcb)
+    listed = set((manifest.get("files") or {}).keys())
     if not searches:
-        print("  (no sealed searches in this record)")
+        print("  FAIL sealed searches: this record contains NO sealed search — there is nothing to verify")
+        fails += 1
     for i, row in enumerate(searches, 1):
+        if not isinstance(row, dict):
+            print(f"\nSearch {i}: FAIL malformed row")
+            fails += 1
+            continue
         print(f"\nSearch {i} — session {row.get('session_id')}, recorded {row.get('at')}")
-        ev = {}
+        ev: Dict[str, Any] = {}
         ef = row.get("evidence_file")
         if ef:
+            if ef not in listed:
+                print(f"  FAIL evidence file: {ef} is not listed in MANIFEST.json")
+                fails += 1
             try:
                 raw = open(os.path.join(a.bundle, ef), "rb").read()
                 if row.get("evidence_sha256") and sha256_hex(raw) != row["evidence_sha256"]:
                     print(f"  FAIL evidence file: {ef} sha256 does not match searches.json")
-                    all_ok = False
-                ev = json.loads(raw)
+                    fails += 1
+                loaded = json.loads(raw)
+                ev = loaded if isinstance(loaded, dict) else {}
             except Exception as exc:                        # noqa: BLE001
                 print(f"  FAIL evidence file: {ef} unreadable ({type(exc).__name__})")
-                all_ok = False
-        c = verify_search(row, ev, pins=pins, uvm_root=uvm_root, uvm_min_svn=a.uvm_min_svn, matter_cutoff=cutoff)
+                fails += 1
+        else:
+            print("  FAIL evidence file: none named for this search")
+            fails += 1
+        try:
+            c = verify_search(row, ev, pins=pins, uvm_root=uvm_root, uvm_min_svn=a.uvm_min_svn, matter_cutoff=cutoff,
+                              reference=reference, min_tcb=min_tcb)
+        except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal, not a traceback
+            print(f"  FAIL verifier error on this search: {type(exc).__name__}: {exc}")
+            fails += 1
+            continue
         c.dump()
-        if c.failed:
-            all_ok = False
-    print("\nRESULT:", "every applicable check PASSED" if all_ok else f"FAILED — {sum(1 for _ in [1])} or more checks did not pass; see FAIL lines above")
-    print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; enforcing certificate dates.")
-    print("Fully independent redo: snpguest / go-sev-guest (AMD chain), go-cose / pycose (UVM), az confcom acipolicygen (policy ↔ image).")
-    return 0 if all_ok else 1
+        fails += len(c.failed)
+    if a.extract:
+        extract(a.bundle, a.extract, [r for r in searches if isinstance(r, dict)])
+    print()
+    if fails:
+        print(f"RESULT: FAILED — {fails} check(s) did not pass; see FAIL lines above")
+    elif test_roots:
+        print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
+    else:
+        print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
+    print("This record proves what it shows; it cannot prove it shows every search that ran.")
+    print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; certificate revocation.")
+    return 1 if fails else (3 if test_roots else 0)
 
 
 if __name__ == "__main__":

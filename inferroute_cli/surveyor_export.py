@@ -36,53 +36,90 @@ _EXPOSURE_WORD = {
 
 VERIFY_MD = """# How to verify this record
 
-This bundle is self-contained. Nothing below needs InferRoute, this attorney's machine, or the internet,
-except where marked. Do the checks in any order; each is independent.
+This bundle is self-contained: nothing below needs InferRoute, this attorney's machine, or the internet,
+except the ONE thing that establishes identity (step 3), which by design must come from outside the bundle.
+The `verify_record.py` and `sha256sum` commands below are run, in the exporter's own test suite, on a
+bundle the exporter produced; `ots` needs the opentimestamps-client and is not exercised there. `python3`
+3.9+ and the `cryptography` package (>= 42) are the only requirements for the verifier.
 
-## 1. Quick: run the bundled verifier (stdlib + `cryptography`)
+## 1. Run the bundled verifier
 
-    python3 verify_record.py .
+    python3 verify_record.py . --reference reference.json
 
-It prints one line per check (PASS / FAIL / SKIP with the reason) and exits 0 only if every applicable
-check passed. It is one short file: read it before you trust it — it is meant to be audited in minutes.
+One line per check (PASS / FAIL / SKIP with the reason). Exit 0 only if EVERY check passed under production
+roots; 1 if any failed (including "no reference" and "no sealed searches"); 2 if refused (bad flags, old
+library); 3 if it passed but under test roots. The file is short on purpose — read it before trusting it.
 
-## 2. Bundle integrity
+## 2. Bundle integrity (an index, not a seal)
 
-`MANIFEST.json` lists the SHA-256 of every file. Recompute them (`sha256sum *`) and compare. If
-`MANIFEST.json.ots` is present, `ots verify MANIFEST.json` (OpenTimestamps, open source) proves the
-manifest existed no later than the Bitcoin block it is anchored in — evidence of the date of this record.
+`MANIFEST.json` lists the SHA-256 of every file and `SHA256SUMS` repeats them in coreutils form:
 
-## 3. What each check re-derives
+    sha256sum -c SHA256SUMS
 
-* **Statement signature** — Ed25519 over the canonical JSON of the statement (sort_keys, no spaces,
-  minus `sig`), under `signer_pub`. Any Ed25519 implementation can redo this.
-* **Signer key is hardware-bound** — `signer_pub` appears as `statement_signer_pub` inside
-  `offer.runtime_data` (base64 JSON), and the SEV-SNP report's `REPORT_DATA` (bytes 0x50..0x90) equals
-  SHA-256(runtime_data) followed by 32 zero bytes. So the AMD chip signed over that key.
-* **AMD chain** — the report (1184 bytes at `offer.evidence`) is ECDSA-P384-signed under the VCEK in
-  `offer.endorsements`; VCEK is signed by the ASK, ASK by the ARK, ARK self-signed; the ARK's public key
-  hashes to AMD's published root for the product line (the verifier prints the hash and the AMD KDS URL to
-  compare). Fully independent redo: `snpguest verify` (AMD, github.com/virtee/snpguest) or
-  `go-sev-guest` (Google, github.com/google/go-sev-guest) on the same report and certificates.
-* **Utility VM** — `offer.uvm_endorsements` is a COSE_Sign1 (PS384) signed by Microsoft; its x5chain
-  roots at "Microsoft Supply Chain RSA Root CA 2022" (fingerprint printed); its payload's launch
-  measurement equals the report's `MEASUREMENT` (bytes 0x90..0xC0). Independent redo: `go-cose`,
-  `pycose`.
-* **Container policy** — the report's `HOST_DATA` (bytes 0xC0..0xE0) equals SHA-256 of the
-  base64-decoded policy in `policy_b64`. To tie the policy to a container image, regenerate it with
-  `az confcom acipolicygen` from the image and compare. (If `policy_b64` is absent the verifier prints
-  the HOST_DATA to compare against the policy the operator publishes.)
-* **Query and result** — `query_sha256` = SHA-256(request_id ‖ canonical(query_text)) and
-  `result_sha256` = SHA-256(request_id ‖ canonical(result)), with `hits_n` = number of hits, and
-  `cutoff_date` = the matter's date bound in `MANIFEST.json`.
+Both are UNSIGNED. They let you see that a file changed after export; they cannot show the export was
+honest. The seal is the enclave-signed statement inside each search. If `MANIFEST.json.ots` is present:
 
-## 4. What this bundle cannot prove
+    ots verify MANIFEST.json.ots
 
-* That this attorney's own machine was confined while the session ran. That is the device's self-report
-  (`record.html` says, per session, whether it was run confined or under a developer override).
-* Anything about the model lane beyond the receipt's own listed checks and limitations, reproduced verbatim
-  in `record.html`.
-* Novelty, patentability, or the absence of prior art. The report lists what a bounded corpus surfaced.
+proves the manifest existed no later than the Bitcoin block it is anchored in (OpenTimestamps, open source).
+
+## 3. IDENTITY — the step that separates InferRoute's enclave from anyone's Azure container
+
+A SEV-SNP report and Microsoft's endorsement prove that SOME confidential container ran on a genuine AMD
+chip inside Microsoft's utility VM. Anyone with an Azure account can produce such a bundle with their own
+key, their own statement over any text, and their own policy. The MEASUREMENT endorses Microsoft's utility
+VM, not our container. What identifies InferRoute's enclave is the container-policy hash (HOST_DATA) and the
+index / encoder manifest hashes — and they mean nothing unless compared against values you obtained from
+InferRoute INDEPENDENTLY of this bundle:
+
+    reference.json  =  {"policy_sha256": [...], "index_manifest_sha256": [...], "model_manifest_sha256": [...],
+                        "source": "<where you got it>", "published_at": "..."}
+
+`MANIFEST.json` → `reference_hint` records what THIS machine was configured to expect at session time. It is
+a convenience, not authority: it came from the same machine as the bundle. Obtain the reference from
+InferRoute's published location and pass it with `--reference`. Until you do, the verifier FAILS identity.
+
+## 4. What each check re-derives (the bytes, by file)
+
+`searches.json` holds one entry per sealed search: `statement` (with `sig`), `result`, `query_text`,
+`signer_pub`, and `evidence_file`. That evidence file is JSON: `offer.evidence` (base64 of the 1184-byte
+SEV-SNP report), `offer.endorsements` (base64 PEM: VCEK, ASK, ARK), `offer.uvm_endorsements` (base64
+COSE_Sign1), `offer.runtime_data` (base64 JSON), and `policy_b64` (a sibling of `offer`, when archived).
+
+* **Statement signature** — Ed25519 over the canonical JSON of `statement` (keys sorted, no spaces,
+  `sig` removed) under `signer_pub`.
+* **Signer is hardware-bound** — `signer_pub` == `statement_signer_pub` inside `runtime_data`, and the
+  report's `REPORT_DATA` (bytes 0x50..0x90) == SHA-256(runtime_data bytes) ‖ 32 zero bytes.
+* **AMD chain** — report signed (ECDSA P-384, R/S little-endian at 0x2A0) under the VCEK; VCEK ← ASK ← ARK;
+  ARK SPKI SHA-256 == AMD's published root for the product (printed with the KDS URL — compare it yourself);
+  VCEK hwID and TCB match the report; VMPL 0; debug off; AMD certificate dates enforced.
+* **Utility VM** — COSE_Sign1 PS384 under its x5chain; chain root == Microsoft Supply Chain RSA Root CA 2022
+  (printed); payload launch measurement == report `MEASUREMENT` (0x90..0xC0).
+* **Policy consistency** — SHA-256(base64-decoded `policy_b64`) == report `HOST_DATA` (0xC0..0xE0). This is
+  agreement within the bundle; identity is step 3.
+* **Query / result** — `query_sha256` == SHA-256(request_id ‖ canonical(query_text)); `result_sha256` ==
+  SHA-256(request_id ‖ canonical(result)); `hits_n` == number of hits; the signed `cutoff_date` is the date
+  bound the enclave was given (the manifest's value is the record's unsigned claim about the matter).
+
+## 5. Independent tools
+
+    python3 verify_record.py . --extract raw/
+
+writes, per search, `raw/search-N/report.bin`, `vcek.pem`, `ask_ark.pem`, `uvm_endorsement.cose`,
+`runtime_data.json`, `policy.rego`, `statement.json` — the exact bytes the checks above consume, as files.
+These tools consume the same bytes: AMD's `snpguest` (github.com/virtee/snpguest) and Google's
+`go-sev-guest` (github.com/google/go-sev-guest) for the report and certificate chain; `go-cose` or
+`pycose` for the COSE endorsement; `az confcom acipolicygen` to regenerate a policy from a container image
+and compare its hash. We have NOT run those invocations on this bundle here; we make no claim about their
+exact command lines, only that the extracted files are their inputs.
+
+## 6. What this bundle cannot prove
+
+* That this attorney's own machine was confined while the session ran (the device's self-report, stated per
+  session in `record.html`).
+* Anything about the model lane beyond the receipt's own listed checks and limitations, reproduced verbatim.
+* That the record is COMPLETE: it proves what it shows, never that it shows every search that ran.
+* Novelty, patentability, or the absence of prior art.
 """
 
 
@@ -301,10 +338,19 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
         A("<p class=note>No sealed search completed for this matter.</p>")
 
     A("<h2>What this record does and does not prove</h2>")
+    any_policy = any(x.get("evidence", {}).get("policy_b64") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict))
     A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
       "result was signed by a key bound into an AMD SEV-SNP hardware report; that the report chains to AMD's published "
-      "root and the utility VM to Microsoft's; that the report commits to the container policy in force; that each "
-      "signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
+      "root and the utility VM to Microsoft's"
+      + ("; that the archived container policy agrees with the report's HOST_DATA" if any_policy else "")
+      + "; that each signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
+    A("<p class=note><b>What that does NOT establish on its own</b>: that the container was InferRoute's. A SEV-SNP "
+      "report and Microsoft's endorsement prove a genuine confidential container inside Microsoft's utility VM — the "
+      "MEASUREMENT endorses that utility VM, not our container. Only comparing the policy hash and the index / encoder "
+      "manifest hashes against values obtained from InferRoute <i>independently of this bundle</i> shows our code and our "
+      "index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root pins plus "
+      "signature links: no revocation checking, no certificate-path constraints. The MANIFEST is an unsigned index; the "
+      "enclave-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
     A("<p class=note><b>This device's own attestation only</b>: that its agent ran confined (per session above), that the "
       "date bound and marks were held outside the agent's reach, and that the model-lane checks passed as listed. "
       "A reader who does not trust this device should weigh those lines accordingly.</p>")
@@ -324,6 +370,22 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the attorney's machine.</p>")
     A("</body></html>")
     return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff}
+
+
+def _reference_hint() -> Dict[str, Any]:
+    """What THIS machine was configured to expect (search.json pins). A convenience for the reader — it comes
+    from the same machine as the bundle, so it is NOT the out-of-band reference the verifier needs."""
+    hint: Dict[str, Any] = {"note": "values this machine was configured to expect at session time; NOT authoritative — "
+                                    "obtain InferRoute's published reference independently and pass it with --reference"}
+    try:
+        from .pi_attested import search_config_path
+        cfg = json.loads(search_config_path().read_text())
+        for k in ("expect_host_data", "expect_index", "reference_url"):
+            if cfg.get(k):
+                hint[k] = cfg[k]
+    except Exception:                                          # noqa: BLE001
+        pass
+    return hint
 
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -362,12 +424,17 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     for sha, content in b["evidence"].items():
         files[f"{sha[:16]}.evidence.json"] = content.encode("utf-8")
     verifier_src = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"
-    if verifier_src.exists():
-        files["verify_record.py"] = verifier_src.read_bytes()
+    if not verifier_src.exists():
+        raise S.SurveyorError("the independent verifier (pi_attested/verify_record.py) is missing from this installation; "
+                              "refusing to write a record that VERIFY.md tells the reader to verify with it")
+    files["verify_record.py"] = verifier_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
                 "matter_cutoff": b["matter_cutoff"], "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "note": "an unsigned index of this bundle, not a seal; the enclave-signed statements in searches.json are the seal",
+                "reference_hint": _reference_hint(),
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
+    files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
     for name, data in files.items():
         p = dest / name
         p.write_bytes(data)

@@ -73,11 +73,25 @@ index / encoder manifest hashes — and they mean nothing unless compared agains
 InferRoute INDEPENDENTLY of this bundle:
 
     reference.json  =  {"policy_sha256": [...], "index_manifest_sha256": [...], "model_manifest_sha256": [...],
-                        "source": "<where you got it>", "published_at": "..."}
+                        "source": "<where you got it>", "published_at": "...", "sig": "<optional, see below>"}
+
+Each entry is either a bare hash or `{"value": "...", "valid_from": "YYYY-MM-DDTHH:MM:SSZ",
+"valid_to": "...", "retired": false}`. A record whose search matched an entry that was retired, or outside
+its window at the time of the search, FAILS identity — and the verifier says which entry matched and why.
+That is how a policy later withdrawn cannot pass as current, and how the enclave changing over a long
+matter is spoken about precisely.
+
+**How to obtain the reference so that it means something.** A page served by InferRoute at the moment you
+verify is the weakest form: you would be trusting InferRoute again, just later. Do this instead:
+1. Take the reference values (and InferRoute's publication key) from your engagement letter or a signed
+   release note, and RECORD them in your own file at first use.
+2. Verify every later record against your own first copy: `--reference your-copy.json`.
+3. If the reference is signed, pass the publication key you recorded once: `--reference-key <hex>`. Later
+   reference updates signed by that key can then be accepted without re-establishing trust.
 
 `MANIFEST.json` → `reference_hint` records what THIS machine was configured to expect at session time. It is
-a convenience, not authority: it came from the same machine as the bundle. Obtain the reference from
-InferRoute's published location and pass it with `--reference`. Until you do, the verifier FAILS identity.
+a convenience, not authority: it came from the same machine as the bundle. Until you pass a reference you
+obtained independently, the verifier FAILS identity.
 
 ## 4. What each check re-derives (the bytes, by file)
 
@@ -118,7 +132,9 @@ exact command lines, only that the extracted files are their inputs.
 * That this attorney's own machine was confined while the session ran (the device's self-report, stated per
   session in `record.html`).
 * Anything about the model lane beyond the receipt's own listed checks and limitations, reproduced verbatim.
-* That the record is COMPLETE: it proves what it shows, never that it shows every search that ran.
+* That the record is COMPLETE at the very end: each statement carries a per-enclave sequence number, so a
+  search dropped from the middle (or the start) of an enclave's lifetime leaves a visible gap the verifier
+  reports; a search dropped from the very END of a lifetime cannot be revealed by any counter.
 * Novelty, patentability, or the absence of prior art.
 """
 

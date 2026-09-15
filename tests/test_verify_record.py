@@ -182,7 +182,7 @@ def test_identity_fails_without_a_reference_and_with_a_wrong_one(tmp_path, V, km
     wrong = tmp_path / "wrong.json"
     wrong.write_text(json.dumps({"policy_sha256": ["00" * 32], "index_manifest_sha256": ["ef" * 32], "model_manifest_sha256": ["12" * 32]}))
     code, out = _run(d, "--reference", str(wrong))
-    assert "FAIL enclave identity" in out and "policy ✗" in out and code == 1
+    assert "FAIL enclave identity" in out and "policy: no entry matches" in out and code == 1
 
 
 def test_cli_refuses_changed_result_query_manifest_and_unlisted_files(tmp_path, V, kms):
@@ -225,3 +225,108 @@ def test_extract_writes_raw_files_for_independent_tools(tmp_path, V, kms):
     assert (sd / "report.bin").stat().st_size == 1184
     assert b"BEGIN CERTIFICATE" in (sd / "vcek.pem").read_bytes() and b"BEGIN CERTIFICATE" in (sd / "ask_ark.pem").read_bytes()
     assert (sd / "uvm_endorsement.cose").stat().st_size > 100 and json.loads((sd / "runtime_data.json").read_text())["v"] == 1
+
+
+# ───────────────────── reference validity, signed reference, completeness ─────────────────────
+
+def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z"):
+    """Several statements from ONE enclave lifetime (same runtime_data / signer), with given seq numbers."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    key = Ed25519PrivateKey.generate()
+    pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    rd = {"v": 1, "kind": "sealed-search", "lifetime_id": "ab" * 8, "statement_signer_pub": pub,
+          "enclave_x25519_pub": "cd" * 32, "index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    rd_bytes = json.dumps(rd).encode()
+    offer = {"evidence": kms["evidence"], "endorsements": kms["endorsements"], "uvm_endorsements": kms["uvm_endorsements"],
+             "runtime_data": base64.b64encode(rd_bytes).decode()}
+    ev_bytes = json.dumps({"offer": offer}, indent=1).encode()
+    ev_sha = hashlib.sha256(ev_bytes).hexdigest()
+    d = tmp_path / "bundle"
+    d.mkdir(parents=True)
+    (d / f"{ev_sha[:16]}.evidence.json").write_bytes(ev_bytes)
+    rows = []
+    for i, seq in enumerate(seqs, 1):
+        rid = f"{i:032x}"
+        q, res = f"query {i}", {"hits": [{"key": f"US-{i}-A"}]}
+        st = {"v": 1, "kind": "search", "lifetime_id": rd["lifetime_id"], "request_id": rid, "started_utc": started,
+              "runtime_data_sha256": hashlib.sha256(rd_bytes).hexdigest(), "index_manifest_sha256": rd["index_manifest_sha256"],
+              "model_manifest_sha256": rd["model_manifest_sha256"], "cutoff_date": 20200115, "hits_n": 1, "outcome": "answered",
+              "query_sha256": V.salted(rid, q), "result_sha256": V.salted(rid, res)}
+        if seq is not None:
+            st["seq"] = seq
+        st["sig"] = key.sign(V.canonical(st)).hex()
+        rows.append({"n": i, "session_id": "s1", "at": "t", "statement": st, "result": res, "query_text": q, "signer_pub": pub,
+                     "evidence_file": f"{ev_sha[:16]}.evidence.json", "evidence_sha256": ev_sha})
+    (d / "searches.json").write_text(json.dumps(rows))
+    (d / "record.html").write_text("<html>record</html>")
+    (d / "VERIFY.md").write_text("# verify\n")
+    (d / "verify_record.py").write_bytes(SCRIPT.read_bytes())
+    files = {n: hashlib.sha256((d / n).read_bytes()).hexdigest() for n in os.listdir(d)}
+    (d / "MANIFEST.json").write_text(json.dumps({"files": files, "matter_cutoff": 20200115}))
+    host = V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+    return d, host, rd
+
+
+def _ref(tmp_path, name, policy_entries, idx="ef" * 32, mdl="12" * 32, sign_with=None):
+    ref = {"policy_sha256": policy_entries, "index_manifest_sha256": [idx], "model_manifest_sha256": [mdl],
+           "source": "test", "published_at": "2026-01-01"}
+    if sign_with is not None:
+        from importlib import import_module
+        V = _load()
+        ref["sig"] = sign_with.sign(V.canonical(ref)).hex()
+    p = tmp_path / name
+    p.write_text(json.dumps(ref))
+    return p
+
+
+def test_reference_validity_windows_and_retired_entries(tmp_path, V, kms):
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1])
+    # current entry with a window that contains the search time → identity passes
+    ok = _ref(tmp_path, "ok.json", [{"value": host, "valid_from": "2026-01-01T00:00:00Z", "valid_to": "2026-12-31T23:59:59Z"}])
+    _, out = _run(d, "--reference", str(ok))
+    assert "PASS enclave identity" in out and "policy: current (valid 2026-01-01T00:00:00Z → 2026-12-31T23:59:59Z)" in out
+    # retired entry → matches but is not current → FAIL, and it says so
+    retired = _ref(tmp_path, "retired.json", [{"value": host, "retired": True}])
+    _, out = _run(d, "--reference", str(retired))
+    assert "FAIL enclave identity" in out and "matches a RETIRED entry" in out
+    # window that ended before the search → FAIL with the reason
+    old = _ref(tmp_path, "old.json", [{"value": host, "valid_to": "2026-03-01T00:00:00Z"}])
+    _, out = _run(d, "--reference", str(old))
+    assert "FAIL enclave identity" in out and "after its valid_to 2026-03-01T00:00:00Z" in out
+
+
+def test_signed_reference_with_first_use_key(tmp_path, V, kms):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1])
+    pubkey = Ed25519PrivateKey.generate()
+    pub_hex = pubkey.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    signed = _ref(tmp_path, "signed.json", [host], sign_with=pubkey)
+    _, out = _run(d, "--reference", str(signed), "--reference-key", pub_hex)
+    assert "PASS reference signature" in out
+    _, out = _run(d, "--reference", str(signed))                      # signed, but the reader gave no key
+    assert "SKIP reference signature" in out and "no --reference-key" in out
+    other = Ed25519PrivateKey.generate().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    code, out = _run(d, "--reference", str(signed), "--reference-key", other)
+    assert "FAIL reference signature" in out and code == 1
+    unsigned = _ref(tmp_path, "unsigned.json", [host])
+    code, out = _run(d, "--reference", str(unsigned), "--reference-key", pub_hex)
+    assert "FAIL reference signature" in out and "unsigned" in out and code == 1
+
+
+def test_completeness_from_sequence_numbers(tmp_path, V, kms):
+    host_ref = lambda tp, d_host: _ref(tp, "r.json", [d_host])       # noqa: E731
+    d, host, _ = _multi_bundle(tmp_path / "ok", V, kms, seqs=[1, 2, 3])
+    _, out = _run(d, "--reference", str(host_ref(tmp_path / "ok", host)))
+    assert "PASS completeness (per-enclave sequence)" in out and "seq 1..3 contiguous (3 searches)" in out
+    assert "dropped from the END" in out
+    d, host, _ = _multi_bundle(tmp_path / "gap", V, kms, seqs=[1, 3])
+    code, out = _run(d, "--reference", str(host_ref(tmp_path / "gap", host)))
+    assert "FAIL completeness (per-enclave sequence)" in out and "missing [2]" in out and code == 1
+    d, host, _ = _multi_bundle(tmp_path / "late", V, kms, seqs=[2, 3])
+    _, out = _run(d, "--reference", str(host_ref(tmp_path / "late", host)))
+    assert "FAIL completeness" in out and "starts at seq 2" in out
+    d, host, _ = _multi_bundle(tmp_path / "none", V, kms, seqs=[None, None])
+    _, out = _run(d, "--reference", str(host_ref(tmp_path / "none", host)))
+    assert "SKIP completeness (per-enclave sequence)" in out and "no sequence numbers" in out

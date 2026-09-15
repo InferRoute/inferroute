@@ -24,6 +24,8 @@ def stub(monkeypatch):
     def platform(address_level, restricted, linux=True, abi=8):
         monkeypatch.setattr(C.sys, "platform", "linux" if linux else "darwin")
         monkeypatch.setattr(C, "netns_available", lambda: address_level)
+        # the probe the launch actually depends on: a netns AND bubblewrap to build it with
+        monkeypatch.setattr(C, "netns_bind_available", lambda: address_level)
         monkeypatch.setattr(C, "userns_restricted", lambda: restricted)
         monkeypatch.setattr(C, "landlock_abi", lambda _libc: abi)
     return set_env, platform
@@ -58,15 +60,28 @@ def test_default_uses_port_level_and_states_the_residual(stub):
     set_env(None)
     platform(address_level=False, restricted=True)
     ok, notice = P.confine_precheck()
-    assert ok and "port-level" in notice and "still reachable" in notice
+    assert ok and "port-level" in notice and "still reachable" in notice and "READS" in notice
 
 
-def test_default_reports_address_level_when_available(stub):
+def test_default_stays_port_level_even_where_address_level_is_available(stub):
+    """Being ABLE to build the empty netns is not the same as having built one. Default mode confines with
+    Landlock only, so the notice must not say ADDRESS just because bubblewrap is installed — it must state
+    both port-level residuals and point at the mode that removes them."""
     set_env, platform = stub
     set_env(None)
     platform(address_level=True, restricted=False)
     ok, notice = P.confine_precheck()
-    assert ok and "ADDRESS" in notice and "residual" not in notice.lower()
+    assert ok and "ADDRESS" not in notice
+    assert "still reachable" in notice and "READS are not confined" in notice
+    assert "IR_ATTESTED_CONFINE=require" in notice
+
+
+def test_require_notice_states_that_files_are_absent_not_just_unwritable(stub):
+    set_env, platform = stub
+    set_env("require")
+    platform(address_level=True, restricted=False)
+    ok, notice = P.confine_precheck()
+    assert ok and "absent, not merely unwritable" in notice
 
 
 def test_off_disables_and_says_nothing(stub):

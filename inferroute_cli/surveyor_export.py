@@ -377,20 +377,35 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "A reader who does not trust this device should weigh those lines accordingly.</p>")
     A("<p class=note><b>Not claimed</b>: novelty, patentability, or the absence of prior art. A sealed search lists what a "
       "bounded corpus surfaced under a stated date bound; the corpus is named by its index manifest hash in each statement.</p>")
-    reach = []
-    for s in sessions:
-        c0 = str((s["record"] or {}).get("confinement") or "")
-        if not c0:
-            reach.append(f"{s['session_id']}: confinement not recorded — cannot claim these records were out of reach")
-        elif "unconfined" in c0:
-            reach.append(f"{s['session_id']}: UNCONFINED (developer override) — the agent could have altered these records")
-        else:
-            reach.append(f"{s['session_id']}: held outside the agent's write access (require-mode confinement)")
+    reach = [f"{s['session_id']}: {_reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
     if reach:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")
     A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the attorney's machine.</p>")
     A("</body></html>")
     return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff}
+
+
+def _reach_note(recorded: str) -> str:
+    """What one session's RECORDED confinement line entitles the bundle to say about these records. Read off
+    the stamped line itself rather than assumed from the mode: a best-effort session and a required one both
+    write-deny the record directory, but only the required one would have refused to run without it, and only
+    the address-level bind made the directory invisible rather than unwritable. Saying "require-mode" for a
+    session that ran best-effort would be the bundle claiming a guarantee nobody made."""
+    low = recorded.lower()
+    if not recorded:
+        return "confinement not recorded — cannot claim these records were out of reach"
+    if "unconfined" in low or low.startswith("not confined"):
+        return "UNCONFINED (developer override) — the agent could have altered these records"
+    # NOT "address-level": require mode has confined EGRESS by address since before the matter-dir bind
+    # existed, and those sessions left the filesystem merely write-denied. Only the line that itself says
+    # the files were absent earns the stronger sentence.
+    if "absent rather than unwritable" in low:
+        return ("not present in the agent's filesystem at all (address-level confinement: an empty network "
+                "namespace with only the matter directory bound in)")
+    if low.startswith("require"):
+        return "held outside the agent's write access (require-mode confinement)"
+    return ("held outside the agent's write access, but confinement was best-effort — had it been unavailable "
+            "this session would still have run, so weigh this line by the mode, not by the mode's name")
 
 
 def _reference_hint() -> Dict[str, Any]:

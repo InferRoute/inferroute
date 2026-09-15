@@ -270,6 +270,9 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     await server_task
                     session.close()
                     return 2
+                # Decided before the verifier starts: the verifier stamps the confinement line into every
+                # record from this flag. If the sandbox cannot then be built, the launch is REFUSED below.
+                os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"
                 search_endpoint = pi_attested.start_search_proxy()
                 argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                             alias=alias, upstream_name=f"{alias.model_id} [confidential]",
@@ -289,6 +292,7 @@ def launch(args: list[str], agent: str = "claude") -> int:
                           f"local endpoint 127.0.0.1:{port}[/]\n")
             reset_sigint = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)  # noqa: E731
             preexec = reset_sigint
+            sandbox = None
             if agent == "pi":
                 from . import pi_attested
                 ok_confine, notice = pi_attested.confine_precheck()
@@ -302,12 +306,32 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     session.close()
                     return 2
                 write_paths = pi_attested.confine_write_paths(env["PI_CODING_AGENT_DIR"], os.getcwd())
-                preexec = pi_attested.preexec_confine(pi_confine_ports, write_paths=write_paths, then=reset_sigint)
+                if pi_attested.netns_bind_intended():
+                    # Address-level: an empty network namespace whose only channels out are unix sockets to
+                    # the two verifying proxies, and a filesystem built up from nothing — the matter tree and
+                    # the agent's own config, nothing else. The in-sandbox forwarder binds the ports the agent
+                    # expects, THEN applies the same Landlock+seccomp confinement, then execs the agent.
+                    try:
+                        sandbox = pi_attested.netns_sandbox(ports=pi_confine_ports, cfg_dir=env["PI_CODING_AGENT_DIR"],
+                                                            rw=[os.getcwd()], binary=binary)
+                        argv = sandbox.wrap(argv, write_paths=write_paths)
+                    except Exception as e:                                          # noqa: BLE001
+                        console.print("[red]refusing to launch: address-level confinement was promised to this "
+                                      f"session's records but the sandbox could not be built ({e}).[/]")
+                        pi_attested.stop_search_proxy()
+                        server.should_exit = True
+                        await server_task
+                        session.close()
+                        return 2
+                else:
+                    preexec = pi_attested.preexec_confine(pi_confine_ports, write_paths=write_paths, then=reset_sigint)
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
             rc = await proc.wait()
             if agent == "pi":
                 from . import pi_attested
+                if sandbox is not None:
+                    sandbox.close()
                 pi_attested.stop_search_proxy()
             server.should_exit = True
             await server_task

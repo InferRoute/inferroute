@@ -143,10 +143,15 @@ def _jump(code: int, k: int, jt: int, jf: int) -> bytes:
     return struct.pack("HBBI", code, jt, jf, k)
 
 
-def _seccomp_program(arch: str) -> bytes:
+def _seccomp_program(arch: str, allow_unix: bool = False) -> bytes:
     """Allow everything except: wrong architecture or x32 (kill), io_uring_setup (EACCES), and socket()
     for AF_UNIX / AF_PACKET / any datagram or raw inet socket (EACCES). Inet stream sockets and
     socketpair() (a different syscall) stay allowed, so child pipes still work.
+
+    `allow_unix` permits AF_UNIX. It is for the network-namespace path ONLY, where the agent sits in an
+    empty netns and reaches the two proxies through unix sockets bind-mounted in: there is no route off
+    the machine to protect, and the forwarders need AF_UNIX. On the port-level path AF_UNIX stays denied,
+    because it is the systemd-resolved varlink DNS hole.
 
     seccomp_data: nr at offset 0, arch at 4, args at 16, 24, … Jumps name an absolute target index,
     converted to a relative offset here. Targets: 17 allow, 18 errno, 19 kill.
@@ -165,7 +170,7 @@ def _seccomp_program(arch: str) -> bytes:
         _jump(JEQ_K, a["io_uring_setup"], r(4, "errno"), 0),   # 4  io_uring_setup -> EACCES
         _jump(JEQ_K, a["socket"], 0, r(5, "allow")),           # 5  socket()? else ALLOW
         _stmt(LD_W_ABS, 16),                                   # 6  A = domain (args[0])
-        _jump(JEQ_K, AF_UNIX, r(7, "errno"), 0),               # 7  AF_UNIX -> EACCES
+        _jump(JEQ_K, AF_UNIX, r(7, "allow" if allow_unix else "errno"), 0),   # 7  AF_UNIX
         _jump(JEQ_K, AF_PACKET, r(8, "errno"), 0),             # 8  AF_PACKET -> EACCES
         _jump(JEQ_K, AF_INET, 12 - 9 - 1, 0),                  # 9  AF_INET -> type check (12)
         _jump(JEQ_K, AF_INET6, 12 - 10 - 1, 0),                # 10 AF_INET6 -> type check (12)
@@ -182,7 +187,8 @@ def _seccomp_program(arch: str) -> bytes:
     return b"".join(prog)
 
 
-def apply(ports: List[int], *, write_paths: List[str] | None = None, min_landlock_abi: int = 4) -> Confinement:
+def apply(ports: List[int], *, write_paths: List[str] | None = None, min_landlock_abi: int = 4,
+          allow_unix: bool = False, netns_bound: bool = False) -> Confinement:
     """Confine THIS process and its children to TCP connect on `ports` only. Call in a child, after
     fork and before exec (a preexec_fn), or in a process about to become the agent.
 
@@ -238,21 +244,26 @@ def apply(ports: List[int], *, write_paths: List[str] | None = None, min_landloc
     finally:
         os.close(fd)
 
-    prog = _seccomp_program(arch)
+    prog = _seccomp_program(arch, allow_unix=allow_unix)
     buf = ctypes.create_string_buffer(prog, len(prog))
     fprog = _SockFprog(len(prog) // 8, ctypes.cast(buf, ctypes.c_void_p))
     if libc.syscall(a["seccomp"], SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(fprog)) != 0:
         raise Unavailable(f"seccomp filter install failed (errno {ctypes.get_errno()})")
 
-    residuals = ["Landlock matches port, not address: a remote server on an allowed port number is "
-                 "reachable; close with a network namespace (one-time AppArmor profile), a "
-                 "connect-inspecting supervisor, or sandbox-exec on macOS."]
-    if write_paths is None:
-        residuals.append("Filesystem writes are NOT confined (write_paths not set): the agent can write "
-                         "outside the workspace.")
+    if netns_bound:
+        # Inside the empty netns with only the matter tree bound in, the two residuals below do not hold:
+        # there is no route off the machine at all, and unbound trees are not merely unwritable but absent.
+        residuals = []
     else:
-        residuals.append("File READS are not confined; an agent can read other files into model context "
-                         "until the matter-only bind-mount ships.")
+        residuals = ["Landlock matches port, not address: a remote server on an allowed port number is "
+                     "reachable; close with a network namespace (one-time AppArmor profile), a "
+                     "connect-inspecting supervisor, or sandbox-exec on macOS."]
+        if write_paths is None:
+            residuals.append("Filesystem writes are NOT confined (write_paths not set): the agent can write "
+                             "outside the workspace.")
+        else:
+            residuals.append("File READS are not confined; an agent can read other files into model context "
+                             "until the matter-only bind-mount ships.")
     return Confinement(ports=sorted(set(int(p) for p in ports)), landlock_abi=abi,
                        write_paths=granted, residuals=residuals)
 
@@ -264,6 +275,12 @@ def preexec(ports: List[int], *, write_paths: List[str] | None = None, min_landl
     def _fn():
         apply(ports, write_paths=write_paths, min_landlock_abi=min_landlock_abi)
     return _fn
+
+
+def netns_bind_available() -> bool:
+    """Both halves of the address-level path: an unprivileged empty netns, and bubblewrap to build it."""
+    import shutil
+    return netns_available() and bool(shutil.which("bwrap"))
 
 
 # ───────────────────────── address-level confinement availability ─────────────────────────

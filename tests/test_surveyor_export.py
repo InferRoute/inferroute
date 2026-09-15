@@ -76,7 +76,13 @@ def test_export_writes_a_verifiable_bundle(matter):
     assert m["matter_cutoff"] == 20200115
     for name, sha in m["files"].items():
         assert hashlib.sha256((out / name).read_bytes()).hexdigest() == sha
-    assert set(m["files"]) == set(names) - {"MANIFEST.json"}
+    assert set(m["files"]) == set(names) - {"MANIFEST.json", "SHA256SUMS"}
+    assert "SHA256SUMS" in names and m["note"].startswith("an unsigned index")
+    assert "reference_hint" in m and "NOT authoritative" in m["reference_hint"]["note"]
+    # VERIFY.md is the honest version: identity via --reference, extract step, tools named as consumers only
+    v = (out / "VERIFY.md").read_text()
+    assert "--reference" in v and "--extract" in v and "sha256sum -c SHA256SUMS" in v and "ots verify MANIFEST.json.ots" in v
+    assert "have NOT run those invocations" in v
     # searches.json binds statement, result, query text and names the evidence file by sha
     rows = json.loads((out / "searches.json").read_text())
     assert rows[0]["query_text"].startswith("A battery housing with QUERY-MARKER")
@@ -104,6 +110,8 @@ def test_record_html_shows_report_query_statement_model_checks_and_honest_reach(
     assert "c0ffee1234567890" in h                                                  # governing contract
     assert "held outside the agent" in h and "self-report" in h                     # honest reach
     assert "does and does not prove" in h and "Not claimed" in h
+    assert "not InferRoute" in h or "NOT establish" in h                           # the identity caveat is stated
+    assert "archived container policy agrees" in h                                 # policy sentence conditional (policy archived here)
     assert "<script" not in h and 'src="http' not in h and "<link " not in h
 
 
@@ -137,11 +145,10 @@ def test_export_default_path_is_outside_the_workspace_and_warns_plaintext(matter
     assert "plain text" in capsys.readouterr().out
 
 
-def test_verify_export_runs_the_bundled_verifier(matter):
-    # with no sealed searches the bundle verifies trivially (integrity only) — the command wiring is what's tested
+def test_verify_export_runs_the_bundled_verifier_and_an_empty_record_is_not_a_pass(matter):
     out = matter / "b5"
     S.cmd_export("AcmeCorp/battery-cooling", str(out))
-    assert S.main(["verify-export", str(out)]) == 0
+    assert S.main(["verify-export", str(out)]) == 1               # no sealed searches → FAIL, never a clean exit
 
 
 def test_export_of_a_matter_with_no_sessions_still_renders(matter):

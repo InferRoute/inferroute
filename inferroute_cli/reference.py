@@ -309,8 +309,11 @@ def new_key(out_path: str, *, passphrase: Optional[bytes] = None) -> str:
         raise ReferenceError(f"{p} already exists; refusing to overwrite a publication key")
     key = Ed25519PrivateKey.generate()
     enc = serialization.BestAvailableEncryption(passphrase) if passphrase else serialization.NoEncryption()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc))
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc))
+    except OSError as e:
+        raise ReferenceError(f"cannot write the publication key to {p}: {e.strerror or e}") from e
     try:
         os.chmod(p, 0o600)
     except OSError:
@@ -321,7 +324,12 @@ def new_key(out_path: str, *, passphrase: Optional[bytes] = None) -> str:
 def _load_key(path: str, passphrase: Optional[bytes]):
     from cryptography.hazmat.primitives import serialization
     try:
-        return serialization.load_pem_private_key(Path(path).read_bytes(), password=passphrase)
+        data = Path(path).read_bytes()
+    except OSError as e:
+        raise ReferenceError(f"cannot read the publication key at {path}: {e.strerror or e}. "
+                             "Check the path — this is about the file, not the key.") from e
+    try:
+        return serialization.load_pem_private_key(data, password=passphrase)
     except TypeError as e:
         raise ReferenceError(f"{path} is encrypted; give the passphrase with --passphrase-env VAR") from e
     except ValueError as e:
@@ -365,7 +373,12 @@ def verify(ref: Dict[str, Any], key_hex: Optional[str]) -> Tuple[bool, str]:
 
 
 def describe(ref: Dict[str, Any], at_iso: Optional[str] = None) -> List[str]:
-    """One line per entry, saying whether it is current at `at` (default: now)."""
+    """One line per entry, saying whether it is current at `at` (default: now). An unparsable `at` is
+    REFUSED: an operator asking what was current on a past date must never get a confident answer about a
+    different moment — the failure closed inside the verifier's window check, not reopened at the door."""
+    if at_iso is not None and parse_time(at_iso) is None:
+        raise ReferenceError(f"--at {at_iso!r} is not an ISO-8601 time; refusing to report status as of some "
+                             "other moment than the one you asked about")
     at = parse_time(at_iso) or dt.datetime.now(dt.timezone.utc)
     lines = [f"reference from {ref.get('source') or '(unnamed)'}, published {ref.get('published_at') or '?'}"
              f" — status at {at.strftime('%Y-%m-%dT%H:%M:%SZ')}"]
@@ -455,6 +468,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     v.add_argument("--in", dest="inp", required=True)
     v.add_argument("--key-hex", default=None)
     v.add_argument("--at", default=None, help="report status as of this time (default: now)")
+    v.add_argument("--allow-unverified", action="store_true",
+                   help="exit 0 even though the signature was not verified — for inspecting an unsigned draft")
 
     a = p.parse_args(argv)
     try:
@@ -497,12 +512,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if a.cmd == "verify":
             ref = _read(a.inp)
+            _require_time(a.at, "--at")
             ok, why = verify(ref, a.key_hex)
             print(("OK   " if ok else "NOT VERIFIED  ") + why)
             for line in describe(ref, a.at):
                 print(line)
-            return 0 if (ok or not a.key_hex) else 1
-    except ReferenceError as e:
+            if not ok and not a.allow_unverified:
+                # The exit code must say what the text says: anyone scripting this check on an unsigned
+                # reference, or without the key, must not get a green exit.
+                print("exit 1: the signature was NOT verified. Pass --key-hex with the key you recorded at "
+                      "first use, or --allow-unverified if you are deliberately inspecting an unsigned draft.")
+            return 0 if (ok or a.allow_unverified) else 1
+    except (ReferenceError, OSError) as e:
         import sys
         sys.stderr.write(f"\n  {e}\n\n")
         return 2

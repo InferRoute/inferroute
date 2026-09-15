@@ -419,3 +419,44 @@ def test_verify_notes_an_overlap_without_failing_on_it(tmp_path, capsys):
     assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 0     # usable; the reader is not blocked
     out = capsys.readouterr().out
     assert "more than one entry is current for policy_sha256" in out and "planned rollout overlap" in out
+
+
+def test_new_key_refuses_a_filesystem_that_cannot_enforce_owner_only(tmp_path, monkeypatch):
+    """chmod on exFAT/FAT/NTFS SUCCEEDS and changes nothing, so the key would sit world-readable while the
+    command reported it protected — the same report-one-thing-do-another shape. Refuse, and delete the key
+    that was briefly written. (Simulated by making the read-back report a permissive mode.)"""
+    real_stat = Path.stat
+    target = tmp_path / "k.key"
+
+    def fake_stat(self, *a, **kw):
+        st = real_stat(self, *a, **kw)
+        if Path(self) == target:
+            class S:
+                st_mode = 0o100755                        # what exFAT reports back
+            return S()
+        return st
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    with pytest.raises(R.ReferenceError) as e:
+        R.new_key(str(target))
+    assert "group/other can read it" in str(e.value) and "exFAT" in str(e.value)
+    monkeypatch.undo()
+    assert not target.exists(), "the exposed key must be deleted, not left behind"
+    # a filesystem that does enforce it still works
+    assert R.new_key(str(tmp_path / "ok.key"))
+    assert (tmp_path / "ok.key").stat().st_mode & 0o077 == 0
+
+
+def test_passphrase_can_be_typed_rather_than_put_in_argv_or_env(tmp_path, monkeypatch):
+    typed = iter(["s3cret", "s3cret", "s3cret"])
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: next(typed))
+    key = tmp_path / "k.key"
+    pub = R.new_key(str(key), passphrase=R._passphrase(None, prompt=True, confirm=True))
+    ref = _three("abc")
+    assert R.sign(ref, str(key), passphrase=R._passphrase(None, prompt=True))["publication_key"] == pub
+    # a mismatch writes nothing
+    two = iter(["a", "b"])
+    monkeypatch.setattr("getpass.getpass", lambda *a, **kw: next(two))
+    with pytest.raises(R.ReferenceError) as e:
+        R._passphrase(None, prompt=True, confirm=True)
+    assert "do not match" in str(e.value)

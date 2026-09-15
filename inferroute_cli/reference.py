@@ -326,10 +326,28 @@ def new_key(out_path: str, *, passphrase: Optional[bytes] = None) -> str:
         p.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, enc))
     except OSError as e:
         raise ReferenceError(f"cannot write the publication key to {p}: {e.strerror or e}") from e
+    # VERIFY the permissions actually took. On a filesystem with no POSIX permissions — exFAT, FAT, NTFS,
+    # most removable media as shipped — chmod SUCCEEDS and changes nothing, so the key would sit
+    # world-readable while this command reported it protected. Refuse rather than report a protection we
+    # did not achieve; delete the key we just wrote, since it was exposed the moment it landed.
     try:
         os.chmod(p, 0o600)
-    except OSError:
-        pass
+        mode = p.stat().st_mode & 0o777
+    except OSError as e:
+        mode = None
+        exposed = f"cannot read back the permissions ({e.strerror or e})"
+    else:
+        exposed = f"the file is mode {oct(mode)} — group/other can read it" if mode & 0o077 else ""
+    if exposed:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+        raise ReferenceError(
+            f"REFUSING to leave a publication key at {p}: {exposed}. That filesystem cannot enforce owner-only "
+            "permissions (exFAT, FAT and NTFS cannot), so the key would be readable by anything that can read "
+            "the mount. The key just written has been deleted. Write it to a filesystem with POSIX "
+            "permissions — ext4 on a dedicated USB stick you unplug afterwards is the intended home.")
     return key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
 
 
@@ -429,7 +447,17 @@ def _write(ref: Dict[str, Any], out: Optional[str]) -> None:
     print(f"wrote {p}")
 
 
-def _passphrase(var: Optional[str]) -> Optional[bytes]:
+def _passphrase(var: Optional[str], prompt: bool = False, confirm: bool = False) -> Optional[bytes]:
+    """From $VAR, or typed at a prompt. Never from argv — a passphrase on a command line lands in the shell
+    history and in every `ps` listing on the machine."""
+    if prompt:
+        import getpass
+        first = getpass.getpass("passphrase for the publication key: ")
+        if not first:
+            raise ReferenceError("empty passphrase; run without --passphrase-prompt to write an unencrypted key")
+        if confirm and getpass.getpass("confirm passphrase: ") != first:
+            raise ReferenceError("the two passphrases do not match; nothing was written")
+        return first.encode()
     if not var:
         return None
     v = os.environ.get(var)
@@ -446,6 +474,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     k = sub.add_parser("new-key", help="OFFLINE MACHINE: generate the long-lived publication key")
     k.add_argument("--out", required=True)
     k.add_argument("--passphrase-env", default=None, metavar="VAR", help="encrypt the key with $VAR (never pass a passphrase in argv)")
+    k.add_argument("--passphrase-prompt", action="store_true", help="type the passphrase at a prompt instead (not in argv, env or history)")
 
     b = sub.add_parser("build", help="derive the reference from a deployment YOU control")
     b.add_argument("--from-offer", default=None, metavar="FILE", help="a /offer document or evidence bundle from YOUR deployment")
@@ -470,6 +499,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--in", dest="inp", required=True)
     s.add_argument("--key", required=True)
     s.add_argument("--passphrase-env", default=None, metavar="VAR")
+    s.add_argument("--passphrase-prompt", action="store_true", help="type the passphrase at a prompt instead")
     s.add_argument("--allow-not-current", action="store_true",
                    help="sign even though no entry is current now (a deliberately historical or pre-announced reference)")
     s.add_argument("--allow-overlap", action="store_true",
@@ -486,12 +516,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "new-key":
-            pub = new_key(a.out, passphrase=_passphrase(a.passphrase_env))
+            pub = new_key(a.out, passphrase=_passphrase(a.passphrase_env, a.passphrase_prompt, confirm=True))
             print(f"publication key written to {a.out}")
             print(f"  public key (this goes in the engagement letter and every firm records it): {pub}")
             print("  KEEP THE PRIVATE KEY OFFLINE. It is the root of every firm's trust in every later")
             print("  reference; anyone holding it can re-anchor identity for all of them.")
-            if not a.passphrase_env:
+            if not (a.passphrase_env or a.passphrase_prompt):
                 print("  (written unencrypted — the air gap is the control; use --passphrase-env to add one)")
             return 0
 
@@ -516,7 +546,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if a.cmd == "sign":
-            ref = sign(_read(a.inp), a.key, passphrase=_passphrase(a.passphrase_env),
+            ref = sign(_read(a.inp), a.key, passphrase=_passphrase(a.passphrase_env, a.passphrase_prompt),
                        allow_not_current=a.allow_not_current, allow_overlap=a.allow_overlap)
             _write(ref, a.out or a.inp)
             print(f"  signed under {ref['publication_key'][:16]}…")

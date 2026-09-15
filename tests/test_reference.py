@@ -229,10 +229,100 @@ def test_verify_cli_reports_status_and_exits_nonzero_on_a_bad_key(tmp_path, caps
     p.write_text(json.dumps(ref))
     key = tmp_path / "k.key"
     pub = R.new_key(str(key))
-    assert R.main(["sign", "--in", str(p), "--key", str(key)]) == 0
+    assert R.main(["sign", "--in", str(p), "--key", str(key)]) == 2          # nothing current → refused
+    assert R.main(["sign", "--in", str(p), "--key", str(key), "--allow-not-current"]) == 0
     assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 0
     out = capsys.readouterr().out
     assert "OK   verifies under the publication key" in out and "expired (to 2020-12-31T00:00:00Z)" in out
     other = R.new_key(str(tmp_path / "o.key"))
     assert R.main(["verify", "--in", str(p), "--key-hex", other]) == 1
     assert "does NOT verify" in capsys.readouterr().out
+
+
+# ───────── reviewer's knife on the issuer: supersede that does not supersede, dead windows, dead references ─────────
+
+def _three(vals, **kw):
+    return R.build({f: v * 64 for f, v in zip(R.FIELDS, vals)}, **kw)
+
+
+def test_supersede_closes_an_entry_that_already_had_an_end_date(V):
+    """Finding 1: --supersede skipped any entry that already carried a valid_to, so a release given an
+    explicit end date at build time survived it — and since the verifier accepts ANY matching entry that is
+    current, the superseded release kept passing until its original end."""
+    v1 = _three("abc", valid_from="2026-01-01T00:00:00Z", valid_to="2030-01-01T00:00:00Z")
+    v2 = _three("dbc", merge=v1, valid_from="2026-06-01T00:00:00Z", supersede=True)
+    old = [e for e in v2["policy_sha256"] if e["value"] == "a" * 64][0]
+    assert old["valid_to"] == "2026-06-01T00:00:00Z", old      # closed at the supersede, not left at 2030
+    # and the verifier a stranger runs now refuses it twelve hours after the supersede
+    entries = V._ref_entries(v2, "policy_sha256")
+    ok, why = V._ref_match(entries, "a" * 64, "2026-06-01T12:00:00Z")
+    assert ok is False and "after its valid_to 2026-06-01T00:00:00Z" in why
+    assert V._ref_match(entries, "d" * 64, "2026-06-01T12:00:00Z")[0] is True
+    # an entry that already ended EARLIER than the supersede keeps its own earlier end
+    early = _three("abc", valid_from="2026-01-01T00:00:00Z", valid_to="2026-02-01T00:00:00Z")
+    later = _three("dbc", merge=early, valid_from="2026-06-01T00:00:00Z", supersede=True)
+    assert [e for e in later["policy_sha256"] if e["value"] == "a" * 64][0]["valid_to"] == "2026-02-01T00:00:00Z"
+
+
+def test_a_backwards_supersede_is_refused(V):
+    """Finding 2: superseding before an existing entry starts wrote a window ending before it began — an
+    entry dead for every input, whose only symptom is an unexplainable refusal in the field."""
+    v1 = _three("abc", valid_from="2026-06-01T00:00:00Z")
+    with pytest.raises(R.ReferenceError) as e:
+        _three("dbc", merge=v1, valid_from="2026-01-01T00:00:00Z", supersede=True)
+    assert "is BEFORE an existing" in str(e.value) and "could never be current" in str(e.value)
+    # the reference was not half-superseded by the refusal
+    assert "valid_to" not in v1["policy_sha256"][0]
+    # and a new entry whose own end precedes its own start is refused too
+    with pytest.raises(R.ReferenceError) as e2:
+        _three("abc", valid_from="2026-06-01T00:00:00Z", valid_to="2026-01-01T00:00:00Z")
+    assert "before --valid-from" in str(e2.value)
+
+
+def test_sign_refuses_a_reference_in_which_nothing_is_current(tmp_path):
+    """Finding 3: a signed reference whose entries had all expired was published-ready and would have failed
+    identity for every client of every record. Fail when the bad value is created, not when a firm uses it."""
+    key = tmp_path / "k.key"
+    R.new_key(str(key))
+    dead = _three("abc", valid_from="2020-01-01T00:00:00Z", valid_to="2021-01-01T00:00:00Z")
+    with pytest.raises(R.ReferenceError) as e:
+        R.sign(dead, str(key))
+    assert "nothing is current" in str(e.value) and "expired (to 2021-01-01T00:00:00Z)" in str(e.value)
+    assert "--allow-not-current" in str(e.value)
+    assert "sig" in R.sign(dead, str(key), allow_not_current=True)      # the deliberate historical case
+    # a pre-announced (not yet current) reference is the same refusal with the same escape hatch
+    future = _three("abc", valid_from="2099-01-01T00:00:00Z")
+    with pytest.raises(R.ReferenceError):
+        R.sign(future, str(key))
+    assert "sig" in R.sign(future, str(key), allow_not_current=True)
+
+
+def test_sign_refuses_two_simultaneously_current_entries_for_one_field(tmp_path):
+    """The structural gap: the verifier accepts any current entry, so two current entries mean two different
+    enclaves both pass identity — right during a planned overlap, wrong otherwise, and nothing said which."""
+    key = tmp_path / "k.key"
+    R.new_key(str(key))
+    overlapping = _three("dbc", merge=_three("abc"), valid_from=None)    # two open policy entries
+    assert len(overlapping["policy_sha256"]) == 2
+    with pytest.raises(R.ReferenceError) as e:
+        R.sign(overlapping, str(key))
+    assert "more than one entry is current" in str(e.value) and "--allow-overlap" in str(e.value)
+    assert "sig" in R.sign(overlapping, str(key), allow_overlap=True)
+    # a correct supersede leaves exactly one current, so it signs with no override at all
+    clean = _three("dbc", merge=_three("abc", valid_from="2026-01-01T00:00:00Z"),
+                   valid_from="2026-06-01T00:00:00Z", supersede=True)
+    assert "sig" in R.sign(clean, str(key))
+
+
+def test_dead_and_unparsable_windows_are_refused_at_signing(tmp_path):
+    key = tmp_path / "k.key"
+    R.new_key(str(key))
+    hand_edited = {**_three("abc"), "policy_sha256": [{"value": "a" * 64, "valid_from": "2026-01-01T00:00:00Z",
+                                                       "valid_to": "2025-01-01T00:00:00Z"}]}
+    with pytest.raises(R.ReferenceError) as e:
+        R.sign(hand_edited, str(key), allow_not_current=True, allow_overlap=True)
+    assert "DEAD INTERVAL" in str(e.value)                      # not silenced by the overrides
+    bad_time = {**_three("abc"), "policy_sha256": [{"value": "a" * 64, "valid_to": "whenever"}]}
+    with pytest.raises(R.ReferenceError) as e2:
+        R.sign(bad_time, str(key), allow_not_current=True, allow_overlap=True)
+    assert "UNPARSABLE WINDOW" in str(e2.value)

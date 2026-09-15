@@ -18,8 +18,14 @@ Three rules the tooling enforces or states, because getting them wrong silently 
     policy must equal HOST_DATA or the build is REFUSED.
  2. Derive from a deployment YOU control. Deriving a reference from a bundle a client sent you is circular:
     it would make the record validate against itself.
- 3. A new release does not make the old one acceptable forever. `--supersede` closes every still-open
-    validity window at the new entry's start, so a retired or superseded release cannot pass as current.
+ 3. A new release does not make the old one acceptable forever. `--supersede` closes EVERY non-retired
+    entry at the new entry's start — setting its end to the earlier of its own end and this moment, not only
+    the entries that had no end. An entry given an explicit end date would otherwise survive a supersede and
+    keep passing, because the verifier accepts ANY matching entry that is current.
+ 4. A reference is refused at SIGNING if it would fail or confuse the moment it is published: nothing
+    current (identity fails for every client), two entries current for one field (two different enclaves
+    both pass), or a window that ends before it begins. The first two have explicit overrides for the
+    deliberate cases — a historical or pre-announced reference, and a planned rollout overlap.
 
 The signature is Ed25519 over the canonical JSON of the reference with `sig` removed — byte-for-byte the
 same canonicalisation the bundled verifier uses (a test asserts the two agree, including on non-ASCII).
@@ -138,13 +144,84 @@ def _entries(ref: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
     return out
 
 
+
+def entry_status(e: Dict[str, Any], at: dt.datetime) -> Tuple[bool, str]:
+    """(is_current_at, human status) for one entry. The single place that decides "current", so describe()
+    and the pre-publication check can never disagree with each other."""
+    vf, vt = parse_time(e.get("valid_from")), parse_time(e.get("valid_to"))
+    if e.get("retired"):
+        return False, "RETIRED"
+    if (e.get("valid_from") and vf is None) or (e.get("valid_to") and vt is None):
+        return False, "UNPARSABLE WINDOW — will fail for every reader"
+    if vf is not None and vt is not None and vt < vf:
+        return False, f"DEAD INTERVAL ({e['valid_from']} → {e['valid_to']}) — can never be current"
+    if not (vf or vt):
+        return True, "current (no window)"
+    if vf is not None and at < vf:
+        return False, f"not yet current (from {e['valid_from']})"
+    if vt is not None and at > vt:
+        return False, f"expired (to {e['valid_to']})"
+    return True, "current"
+
+
+def current_entries(ref: Dict[str, Any], field: str, at: dt.datetime) -> List[Dict[str, Any]]:
+    return [e for e in _entries(ref, field) if entry_status(e, at)[0]]
+
+
+def check_publishable(ref: Dict[str, Any], *, at: Optional[dt.datetime] = None, allow_not_current: bool = False,
+                      allow_overlap: bool = False) -> None:
+    """Refuse to sign a reference that would fail, or be ambiguous, the moment it is published.
+
+    The verifier accepts a value if ANY matching entry is current, so: nothing current means identity fails
+    for every client of every record, and two current entries for one field means two different enclaves both
+    pass — right during a planned rollout overlap, wrong the rest of the time, and today nothing else would
+    tell the operator which situation they are in. (A one-instant overlap at a supersede boundary is possible
+    and harmless; it is only visible if you sign at exactly that second.)
+    """
+    at = at or dt.datetime.now(dt.timezone.utc)
+    dead, empty, overlap = [], [], []
+    for field in FIELDS:
+        entries = _entries(ref, field)
+        for e in entries:
+            ok, why = entry_status(e, at)
+            if not ok and ("DEAD INTERVAL" in why or "UNPARSABLE" in why):
+                dead.append(f"{field} {e['value'][:16]}…: {why}")
+        cur = [e for e in entries if entry_status(e, at)[0]]
+        if not cur:
+            empty.append(f"{field} (" + "; ".join(f"{e['value'][:16]}… {entry_status(e, at)[1]}" for e in entries) + ")"
+                         if entries else f"{field} (no entries)")
+        elif len(cur) > 1:
+            overlap.append(f"{field}: {len(cur)} current — " + ", ".join(e["value"][:16] + "…" for e in cur))
+    problems = list(dead)
+    if empty and not allow_not_current:
+        problems.append("nothing is current for: " + "; ".join(empty) +
+                        " — published as-is, identity FAILS for every client of every record. Use "
+                        "--allow-not-current only to publish a deliberately historical or pre-announced reference.")
+    if overlap and not allow_overlap:
+        problems.append("more than one entry is current for: " + "; ".join(overlap) +
+                        " — two different enclaves would both pass identity. This is correct only during a "
+                        "planned rollout overlap; if you superseded a release and still see two, the previous "
+                        "window did not close. Use --allow-overlap if the overlap is intended.")
+    if problems:
+        raise ReferenceError("refusing to sign:\n    - " + "\n    - ".join(problems))
+
+
 def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, valid_from: Optional[str] = None,
           valid_to: Optional[str] = None, source: Optional[str] = None, supersede: bool = False,
           note: Optional[str] = None) -> Dict[str, Any]:
-    """Create or extend a reference. `supersede` closes every still-open window at `valid_from`, so the
-    previous release stops being acceptable the moment this one starts."""
+    """Create or extend a reference.
+
+    `supersede` closes EVERY non-retired entry at `valid_from` — setting valid_to to the earlier of its
+    existing end and this moment, not only the entries that had no end. An entry given an explicit end date
+    at build time would otherwise survive a supersede and keep passing as current, because the verifier
+    accepts any matching entry that is current.
+    """
     _require_time(valid_from, "--valid-from")
     _require_time(valid_to, "--valid-to")
+    new_vf, new_vt = parse_time(valid_from), parse_time(valid_to)
+    if new_vf is not None and new_vt is not None and new_vt < new_vf:
+        raise ReferenceError(f"--valid-to {valid_to} is before --valid-from {valid_from}: that entry could "
+                             "never be current, so no record would ever verify against it")
     if supersede and not valid_from:
         raise ReferenceError("--supersede needs --valid-from: it closes the previous entries' windows at the "
                              "moment this release starts, so there must be a moment to close them at")
@@ -155,11 +232,26 @@ def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, val
 
     ref: Dict[str, Any] = dict(merge or {})
     ref.pop("sig", None)                                          # any edit invalidates a previous signature
+    ref.pop("publication_key", None)
+    if supersede:
+        # Check every field BEFORE mutating any, so a refusal never leaves a half-superseded reference.
+        for field in FIELDS:
+            for e in _entries(ref, field):
+                evf = parse_time(e.get("valid_from"))
+                if not e.get("retired") and evf is not None and new_vf is not None and new_vf < evf:
+                    raise ReferenceError(
+                        f"--supersede at {valid_from} is BEFORE an existing {field} entry starts "
+                        f"({e['value'][:16]}… from {e['valid_from']}). Closing it then would write a window "
+                        "that ends before it begins, and that entry could never be current again.")
     for field in FIELDS:
         existing = _entries(ref, field)
         if supersede:
             for e in existing:
-                if not e.get("retired") and not e.get("valid_to"):
+                if e.get("retired"):
+                    continue
+                evt = parse_time(e.get("valid_to"))
+                # close at the EARLIER of its own end and this moment
+                if evt is None or (new_vf is not None and new_vf < evt):
                     e["valid_to"] = valid_from
         fresh: Dict[str, Any] = {"value": values[field].lower()}
         if valid_from:
@@ -184,6 +276,7 @@ def retire(ref: Dict[str, Any], value: str, *, field: Optional[str] = None, at: 
     _require_time(at, "--at")
     ref = dict(ref)
     ref.pop("sig", None)
+    ref.pop("publication_key", None)
     v = value.lower()
     n = 0
     for f in ([field] if field else list(FIELDS)):
@@ -235,9 +328,15 @@ def _load_key(path: str, passphrase: Optional[bytes]):
         raise ReferenceError(f"cannot load the publication key from {path}: {e}") from e
 
 
-def sign(ref: Dict[str, Any], key_path: str, *, passphrase: Optional[bytes] = None) -> Dict[str, Any]:
+def sign(ref: Dict[str, Any], key_path: str, *, passphrase: Optional[bytes] = None,
+         allow_not_current: bool = False, allow_overlap: bool = False,
+         at: Optional[dt.datetime] = None) -> Dict[str, Any]:
+    """Sign a reference — after refusing the states that fail or confuse at the moment of publication. The
+    principle the verifier already follows, applied one step earlier: fail when the bad value is CREATED,
+    not when a firm tries to use it."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    check_publishable(ref, at=at, allow_not_current=allow_not_current, allow_overlap=allow_overlap)
     key = _load_key(key_path, passphrase)
     if not isinstance(key, Ed25519PrivateKey):
         raise ReferenceError(f"{key_path} is not an Ed25519 key")
@@ -274,20 +373,9 @@ def describe(ref: Dict[str, Any], at_iso: Optional[str] = None) -> List[str]:
         entries = _entries(ref, field)
         lines.append(f"  {field}:" + ("" if entries else "  (none — identity will FAIL for every record)"))
         for e in entries:
-            vf, vt = parse_time(e.get("valid_from")), parse_time(e.get("valid_to"))
-            if e.get("retired"):
-                status = "RETIRED"
-            elif not (e.get("valid_from") or e.get("valid_to")):
-                status = "current (no window)"
-            elif (e.get("valid_from") and vf is None) or (e.get("valid_to") and vt is None):
-                status = "UNPARSABLE WINDOW — will fail"
-            elif vf is not None and at < vf:
-                status = f"not yet current (from {e['valid_from']})"
-            elif vt is not None and at > vt:
-                status = f"expired (to {e['valid_to']})"
-            else:
-                status = "current"
-            window = f"  [{e.get('valid_from') or '…'} → {e.get('valid_to') or '…'}]" if (e.get("valid_from") or e.get("valid_to")) else ""
+            _, status = entry_status(e, at)
+            window = (f"  [{e.get('valid_from') or '…'} → {e.get('valid_to') or '…'}]"
+                      if (e.get("valid_from") or e.get("valid_to")) else "")
             lines.append(f"    {e['value']}  {status}{window}")
     return lines
 
@@ -357,6 +445,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--in", dest="inp", required=True)
     s.add_argument("--key", required=True)
     s.add_argument("--passphrase-env", default=None, metavar="VAR")
+    s.add_argument("--allow-not-current", action="store_true",
+                   help="sign even though no entry is current now (a deliberately historical or pre-announced reference)")
+    s.add_argument("--allow-overlap", action="store_true",
+                   help="sign even though two entries are current for one field (a planned rollout overlap)")
     s.add_argument("--out", default=None)
 
     v = sub.add_parser("verify", help="what a firm sees; run it before publishing too")
@@ -397,7 +489,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
         if a.cmd == "sign":
-            ref = sign(_read(a.inp), a.key, passphrase=_passphrase(a.passphrase_env))
+            ref = sign(_read(a.inp), a.key, passphrase=_passphrase(a.passphrase_env),
+                       allow_not_current=a.allow_not_current, allow_overlap=a.allow_overlap)
             _write(ref, a.out or a.inp)
             print(f"  signed under {ref['publication_key'][:16]}…")
             return 0

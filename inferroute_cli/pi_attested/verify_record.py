@@ -528,30 +528,41 @@ def _parse_time(s: Any) -> Optional["datetime.datetime"]:
 
 
 def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str]) -> Tuple[bool, str]:
-    """(current_match, why). A retired or out-of-window entry MATCHES but is not CURRENT — reported as such.
+    """(current_match, why). EVERY entry whose value matches is evaluated: the match is current if ANY of
+    them is current at the statement's time (that entry is reported); it is refused only when no matching
+    entry is current, with every reason listed. So a retired entry listed before a current one for the same
+    hash — two releases sharing a manifest, a reinstated policy — cannot decide the verdict by list order.
     A windowed entry can only be called current against a PARSABLE statement time: a missing or unreadable
     started_utc FAILS rather than making the window vacuous."""
     v = str(value or "").lower()
     at = _parse_time(at_iso)
+    refusals: List[str] = []
     for e in entries:
         if e["value"] != v:
             continue
         if e["retired"]:
-            return False, "matches a RETIRED entry"
+            refusals.append("matches a RETIRED entry")
+            continue
         if not (e["valid_from"] or e["valid_to"]):
             return True, "current (entry carries no validity window)"
         vf = _parse_time(e["valid_from"]) if e["valid_from"] else None
         vt = _parse_time(e["valid_to"]) if e["valid_to"] else None
         if (e["valid_from"] and vf is None) or (e["valid_to"] and vt is None):
-            return False, "matches an entry whose validity window does not parse as ISO-8601"
+            refusals.append("matches an entry whose validity window does not parse as ISO-8601")
+            continue
         if at is None:
-            return False, (f"matches a windowed entry, but the statement carries no parsable time "
-                           f"(started_utc {at_iso!r}) — cannot say it was current")
+            refusals.append(f"matches a windowed entry, but the statement carries no parsable time "
+                            f"(started_utc {at_iso!r}) — cannot say it was current")
+            continue
         if vf is not None and at < vf:
-            return False, f"matches, but the search ({at_iso}) predates its valid_from {e['valid_from']}"
+            refusals.append(f"matches, but the search ({at_iso}) predates its valid_from {e['valid_from']}")
+            continue
         if vt is not None and at > vt:
-            return False, f"matches, but the search ({at_iso}) is after its valid_to {e['valid_to']}"
+            refusals.append(f"matches, but the search ({at_iso}) is after its valid_to {e['valid_to']}")
+            continue
         return True, f"current (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'}, search at {at_iso})"
+    if refusals:
+        return False, "; ".join(dict.fromkeys(refusals)) + (f" ({len(refusals)} matching entries, none current)" if len(refusals) > 1 else "")
     return False, "no entry matches"
 
 

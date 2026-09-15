@@ -415,3 +415,26 @@ def test_completeness_wording_is_per_enclave_shown(tmp_path, V, kms):
     d, host, _ = _multi_bundle(tmp_path, V, kms, seqs=[1, 2])
     _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
     assert "every search of each enclave SHOWN" in out and "entire lifetime dropped" in out
+
+
+def test_duplicate_values_are_all_evaluated_and_any_current_one_wins(tmp_path, V, kms):
+    """A retired (or expired) entry listed before a current one for the SAME hash must not decide the verdict
+    by list order — two releases sharing a manifest, or a reinstated policy, make this common."""
+    d, host = _bundle_with_statement_time(tmp_path, V, kms, started="2026-06-01T12:00:00Z")
+    retired_first = [{"value": host, "retired": True},
+                     {"value": host, "valid_from": "2026-01-01T00:00:00Z", "valid_to": "2026-12-31T00:00:00Z"}]
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "rf.json", retired_first)))
+    assert "PASS enclave identity" in out and "policy: current (valid 2026-01-01T00:00:00Z" in out
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "cf.json", list(reversed(retired_first)))))
+    assert "PASS enclave identity" in out
+    # an expired entry before a current one, both orders
+    expired_first = [{"value": host, "valid_to": "2020-01-01T00:00:00Z"},
+                     {"value": host, "valid_from": "2026-01-01T00:00:00Z"}]
+    for order in (expired_first, list(reversed(expired_first))):
+        _, out = _run(d, "--reference", str(_ref(tmp_path, "ef.json", order)))
+        assert "PASS enclave identity" in out, out
+    # and when NO matching entry is current, every reason is listed
+    none_current = [{"value": host, "retired": True}, {"value": host, "valid_to": "2020-01-01T00:00:00Z"}]
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "nc.json", none_current)))
+    assert code == 1 and "FAIL enclave identity" in out
+    assert "matches a RETIRED entry" in out and "after its valid_to 2020-01-01T00:00:00Z" in out and "2 matching entries, none current" in out

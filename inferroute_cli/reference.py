@@ -11,6 +11,12 @@ obtained from InferRoute through a channel they already trust. These commands pr
     ir surveyor reference sign      --key KEY        on the OFFLINE machine that holds the key
     ir surveyor reference verify    --key-hex HEX    what a firm sees; also a check before you publish
 
+`verify` exit codes, because a reference has two independent verdicts and the code must carry both:
+    0  signed by the key you gave, and something is current for every field — usable
+    1  the signature was not verified (unsigned, or no key given); --allow-unverified to inspect a draft
+    2  refused: unreadable file, bad argument
+    3  signed, but nothing is current — every record checked against it FAILS identity
+
 Three rules the tooling enforces or states, because getting them wrong silently is the failure mode:
 
  1. `policy_sha256` is HOST_DATA as the hardware reports it (bytes 0xC0..0xE0 of the SNP report), read from
@@ -168,6 +174,12 @@ def current_entries(ref: Dict[str, Any], field: str, at: dt.datetime) -> List[Di
     return [e for e in _entries(ref, field) if entry_status(e, at)[0]]
 
 
+def currency(ref: Dict[str, Any], at: dt.datetime) -> Dict[str, List[Dict[str, Any]]]:
+    """Per field, the entries current at `at`. One definition, shared by the pre-publication refusal and by
+    `verify`, so the operator's check and the firm's check can never disagree about what "usable" means."""
+    return {f: current_entries(ref, f, at) for f in FIELDS}
+
+
 def check_publishable(ref: Dict[str, Any], *, at: Optional[dt.datetime] = None, allow_not_current: bool = False,
                       allow_overlap: bool = False) -> None:
     """Refuse to sign a reference that would fail, or be ambiguous, the moment it is published.
@@ -186,7 +198,7 @@ def check_publishable(ref: Dict[str, Any], *, at: Optional[dt.datetime] = None, 
             ok, why = entry_status(e, at)
             if not ok and ("DEAD INTERVAL" in why or "UNPARSABLE" in why):
                 dead.append(f"{field} {e['value'][:16]}…: {why}")
-        cur = [e for e in entries if entry_status(e, at)[0]]
+        cur = current_entries(ref, field, at)
         if not cur:
             empty.append(f"{field} (" + "; ".join(f"{e['value'][:16]}… {entry_status(e, at)[1]}" for e in entries) + ")"
                          if entries else f"{field} (no entries)")
@@ -513,16 +525,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         if a.cmd == "verify":
             ref = _read(a.inp)
             _require_time(a.at, "--at")
+            at = parse_time(a.at) or dt.datetime.now(dt.timezone.utc)
             ok, why = verify(ref, a.key_hex)
-            print(("OK   " if ok else "NOT VERIFIED  ") + why)
+            cur = currency(ref, at)
+            empty = [f for f, entries in cur.items() if not entries]
+            overlapping = [f for f, entries in cur.items() if len(entries) > 1]
+            # A reference has TWO independent verdicts — is it signed by the key you hold, and is it usable —
+            # and the exit code has to carry both. Leading with OK while something below says "expired" is
+            # the failure mode this whole series kept finding.
+            if not ok:
+                print("NOT VERIFIED  " + why)
+            elif empty:
+                print(f"SIGNED BUT NOT USABLE  {why} — but nothing is current for: {', '.join(empty)}")
+            else:
+                print("OK   " + why)
             for line in describe(ref, a.at):
                 print(line)
+            if overlapping:
+                print(f"note: more than one entry is current for {', '.join(overlapping)} — two different "
+                      "enclaves would both pass identity; correct only during a planned rollout overlap.")
             if not ok and not a.allow_unverified:
-                # The exit code must say what the text says: anyone scripting this check on an unsigned
-                # reference, or without the key, must not get a green exit.
                 print("exit 1: the signature was NOT verified. Pass --key-hex with the key you recorded at "
                       "first use, or --allow-unverified if you are deliberately inspecting an unsigned draft.")
-            return 0 if (ok or a.allow_unverified) else 1
+            elif empty:
+                print("exit 3: the signature is good, but every record checked against this reference will "
+                      "FAIL identity" + (f" as of {a.at}" if a.at else " right now") + ". If this is a "
+                      "deliberately historical reference that is expected; otherwise build and sign a current one.")
+            if not ok and not a.allow_unverified:
+                return 1
+            return 3 if empty else 0
     except (ReferenceError, OSError) as e:
         import sys
         sys.stderr.write(f"\n  {e}\n\n")

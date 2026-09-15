@@ -231,9 +231,11 @@ def test_verify_cli_reports_status_and_exits_nonzero_on_a_bad_key(tmp_path, caps
     pub = R.new_key(str(key))
     assert R.main(["sign", "--in", str(p), "--key", str(key)]) == 2          # nothing current → refused
     assert R.main(["sign", "--in", str(p), "--key", str(key), "--allow-not-current"]) == 0
-    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 0
+    # signed under the right key, but nothing current: the signature verdict and the usability verdict differ
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 3
     out = capsys.readouterr().out
-    assert "OK   verifies under the publication key" in out and "expired (to 2020-12-31T00:00:00Z)" in out
+    assert "SIGNED BUT NOT USABLE" in out and "verifies under the publication key" in out
+    assert "expired (to 2020-12-31T00:00:00Z)" in out
     other = R.new_key(str(tmp_path / "o.key"))
     assert R.main(["verify", "--in", str(p), "--key-hex", other]) == 1
     assert "does NOT verify" in capsys.readouterr().out
@@ -370,3 +372,50 @@ def test_verify_refuses_an_unparsable_at_rather_than_answering_about_now(tmp_pat
     with pytest.raises(R.ReferenceError):
         R.describe(ref, "last tuesday")                                  # closed in the API too
     assert R.describe(ref, "2026-06-01T12:00:00Z")                       # a real time still works
+
+
+def test_verify_separates_the_signature_verdict_from_the_usability_verdict(tmp_path, capsys):
+    """A signed reference under which nothing is current led with OK and exited 0 — while being one under
+    which every record fails identity for every client. The exit code has to carry both verdicts."""
+    key = tmp_path / "k.key"
+    pub = R.new_key(str(key))
+
+    dead = _three("abc", valid_from="2020-01-01T00:00:00Z", valid_to="2021-01-01T00:00:00Z")
+    p = tmp_path / "dead.json"
+    p.write_text(json.dumps(R.sign(dead, str(key), allow_not_current=True)))
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 3
+    out = capsys.readouterr().out
+    assert out.startswith("SIGNED BUT NOT USABLE"), out           # not "OK"
+    assert "nothing is current for: policy_sha256" in out and "expired (to 2021-01-01T00:00:00Z)" in out
+    assert "exit 3" in out and "FAIL identity" in out
+    # waiving the SIGNATURE concern does not waive the usability one
+    assert R.main(["verify", "--in", str(p), "--allow-unverified"]) == 3
+    capsys.readouterr()
+
+    # the same reference, asked about a date when it WAS current, is usable then
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub, "--at", "2020-06-01T00:00:00Z"]) == 0
+    assert capsys.readouterr().out.startswith("OK   ")
+
+    # a current, signed reference is plain 0
+    live = _three("abc", valid_from="2020-01-01T00:00:00Z")
+    q = tmp_path / "live.json"
+    q.write_text(json.dumps(R.sign(live, str(key))))
+    assert R.main(["verify", "--in", str(q), "--key-hex", pub]) == 0
+    assert capsys.readouterr().out.startswith("OK   ")
+
+    # an unsigned reference that is also unusable reports the signature problem first (exit 1)
+    u = tmp_path / "unsigned.json"
+    u.write_text(json.dumps(dead))
+    assert R.main(["verify", "--in", str(u), "--key-hex", pub]) == 1
+    assert capsys.readouterr().out.startswith("NOT VERIFIED")
+
+
+def test_verify_notes_an_overlap_without_failing_on_it(tmp_path, capsys):
+    key = tmp_path / "k.key"
+    pub = R.new_key(str(key))
+    overlapping = _three("dbc", merge=_three("abc"))
+    p = tmp_path / "o.json"
+    p.write_text(json.dumps(R.sign(overlapping, str(key), allow_overlap=True)))
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 0     # usable; the reader is not blocked
+    out = capsys.readouterr().out
+    assert "more than one entry is current for policy_sha256" in out and "planned rollout overlap" in out

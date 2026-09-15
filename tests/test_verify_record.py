@@ -285,7 +285,8 @@ def test_reference_validity_windows_and_retired_entries(tmp_path, V, kms):
     # current entry with a window that contains the search time → identity passes
     ok = _ref(tmp_path, "ok.json", [{"value": host, "valid_from": "2026-01-01T00:00:00Z", "valid_to": "2026-12-31T23:59:59Z"}])
     _, out = _run(d, "--reference", str(ok))
-    assert "PASS enclave identity" in out and "policy: current (valid 2026-01-01T00:00:00Z → 2026-12-31T23:59:59Z)" in out
+    assert "PASS enclave identity" in out
+    assert "policy: current (valid 2026-01-01T00:00:00Z → 2026-12-31T23:59:59Z, search at 2026-06-01T12:00:00Z)" in out
     # retired entry → matches but is not current → FAIL, and it says so
     retired = _ref(tmp_path, "retired.json", [{"value": host, "retired": True}])
     _, out = _run(d, "--reference", str(retired))
@@ -330,3 +331,87 @@ def test_completeness_from_sequence_numbers(tmp_path, V, kms):
     d, host, _ = _multi_bundle(tmp_path / "none", V, kms, seqs=[None, None])
     _, out = _run(d, "--reference", str(host_ref(tmp_path / "none", host)))
     assert "SKIP completeness (per-enclave sequence)" in out and "no sequence numbers" in out
+
+
+# ───────────── reviewer's third pass: windows fail closed, real time comparison, completeness never silent ─────────────
+
+def _bundle_with_statement_time(tmp_path, V, kms, started, no_lifetime=False):
+    """One statement; `started` None omits started_utc entirely."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    key = Ed25519PrivateKey.generate()
+    pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    rd = {"v": 1, "kind": "sealed-search", "lifetime_id": "ab" * 8, "statement_signer_pub": pub,
+          "enclave_x25519_pub": "cd" * 32, "index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    rd_bytes = json.dumps(rd).encode()
+    offer = {"evidence": kms["evidence"], "endorsements": kms["endorsements"], "uvm_endorsements": kms["uvm_endorsements"],
+             "runtime_data": base64.b64encode(rd_bytes).decode()}
+    ev_bytes = json.dumps({"offer": offer}, indent=1).encode()
+    ev_sha = hashlib.sha256(ev_bytes).hexdigest()
+    d = tmp_path / "bundle"
+    d.mkdir(parents=True)
+    (d / f"{ev_sha[:16]}.evidence.json").write_bytes(ev_bytes)
+    rid = "0" * 32
+    q, res = "q", {"hits": [{"key": "US-1-A"}]}
+    st = {"v": 1, "kind": "search", "request_id": rid, "seq": 1,
+          "runtime_data_sha256": hashlib.sha256(rd_bytes).hexdigest(), "index_manifest_sha256": rd["index_manifest_sha256"],
+          "model_manifest_sha256": rd["model_manifest_sha256"], "cutoff_date": 20200115, "hits_n": 1, "outcome": "answered",
+          "query_sha256": V.salted(rid, q), "result_sha256": V.salted(rid, res)}
+    if not no_lifetime:
+        st["lifetime_id"] = rd["lifetime_id"]
+    if started is not None:
+        st["started_utc"] = started
+    st["sig"] = key.sign(V.canonical(st)).hex()
+    (d / "searches.json").write_text(json.dumps([{"n": 1, "session_id": "s", "at": "t", "statement": st, "result": res,
+                                                  "query_text": q, "signer_pub": pub, "evidence_file": f"{ev_sha[:16]}.evidence.json",
+                                                  "evidence_sha256": ev_sha}]))
+    for n, body in (("record.html", "<html/>"), ("VERIFY.md", "#")):
+        (d / n).write_text(body)
+    (d / "verify_record.py").write_bytes(SCRIPT.read_bytes())
+    files = {n: hashlib.sha256((d / n).read_bytes()).hexdigest() for n in os.listdir(d)}
+    (d / "MANIFEST.json").write_text(json.dumps({"files": files, "matter_cutoff": 20200115}))
+    host = V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+    return d, host
+
+
+def test_a_windowed_entry_never_reads_current_without_a_statement_time(tmp_path, V, kms):
+    d, host = _bundle_with_statement_time(tmp_path, V, kms, started=None)
+    expired = _ref(tmp_path, "expired.json", [{"value": host, "valid_to": "2020-01-01T00:00:00Z"}])
+    code, out = _run(d, "--reference", str(expired))
+    assert "FAIL enclave identity" in out
+    # the windowed POLICY entry must not read current; the unwindowed index/encoder entries legitimately do
+    assert "policy: matches a windowed entry, but the statement carries no parsable time" in out
+    # an unparsable statement time is the same refusal
+    d2, host2 = _bundle_with_statement_time(tmp_path / "u", V, kms, started="yesterday-ish")
+    _, out = _run(d2, "--reference", str(_ref(tmp_path / "u", "e.json", [{"value": host2, "valid_to": "2099-01-01T00:00:00Z"}])))
+    assert "FAIL enclave identity" in out and "no parsable time" in out
+    # an unparsable WINDOW is refused too
+    d3, host3 = _bundle_with_statement_time(tmp_path / "w", V, kms, started="2026-06-01T12:00:00Z")
+    _, out = _run(d3, "--reference", str(_ref(tmp_path / "w", "e.json", [{"value": host3, "valid_to": "not-a-time"}])))
+    assert "FAIL enclave identity" in out and "does not parse as ISO-8601" in out
+
+
+def test_window_comparison_is_a_time_comparison_not_a_string_one(tmp_path, V, kms):
+    # 01:00 at +02:00 on the 15th is 23:00Z on the 14th: BEFORE a valid_from of 2026-09-15T00:00:00Z.
+    # A string compare would sort it after and call it current.
+    d, host = _bundle_with_statement_time(tmp_path, V, kms, started="2026-09-15T01:00:00+02:00")
+    ref = _ref(tmp_path, "r.json", [{"value": host, "valid_from": "2026-09-15T00:00:00Z"}])
+    _, out = _run(d, "--reference", str(ref))
+    assert "FAIL enclave identity" in out and "predates its valid_from" in out
+    # fractional seconds inside the window are current
+    d2, host2 = _bundle_with_statement_time(tmp_path / "f", V, kms, started="2026-06-01T12:00:00.250Z")
+    ref2 = _ref(tmp_path / "f", "r.json", [{"value": host2, "valid_from": "2026-01-01T00:00:00Z", "valid_to": "2026-12-31T00:00:00Z"}])
+    _, out = _run(d2, "--reference", str(ref2))
+    assert "PASS enclave identity" in out and "current (valid" in out
+
+
+def test_completeness_is_never_silent_when_grouping_is_impossible(tmp_path, V, kms):
+    d, host = _bundle_with_statement_time(tmp_path, V, kms, started="2026-06-01T12:00:00Z", no_lifetime=True)
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "SKIP completeness (per-enclave sequence)" in out and "carry no lifetime_id" in out
+
+
+def test_completeness_wording_is_per_enclave_shown(tmp_path, V, kms):
+    d, host, _ = _multi_bundle(tmp_path, V, kms, seqs=[1, 2])
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "every search of each enclave SHOWN" in out and "entire lifetime dropped" in out

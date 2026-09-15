@@ -44,8 +44,12 @@ What it does NOT do:
     reference verifier behaves the same). No revocation checking; no basicConstraints / keyUsage / path
     length validation — trust is two root pins plus signature links, nothing more.
   * It cannot verify the attorney's OWN machine was confined — that is the device's self-report.
-  * It proves what the record SHOWS, never that the record shows every search that ran (statements carry
-    no sequence numbers; a deleted search row is undetectable).
+  * Completeness: each statement carries a per-enclave sequence number; the record is checked for gaps and
+    duplicates per enclave lifetime, so a dropped search is visible — except one dropped from the very END
+    of a lifetime, which no counter can reveal. Statements without sequence numbers get a SKIP that says so.
+  * The reference may be SIGNED by InferRoute's long-lived publication key: record that key once at first
+    use and pass --reference-key; each reference entry may carry a validity window or a retired flag, and a
+    match that was not current at the search's time FAILS and says which entry matched.
   * MANIFEST.json is an index, not a seal: it is unsigned. The enclave-signed statements are the seal.
   * `--extract DIR` writes each search's raw evidence (report.bin, vcek.pem, ask_ark.pem,
     uvm_endorsement.cose, runtime_data.json, policy.rego) for independent tools; VERIFY.md names them
@@ -486,6 +490,96 @@ def _is_hex32(v: Any) -> bool:
     return isinstance(v, str) and len(v) == 64 and all(ch in "0123456789abcdef" for ch in v.lower())
 
 
+# ───────────────────────────── the reference (identity), signed and time-bounded ─────────────────────────────
+
+
+def _ref_entries(reference: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
+    """Entries may be plain hashes or objects {value, valid_from, valid_to, retired}. Times are ISO-8601 UTC
+    ('YYYY-MM-DDTHH:MM:SSZ'), compared lexicographically against the statement's started_utc."""
+    out: List[Dict[str, Any]] = []
+    for e in reference.get(field, []) or []:
+        if isinstance(e, str):
+            out.append({"value": e.lower(), "valid_from": None, "valid_to": None, "retired": False})
+        elif isinstance(e, dict) and isinstance(e.get("value"), str):
+            out.append({"value": e["value"].lower(), "valid_from": e.get("valid_from") or None,
+                        "valid_to": e.get("valid_to") or None, "retired": bool(e.get("retired"))})
+    return out
+
+
+def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str]) -> Tuple[bool, str]:
+    """(current_match, why). A retired or out-of-window entry MATCHES but is not CURRENT — reported as such."""
+    v = str(value or "").lower()
+    for e in entries:
+        if e["value"] != v:
+            continue
+        if e["retired"]:
+            return False, "matches a RETIRED entry"
+        if at_iso and e["valid_from"] and at_iso < e["valid_from"]:
+            return False, f"matches, but the search ({at_iso}) predates its valid_from {e['valid_from']}"
+        if at_iso and e["valid_to"] and at_iso > e["valid_to"]:
+            return False, f"matches, but the search ({at_iso}) is after its valid_to {e['valid_to']}"
+        window = f" (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'})" if (e["valid_from"] or e["valid_to"]) else ""
+        return True, "current" + window
+    return False, "no entry matches"
+
+
+def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Optional[str]) -> None:
+    """The reference file may be signed (Ed25519 over its canonical JSON minus `sig`) by InferRoute's
+    long-lived publication key. Record that key ONCE at first use (engagement letter / signed release note)
+    and pass it with --reference-key: later reference updates are then accepted without re-establishing
+    trust. Trust-on-first-use, anchored in the firm's own file."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    sig = reference.get("sig")
+    if key_hex is None:
+        c.add(None, "reference signature", "reference carries a signature but no --reference-key was given (record InferRoute's publication key at first use and pass it)"
+              if sig else "reference is unsigned; its trust rests entirely on how you obtained it")
+        return
+    if not sig:
+        c.add(False, "reference signature", "a --reference-key was given but this reference is unsigned")
+        return
+    body = {k: v for k, v in reference.items() if k != "sig"}
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(key_hex)).verify(bytes.fromhex(str(sig)), canonical(body))
+        c.add(True, "reference signature", f"verifies under the publication key {key_hex[:16]}… you recorded at first use")
+    except Exception:                                       # noqa: BLE001
+        c.add(False, "reference signature", "does NOT verify under the given publication key")
+
+
+def check_completeness(c: Checks, searches: List[Dict[str, Any]]) -> None:
+    """Per enclave lifetime, the signed `seq` numbers must run 1..N with no gaps or duplicates. Then the record
+    can claim "every search of that enclave, in order" — except a search dropped from the very END of a
+    lifetime, which no counter can reveal."""
+    by_life: Dict[str, List[Any]] = {}
+    for row in searches:
+        st = row.get("statement") if isinstance(row, dict) else None
+        if isinstance(st, dict) and st.get("lifetime_id"):
+            by_life.setdefault(str(st["lifetime_id"]), []).append(st.get("seq"))
+    if not by_life:
+        return
+    if not any(isinstance(s, int) for seqs in by_life.values() for s in seqs):
+        c.add(None, "completeness (per-enclave sequence)", "these statements carry no sequence numbers; a dropped search is undetectable")
+        return
+    problems, summary = [], []
+    for lid, seqs in by_life.items():
+        ints = sorted(s for s in seqs if isinstance(s, int))
+        tag = f"enclave {lid[:8]}…"
+        if len(ints) != len(seqs):
+            problems.append(f"{tag}: a statement without a sequence number")
+            continue
+        present = set(ints)
+        gaps = [n for n in range(ints[0], ints[-1] + 1) if n not in present]
+        dups = len(ints) != len(present)
+        if ints[0] != 1:
+            problems.append(f"{tag}: starts at seq {ints[0]} — searches 1..{ints[0] - 1} of this enclave are not in the record")
+        if gaps or dups:
+            problems.append(f"{tag}: seq {ints[0]}..{ints[-1]}" + (f" missing {gaps}" if gaps else "") + (" with duplicates" if dups else ""))
+        if ints[0] == 1 and not gaps and not dups:
+            summary.append(f"{tag}: seq 1..{ints[-1]} contiguous ({len(ints)} search{'es' if len(ints) != 1 else ''})")
+    c.add(not problems, "completeness (per-enclave sequence)",
+          ("; ".join(summary) + " — a search dropped from the END of a lifetime remains undetectable") if not problems
+          else "; ".join(problems))
+
+
 def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[str, str], uvm_root: str,
                   uvm_min_svn: int, matter_cutoff: Optional[int], reference: Optional[Dict[str, Any]],
                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
@@ -575,20 +669,22 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
 
     # 4. IDENTITY — the only check that separates InferRoute's enclave from any other Azure confidential
     #    container. Mirrors the live verifier's ruling (aci_evidence: an unpinned policy is a FAILING step).
+    #    Each reference entry may carry a validity window or be retired; a match that is not CURRENT at the
+    #    statement's time fails, and the row says which entry matched and why.
     if reference is None:
         c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
               "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT InferRoute's; "
               "obtain InferRoute's published reference out of band and rerun with --reference")
     else:
-        pols = {str(x).lower() for x in reference.get("policy_sha256", [])}
-        idxs = {str(x).lower() for x in reference.get("index_manifest_sha256", [])}
-        mdls = {str(x).lower() for x in reference.get("model_manifest_sha256", [])}
-        pol_ok = p is not None and p["host_data"].hex() in pols
-        idx_ok = bool(rd) and str(idx).lower() in idxs
-        mdl_ok = bool(rd) and str(mdl).lower() in mdls
+        at = st.get("started_utc") if isinstance(st.get("started_utc"), str) else None
+        pol_ok, pol_why = (_ref_match(_ref_entries(reference, "policy_sha256"), p["host_data"].hex(), at) if p is not None
+                           else (False, "no report"))
+        idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), idx, at) if rd else (False, "no runtime data")
+        mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), mdl, at) if rd else (False, "no runtime data")
         c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
-              f"policy {'✓' if pol_ok else '✗'} index manifest {'✓' if idx_ok else '✗'} encoder manifest {'✓' if mdl_ok else '✗'} "
-              f"against reference {reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}")
+              f"policy: {pol_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — against reference "
+              f"{reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}"
+              + (f", at the search's time {at}" if at else ""))
 
     # 5. content bindings
     rid = str(st.get("request_id") or "")
@@ -699,6 +795,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("bundle", help="the export directory (record.html, searches.json, MANIFEST.json, *.evidence.json)")
     ap.add_argument("--reference", default=None, metavar="FILE",
                     help="InferRoute's published reference (policy_sha256, index_manifest_sha256, model_manifest_sha256), obtained OUT OF BAND; without it identity FAILS")
+    ap.add_argument("--reference-key", default=None, metavar="ED25519_PUB_HEX",
+                    help="InferRoute's long-lived publication key, recorded at first use; verifies the reference file's signature")
     ap.add_argument("--min-tcb", action="append", default=[], metavar="PRODUCT=snpSPL:N,ucodeSPL:N",
                     help="minimum firmware TCB per product line (same shape as the UVM SVN floor)")
     ap.add_argument("--extract", default=None, metavar="DIR", help="also write each search's raw evidence as files for independent tools")
@@ -744,6 +842,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if test_roots:
         print("!!! NON-PRODUCTION ROOTS PINNED (--i-am-testing): this run verifies a TEST enclave, never Azure. Exit code 3 at best. !!!")
     c0, manifest = check_manifest(a.bundle)
+    if reference is not None:
+        check_reference_signature(c0, reference, a.reference_key)
     c0.dump()
     fails = len(c0.failed)
     try:
@@ -793,6 +893,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         c.dump()
         fails += len(c.failed)
+    if searches:
+        cc = Checks()
+        check_completeness(cc, [r for r in searches if isinstance(r, dict)])
+        if cc.rows:
+            print("\nRecord")
+            cc.dump()
+            fails += len(cc.failed)
     if a.extract:
         extract(a.bundle, a.extract, [r for r in searches if isinstance(r, dict)])
     print()
@@ -802,7 +909,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
     else:
         print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
-    print("This record proves what it shows; it cannot prove it shows every search that ran.")
+    print("Completeness: with sequence numbers the record shows every search of each enclave in order, except one dropped from the very end; without them, only what it shows.")
     print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; certificate revocation.")
     return 1 if fails else (3 if test_roots else 0)
 

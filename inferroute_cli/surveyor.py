@@ -283,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
     x = sub.add_parser("export"); x.add_argument("matter"); x.add_argument("-o", "--out", default=None)
     x.add_argument("--anchor", action="store_true", help="OpenTimestamps-anchor MANIFEST.json (publishes only a hash)")
     ve = sub.add_parser("verify-export"); ve.add_argument("bundle")
+    rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
+    rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
     a = p.parse_args(argv)
     try:
@@ -296,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_export(a.matter, a.out, anchor=a.anchor)
         if a.cmd == "verify-export":
             return cmd_verify_export(a.bundle)
+        if a.cmd == "reference":
+            from . import reference as reference_mod
+            return reference_mod.main(a.args)
         if a.cmd == "list":
             return cmd_list()
     except SurveyorError as e:

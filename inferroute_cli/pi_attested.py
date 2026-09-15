@@ -347,6 +347,38 @@ def confine_required() -> bool:
     return os.environ.get("IR_ATTESTED_CONFINE", "").strip().lower() in ("1", "require", "required", "strict")
 
 
+def netns_bind_intended() -> bool:
+    """True when this launch will run the agent in an empty netns with only the matter tree bound in.
+    Set by the launcher BEFORE the proxies start, and honoured only on a path that ABORTS the launch if the
+    sandbox cannot then be built — so the label can never say "address-level" for a session that ran without
+    it. Requested and applied are the same thing here by construction."""
+    return os.environ.get("IR_ATTESTED_NETNS_BIND") == "1"
+
+
+def plan_netns_bind() -> bool:
+    """Whether THIS launch will run the agent in the empty-netns bind: require mode, on a machine that can
+    build it. Decided BEFORE the verifier starts, because the verifier stamps the confinement line into
+    every record from this decision — and the launcher refuses to start if the sandbox then fails to build,
+    so a record can never claim a confinement its session did not run under."""
+    if confine_disabled() or os.environ.get("IR_SURVEYOR_DEV_UNCONFINED") == "1" or not confine_required():
+        return False
+    from inferroute_local import confinement
+    return confinement.netns_bind_available()
+
+
+def netns_sandbox(*, ports, cfg_dir: str, rw, ro=(), binary: str = ""):
+    """The sandbox for the launch path. Raises netns.NetnsUnavailable; the caller must refuse to launch."""
+    from inferroute_local import netns
+    return netns.NetnsSandbox(ports=ports, cfg_dir=cfg_dir, rw=rw, ro=ro, binary=binary)
+
+
+def run_in_netns_bind(argv, *, ports, cfg_dir: str, rw, ro=(), env=None, binary: str = "", timeout=None):
+    """Run a command inside the sandbox synchronously. The acceptance test for step 7 drives this."""
+    from inferroute_local import netns
+    return netns.run_in_netns_bind(argv, ports=ports, cfg_dir=cfg_dir, rw=rw, ro=ro, env=env,
+                                   binary=binary, timeout=timeout)
+
+
 def confinement_label() -> str:
     """The confinement line the verifier stamps into every disclosure record — asserted host-side from the
     launch env, not from anything the sandbox composes. In require mode the launch refuses unless the
@@ -355,6 +387,9 @@ def confinement_label() -> str:
         return "unconfined (developer override)"
     if confine_disabled():
         return "not confined"
+    if netns_bind_intended():
+        from inferroute_local import netns
+        return netns.ADDRESS_LEVEL_LABEL
     if confine_required():
         return "require (address-level egress enforced or the session does not start)"
     return "best-effort (port-level; not required)"
@@ -400,10 +435,13 @@ def confine_precheck() -> tuple[bool, str]:
         abi = confinement.landlock_abi(__import__("ctypes").CDLL(None, use_errno=True)) if linux else 0
     except Exception:                                       # noqa: BLE001
         abi = 0
-    address_level = linux and confinement.netns_available()
+    # The same probe the sandbox constructor uses. Testing a weaker one here would let the launch pass a
+    # check for "address-level" and then fail to build the thing that provides it.
+    address_level = linux and confinement.netns_bind_available()
     if confine_required():
         if address_level:
-            return True, "network confined to the local proxies by ADDRESS (empty network namespace)"
+            return True, ("network confined to the local proxies by ADDRESS (empty network namespace), and "
+                          "the filesystem built up from nothing — other files are absent, not merely unwritable")
         if linux and confinement.userns_restricted():
             return False, ("IR_ATTESTED_CONFINE=require, but address-level confinement needs the one-time "
                            "AppArmor profile — run scripts/install-confine-profile.sh once (sudo), then retry. "
@@ -411,9 +449,12 @@ def confine_precheck() -> tuple[bool, str]:
         return False, ("IR_ATTESTED_CONFINE=require, but this platform cannot confine egress by address "
                        "(needs Linux with bubblewrap and unprivileged network namespaces). Refusing to launch.")
     if linux and abi >= 4:
-        residual = " (port-level: a remote host on an allowed port number is still reachable; install the "
-        residual += "AppArmor profile and set IR_ATTESTED_CONFINE=require for address-level)" if not address_level else ""
-        base = "network confined to the local proxies by ADDRESS" if address_level else "network confined to the local proxies"
-        return True, base + residual
+        # Best-effort is port-level: Landlock matches a port NUMBER, and it bounds writes but not reads.
+        # Both residuals are stated, because only the require-mode bind removes them, and a reader who is
+        # told "confined" without them would read more into the word than it carries here.
+        residual = (" (port-level: a remote host on an allowed port number is still reachable, and file READS "
+                    "are not confined — the agent can read other files into model context; install the AppArmor "
+                    "profile and set IR_ATTESTED_CONFINE=require for the address-level bind, which removes both)")
+        return True, "network confined to the local proxies" + residual
     return True, ("this platform cannot confine the agent's network (needs Linux with Landlock ABI 4); "
                   "the agent could reach the network directly — set IR_ATTESTED_CONFINE=require to refuse instead")

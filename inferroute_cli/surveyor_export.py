@@ -76,8 +76,11 @@ InferRoute INDEPENDENTLY of this bundle:
                         "source": "<where you got it>", "published_at": "...", "sig": "<optional, see below>"}
 
 Each entry is either a bare hash or `{"value": "...", "valid_from": "YYYY-MM-DDTHH:MM:SSZ",
-"valid_to": "...", "retired": false}`. A record whose search matched an entry that was retired, or outside
-its window at the time of the search, FAILS identity — and the verifier says which entry matched and why.
+"valid_to": "...", "retired": false}`. Times are ISO-8601 and compared as times (offsets honoured, a
+trailing Z normalised, naive taken as UTC). A record whose search matched an entry that was retired, or
+outside its window at the search's signed time, FAILS identity — and so does a windowed match when the
+statement carries no parsable time, rather than the window going silent. The verifier says which entry
+matched and why.
 That is how a policy later withdrawn cannot pass as current, and how the enclave changing over a long
 matter is spoken about precisely.
 
@@ -132,9 +135,11 @@ exact command lines, only that the extracted files are their inputs.
 * That this attorney's own machine was confined while the session ran (the device's self-report, stated per
   session in `record.html`).
 * Anything about the model lane beyond the receipt's own listed checks and limitations, reproduced verbatim.
-* That the record is COMPLETE at the very end: each statement carries a per-enclave sequence number, so a
-  search dropped from the middle (or the start) of an enclave's lifetime leaves a visible gap the verifier
-  reports; a search dropped from the very END of a lifetime cannot be revealed by any counter.
+* That the record is COMPLETE beyond what it shows: each statement carries a per-enclave sequence number, so
+  a search dropped from the middle (or the start) of an enclave's lifetime leaves a visible gap the verifier
+  reports — "every search of each enclave SHOWN, in order". A search dropped from the very END of a
+  lifetime, or an ENTIRE enclave lifetime dropped from the record, cannot be revealed by any counter; the
+  record does not say how many enclaves a matter used.
 * Novelty, patentability, or the absence of prior art.
 """
 

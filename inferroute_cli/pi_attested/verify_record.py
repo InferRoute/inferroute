@@ -46,7 +46,9 @@ What it does NOT do:
   * It cannot verify the attorney's OWN machine was confined — that is the device's self-report.
   * Completeness: each statement carries a per-enclave sequence number; the record is checked for gaps and
     duplicates per enclave lifetime, so a dropped search is visible — except one dropped from the very END
-    of a lifetime, which no counter can reveal. Statements without sequence numbers get a SKIP that says so.
+    of a lifetime, and except an ENTIRE lifetime dropped from the record (the check is per enclave shown;
+    nothing says how many enclaves a matter used). Statements without sequence numbers or without a
+    lifetime_id get a SKIP that says so.
   * The reference may be SIGNED by InferRoute's long-lived publication key: record that key once at first
     use and pass --reference-key; each reference entry may carry a validity window or a retired flag, and a
     match that was not current at the search's time FAILS and says which entry matched.
@@ -506,20 +508,50 @@ def _ref_entries(reference: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
     return out
 
 
+def _parse_time(s: Any) -> Optional["datetime.datetime"]:
+    """ISO-8601 → aware UTC datetime, or None if it does not parse. A trailing Z is normalised; an offset is
+    honoured (2026-09-15T01:00:00+02:00 is 23:00Z on the 14th); fractional seconds are accepted; a naive
+    time is taken as UTC. A string compare is the wrong instrument for 'was this current at the time'."""
+    import datetime
+    if not isinstance(s, str) or not s.strip():
+        return None
+    t = s.strip()
+    if t[-1] in "Zz":
+        t = t[:-1] + "+00:00"
+    try:
+        d = datetime.datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=datetime.timezone.utc)
+    return d.astimezone(datetime.timezone.utc)
+
+
 def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str]) -> Tuple[bool, str]:
-    """(current_match, why). A retired or out-of-window entry MATCHES but is not CURRENT — reported as such."""
+    """(current_match, why). A retired or out-of-window entry MATCHES but is not CURRENT — reported as such.
+    A windowed entry can only be called current against a PARSABLE statement time: a missing or unreadable
+    started_utc FAILS rather than making the window vacuous."""
     v = str(value or "").lower()
+    at = _parse_time(at_iso)
     for e in entries:
         if e["value"] != v:
             continue
         if e["retired"]:
             return False, "matches a RETIRED entry"
-        if at_iso and e["valid_from"] and at_iso < e["valid_from"]:
+        if not (e["valid_from"] or e["valid_to"]):
+            return True, "current (entry carries no validity window)"
+        vf = _parse_time(e["valid_from"]) if e["valid_from"] else None
+        vt = _parse_time(e["valid_to"]) if e["valid_to"] else None
+        if (e["valid_from"] and vf is None) or (e["valid_to"] and vt is None):
+            return False, "matches an entry whose validity window does not parse as ISO-8601"
+        if at is None:
+            return False, (f"matches a windowed entry, but the statement carries no parsable time "
+                           f"(started_utc {at_iso!r}) — cannot say it was current")
+        if vf is not None and at < vf:
             return False, f"matches, but the search ({at_iso}) predates its valid_from {e['valid_from']}"
-        if at_iso and e["valid_to"] and at_iso > e["valid_to"]:
+        if vt is not None and at > vt:
             return False, f"matches, but the search ({at_iso}) is after its valid_to {e['valid_to']}"
-        window = f" (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'})" if (e["valid_from"] or e["valid_to"]) else ""
-        return True, "current" + window
+        return True, f"current (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'}, search at {at_iso})"
     return False, "no entry matches"
 
 
@@ -550,11 +582,18 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]]) -> None:
     can claim "every search of that enclave, in order" — except a search dropped from the very END of a
     lifetime, which no counter can reveal."""
     by_life: Dict[str, List[Any]] = {}
+    ungrouped = 0
     for row in searches:
         st = row.get("statement") if isinstance(row, dict) else None
-        if isinstance(st, dict) and st.get("lifetime_id"):
+        if not isinstance(st, dict):
+            continue
+        if st.get("lifetime_id"):
             by_life.setdefault(str(st["lifetime_id"]), []).append(st.get("seq"))
+        else:
+            ungrouped += 1
     if not by_life:
+        c.add(None, "completeness (per-enclave sequence)",
+              f"cannot group: {ungrouped} statement(s) carry no lifetime_id, so sequence gaps cannot be checked")
         return
     if not any(isinstance(s, int) for seqs in by_life.values() for s in seqs):
         c.add(None, "completeness (per-enclave sequence)", "these statements carry no sequence numbers; a dropped search is undetectable")
@@ -575,8 +614,11 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]]) -> None:
             problems.append(f"{tag}: seq {ints[0]}..{ints[-1]}" + (f" missing {gaps}" if gaps else "") + (" with duplicates" if dups else ""))
         if ints[0] == 1 and not gaps and not dups:
             summary.append(f"{tag}: seq 1..{ints[-1]} contiguous ({len(ints)} search{'es' if len(ints) != 1 else ''})")
+    if ungrouped:
+        problems.append(f"{ungrouped} statement(s) carry no lifetime_id and could not be checked")
     c.add(not problems, "completeness (per-enclave sequence)",
-          ("; ".join(summary) + " — a search dropped from the END of a lifetime remains undetectable") if not problems
+          ("; ".join(summary) + " — covers every search of each enclave SHOWN, in order; a search dropped from the END "
+           "of a lifetime, or an entire lifetime dropped from the record, remains undetectable") if not problems
           else "; ".join(problems))
 
 
@@ -909,7 +951,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
     else:
         print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
-    print("Completeness: with sequence numbers the record shows every search of each enclave in order, except one dropped from the very end; without them, only what it shows.")
+    print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
+          "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
     print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; certificate revocation.")
     return 1 if fails else (3 if test_roots else 0)
 

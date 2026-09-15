@@ -15,7 +15,7 @@ obtained from InferRoute through a channel they already trust. These commands pr
     0  signed by the key you gave, and something is current for every field — usable
     1  the signature was not verified (unsigned, or no key given); --allow-unverified to inspect a draft
     2  refused: unreadable file, bad argument
-    3  signed, but nothing is current — every record checked against it FAILS identity
+    3  signed, but not usable as a production anchor — nothing is current, or it is marked DEVELOPMENT
 
 Three rules the tooling enforces or states, because getting them wrong silently is the failure mode:
 
@@ -368,7 +368,7 @@ def _load_key(path: str, passphrase: Optional[bytes]):
 
 def sign(ref: Dict[str, Any], key_path: str, *, passphrase: Optional[bytes] = None,
          allow_not_current: bool = False, allow_overlap: bool = False,
-         at: Optional[dt.datetime] = None) -> Dict[str, Any]:
+         at: Optional[dt.datetime] = None, development: bool = False) -> Dict[str, Any]:
     """Sign a reference — after refusing the states that fail or confuse at the moment of publication. The
     principle the verifier already follows, applied one step earlier: fail when the bad value is CREATED,
     not when a firm tries to use it."""
@@ -381,6 +381,10 @@ def sign(ref: Dict[str, Any], key_path: str, *, passphrase: Optional[bytes] = No
     # The public key is recorded INSIDE the signed body, so a reader can see which key they should already
     # hold — but it proves nothing on its own: the check is against the key they recorded at first use.
     body = {k: v for k, v in ref.items() if k != "sig"}
+    # A development reference carries the mark INSIDE the signature, so it cannot be stripped without
+    # invalidating it. The record verifier refuses identity against a marked reference outright.
+    if development:
+        body["development"] = True
     body["publication_key"] = key.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
     return {**body, "sig": key.sign(canonical(body)).hex()}
@@ -504,6 +508,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="sign even though no entry is current now (a deliberately historical or pre-announced reference)")
     s.add_argument("--allow-overlap", action="store_true",
                    help="sign even though two entries are current for one field (a planned rollout overlap)")
+    s.add_argument("--development", action="store_true",
+                   help="mark this reference DEVELOPMENT: it announces itself, and the record verifier refuses "
+                        "identity against it. Use for every key that is not the offline production key.")
     s.add_argument("--out", default=None)
 
     v = sub.add_parser("verify", help="what a firm sees; run it before publishing too")
@@ -547,7 +554,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if a.cmd == "sign":
             ref = sign(_read(a.inp), a.key, passphrase=_passphrase(a.passphrase_env, a.passphrase_prompt),
-                       allow_not_current=a.allow_not_current, allow_overlap=a.allow_overlap)
+                       allow_not_current=a.allow_not_current, allow_overlap=a.allow_overlap,
+                       development=a.development)
             _write(ref, a.out or a.inp)
             print(f"  signed under {ref['publication_key'][:16]}…")
             return 0
@@ -563,6 +571,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             # A reference has TWO independent verdicts — is it signed by the key you hold, and is it usable —
             # and the exit code has to carry both. Leading with OK while something below says "expired" is
             # the failure mode this whole series kept finding.
+            if ref.get("development"):
+                print("!!! DEVELOPMENT REFERENCE — signed by a key that is NOT the offline production key. "
+                      "The record verifier REFUSES identity against this. Never put its key in an engagement "
+                      "letter. !!!")
             if not ok:
                 print("NOT VERIFIED  " + why)
             elif empty:
@@ -581,9 +593,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print("exit 3: the signature is good, but every record checked against this reference will "
                       "FAIL identity" + (f" as of {a.at}" if a.at else " right now") + ". If this is a "
                       "deliberately historical reference that is expected; otherwise build and sign a current one.")
+            if ref.get("development"):
+                print("exit 3: a development reference is signed and may be usable for testing, but it can "
+                      "never establish production identity.")
             if not ok and not a.allow_unverified:
                 return 1
-            return 3 if empty else 0
+            return 3 if (empty or ref.get("development")) else 0
     except (ReferenceError, OSError) as e:
         import sys
         sys.stderr.write(f"\n  {e}\n\n")

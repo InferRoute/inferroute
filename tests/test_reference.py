@@ -460,3 +460,35 @@ def test_passphrase_can_be_typed_rather_than_put_in_argv_or_env(tmp_path, monkey
     with pytest.raises(R.ReferenceError) as e:
         R._passphrase(None, prompt=True, confirm=True)
     assert "do not match" in str(e.value)
+
+
+def test_a_development_reference_announces_itself_and_cannot_establish_identity(tmp_path, capsys):
+    """A key that is not the offline production key must be impossible to mistake for it — in a few days,
+    or by whoever fills in the engagement letter. The mark is inside the signature, so stripping it breaks
+    the signature, and the record verifier refuses identity against it outright."""
+    key = tmp_path / "dev.key"
+    pub = R.new_key(str(key))
+    ref = R.sign(_three("abc"), str(key), development=True)
+    assert ref["development"] is True
+    p = tmp_path / "dev.json"
+    p.write_text(json.dumps(ref))
+
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 3       # signed, but never production
+    out = capsys.readouterr().out
+    assert "DEVELOPMENT REFERENCE" in out and "engagement letter" in out and "exit 3" in out
+
+    # the mark is signed: removing it invalidates the signature rather than laundering the reference
+    stripped = {k: v for k, v in ref.items() if k != "development"}
+    ok, _ = R.verify(stripped, pub)
+    assert ok is False
+
+    # and the verifier a firm runs refuses identity against it
+    V = _verifier()
+    c = V.Checks()
+    st = {"started_utc": "2026-06-01T12:00:00Z"}
+    V.verify_search({"statement": st, "signer_pub": ""}, {}, pins=V.AMD_ARK_SPKI_SHA256,
+                    uvm_root=V.MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=100, matter_cutoff=None, reference=ref)
+    rows = V.verify_search({"statement": st, "signer_pub": ""}, {}, pins=V.AMD_ARK_SPKI_SHA256,
+                           uvm_root=V.MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=100, matter_cutoff=None, reference=ref).rows
+    identity = [r for r in rows if "enclave identity" in r[1]][0]
+    assert identity[0] == "FAIL" and "marked DEVELOPMENT" in identity[2]

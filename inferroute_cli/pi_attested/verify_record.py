@@ -724,7 +724,12 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     #    container. Mirrors the live verifier's ruling (aci_evidence: an unpinned policy is a FAILING step).
     #    Each reference entry may carry a validity window or be retired; a match that is not CURRENT at the
     #    statement's time fails, and the row says which entry matched and why.
-    if reference is None:
+    if isinstance(reference, dict) and reference.get("development"):
+        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
+              "this reference is marked DEVELOPMENT — it was signed by a key that is not the production "
+              "publication key, so it cannot establish that the enclave was InferRoute's. Obtain the "
+              "production reference from your engagement letter.")
+    elif reference is None:
         c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
               "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT InferRoute's; "
               "obtain InferRoute's published reference out of band and rerun with --reference")

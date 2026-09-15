@@ -326,3 +326,47 @@ def test_dead_and_unparsable_windows_are_refused_at_signing(tmp_path):
     with pytest.raises(R.ReferenceError) as e2:
         R.sign(bad_time, str(key), allow_not_current=True, allow_overlap=True)
     assert "UNPARSABLE WINDOW" in str(e2.value)
+
+
+# ───────────────────────── the argv layer: no tracebacks, no exit code that lies ─────────────────────────
+
+def test_sign_with_a_missing_key_file_is_a_message_not_a_traceback(tmp_path, capsys):
+    ref = _three("abc")
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(ref))
+    assert R.main(["sign", "--in", str(p), "--key", str(tmp_path / "nope.key")]) == 2
+    err = capsys.readouterr().err
+    assert "cannot read the publication key" in err and "about the file, not the key" in err
+    assert "Traceback" not in err
+
+
+def test_verify_exit_code_does_not_contradict_its_own_output(tmp_path, capsys):
+    """An unsigned reference, or a signed one checked without a key, must not exit 0 — anyone scripting the
+    check the runbook tells a firm to run would get a green light on a reference nobody signed."""
+    ref = _three("abc")
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(ref))
+    assert R.main(["verify", "--in", str(p)]) == 1                       # unsigned
+    out = capsys.readouterr().out
+    assert "NOT VERIFIED" in out and "unsigned" in out and "exit 1" in out
+    assert R.main(["verify", "--in", str(p), "--allow-unverified"]) == 0  # deliberate draft inspection
+    assert "NOT VERIFIED" in capsys.readouterr().out                      # still says so
+
+    key = tmp_path / "k.key"
+    pub = R.new_key(str(key))
+    assert R.main(["sign", "--in", str(p), "--key", str(key)]) == 0
+    capsys.readouterr()
+    assert R.main(["verify", "--in", str(p)]) == 1                       # signed, but nobody checked it
+    assert "no publication key was given" in capsys.readouterr().out
+    assert R.main(["verify", "--in", str(p), "--key-hex", pub]) == 0
+
+
+def test_verify_refuses_an_unparsable_at_rather_than_answering_about_now(tmp_path, capsys):
+    ref = _three("abc")
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(ref))
+    assert R.main(["verify", "--in", str(p), "--at", "last tuesday"]) == 2
+    assert "not an ISO-8601 time" in capsys.readouterr().err
+    with pytest.raises(R.ReferenceError):
+        R.describe(ref, "last tuesday")                                  # closed in the API too
+    assert R.describe(ref, "2026-06-01T12:00:00Z")                       # a real time still works

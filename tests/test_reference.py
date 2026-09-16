@@ -492,3 +492,37 @@ def test_a_development_reference_announces_itself_and_cannot_establish_identity(
                            uvm_root=V.MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=100, matter_cutoff=None, reference=ref).rows
     identity = [r for r in rows if "enclave identity" in r[1]][0]
     assert identity[0] == "FAIL" and "marked DEVELOPMENT" in identity[2]
+
+
+EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+@pytest.mark.parametrize("field, value, why", [
+    ("policy_sha256", "abc", "not a 64-character hex"),
+    ("index_manifest_sha256", EMPTY, "SHA-256 of nothing"),
+    ("model_manifest_sha256", "0" * 64, "all zeros"),
+])
+def test_explicit_values_are_validated_like_offer_values(field, value, why):
+    """The explicit-flag path accepted anything present: a reference with policy 'abc' and the empty-manifest
+    hash was written. One definition of "a value we may anchor to" now serves both paths — two validators
+    let the weaker path publish what the stronger refuses."""
+    from inferroute_cli import reference as R
+    values = {"policy_sha256": "a" * 64, "index_manifest_sha256": "b" * 64, "model_manifest_sha256": "c" * 64}
+    values[field] = value
+    with pytest.raises(R.ReferenceError) as e:
+        R.build(values)
+    assert why in str(e.value) and field in str(e.value)
+
+
+def test_the_empty_manifest_is_refused_from_an_offer_too(tmp_path):
+    """A manifest builder that found no files (Python 3.12's rglob does not follow symlinked directories)
+    returns SHA-256 of nothing — a real-looking digest identical for every index."""
+    import base64, json
+    from inferroute_cli import reference as R
+    report = bytearray(1184)
+    rd = {"index_manifest_sha256": EMPTY, "model_manifest_sha256": "c" * 64}
+    p = tmp_path / "offer.json"
+    p.write_text(json.dumps({"evidence": base64.b64encode(bytes(report)).decode(),
+                             "runtime_data": base64.b64encode(json.dumps(rd).encode()).decode()}))
+    with pytest.raises(R.ReferenceError, match="SHA-256 of nothing"):
+        R.values_from_offer(str(p))

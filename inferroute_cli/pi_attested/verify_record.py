@@ -489,6 +489,16 @@ def check_uvm(c: Checks, blob: bytes, root_b64url: str, min_svn: int) -> Optiona
 
 
 ZERO32 = "0" * 64
+# SHA-256 of b"": what a manifest builder returns when it found no files (e.g. over a root whose directories
+# are symlinks, which Python 3.12's rglob does not follow). A real-looking digest that names no bytes and is the
+# same for every index — a match on it proves nothing about WHICH index ran. Kept in step with the issuer's
+# refusal in the reference-issuing tool; duplicated here only because this file must import nothing of ours.
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+
+def _names_bytes(v: Any) -> bool:
+    """A manifest digest that actually identifies something: well-formed, not a placeholder, not empty."""
+    return _is_hex32(v) and str(v).lower() not in (ZERO32, EMPTY_SHA256)
 
 
 def _is_hex32(v: Any) -> bool:
@@ -795,6 +805,13 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
           f"answers would be signed by {str(signer)[:16]}…" if _is_hex32(signer) and str(signer).lower() != ZERO32
           else "the offer names no usable statement signer key")
 
+    for field, label in (("index_manifest_sha256", "index manifest names real bytes"),
+                         ("model_manifest_sha256", "encoder manifest names real bytes")):
+        v = rd.get(field)
+        c.add(_names_bytes(v), label,
+              f"{str(v)[:16]}… identifies the files this enclave serves" if _names_bytes(v)
+              else f"{field} is {'SHA-256 of nothing — a manifest built over NO files; it is the same for every '
+                                'index and cannot say which one runs' if str(v).lower() == EMPTY_SHA256 else 'missing, malformed or all zeros'}")
     check_hardware(c, offer or {}, rd, rd_bytes, pins=pins or AMD_ARK_SPKI_SHA256,
                    uvm_root=uvm_root or MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=uvm_min_svn,
                    policy_b64=policy_b64, min_tcb=min_tcb)
@@ -847,12 +864,13 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     c.add(bool(rd) and st.get("runtime_data_sha256") == sha256_hex(rd_bytes), "statement names this runtime data",
           f"runtime_data_sha256 {sha256_hex(rd_bytes)[:16]}…" if rd else "no runtime data to compare")
     idx, mdl = rd.get("index_manifest_sha256"), rd.get("model_manifest_sha256")
-    commits_ok = (bool(rd) and _is_hex32(idx) and idx.lower() != ZERO32 and _is_hex32(mdl) and mdl.lower() != ZERO32
+    commits_ok = (bool(rd) and _names_bytes(idx) and _names_bytes(mdl)
                   and st.get("lifetime_id") == rd.get("lifetime_id") and st.get("index_manifest_sha256") == idx
                   and st.get("model_manifest_sha256") == mdl)
     c.add(commits_ok, "statement matches enclave commitments",
           f"lifetime {str(rd.get('lifetime_id'))[:12]}…, index manifest {str(idx)[:12]}…, encoders {str(mdl)[:12]}… (all non-zero)"
-          if commits_ok else "lifetime / index manifest / encoder manifest are missing, zero, or differ from the statement")
+          if commits_ok else "lifetime / index manifest / encoder manifest are missing, zero, EMPTY (a manifest of no "
+                                 "files), or differ from the statement")
 
     # 3-4. hardware and identity, asked by the same code the live client asks them with. `at` is this
     # statement's own time: a reference entry's window must have been current WHEN THE SEARCH RAN, not now.

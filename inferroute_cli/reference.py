@@ -112,6 +112,20 @@ def _require_time(s: Optional[str], what: str) -> Optional[str]:
 # ───────────────────────────── deriving the values from a real deployment ─────────────────────────────
 
 
+# Signs that an attested policy carries a per-deploy secret. Found on the first working deploy (2026-09-17):
+# confcom wrote the container's INDEX_URL environment value — a blob SAS URL, expiry and signature included —
+# verbatim into the policy, so HOST_DATA differed on every deploy of the same code and the token was published
+# with every bundle. Narrow on purpose: the parameters of an Azure SAS, which never belong in an identity anchor.
+_SAS_MARKERS = (b"sig=", b"&se=", b"?se=", b"&sp=", b"sv=20")
+
+
+def policy_credential(policy: bytes) -> Optional[str]:
+    """What credential-shaped text an attested policy contains, or None."""
+    low = policy.lower()
+    hits = [m.decode() for m in _SAS_MARKERS if m in low]
+    return f"Azure SAS parameters {', '.join(hits)}" if "sig=" in " ".join(hits) else None
+
+
 def values_from_offer(path: str) -> Dict[str, str]:
     """HOST_DATA and the manifest hashes, read from a deployment's own attestation offer.
 
@@ -140,9 +154,17 @@ def values_from_offer(path: str) -> Dict[str, str]:
     policy_b64 = doc.get("policy_b64") or offer.get("policy_b64")
     if policy_b64:
         try:
-            got = hashlib.sha256(base64.b64decode(policy_b64)).hexdigest()
+            raw = base64.b64decode(policy_b64)
+            got = hashlib.sha256(raw).hexdigest()
         except Exception as e:                                   # noqa: BLE001
             raise ReferenceError(f"the policy in {path} is not valid base64") from e
+        cred = policy_credential(raw)
+        if cred:
+            raise ReferenceError(
+                f"REFUSING: the attested policy embeds a credential ({cred}). A value that changes on every "
+                "deploy makes HOST_DATA change on every deploy, so a reference pinning it would never match the "
+                "next container — and the policy ships in every exported bundle, so the credential would too. "
+                "Fix the deployment so the policy is identical across deploys, then build the reference.")
         if got != host_data:
             raise ReferenceError(
                 "REFUSING: the policy in this file does not hash to the HOST_DATA the hardware reported "

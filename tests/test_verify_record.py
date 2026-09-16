@@ -229,7 +229,7 @@ def test_extract_writes_raw_files_for_independent_tools(tmp_path, V, kms):
 
 # ───────────────────── reference validity, signed reference, completeness ─────────────────────
 
-def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z"):
+def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z", omit_recipient=False):
     """Several statements from ONE enclave lifetime (same runtime_data / signer), with given seq numbers."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives import serialization
@@ -249,14 +249,18 @@ def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z"):
     for i, seq in enumerate(seqs, 1):
         rid = f"{i:032x}"
         q, res = f"query {i}", {"hits": [{"key": f"US-{i}-A"}]}
+        reply_priv = bytes([(i * 7 + j) % 256 for j in range(32)])          # a stand-in one-time reply key
         st = {"v": 1, "kind": "search", "lifetime_id": rd["lifetime_id"], "request_id": rid, "started_utc": started,
               "runtime_data_sha256": hashlib.sha256(rd_bytes).hexdigest(), "index_manifest_sha256": rd["index_manifest_sha256"],
               "model_manifest_sha256": rd["model_manifest_sha256"], "cutoff_date": 20200115, "hits_n": 1, "outcome": "answered",
               "query_sha256": V.salted(rid, q), "result_sha256": V.salted(rid, res)}
         if seq is not None:
             st["seq"] = seq
+        if not omit_recipient:                       # an older enclave signed a VALID statement without it
+            st["reply_to_sha256"] = hashlib.sha256(reply_priv).hexdigest()
         st["sig"] = key.sign(V.canonical(st)).hex()
         rows.append({"n": i, "session_id": "s1", "at": "t", "statement": st, "result": res, "query_text": q, "signer_pub": pub,
+                     **({} if omit_recipient else {"reply_to": reply_priv.hex()}),
                      "evidence_file": f"{ev_sha[:16]}.evidence.json", "evidence_sha256": ev_sha})
     (d / "searches.json").write_text(json.dumps(rows))
     (d / "record.html").write_text("<html>record</html>")
@@ -479,3 +483,42 @@ def test_a_hand_typed_unsigned_reference_is_still_usable(V):
     c2 = V.Checks()                                   # signed but kindless: not something we issue
     V.check_reference_signature(c2, {"policy_sha256": "ab" * 32, "sig": "00" * 64}, "ab" * 32)
     assert c2.failed and any("no schema" in d for _, _, d in c2.rows)
+
+
+def _remanifest(d):
+    """Rebuild MANIFEST.json after editing a bundle, so a tamper test exercises the check it means to and
+    not the file-hash check standing in front of it."""
+    files = {n: hashlib.sha256((d / n).read_bytes()).hexdigest() for n in os.listdir(d) if n != "MANIFEST.json"}
+    (d / "MANIFEST.json").write_text(json.dumps({"files": files, "matter_cutoff": 20200115}))
+
+
+def test_the_bundle_shows_whether_a_second_copy_could_have_been_sealed(tmp_path, V, kms):
+    """The enclave signs the recipient; the attorney's own proxy recorded the key it made. Equal, and the
+    answer went to that one address. This is "only you can open it" as arithmetic rather than our word."""
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1])
+    ref = _ref(tmp_path, "r.json", [host])
+    # This fixture's evidence commits to its own runtime data, so the bundle never reaches exit 0 — assert
+    # on the ROW, which is what this test is about. A code assertion here would be testing the fixture.
+    code, out = _run(d, "--reference", str(ref))
+    assert "PASS sealed to one recipient" in out
+
+    rows = json.loads((d / "searches.json").read_text())
+    rows[0]["reply_to"] = "aa" * 32                       # as if the answer had gone to a different address
+    (d / "searches.json").write_text(json.dumps(rows))
+    _remanifest(d)
+    code, out = _run(d, "--reference", str(ref))
+    assert "FAIL sealed to one recipient" in out and code == 1
+    assert "NOT the key this record says was used" in out
+    assert "PASS statement signature" in out, "only the recipient check may move; the statement is untouched"
+
+
+def test_a_record_made_before_the_field_existed_skips_and_says_so(tmp_path, V, kms):
+    """A record already made cannot be re-run. Failing it retroactively would punish the attorney for our
+    version history — but it must not read as a passed check either. SKIP, naming what is unchecked. The
+    LIVE path refuses instead, because there the search is still happening: same fact, different remedy
+    (sealed-research tests/test_search_verifier.py)."""
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1], omit_recipient=True)
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "r2.json", [host])))
+    assert "SKIP sealed to one recipient" in out
+    assert "predates the signed recipient key" in out
+    assert "PASS statement signature" in out, "the older statement must still be a VALID statement"

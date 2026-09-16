@@ -89,7 +89,9 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
 1. Take the reference values (and InferRoute's publication key) from your engagement letter or a signed
    release note, and RECORD them in your own file at first use.
 2. Verify every later record against your own first copy: `--reference your-copy.json`.
-3. If the reference is signed, pass the publication key you recorded once: `--reference-key <hex>`. Later
+3. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
+   values with `=`: a pasted value that begins with `-` is otherwise read as another flag, and the error
+   ("expected one argument") does not say so. Later
    reference updates signed by that key can then be accepted without re-establishing trust.
 
 `MANIFEST.json` → `reference_hint` records what THIS machine was configured to expect at session time. It is
@@ -395,9 +397,13 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A("<p class=note><b>Which search this was</b>: the sealed one. Inside the enclave there is no route off the "
       "machine, so a search reads only the corpus resident there — for most documents, the title and abstract. "
       "Each report states how many of the documents it examined most closely it was able to read in full. A "
-      "search run WITHOUT this proof, on a machine you already trust, can fetch and read full descriptions, and "
-      "may therefore surface documents this one placed lower. Depth and proof are a trade here; this record is "
-      "the proof side of it, and says so rather than implying it was also the deepest read available.</p>")
+      "search run WITHOUT this proof, on a machine you already trust, can fetch and read full descriptions. "
+      "Whether that changes which documents surface is NOT established: measured against examiner-cited art, "
+      "reading full text moved the result by about a fifth of a percentage point and our own pre-registered "
+      "test for &lsquo;this does not pay&rsquo; fired. So the honest statement is about what this search could "
+      "READ, not "
+      "about how well it ranked: it read less, and we cannot tell you that reading more would have served you "
+      "better.</p>")
     # Reports may quote passages from the documents themselves. A reader — or a court — must not be able to
     # take those quotations for our characterisation of somebody's patent, and a bundle can be forwarded to
     # people who never saw this sentence spoken aloud. Each hit also records which text the quote came from.

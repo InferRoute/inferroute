@@ -615,3 +615,14 @@ def test_a_retired_enclave_is_refused_before_sealing_not_after(V, kms):
     c = V.verify_offer(_offer(V, kms), reference=ref)
     assert "enclave identity (InferRoute's policy, index, encoders)" in c.failed
     assert any("RETIRED" in d for _, _, d in c.rows)
+
+
+def test_a_value_beginning_with_a_hyphen_is_explained_not_just_refused(tmp_path):
+    """base64url fingerprints start with '-' about 1.3% of the time, so a correct paste fails with argparse's
+    "expected one argument" and no clue why. Measured by sealed-research after it made one of their tests
+    flaky at a few percent per run; the same shape reaches any user of this CLI."""
+    r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path), "--uvm-root", "-Ab3xyz"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "expected one argument" in r.stderr
+    assert "--uvm-root=VALUE" in r.stderr and "starts with '-'" in r.stderr

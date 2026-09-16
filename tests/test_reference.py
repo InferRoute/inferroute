@@ -526,3 +526,37 @@ def test_the_empty_manifest_is_refused_from_an_offer_too(tmp_path):
                              "runtime_data": base64.b64encode(json.dumps(rd).encode()).decode()}))
     with pytest.raises(R.ReferenceError, match="SHA-256 of nothing"):
         R.values_from_offer(str(p))
+
+
+def test_a_policy_carrying_a_sas_credential_cannot_become_the_anchor(tmp_path):
+    """The first working deploy attested a policy containing its INDEX_URL — a blob SAS URL with expiry and
+    signature. HOST_DATA therefore changed on every deploy of the same code (a reference pinning it would
+    never match again) and the token shipped in every bundle. The issuer refuses it at build time, and the
+    refusal is about the POLICY, so it fires even when the policy hashes correctly to HOST_DATA."""
+    import base64, hashlib, json
+    from inferroute_cli import reference as R
+    policy = (b'{"id":"reg.azurecr.io/x:1","env":[{"pattern":"INDEX_URL=https://acct.blob.core.windows.net/'
+              b'index/r.tar?se=2026-09-17T05%3A32Z&sp=r&sv=2026-04-06&sr=b&sig=AAAA%3D"}]}')
+    report = bytearray(1184)
+    report[0xC0:0xE0] = hashlib.sha256(policy).digest()          # consistent: policy DOES hash to HOST_DATA
+    rd = {"index_manifest_sha256": "b" * 64, "model_manifest_sha256": "c" * 64}
+    p = tmp_path / "evidence.json"
+    p.write_text(json.dumps({"offer": {"evidence": base64.b64encode(bytes(report)).decode(),
+                                       "runtime_data": base64.b64encode(json.dumps(rd).encode()).decode()},
+                             "policy_b64": base64.b64encode(policy).decode()}))
+    with pytest.raises(R.ReferenceError, match="embeds a credential"):
+        R.values_from_offer(str(p))
+
+
+def test_a_policy_without_a_credential_is_still_accepted(tmp_path):
+    import base64, hashlib, json
+    from inferroute_cli import reference as R
+    policy = b'{"id":"reg.azurecr.io/x:1","env":[{"pattern":"INDEX_URL=https://acct.blob.core.windows.net/index/.*","strategy":"re2"}]}'
+    report = bytearray(1184)
+    report[0xC0:0xE0] = hashlib.sha256(policy).digest()
+    rd = {"index_manifest_sha256": "b" * 64, "model_manifest_sha256": "c" * 64}
+    p = tmp_path / "evidence.json"
+    p.write_text(json.dumps({"offer": {"evidence": base64.b64encode(bytes(report)).decode(),
+                                       "runtime_data": base64.b64encode(json.dumps(rd).encode()).decode()},
+                             "policy_b64": base64.b64encode(policy).decode()}))
+    assert R.values_from_offer(str(p))["policy_sha256"] == hashlib.sha256(policy).hexdigest()

@@ -269,7 +269,10 @@ def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z"):
 
 
 def _ref(tmp_path, name, policy_entries, idx="ef" * 32, mdl="12" * 32, sign_with=None):
-    ref = {"policy_sha256": policy_entries, "index_manifest_sha256": [idx], "model_manifest_sha256": [mdl],
+    # mirrors what `ir surveyor reference build` writes, schema included — a fixture that drifts from the
+    # issuer tests a document nobody issues.
+    ref = {"schema": "inferroute.enclave-reference/1",
+           "policy_sha256": policy_entries, "index_manifest_sha256": [idx], "model_manifest_sha256": [mdl],
            "source": "test", "published_at": "2026-01-01"}
     if sign_with is not None:
         from importlib import import_module
@@ -438,3 +441,41 @@ def test_duplicate_values_are_all_evaluated_and_any_current_one_wins(tmp_path, V
     code, out = _run(d, "--reference", str(_ref(tmp_path, "nc.json", none_current)))
     assert code == 1 and "FAIL enclave identity" in out
     assert "matches a RETIRED entry" in out and "after its valid_to 2020-01-01T00:00:00Z" in out and "2 matching entries, none current" in out
+
+
+def test_a_document_of_another_kind_is_not_a_reference(V):
+    """A signature says "InferRoute wrote this", never "InferRoute meant it as a reference". Once the
+    publication key signs anything else — a release note, a retrospective benchmark — a document carrying
+    the right field names must not be readable as a reference just because the key checks out."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    key = Ed25519PrivateKey.generate()
+    pub = key.public_key().public_bytes_raw().hex()
+    impostor = {"schema": "inferroute.benchmark-result/1",
+                "policy_sha256": "ab" * 32, "index_manifest_sha256": "cd" * 32}
+    impostor["sig"] = key.sign(V.canonical(impostor)).hex()
+
+    c = V.Checks()
+    V.check_reference_signature(c, impostor, pub)
+    assert c.failed, "a benchmark document signed by the publication key must not pass as a reference"
+    assert any("another kind" in d for _, _, d in c.rows)
+
+    # and the genuine kind still passes under the same key
+    real = {"schema": V.REFERENCE_SCHEMA, "policy_sha256": "ab" * 32}
+    real["sig"] = key.sign(V.canonical(real)).hex()
+    c2 = V.Checks()
+    V.check_reference_signature(c2, real, pub)
+    assert not c2.failed
+
+
+def test_a_hand_typed_unsigned_reference_is_still_usable(V):
+    """Three hashes an attorney typed out of an engagement letter carry no schema and no signature. That is
+    honest — the verifier already says trust rests on how it was obtained — and must not be refused as
+    "the wrong kind of document". Only a SIGNED document needs to prove what kind it is."""
+    c = V.Checks()
+    V.check_reference_signature(c, {"policy_sha256": "ab" * 32}, None)
+    assert not c.failed
+    assert any("how you obtained it" in d for _, _, d in c.rows)
+
+    c2 = V.Checks()                                   # signed but kindless: not something we issue
+    V.check_reference_signature(c2, {"policy_sha256": "ab" * 32, "sig": "00" * 64}, "ab" * 32)
+    assert c2.failed and any("no schema" in d for _, _, d in c2.rows)

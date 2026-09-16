@@ -378,6 +378,13 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "A reader who does not trust this device should weigh those lines accordingly.</p>")
     A("<p class=note><b>Not claimed</b>: novelty, patentability, or the absence of prior art. A sealed search lists what a "
       "bounded corpus surfaced under a stated date bound; the corpus is named by its index manifest hash in each statement.</p>")
+    # Reports may quote passages from the documents themselves. A reader — or a court — must not be able to
+    # take those quotations for our characterisation of somebody's patent, and a bundle can be forwarded to
+    # people who never saw this sentence spoken aloud. Each hit also records which text the quote came from.
+    A("<p class=note><b>Quotations are source text</b>: where a report shows a passage, it is text from the cited "
+      "document itself, identified by its source, and not our summary, paraphrase or opinion of that document. "
+      "Where a search could read only a title and abstract, the report says so and the signed result records the "
+      "shortfall — a document weighed on its abstract alone was not read in full.</p>")
     reach = [f"{s['session_id']}: {_reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
     if reach:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")

@@ -566,12 +566,33 @@ def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str])
     return False, "no entry matches"
 
 
+REFERENCE_SCHEMA = "inferroute.enclave-reference/1"
+
+
 def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Optional[str]) -> None:
     """The reference file may be signed (Ed25519 over its canonical JSON minus `sig`) by InferRoute's
     long-lived publication key. Record that key ONCE at first use (engagement letter / signed release note)
     and pass it with --reference-key: later reference updates are then accepted without re-establishing
     trust. Trust-on-first-use, anchored in the firm's own file."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    # WHAT KIND OF DOCUMENT IS THIS. A signature says "InferRoute wrote this", never "InferRoute meant it
+    # as a reference". The moment that key signs anything else — a release note, a benchmark result — a
+    # document carrying the right field names could stand in for a reference unless the kind is checked
+    # first. So the kind is checked first, and an unexpected one FAILS rather than being read anyway.
+    schema, sig_present = str(reference.get("schema") or ""), bool(reference.get("sig"))
+    if schema and schema != REFERENCE_SCHEMA:
+        c.add(False, "reference document kind",
+              f"expected {REFERENCE_SCHEMA}, this file says {schema} — a document of another kind is not a "
+              "reference, even signed by the right key")
+        return
+    if sig_present and not schema:
+        # Every reference the issuer produces stamps its kind. A SIGNED document without one is either not
+        # ours or not meant as a reference; an UNSIGNED one may simply be three hashes an attorney typed
+        # out of an engagement letter, and that case is honest — it just carries no authority to confuse.
+        c.add(False, "reference document kind",
+              f"this file is signed but carries no schema; a reference issued by InferRoute says "
+              f"{REFERENCE_SCHEMA}")
+        return
     sig = reference.get("sig")
     if key_hex is None:
         c.add(None, "reference signature", "reference carries a signature but no --reference-key was given (record InferRoute's publication key at first use and pass it)"

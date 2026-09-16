@@ -25,6 +25,8 @@ What it re-derives, per sealed search, from the bundle alone:
   policy    HOST_DATA in the report == SHA-256(the container policy), when the policy is in the bundle
   content   query_sha256 == SHA-256(request_id ‖ canonical(query text)); result_sha256 == SHA-256(request_id
             ‖ canonical(result)); hits_n == len(hits); cutoff_date == the matter's date bound
+  recipient the enclave's signed reply_to_sha256 == SHA-256(the one-time public key this machine made for
+            that search), so the result went to that address and no second copy was sealed to anyone else
 
   identity  ONLY WITH --reference: HOST_DATA (the container policy hash) and the index / encoder manifest
             hashes equal values obtained from InferRoute OUT OF BAND. Without this the bundle proves a genuine
@@ -775,6 +777,26 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
         c.add(None, "query text is the one searched", "query text not in bundle; query_sha256 cannot be opened")
     res = row.get("result")
     if isinstance(res, dict):
+        # WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the attorney's own proxy recorded the
+        # key it made. Equal, and the result went to that one address: a copy sealed to anyone else would
+        # have a different signed recipient. This is the difference between "only you can open it" as our
+        # word and as your arithmetic. Statements from before the field existed get a SKIP that says what
+        # is therefore unchecked — an absent check must never read as a passed one.
+        rt, want = st.get("reply_to_sha256"), row.get("reply_to")
+        if rt is None:
+            c.add(None, "sealed to one recipient",
+                  "this statement predates the signed recipient key; nothing here rules out a second recipient")
+        elif not isinstance(want, str) or not want:
+            c.add(None, "sealed to one recipient",
+                  "the statement names a recipient but the record kept no reply key to compare it against")
+        else:
+            try:
+                same = sha256_hex(bytes.fromhex(want)) == rt
+            except ValueError:
+                same = False
+            c.add(same, "sealed to one recipient",
+                  "the signed recipient is the one-time key this machine made for this search — no second copy"
+                  if same else "the signed recipient is NOT the key this record says was used")
         ok = salted(rid, res) == st.get("result_sha256")
         c.add(ok, "result is the signed result", "SHA-256(request_id ‖ canonical(result)) == result_sha256" if ok else "result does NOT match result_sha256")
         c.add(len(res.get("hits") or []) == st.get("hits_n"), "hit count as signed", f"{len(res.get('hits') or [])} hits, statement says {st.get('hits_n')}")

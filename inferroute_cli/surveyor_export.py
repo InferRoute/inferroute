@@ -326,6 +326,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
                 ev_file = f"{ev_sha[:16]}.evidence.json"
                 evidence[ev_sha] = blob.decode("utf-8")
             searches.append({"n": n, "session_id": s["session_id"], "at": x.get("at"), "statement": stmt,
+                             "reply_to": x.get("reply_to"),
                              "result": x.get("result"), "query_text": x.get("query_text"),
                              "signer_pub": x.get("signer_pub"), "cutoff_date": x.get("cutoff_date"),
                              "index_snapshot": x.get("index_snapshot"), "measurement": x.get("measurement"),

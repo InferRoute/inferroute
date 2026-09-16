@@ -626,3 +626,15 @@ def test_a_value_beginning_with_a_hyphen_is_explained_not_just_refused(tmp_path)
     assert r.returncode != 0
     assert "expected one argument" in r.stderr
     assert "--uvm-root=VALUE" in r.stderr and "starts with '-'" in r.stderr
+
+
+def test_a_manifest_of_no_files_never_counts_as_identity(V, kms):
+    """SHA-256 of b"" is what a manifest builder returns over a root it could not walk. It is the same for
+    every index, so an enclave committing to it — even against a reference that pins the same value, which a
+    hand-typed unsigned reference could — has said nothing about WHICH index it serves."""
+    empty = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    rd = {"v": 1, "lifetime_id": "ab" * 8, "statement_signer_pub": "11" * 32, "enclave_x25519_pub": "22" * 32,
+          "index_manifest_sha256": empty, "model_manifest_sha256": "12" * 32}
+    c = V.verify_offer(_offer(V, kms, rd))
+    assert "index manifest names real bytes" in c.failed
+    assert any("SHA-256 of nothing" in d for _, _, d in c.rows)

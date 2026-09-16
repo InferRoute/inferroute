@@ -42,6 +42,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import re
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,6 +50,28 @@ from typing import Any, Dict, List, Optional, Tuple
 FIELDS = ("policy_sha256", "index_manifest_sha256", "model_manifest_sha256")
 HOST_DATA_OFF, HOST_DATA_END = 0xC0, 0xE0
 REPORT_LEN = 1184
+
+
+# A reference anchors identity to these values, so a value that names nothing must never be accepted.
+#   all zeros            — a placeholder, never a measurement
+#   SHA-256 of b""       — what a manifest builder returns when it found NO FILES. It looks like a real
+#                          digest, it is the same for every index, and it is exactly what build_manifest_hash
+#                          produces over a root whose directories are symlinks (Python 3.12's rglob does not
+#                          follow them: measured 0 files over the assembled root). A reference pinning it
+#                          would "prove" a match against any empty enclave while naming no searched bytes.
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+UNUSABLE_DIGESTS = {"0" * 64: "all zeros — a placeholder, not a measurement",
+                    EMPTY_SHA256: "SHA-256 of nothing — a manifest built over no files; it names no bytes "
+                                  "and is identical for every index"}
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+
+
+def digest_problem(value: Any) -> Optional[str]:
+    """Why `value` cannot be anchored to, or None if it can. The single definition, shared by --from-offer
+    and by explicit flags — two validators would let the weaker path publish what the stronger refuses."""
+    if not isinstance(value, str) or not _HEX64.match(value.lower()):
+        return f"not a 64-character hex SHA-256 (got {value!r})"
+    return UNUSABLE_DIGESTS.get(value.lower())
 
 
 class ReferenceError(ValueError):
@@ -130,8 +153,9 @@ def values_from_offer(path: str) -> Dict[str, str]:
     for ref_field, rd_field in (("index_manifest_sha256", "index_manifest_sha256"),
                                 ("model_manifest_sha256", "model_manifest_sha256")):
         v = rd.get(rd_field)
-        if not (isinstance(v, str) and len(v) == 64 and v.lower() != "0" * 64):
-            raise ReferenceError(f"the offer's runtime data has no usable {rd_field} (got {v!r})")
+        why = digest_problem(v)
+        if why:
+            raise ReferenceError(f"the offer's runtime data has no usable {rd_field}: {why}")
         out[ref_field] = v.lower()
     return out
 
@@ -241,6 +265,12 @@ def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, val
     if missing:
         raise ReferenceError(f"refusing to write a reference missing {missing}: it would fail identity for "
                              "every record a client verifies")
+    bad = {f: digest_problem(values.get(f)) for f in FIELDS}
+    bad = {f: why for f, why in bad.items() if why}
+    if bad:
+        raise ReferenceError("refusing to anchor identity to a value that names nothing: "
+                             + "; ".join(f"{f} is {why}" for f, why in bad.items()))
+    values = {f: values[f].lower() for f in FIELDS}
 
     ref: Dict[str, Any] = dict(merge or {})
     ref.pop("sig", None)                                          # any edit invalidates a previous signature

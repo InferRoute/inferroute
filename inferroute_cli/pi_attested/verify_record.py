@@ -91,6 +91,7 @@ UVM_MIN_SVN = 100
 MIN_CRYPTOGRAPHY = 42            # not_valid_before_utc needs 42+; signature_algorithm_parameters 41+
 REQUIRED_FILES = ("record.html", "searches.json", "verify_record.py", "VERIFY.md")
 UNLISTED_OK = {"MANIFEST.json", "MANIFEST.json.ots", "SHA256SUMS"}
+OPTIONAL_FILES = ("unanswered.json",)            # present only when a sealed search went unanswered
 
 _AMD = "1.3.6.1.4.1.3704.1."
 OID_PRODUCT, OID_HWID = _AMD + "2", _AMD + "4"
@@ -611,7 +612,7 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
         c.add(False, "reference signature", "does NOT verify under the given publication key")
 
 
-def check_completeness(c: Checks, searches: List[Dict[str, Any]]) -> None:
+def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Optional[List[Dict[str, Any]]] = None) -> None:
     """Per enclave lifetime, the signed `seq` numbers must run 1..N with no gaps or duplicates. Then the record
     can claim "every search of that enclave, in order" — except a search dropped from the very END of a
     lifetime, which no counter can reveal."""
@@ -650,6 +651,19 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]]) -> None:
             summary.append(f"{tag}: seq 1..{ints[-1]} contiguous ({len(ints)} search{'es' if len(ints) != 1 else ''})")
     if ungrouped:
         problems.append(f"{ungrouped} statement(s) carry no lifetime_id and could not be checked")
+    # THE DEVICE'S OWN ACCOUNT OF A GAP. The enclave takes its sequence number before it searches, so a
+    # request that timed out or dropped leaves a hole for ever. Where the record notes such an attempt, say
+    # so — an unexplained gap reads as a deleted search, and those are very different things. It does NOT
+    # soften the verdict: this is still a failure, the note is the device's word and not proof, and the
+    # missing statement stays missing. Attributed to the same enclave lifetime, or it is not relevant.
+    if problems and unanswered:
+        for lid in by_life:
+            notes = [u for u in unanswered if isinstance(u, dict)
+                     and (not u.get("lifetime_id") or u.get("lifetime_id") == lid)]
+            for u in notes:
+                problems.append(f"enclave {lid[:8]}…: this device recorded a search it sealed at {u.get('at')} "
+                                f"whose answer never arrived ({u.get('reason')}) — consistent with a gap here, "
+                                "but the device's own account, not proof of what the missing search was")
     c.add(not problems, "completeness (per-enclave sequence)",
           ("; ".join(summary) + " — covers every search of each enclave SHOWN, in order; a search dropped from the END "
            "of a lifetime, or an entire lifetime dropped from the record, remains undetectable") if not problems
@@ -996,7 +1010,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         fails += len(c.failed)
     if searches:
         cc = Checks()
-        check_completeness(cc, [r for r in searches if isinstance(r, dict)])
+        # Read only if the manifest listed it — an attacker-supplied side file must not be able to narrate a
+        # gap it created. Membership is already enforced both ways, so an unlisted unanswered.json fails the
+        # bundle before we get here.
+        unanswered = None
+        up = os.path.join(a.bundle, "unanswered.json")
+        if os.path.exists(up):
+            try:
+                loaded = json.load(open(up))
+                unanswered = loaded if isinstance(loaded, list) else None
+            except (OSError, ValueError):
+                unanswered = None
+        check_completeness(cc, [r for r in searches if isinstance(r, dict)], unanswered)
         if cc.rows:
             print("\nRecord")
             cc.dump()

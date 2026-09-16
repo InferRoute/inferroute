@@ -214,6 +214,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
         matter_cutoff = None
 
     evidence: Dict[str, str] = {}
+    unanswered: List[Dict[str, Any]] = []
     searches: List[Dict[str, Any]] = []
     out: List[str] = []
     A = out.append
@@ -315,6 +316,15 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     for s in sessions:
         for x in s["searches"]:
             stmt = x.get("statement") or {}
+            if x.get("kind") == "unanswered":
+                # A search this device sealed and sent whose answer never arrived. The enclave took a
+                # sequence number for it, so the record has a permanent gap there; carrying the attempt turns
+                # an unexplained hole — which reads as a deleted search — into an explained one. It does not
+                # close the gap and the completeness check still fails, as it should.
+                unanswered.append({"session_id": s["session_id"], "at": x.get("at"),
+                                   "request_id": x.get("request_id"), "lifetime_id": x.get("lifetime_id"),
+                                   "reason": x.get("reason")})
+                continue
             if not stmt.get("sig"):
                 continue
             n += 1
@@ -400,7 +410,8 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")
     A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the attorney's machine.</p>")
     A("</body></html>")
-    return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff}
+    return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff,
+            "unanswered": unanswered}
 
 
 def _reach_note(recorded: str) -> str:
@@ -475,6 +486,8 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     files: Dict[str, bytes] = {"record.html": b["html"].encode("utf-8"),
                                "searches.json": json.dumps(b["searches"], indent=1, ensure_ascii=False).encode("utf-8"),
                                "VERIFY.md": VERIFY_MD.encode("utf-8")}
+    if b.get("unanswered"):
+        files["unanswered.json"] = json.dumps(b["unanswered"], indent=1, ensure_ascii=False).encode("utf-8")
     for sha, content in b["evidence"].items():
         files[f"{sha[:16]}.evidence.json"] = content.encode("utf-8")
     verifier_src = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"

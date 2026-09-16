@@ -522,3 +522,38 @@ def test_a_record_made_before_the_field_existed_skips_and_says_so(tmp_path, V, k
     assert "SKIP sealed to one recipient" in out
     assert "predates the signed recipient key" in out
     assert "PASS statement signature" in out, "the older statement must still be a VALID statement"
+
+
+def test_a_gap_the_device_can_explain_is_still_a_failure(tmp_path, V, kms):
+    """The enclave takes its sequence number BEFORE it searches, so a request that times out leaves a
+    permanent hole. The record may carry this device's account of that attempt — an unexplained gap reads as
+    a deleted search, and those are very different things — but the account is the device's word, not proof,
+    so the verdict must not move. Explained, still failed."""
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1, 3])
+    ref = _ref(tmp_path, "r.json", [host])
+
+    code, out = _run(d, "--reference", str(ref))
+    assert "FAIL completeness" in out and "missing [2]" in out
+    assert "never arrived" not in out, "nothing to explain the gap with yet"
+
+    (d / "unanswered.json").write_text(json.dumps([{
+        "session_id": "s1", "at": "2026-06-01T12:00:30Z", "request_id": "ab" * 8,
+        "lifetime_id": rd["lifetime_id"], "reason": "TimeoutError after 300s"}]))
+    _remanifest(d)
+    code, out = _run(d, "--reference", str(ref))
+    assert "FAIL completeness" in out, "an explanation must never turn a failure into a pass"
+    assert "never arrived" in out and "TimeoutError after 300s" in out
+    assert "not proof of what the missing search was" in out
+    assert code == 1
+
+
+def test_an_explanation_for_another_enclave_is_not_applied_here(tmp_path, V, kms):
+    """An attempt recorded against a different enclave lifetime says nothing about this one's gap."""
+    d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1, 3])
+    (d / "unanswered.json").write_text(json.dumps([{
+        "session_id": "s1", "at": "t", "request_id": "cd" * 8,
+        "lifetime_id": "ff" * 8, "reason": "TimeoutError after 300s"}]))
+    _remanifest(d)
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "r2.json", [host])))
+    assert "FAIL completeness" in out and "missing [2]" in out
+    assert "never arrived" not in out, "an attempt on another enclave must not be offered as this gap's reason"

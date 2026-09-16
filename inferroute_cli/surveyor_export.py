@@ -378,6 +378,16 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "A reader who does not trust this device should weigh those lines accordingly.</p>")
     A("<p class=note><b>Not claimed</b>: novelty, patentability, or the absence of prior art. A sealed search lists what a "
       "bounded corpus surfaced under a stated date bound; the corpus is named by its index manifest hash in each statement.</p>")
+    # THE LANE, AND THE TRADE. The attested search is not our best search: an enclave with no route to the
+    # network can only read what is resident in it. A client who chose proof got less reach, and they must be
+    # told that by the record itself rather than discover it when a local search surfaces something this one
+    # ranked lower. Any recall figure we ever publish must carry the lane it was measured in.
+    A("<p class=note><b>Which search this was</b>: the sealed one. Inside the enclave there is no route off the "
+      "machine, so a search reads only the corpus resident there — for most documents, the title and abstract. "
+      "Each report states how many of the documents it examined most closely it was able to read in full. A "
+      "search run WITHOUT this proof, on a machine you already trust, can fetch and read full descriptions, and "
+      "may therefore surface documents this one placed lower. Depth and proof are a trade here; this record is "
+      "the proof side of it, and says so rather than implying it was also the deepest read available.</p>")
     # Reports may quote passages from the documents themselves. A reader — or a court — must not be able to
     # take those quotations for our characterisation of somebody's patent, and a bundle can be forwarded to
     # people who never saw this sentence spoken aloud. Each hit also records which text the quote came from.

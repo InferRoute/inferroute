@@ -986,7 +986,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     """Exit codes: 0 every check passed under production roots; 1 one or more checks failed (or nothing to
     verify); 2 usage / refused; 3 every check passed but under TEST roots (never a verification of Azure)."""
     import argparse
-    ap = argparse.ArgumentParser(description="Independently verify an attested prior-art record bundle.")
+    class _Parser(argparse.ArgumentParser):
+        """argparse cannot tell a VALUE that starts with "-" from a flag, and several of the values here can:
+        a base64url fingerprint begins with a hyphen about 1.3% of the time (measured by sealed-research: 51
+        of 4,000). The user then sees "expected one argument" and has no idea why a correct paste failed.
+        Say what to do instead — the equals form is the only shape immune to it."""
+
+        def error(self, message: str) -> None:                  # type: ignore[override]
+            if "expected one argument" in message:
+                message += ("\n\nIf the value you pasted starts with '-' (base64url fingerprints often do), "
+                            "attach it with '=' so it cannot be read as a flag:\n"
+                            "    --uvm-root=VALUE      --reference-key=VALUE      --amd-pin=PRODUCT:VALUE")
+            super().error(message)
+
+    ap = _Parser(description="Independently verify an attested prior-art record bundle.")
     ap.add_argument("bundle", help="the export directory (record.html, searches.json, MANIFEST.json, *.evidence.json)")
     ap.add_argument("--reference", default=None, metavar="FILE",
                     help="InferRoute's published reference (policy_sha256, index_manifest_sha256, model_manifest_sha256), obtained OUT OF BAND; without it identity FAILS")

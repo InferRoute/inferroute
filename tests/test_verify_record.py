@@ -557,3 +557,61 @@ def test_an_explanation_for_another_enclave_is_not_applied_here(tmp_path, V, kms
     code, out = _run(d, "--reference", str(_ref(tmp_path, "r2.json", [host])))
     assert "FAIL completeness" in out and "missing [2]" in out
     assert "never arrived" not in out, "an attempt on another enclave must not be offered as this gap's reason"
+
+
+def _offer(V, kms, rd=None):
+    rd = rd if rd is not None else {"v": 1, "kind": "sealed-search", "lifetime_id": "ab" * 8,
+                                    "statement_signer_pub": "11" * 32, "enclave_x25519_pub": "22" * 32,
+                                    "index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    return {"evidence": kms["evidence"], "endorsements": kms["endorsements"],
+            "uvm_endorsements": kms["uvm_endorsements"],
+            "runtime_data": base64.b64encode(json.dumps(rd).encode()).decode()}
+
+
+def test_the_live_client_and_the_bundle_verifier_ask_the_same_questions(V, kms):
+    """One definition of "verified", shared by the client that is about to seal a query and the stranger
+    checking the record afterwards. Two implementations could diverge so that the live client accepts an
+    enclave the record's verifier later rejects — and each would look right on its own."""
+    c = V.verify_offer(_offer(V, kms))
+    names = {n for _, n, _ in c.rows}
+    for shared in ("REPORT_DATA binds runtime data", "report signature", "AMD root pinned",
+                   "VCEK is for this chip", "report from VMPL 0", "UVM endorsement signature",
+                   "UVM root is Microsoft's", "MEASUREMENT is the endorsed utility VM",
+                   "enclave identity (InferRoute's policy, index, encoders)"):
+        assert shared in names, (shared, sorted(names))
+    # and it asks the two questions that only matter BEFORE sealing
+    assert "sealing key committed in runtime data" in names
+
+
+def test_an_offer_with_no_sealing_key_is_refused_before_anything_is_sent(V, kms):
+    """There is nothing safe to seal to. This must fail loudly rather than fall through to a default."""
+    rd = {"v": 1, "lifetime_id": "ab" * 8, "statement_signer_pub": "11" * 32,
+          "enclave_x25519_pub": "00" * 32,                       # all-zero: present but unusable
+          "index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    c = V.verify_offer(_offer(V, kms, rd))
+    assert "sealing key committed in runtime data" in c.failed
+    assert any("nothing safe to seal to" in d for _, _, d in c.rows)
+
+
+def test_a_live_offer_without_a_reference_fails_identity_exactly_as_a_record_does(V, kms):
+    c = V.verify_offer(_offer(V, kms))
+    assert "enclave identity (InferRoute's policy, index, encoders)" in c.failed
+    assert any("NO REFERENCE SUPPLIED" in d for _, _, d in c.rows)
+    # with one, the same match logic applies as for a record
+    host = V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+    ref = {"schema": "inferroute.enclave-reference/1", "policy_sha256": [host],
+           "index_manifest_sha256": ["ef" * 32], "model_manifest_sha256": ["12" * 32]}
+    c2 = V.verify_offer(_offer(V, kms), reference=ref)
+    assert "enclave identity (InferRoute's policy, index, encoders)" not in c2.failed
+
+
+def test_a_retired_enclave_is_refused_before_sealing_not_after(V, kms):
+    """The windows are asked about NOW for a live enclave: a retired policy must stop the query being sent,
+    not merely fail the record afterwards — by then the invention has already left the machine."""
+    host = V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+    ref = {"schema": "inferroute.enclave-reference/1",
+           "policy_sha256": [{"value": host, "retired": True}],
+           "index_manifest_sha256": ["ef" * 32], "model_manifest_sha256": ["12" * 32]}
+    c = V.verify_offer(_offer(V, kms), reference=ref)
+    assert "enclave identity (InferRoute's policy, index, encoders)" in c.failed
+    assert any("RETIRED" in d for _, _, d in c.rows)

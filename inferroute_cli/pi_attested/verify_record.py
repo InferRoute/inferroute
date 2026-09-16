@@ -670,6 +670,143 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Op
           else "; ".join(problems))
 
 
+# ── shared by BOTH entry points ───────────────────────────────────────────────────────────────────
+# verify_search() checks a record after the fact; verify_offer() checks an enclave BEFORE anything is
+# sealed to it. The hardware and identity questions are the same question in both, so they are asked by
+# the same code. Two copies would drift, and the drift would be invisible: the live client would accept
+# an enclave the bundled verifier later rejects, or the reverse, and each would look right on its own.
+
+def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes, *, pins: Dict[str, str],
+                   uvm_root: str, uvm_min_svn: int, policy_b64: Optional[str] = None,
+                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Optional[Dict[str, Any]]:
+    """The AMD and Microsoft half: REPORT_DATA binds this runtime data, the report verifies under a VCEK
+    that chains to a PINNED AMD root, the utility VM is endorsed by Microsoft and its measurement is the
+    one in the report, and any policy shipped alongside hashes to HOST_DATA. Returns the parsed report."""
+    p = None
+    try:
+        report = base64.b64decode(offer["evidence"], validate=True)
+        p = parse_report(report)
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "SNP report", f"missing or unparsable ({type(exc).__name__})")
+    if p is not None:
+        want = hashlib.sha256(rd_bytes).digest() + b"\x00" * 32
+        bound = bool(rd) and p["report_data"] == want
+        c.add(bound, "REPORT_DATA binds runtime data",
+              "REPORT_DATA == SHA-256(runtime data) ‖ zeros: the chip signed over this runtime data" if bound
+              else "REPORT_DATA does NOT equal SHA-256(runtime data) ‖ zeros (or no runtime data)")
+        try:
+            certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
+            from cryptography.hazmat.primitives import serialization
+            pem = lambda cs: b"".join(x.public_bytes(serialization.Encoding.PEM) for x in cs)  # noqa: E731
+            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins, min_tcb)
+        except Exception as exc:                            # noqa: BLE001
+            c.add(False, "AMD endorsements", f"missing or unparsable ({type(exc).__name__})")
+        try:
+            meas = check_uvm(c, base64.b64decode(offer["uvm_endorsements"], validate=True), uvm_root, uvm_min_svn)
+        except Exception as exc:                            # noqa: BLE001
+            meas = None
+            c.add(False, "UVM endorsement", f"missing or unparsable ({type(exc).__name__})")
+        if meas is not None:
+            c.add(p["measurement"] == meas, "MEASUREMENT is the endorsed utility VM",
+                  f"report MEASUREMENT {p['measurement'].hex()[:16]}… {'==' if p['measurement'] == meas else '!='} endorsed launch measurement "
+                  "(this endorses Microsoft's utility VM, not InferRoute's container)")
+        pol = policy_b64
+        if pol:
+            try:
+                hd = sha256_hex(base64.b64decode(pol))
+                c.add(hd == p["host_data"].hex(), "archived policy matches the report (consistency)",
+                      f"SHA-256(archived policy) {hd[:16]}… {'==' if hd == p['host_data'].hex() else '!='} HOST_DATA — agreement within the bundle, not identity")
+            except Exception:                               # noqa: BLE001
+                c.add(False, "archived policy matches the report (consistency)", "policy in bundle is not valid base64")
+        else:
+            c.add(None, "archived policy matches the report (consistency)", "no policy archived in the bundle")
+    return p
+
+
+def check_identity(c: "Checks", rd: Dict[str, Any], p: Optional[Dict[str, Any]],
+                   reference: Optional[Dict[str, Any]], at: Optional[str]) -> None:
+    """The only check that separates InferRoute's enclave from anyone else's Azure confidential container:
+    HOST_DATA and the manifest hashes against values obtained OUT OF BAND. `at` is the moment the claim is
+    about — a statement's own time when checking a record, and now when checking a live enclave.
+
+    Mirrors the live verifier's ruling (aci_evidence: an unpinned policy is a FAILING step). Each reference
+    entry may carry a validity window or be retired; a match that is not CURRENT at `at` fails, and the row
+    says which entry matched and why."""
+    if isinstance(reference, dict) and reference.get("development"):
+        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
+              "this reference is marked DEVELOPMENT — it was signed by a key that is not the production "
+              "publication key, so it cannot establish that the enclave was InferRoute's. Obtain the "
+              "production reference from your engagement letter.")
+    elif reference is None:
+        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
+              "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT InferRoute's; "
+              "obtain InferRoute's published reference out of band and rerun with --reference")
+    else:
+        # the manifest hashes come from the runtime data the hardware bound, never from the statement:
+        # the question is what the ENCLAVE committed to, not what a record says about it
+        idx, mdl = rd.get("index_manifest_sha256"), rd.get("model_manifest_sha256")
+        pol_ok, pol_why = (_ref_match(_ref_entries(reference, "policy_sha256"), p["host_data"].hex(), at) if p is not None
+                           else (False, "no report"))
+        idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), idx, at) if rd else (False, "no runtime data")
+        mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), mdl, at) if rd else (False, "no runtime data")
+        c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
+              f"policy: {pol_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — against reference "
+              f"{reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}"
+              + (f", at the search's time {at}" if at else ""))
+
+
+
+def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None, uvm_root: Optional[str] = None,
+                 uvm_min_svn: int = UVM_MIN_SVN, reference: Optional[Dict[str, Any]] = None,
+                 policy_b64: Optional[str] = None, at: Optional[str] = None,
+                 min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
+    """Everything checkable about an enclave BEFORE anything is sealed to it — the check a live client must
+    pass before it sends a word of the invention.
+
+    It is the same hardware and identity code the bundled verifier runs after the fact, deliberately: if the
+    live client and the record's verifier held two implementations, one could accept an enclave the other
+    later rejects, and each would look correct on its own. The difference between them is only WHAT IS
+    AVAILABLE — here there is no statement yet, so there is nothing to bind a query or a result to, and the
+    reference's validity windows are asked about NOW rather than about a search's own time.
+
+    Returns Checks; `Checks.failed` empty means every question that could be asked was answered yes. The
+    caller must treat any failure as "do not seal" — a sealed query cannot be recalled.
+    """
+    c = Checks()
+    rd: Dict[str, Any] = {}
+    rd_bytes = b""
+    try:
+        rd_bytes = base64.b64decode((offer or {}).get("runtime_data", ""), validate=True)
+        loaded = json.loads(rd_bytes)
+        rd = loaded if isinstance(loaded, dict) else {}
+        c.add(bool(rd), "runtime data present", f"{len(rd_bytes)} bytes of readable runtime data")
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "runtime data present", f"no readable runtime_data object in the offer ({type(exc).__name__})")
+
+    # The keys we are about to trust with the invention: the enclave's X25519 key (what the query is sealed
+    # to) and its statement signer. Both must be present, non-zero and hardware-bound — the binding is what
+    # check_hardware establishes below, via REPORT_DATA over exactly these bytes.
+    x_pub, signer = rd.get("enclave_x25519_pub"), rd.get("statement_signer_pub")
+    c.add(_is_hex32(x_pub) and str(x_pub).lower() != ZERO32, "sealing key committed in runtime data",
+          f"the query would be sealed to {str(x_pub)[:16]}…, which the hardware report commits to"
+          if _is_hex32(x_pub) and str(x_pub).lower() != ZERO32
+          else "the offer names no usable X25519 key — there is nothing safe to seal to")
+    c.add(_is_hex32(signer) and str(signer).lower() != ZERO32, "signer key committed in runtime data",
+          f"answers would be signed by {str(signer)[:16]}…" if _is_hex32(signer) and str(signer).lower() != ZERO32
+          else "the offer names no usable statement signer key")
+
+    check_hardware(c, offer or {}, rd, rd_bytes, pins=pins or AMD_ARK_SPKI_SHA256,
+                   uvm_root=uvm_root or MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=uvm_min_svn,
+                   policy_b64=policy_b64, min_tcb=min_tcb)
+    p = None
+    try:
+        p = parse_report(base64.b64decode((offer or {}).get("evidence", ""), validate=True))
+    except Exception:                                       # noqa: BLE001
+        p = None
+    check_identity(c, rd, p, reference, at)
+    return c
+
+
 def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[str, str], uvm_root: str,
                   uvm_min_svn: int, matter_cutoff: Optional[int], reference: Optional[Dict[str, Any]],
                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
@@ -717,69 +854,12 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
           f"lifetime {str(rd.get('lifetime_id'))[:12]}…, index manifest {str(idx)[:12]}…, encoders {str(mdl)[:12]}… (all non-zero)"
           if commits_ok else "lifetime / index manifest / encoder manifest are missing, zero, or differ from the statement")
 
-    # 3. hardware report binds the runtime data; AMD chain; UVM; policy consistency
-    p = None
-    try:
-        report = base64.b64decode(offer["evidence"], validate=True)
-        p = parse_report(report)
-    except Exception as exc:                                # noqa: BLE001
-        c.add(False, "SNP report", f"missing or unparsable ({type(exc).__name__})")
-    if p is not None:
-        want = hashlib.sha256(rd_bytes).digest() + b"\x00" * 32
-        bound = bool(rd) and p["report_data"] == want
-        c.add(bound, "REPORT_DATA binds runtime data",
-              "REPORT_DATA == SHA-256(runtime data) ‖ zeros: the chip signed over this runtime data" if bound
-              else "REPORT_DATA does NOT equal SHA-256(runtime data) ‖ zeros (or no runtime data)")
-        try:
-            certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
-            from cryptography.hazmat.primitives import serialization
-            pem = lambda cs: b"".join(x.public_bytes(serialization.Encoding.PEM) for x in cs)  # noqa: E731
-            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins, min_tcb)
-        except Exception as exc:                            # noqa: BLE001
-            c.add(False, "AMD endorsements", f"missing or unparsable ({type(exc).__name__})")
-        try:
-            meas = check_uvm(c, base64.b64decode(offer["uvm_endorsements"], validate=True), uvm_root, uvm_min_svn)
-        except Exception as exc:                            # noqa: BLE001
-            meas = None
-            c.add(False, "UVM endorsement", f"missing or unparsable ({type(exc).__name__})")
-        if meas is not None:
-            c.add(p["measurement"] == meas, "MEASUREMENT is the endorsed utility VM",
-                  f"report MEASUREMENT {p['measurement'].hex()[:16]}… {'==' if p['measurement'] == meas else '!='} endorsed launch measurement "
-                  "(this endorses Microsoft's utility VM, not InferRoute's container)")
-        pol = (evidence or {}).get("policy_b64")
-        if pol:
-            try:
-                hd = sha256_hex(base64.b64decode(pol))
-                c.add(hd == p["host_data"].hex(), "archived policy matches the report (consistency)",
-                      f"SHA-256(archived policy) {hd[:16]}… {'==' if hd == p['host_data'].hex() else '!='} HOST_DATA — agreement within the bundle, not identity")
-            except Exception:                               # noqa: BLE001
-                c.add(False, "archived policy matches the report (consistency)", "policy in bundle is not valid base64")
-        else:
-            c.add(None, "archived policy matches the report (consistency)", "no policy archived in the bundle")
-
-    # 4. IDENTITY — the only check that separates InferRoute's enclave from any other Azure confidential
-    #    container. Mirrors the live verifier's ruling (aci_evidence: an unpinned policy is a FAILING step).
-    #    Each reference entry may carry a validity window or be retired; a match that is not CURRENT at the
-    #    statement's time fails, and the row says which entry matched and why.
-    if isinstance(reference, dict) and reference.get("development"):
-        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
-              "this reference is marked DEVELOPMENT — it was signed by a key that is not the production "
-              "publication key, so it cannot establish that the enclave was InferRoute's. Obtain the "
-              "production reference from your engagement letter.")
-    elif reference is None:
-        c.add(False, "enclave identity (InferRoute's policy, index, encoders)",
-              "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT InferRoute's; "
-              "obtain InferRoute's published reference out of band and rerun with --reference")
-    else:
-        at = st.get("started_utc") if isinstance(st.get("started_utc"), str) else None
-        pol_ok, pol_why = (_ref_match(_ref_entries(reference, "policy_sha256"), p["host_data"].hex(), at) if p is not None
-                           else (False, "no report"))
-        idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), idx, at) if rd else (False, "no runtime data")
-        mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), mdl, at) if rd else (False, "no runtime data")
-        c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
-              f"policy: {pol_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — against reference "
-              f"{reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}"
-              + (f", at the search's time {at}" if at else ""))
+    # 3-4. hardware and identity, asked by the same code the live client asks them with. `at` is this
+    # statement's own time: a reference entry's window must have been current WHEN THE SEARCH RAN, not now.
+    at = st.get("started_utc") if isinstance(st.get("started_utc"), str) else None
+    p = check_hardware(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
+                       policy_b64=(evidence or {}).get("policy_b64"), min_tcb=min_tcb)
+    check_identity(c, rd, p, reference, at)
 
     # 5. content bindings
     rid = str(st.get("request_id") or "")

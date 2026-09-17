@@ -653,7 +653,7 @@ export default function (pi: ExtensionAPI) {
 		],
 		// No cutoff parameter: the date bound is the matter's, held by the host verifier, not the model's to set.
 		parameters: Type.Object({
-			text: Type.Optional(Type.String({ description: "A self-contained technical description to search for (20 characters or more). Not needed with `like`." })),
+			text: Type.Optional(Type.String({ description: "REQUIRED unless `like` is given: a self-contained technical description to search for (20 characters or more). `feature` only names the search; it is not searched." })),
 			feature: Type.Optional(Type.String({ maxLength: 80, description: "A short name for the one feature of the disclosure this search covers" })),
 			like: Type.Optional(Type.String({ description: "A publication number returned earlier in this session: search for documents like it" })),
 			depth: Type.Optional(Type.Union([Type.Literal("quick"), Type.Literal("standard"), Type.Literal("broad")], { description: "How many references: quick 10 (default), standard 25, broad 50" })),
@@ -908,9 +908,10 @@ export default function (pi: ExtensionAPI) {
 		label: "Next steps",
 		description:
 			"Offer the professional two to four next research actions they can send with one click, exactly as written. " +
-			"Call it last in an answer that reports or discusses search results, and write nothing after it. Each step is an " +
-			"instruction to you within your tools (a follow-up search on one feature, documents like a returned one, reading " +
-			"their marks), never a judgment and never a command. Never mention this tool or the steps in your written answer.",
+			"Call it last in an answer that reports or discusses search results, and write nothing after it. Write each step in " +
+			"the professional's own words, as they would ask you (\"Find documents like US-5795305-A\", \"Use my marks to steer " +
+			"the next searches\"), with no tool or parameter names: a follow-up research action within your tools, never a " +
+			"judgment and never a command. Never mention this tool or the steps in your written answer.",
 		promptSnippet: "Offer the professional one-click next research steps (call last)",
 		parameters: Type.Object({
 			steps: Type.Array(Type.String({ maxLength: 200 }), { minItems: 1, maxItems: NEXT_MAX }),

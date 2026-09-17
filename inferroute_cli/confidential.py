@@ -189,7 +189,9 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
     web = bool(surveyor and surveyor.get("web"))
     if web:
         passthrough = [*passthrough, "--mode", "rpc"]
-    if user_model is None and _interactive(passthrough):
+    # Surveyor never asks an attorney to pick a model from a price list: it runs the default, the model its
+    # mission contract is written and tested against.
+    if user_model is None and _interactive(passthrough) and surveyor is None:
         # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.
         from . import choose as choose_mod
         user_model = choose_mod.pick(choose_mod.confidential_options(),
@@ -374,6 +376,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
             session.close()
             console.print("")
             display.render_summary(session.receipt, console)
+            if surveyor is not None and not web:
+                console.print(f"\n  Keep the record of this matter:  [bold]ir surveyor export {surveyor.get('matter', '')}[/]\n")
             if page is not None:
                 await page.linger(console)                     # the page stays up so the record can be exported
             return rc

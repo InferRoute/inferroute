@@ -44,6 +44,11 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .matter-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bound { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .top-actions { display: flex; gap: 8px; }
+@media (max-width: 640px) {
+  .top { gap: 10px; padding: 8px 12px; }
+  .brand, .bound { display: none; }
+  .top-actions button { padding: 5px 10px; font-size: 14px; }
+}
 .pill { border-radius: 999px; font-weight: 600; padding: 5px 14px; }
 .pill-private { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
 .pill-limited { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
@@ -67,7 +72,11 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .hint { color: var(--faint); font-size: 13px; max-width: 60ch; }
 
 /* messages */
+/* Items in the scrolling column keep their height: a card with overflow:hidden would otherwise shrink to a
+   sliver and clip its documents and mark buttons. */
+.log > * { flex-shrink: 0; }
 .msg { max-width: 100%; }
+.msg-assistant hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
 .msg-user { align-self: flex-end; background: var(--user); padding: 9px 14px; border-radius: 14px 14px 4px 14px; max-width: 80%; white-space: pre-wrap; }
 .msg-assistant { padding: 2px 2px; }
 .msg-assistant p { margin: 0 0 10px; }

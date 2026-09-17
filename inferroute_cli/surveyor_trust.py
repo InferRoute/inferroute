@@ -36,6 +36,13 @@ def _hhmm(iso: str) -> str:
         return (iso or "")[11:16]
 
 
+def _local_stamp(iso: str) -> str:
+    try:
+        return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone().strftime("%d %b %Y, %H:%M")
+    except (TypeError, ValueError):
+        return iso
+
+
 def _check(receipt: Any, name: str) -> Optional[dict]:
     c = (getattr(receipt, "checks", None) or {}).get(name)
     return c if isinstance(c, dict) else None
@@ -250,7 +257,7 @@ def render_card(summary: Dict[str, Any], console: Any = None) -> None:
                  Text("What this can't prove", style="bold"), lim, Text(""),
                  Text(f"Full technical proof: ir surveyor proof {summary.get('matter') or ''}".rstrip(), style="grey58"))
     width = min(console.width, 88)
-    console.print(Panel(body, title=f"[bold]{title}[/]", subtitle=f"[grey58]checked {summary['checked_at']}[/]",
+    console.print(Panel(body, title=f"[bold]{title}[/]", subtitle=f"[grey58]checked {_local_stamp(summary['checked_at'])}[/]",
                         border_style=colour, box=box.ROUNDED, width=width, padding=(1, 2)))
 
 
@@ -260,7 +267,7 @@ def render_howto(matter: str, console: Any = None) -> None:
     console = console or Console()
     rows = [("In the session", "ask for a prior-art survey of the disclosure in this folder"),
             ("", "/relevant US-1234567-B2  mark a result (also /not-relevant, /known, /marks)"),
-            ("", "/proof  show the checks again · Ctrl+C twice to leave"),
+            ("", "/proof  show the checks again · /quit  leave"),
             ("Afterwards", f"ir surveyor export {matter}   the record to keep")]
     for head, text in rows:
         console.print(Text.assemble((f"  {head:<16}", "bold"), (text, "grey70")), soft_wrap=True)

@@ -368,7 +368,8 @@ class Bridge:
                 path = await asyncio.to_thread(bridge._export)
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
-            return {"ok": True, "path": str(path), "verify": f"ir surveyor verify-export {path}"}
+            return {"ok": True, "path": str(path), "verify_here": f"ir surveyor verify-export {path}",
+                    "verify_anyone": "python3 verify_record.py ."}
 
         @app.post("/api/close")
         async def close_page():

@@ -344,3 +344,16 @@ def test_planted_context_files_do_not_reach_the_model(tmp_path, user_pi):
         sysmsg = _system_message(s.bodies)
         assert "INJECT-MARKER-2261" not in sysmsg, "a planted context file reached the model system prompt"
         assert "prior-art research assistant" in sysmsg
+
+
+def test_a_surveyor_session_keeps_no_transcript_and_offers_no_resume(tmp_path, user_pi, monkeypatch):
+    # Pi's exit line offered "pi --session <id>", which would continue the matter in plain, unsealed Pi, and the
+    # transcript it resumes from was a plain-text copy of the disclosure. Surveyor runs Pi with --no-session.
+    from inferroute_cli import pi_attested as P, models as M
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
+    alias = M.get("kimi-k2.6")
+    env = {"IR_SURVEYOR_SURFACE": "terminal"}
+    argv = P.env_argv("pi", env, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
+    assert "--no-session" in argv
+    plain = P.env_argv("pi", {}, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
+    assert "--no-session" not in plain

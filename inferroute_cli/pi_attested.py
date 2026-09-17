@@ -229,7 +229,11 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # The disclosure record goes to a writable, ir-owned dir (cfg is in the write allow-set), NOT under
     # confidential/ which the filesystem confinement denies the agent.
     env["IR_ATTESTED_RECORD_DIR"] = str(cfg / "attested-sessions")
-    return [binary, "-ne", "-e", str(EXTENSION), "-na", "-nc", "--tools", ",".join(tools),
+    # A Surveyor session keeps no Pi transcript. The record of a matter is the host-side record the export
+    # reads; a transcript would be a second, plain-text copy of the disclosure nobody is told about, and Pi's
+    # exit line "To resume this session: pi --session …" would invite continuing it in plain `pi`, unsealed.
+    ephemeral = ["--no-session"] if env.get("IR_SURVEYOR_SURFACE") else []
+    return [binary, "-ne", "-e", str(EXTENSION), "-na", "-nc", *ephemeral, "--tools", ",".join(tools),
             "--system-prompt", str(sp),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
 

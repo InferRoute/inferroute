@@ -623,61 +623,84 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
 
 
 def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Optional[List[Dict[str, Any]]] = None) -> None:
-    """Per enclave lifetime, the signed `seq` numbers must run 1..N with no gaps or duplicates. Then the record
-    can claim "every search of that enclave, in order" — except a search dropped from the very END of a
-    lifetime, which no counter can reveal."""
-    by_life: Dict[str, List[Any]] = {}
-    ungrouped = 0
+    """The signed sequence numbers must run 1..N with no gaps or duplicates, so the record can claim "every
+    operation of this session, in order" — except one dropped from the very END, which no counter can reveal.
+
+    An enclave serves many clients, so a counter per enclave lifetime made every record after the first look
+    incomplete, and told each reader how much other people had used it. A statement that carries a session_id
+    is therefore counted within its session (session_seq); one that does not falls back to the per-enclave
+    seq, so records made before session numbering still verify exactly as they did.
+
+    Both kinds of operation count: a sealed search and a document read each take a number, so a record that
+    shows only its searches would show a gap wherever a document was read."""
+    groups: Dict[Tuple[str, Optional[str]], List[Tuple[Any, str]]] = {}
+    ungrouped, per_session = 0, False
     for row in searches:
         st = row.get("statement") if isinstance(row, dict) else None
         if not isinstance(st, dict):
             continue
-        if st.get("lifetime_id"):
-            by_life.setdefault(str(st["lifetime_id"]), []).append(st.get("seq"))
-        else:
+        if not st.get("lifetime_id"):
             ungrouped += 1
-    if not by_life:
-        c.add(None, "completeness (per-enclave sequence)",
-              f"cannot group: {ungrouped} statement(s) carry no lifetime_id, so sequence gaps cannot be checked")
+            continue
+        sid = str(st["session_id"]) if st.get("session_id") else None
+        per_session = per_session or sid is not None
+        seq = st.get("session_seq") if sid is not None else st.get("seq")
+        groups.setdefault((str(st["lifetime_id"]), sid), []).append((seq, str(st.get("kind") or "search")))
+    name = f"completeness (per-{'session' if per_session else 'enclave'} sequence)"
+    if not groups:
+        c.add(None, name, f"cannot group: {ungrouped} statement(s) carry no lifetime_id, so sequence gaps cannot be checked")
         return
-    if not any(isinstance(s, int) for seqs in by_life.values() for s in seqs):
-        c.add(None, "completeness (per-enclave sequence)", "these statements carry no sequence numbers; a dropped search is undetectable")
+    if not any(isinstance(seq, int) for rows in groups.values() for seq, _ in rows):
+        c.add(None, name, "these statements carry no sequence numbers; a dropped search is undetectable")
         return
     problems, summary = [], []
-    for lid, seqs in by_life.items():
-        ints = sorted(s for s in seqs if isinstance(s, int))
-        tag = f"enclave {lid[:8]}…"
-        if len(ints) != len(seqs):
+    for (lid, sid), rows in groups.items():
+        tag = f"session {sid[:8]}… of enclave {lid[:8]}…" if sid else f"enclave {lid[:8]}…"
+        ints = sorted(seq for seq, _ in rows if isinstance(seq, int))
+        if len(ints) != len(rows):
             problems.append(f"{tag}: a statement without a sequence number")
             continue
         present = set(ints)
         gaps = [n for n in range(ints[0], ints[-1] + 1) if n not in present]
         dups = len(ints) != len(present)
         if ints[0] != 1:
-            problems.append(f"{tag}: starts at seq {ints[0]} — searches 1..{ints[0] - 1} of this enclave are not in the record")
+            problems.append(f"{tag}: starts at seq {ints[0]} — operations 1..{ints[0] - 1} are not in the record")
         if gaps or dups:
             problems.append(f"{tag}: seq {ints[0]}..{ints[-1]}" + (f" missing {gaps}" if gaps else "") + (" with duplicates" if dups else ""))
         if ints[0] == 1 and not gaps and not dups:
-            summary.append(f"{tag}: seq 1..{ints[-1]} contiguous ({len(ints)} search{'es' if len(ints) != 1 else ''})")
+            summary.append(f"{tag}: seq 1..{ints[-1]} contiguous ({_counted(rows)})")
     if ungrouped:
         problems.append(f"{ungrouped} statement(s) carry no lifetime_id and could not be checked")
-    # THE DEVICE'S OWN ACCOUNT OF A GAP. The enclave takes its sequence number before it searches, so a
+    # THE DEVICE'S OWN ACCOUNT OF A GAP. The enclave takes its sequence number before it answers, so a
     # request that timed out or dropped leaves a hole for ever. Where the record notes such an attempt, say
     # so — an unexplained gap reads as a deleted search, and those are very different things. It does NOT
     # soften the verdict: this is still a failure, the note is the device's word and not proof, and the
     # missing statement stays missing. Attributed to the same enclave lifetime, or it is not relevant.
     if problems and unanswered:
-        for lid in by_life:
+        for lid, _sid in groups:
             notes = [u for u in unanswered if isinstance(u, dict)
                      and (not u.get("lifetime_id") or u.get("lifetime_id") == lid)]
             for u in notes:
                 problems.append(f"enclave {lid[:8]}…: this device recorded a search it sealed at {u.get('at')} "
                                 f"whose answer never arrived ({u.get('reason')}) — consistent with a gap here, "
                                 "but the device's own account, not proof of what the missing search was")
-    c.add(not problems, "completeness (per-enclave sequence)",
-          ("; ".join(summary) + " — covers every search of each enclave SHOWN, in order; a search dropped from the END "
-           "of a lifetime, or an entire lifetime dropped from the record, remains undetectable") if not problems
-          else "; ".join(problems))
+    shown = ("every operation of each session SHOWN, in order; one dropped from the END, or an entire session "
+             "dropped from the record, remains undetectable") if per_session else \
+            ("every search of each enclave SHOWN, in order; a search dropped from the END of a lifetime, or an "
+             "entire lifetime dropped from the record, remains undetectable")
+    c.add(not problems, name, ("; ".join(summary) + f" — covers {shown}") if not problems else "; ".join(problems))
+
+
+def _counted(rows: List[Tuple[Any, str]]) -> str:
+    """"3 searches, 1 document read" — a reader should not have to infer what was counted."""
+    docs = sum(1 for _, kind in rows if kind == "document")
+    searches = len(rows) - docs
+    parts = []
+    if searches:
+        parts.append(f"{searches} search{'es' if searches != 1 else ''}")
+    if docs:
+        parts.append(f"{docs} document read{'s' if docs != 1 else ''}")
+    return ", ".join(parts) or "0 operations"
 
 
 # ── shared by BOTH entry points ───────────────────────────────────────────────────────────────────
@@ -879,41 +902,13 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
                        policy_b64=(evidence or {}).get("policy_b64"), min_tcb=min_tcb)
     check_identity(c, rd, p, reference, at)
 
-    # 5. content bindings
+    # 5. content bindings — what this operation was, and that the record shows exactly what was signed.
     rid = str(st.get("request_id") or "")
-    q = row.get("query_text")
-    if isinstance(q, str):
-        ok = salted(rid, q) == st.get("query_sha256")
-        c.add(ok, "query text is the one searched", "SHA-256(request_id ‖ canonical(query)) == query_sha256" if ok else "query text does NOT match query_sha256")
+    check_recipient(c, st, row)
+    if str(st.get("kind") or "search") == "document":
+        check_document(c, st, row, rid)
     else:
-        c.add(None, "query text is the one searched", "query text not in bundle; query_sha256 cannot be opened")
-    res = row.get("result")
-    if isinstance(res, dict):
-        # WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the attorney's own proxy recorded the
-        # key it made. Equal, and the result went to that one address: a copy sealed to anyone else would
-        # have a different signed recipient. This is the difference between "only you can open it" as our
-        # word and as your arithmetic. Statements from before the field existed get a SKIP that says what
-        # is therefore unchecked — an absent check must never read as a passed one.
-        rt, want = st.get("reply_to_sha256"), row.get("reply_to")
-        if rt is None:
-            c.add(None, "sealed to one recipient",
-                  "this statement predates the signed recipient key; nothing here rules out a second recipient")
-        elif not isinstance(want, str) or not want:
-            c.add(None, "sealed to one recipient",
-                  "the statement names a recipient but the record kept no reply key to compare it against")
-        else:
-            try:
-                same = sha256_hex(bytes.fromhex(want)) == rt
-            except ValueError:
-                same = False
-            c.add(same, "sealed to one recipient",
-                  "the signed recipient is the one-time key this machine made for this search — no second copy"
-                  if same else "the signed recipient is NOT the key this record says was used")
-        ok = salted(rid, res) == st.get("result_sha256")
-        c.add(ok, "result is the signed result", "SHA-256(request_id ‖ canonical(result)) == result_sha256" if ok else "result does NOT match result_sha256")
-        c.add(len(res.get("hits") or []) == st.get("hits_n"), "hit count as signed", f"{len(res.get('hits') or [])} hits, statement says {st.get('hits_n')}")
-    else:
-        c.add(None, "result is the signed result", "opened result not in bundle")
+        check_search_content(c, st, row, rid)
     # The enclave-SIGNED cutoff is the fact; the MANIFEST's is the record's unsigned claim about the matter.
     if matter_cutoff is not None:
         c.add(st.get("cutoff_date") == matter_cutoff, "date bound the enclave was given",
@@ -922,6 +917,90 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     else:
         c.add(None, "date bound the enclave was given", f"signed statement cutoff_date {st.get('cutoff_date')}; the record states no matter date bound")
     return c
+
+
+def check_recipient(c: Checks, st: Dict[str, Any], row: Dict[str, Any]) -> None:
+    """WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the attorney's own proxy recorded the key
+    it made. Equal, and the answer went to that one address: a copy sealed to anyone else would have a
+    different signed recipient. This is the difference between "only you can open it" as our word and as your
+    arithmetic. Statements from before the field existed get a SKIP that says what is therefore unchecked —
+    an absent check must never read as a passed one."""
+    rt, want = st.get("reply_to_sha256"), row.get("reply_to")
+    if rt is None:
+        c.add(None, "sealed to one recipient",
+              "this statement predates the signed recipient key; nothing here rules out a second recipient")
+    elif not isinstance(want, str) or not want:
+        c.add(None, "sealed to one recipient",
+              "the statement names a recipient but the record kept no reply key to compare it against")
+    else:
+        try:
+            same = sha256_hex(bytes.fromhex(want)) == rt
+        except ValueError:
+            same = False
+        c.add(same, "sealed to one recipient",
+              "the signed recipient is the one-time key this machine made for this operation — no second copy"
+              if same else "the signed recipient is NOT the key this record says was used")
+
+
+def check_search_content(c: Checks, st: Dict[str, Any], row: Dict[str, Any], rid: str) -> None:
+    q = row.get("query_text")
+    if isinstance(q, str):
+        ok = salted(rid, q) == st.get("query_sha256")
+        c.add(ok, "query text is the one searched", "SHA-256(request_id ‖ canonical(query)) == query_sha256" if ok else "query text does NOT match query_sha256")
+    else:
+        c.add(None, "query text is the one searched", "query text not in bundle; query_sha256 cannot be opened")
+    res = row.get("result")
+    if isinstance(res, dict):
+        ok = salted(rid, res) == st.get("result_sha256")
+        c.add(ok, "result is the signed result", "SHA-256(request_id ‖ canonical(result)) == result_sha256" if ok else "result does NOT match result_sha256")
+        c.add(len(res.get("hits") or []) == st.get("hits_n"), "hit count as signed", f"{len(res.get('hits') or [])} hits, statement says {st.get('hits_n')}")
+    else:
+        c.add(None, "result is the signed result", "opened result not in bundle")
+
+
+def _as_yyyymmdd(value: Any) -> Optional[int]:
+    """A date as the enclave may state it: 20180417, "20180417" or "2018-04-17"."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 19000101 <= value <= 20991231 else None
+    if isinstance(value, str):
+        digits = value.replace("-", "")
+        if digits.isdigit() and len(digits) == 8:
+            return _as_yyyymmdd(int(digits))
+    return None
+
+
+def check_document(c: Checks, st: Dict[str, Any], row: Dict[str, Any], rid: str) -> None:
+    """A document read: the enclave returns the text it holds for one publication number and signs the text,
+    the number, how much of the document it held, and the publication date."""
+    text = row.get("text")
+    if isinstance(text, str):
+        ok = salted(rid, text) == st.get("text_sha256")
+        c.add(ok, "document text is the one signed",
+              "SHA-256(request_id ‖ canonical(text)) == text_sha256" if ok else "the text shown does NOT match text_sha256")
+    else:
+        c.add(None, "document text is the one signed", "the document's text is not in the bundle; text_sha256 cannot be opened")
+    signed_key, shown_key = st.get("key"), row.get("key")
+    cov = st.get("coverage") if isinstance(st.get("coverage"), dict) else {}
+    held = "; ".join(f"{k}: {v}" for k, v in sorted(cov.items())) or "not stated"
+    if shown_key is not None and shown_key != signed_key:
+        c.add(False, "document is the one signed", f"the record shows {shown_key}, the enclave signed {signed_key}")
+    else:
+        c.add(bool(signed_key), "document is the one signed",
+              f"{signed_key or '(the statement names no document)'}, published {st.get('publication_date') or 'date not stated'} — "
+              f"the enclave signed that it held {held}")
+    # THE MATTER'S DATE BOUND APPLIES TO A READ, not only to a search. The enclave refuses a read of art
+    # published on or after the bound; the record must fail if one ever got through, or the bound would hold
+    # only while someone was watching.
+    pub, cut = _as_yyyymmdd(st.get("publication_date")), _as_yyyymmdd(st.get("cutoff_date"))
+    if pub is None or cut is None:
+        c.add(None, "the document predates the date bound",
+              f"publication date {st.get('publication_date')!r} or date bound {st.get('cutoff_date')!r} is not a date this can compare")
+    else:
+        c.add(pub < cut, "the document predates the date bound",
+              f"published {pub}, before the matter's bound {cut}" if pub < cut
+              else f"published {pub}, NOT before the matter's bound {cut} — this read went outside the matter's date bound")
 
 
 # ───────────────────────────── bundle-level ─────────────────────────────
@@ -1002,7 +1081,9 @@ def _parse_min_tcb(items: List[str]) -> Dict[str, Dict[str, int]]:
 
 def main(argv: Optional[List[str]] = None) -> int:
     """Exit codes: 0 every check passed under production roots; 1 one or more checks failed (or nothing to
-    verify); 2 usage / refused; 3 every check passed but under TEST roots (never a verification of Azure)."""
+    verify); 2 usage / refused; 3 every check passed but under TEST roots (never a verification of Azure);
+    4 every check passed, but the reference was signed and no --reference-key was given, so the identity
+    rests on a file nobody authenticated."""
     import argparse
     class _Parser(argparse.ArgumentParser):
         """argparse cannot tell a VALUE that starts with "-" from a flag, and several of the values here can:
@@ -1081,6 +1162,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     cutoff = manifest.get("matter_cutoff") if isinstance(manifest.get("matter_cutoff"), int) else None
     min_tcb = _parse_min_tcb(a.min_tcb)
+    # A firmware floor may also travel IN the reference, so a firm does not have to know SPL numbers to hold
+    # one. A floor given on the command line wins, and a reference that pins none leaves the check a SKIP.
+    if not min_tcb and isinstance(reference, dict) and isinstance(reference.get("min_tcb"), dict):
+        from_ref = {str(product): {str(k): int(v) for k, v in levels.items() if isinstance(v, int)}
+                    for product, levels in reference["min_tcb"].items() if isinstance(levels, dict)}
+        min_tcb = {p: lv for p, lv in from_ref.items() if lv}
     listed = set((manifest.get("files") or {}).keys())
     if not searches:
         print("  FAIL sealed searches: this record contains NO sealed search — there is nothing to verify")
@@ -1145,11 +1232,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif test_roots:
         print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
     else:
-        print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
+        if isinstance(reference, dict) and reference.get("sig") and not a.reference_key:
+            print("RESULT: every check PASSED, but this reference was NOT authenticated (exit 4)")
+            print("        The identity above was checked against a signed file nobody verified. Obtain InferRoute's "
+                  "publication key from your engagement letter and pass --reference-key to close this.")
+        else:
+            print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
     print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
           "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
     print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; certificate revocation.")
-    return 1 if fails else (3 if test_roots else 0)
+    # A reference that is signed but was checked against no key: every other line can pass, and the identity
+    # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
+    # say so — a reader who only reads the number would otherwise be told the strongest verdict.
+    unauthenticated = bool(isinstance(reference, dict) and reference.get("sig") and not a.reference_key)
+    if fails:
+        return 1
+    if test_roots:
+        return 3
+    return 4 if unauthenticated else 0
 
 
 if __name__ == "__main__":

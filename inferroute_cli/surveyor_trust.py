@@ -87,6 +87,21 @@ def _plain_search_refusal(refusal: str) -> str:
     return f"Reason: {refusal or 'the checks did not pass'}."
 
 
+IDENTITY_STEP = "enclave identity"
+
+
+def search_is_inferroutes(search: Optional[dict]) -> bool:
+    """Two facts, both required: the signed reference is authentic (signature and kind, checked by the
+    verifier at startup) AND this enclave matches it (the identity step, run live). The first alone would
+    assert an identity nobody compared against the machine."""
+    if not search or not search.get("ok"):
+        return False
+    authentic = bool((search.get("reference") or {}).get("ok"))
+    matched = any(isinstance(st, dict) and str(st.get("step", "")).startswith(IDENTITY_STEP) and st.get("ok")
+                  for st in search.get("steps") or [])
+    return authentic and matched
+
+
 def search_item(search: Optional[dict], date_bound: str = "") -> Dict[str, Any]:
     if search is None:
         return {"key": "search", "state": OFF, "title": "Patent search",
@@ -100,7 +115,7 @@ def search_item(search: Optional[dict], date_bound: str = "") -> Dict[str, Any]:
                 "summary": "Could not be verified, so no search will be sent.",
                 "points": [_plain_search_refusal(str(search.get("refusal") or ""))], "more": [], "technical": technical}
     enclave = search.get("enclave") or {}
-    ref = search.get("reference") or {}
+    ref = {"ok": search_is_inferroutes(search)}
     identity = ("running exactly the software InferRoute published (signed reference checked)" if ref.get("ok")
                 else f"running exactly the software this computer expects (fingerprint {str(enclave.get('host_data', ''))[:8]})")
     points = [f"Genuine sealed hardware, {identity}."]
@@ -190,7 +205,7 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
                                         "inside two sealed machines, both checked just now.")
     return {"schema": "inferroute.surveyor-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items,
-            "limits": limits(states["search"], bool(((search or {}).get("reference") or {}).get("ok"))), "matter": matter, "date_bound": date_bound, "checked_at": _now()}
+            "limits": limits(states["search"], search_is_inferroutes(search)), "matter": matter, "date_bound": date_bound, "checked_at": _now()}
 
 
 # ───────────────────────── terminal ─────────────────────────

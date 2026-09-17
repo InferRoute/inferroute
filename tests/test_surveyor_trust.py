@@ -22,9 +22,15 @@ def _receipt(ok=True, limitations=(), verdict="confidential"):
                            verified_at="2026-09-17T14:58:28Z", started_at="2026-09-17T14:58:28Z", refusal="")
 
 
-def _search(ok=True, reference=None, test_roots=False, refusal=None):
-    out = {"ok": ok, "test_roots": test_roots, "refusal": refusal,
-           "steps": [{"ok": ok, "step": "hardware report", "detail": "version 3"}],
+def _search(ok=True, reference=None, test_roots=False, refusal=None, identity=None):
+    """`reference={"ok": True}` is the verifier's startup check of the signed file; `identity` is the live
+    step comparing THIS enclave with it. By default a verified reference comes with a passing identity step."""
+    steps = [{"ok": ok, "step": "hardware report", "detail": "version 3"}]
+    if identity is None:
+        identity = bool(reference and reference.get("ok"))
+    if reference is not None:
+        steps.append({"ok": identity, "step": "enclave identity (InferRoute's policy, index, encoders)", "detail": "d"})
+    out = {"ok": ok, "test_roots": test_roots, "refusal": refusal, "steps": steps,
            "enclave": {"host_data": "380e3707bca09f61", "index_snapshot": "idx@1", "enclave_key": "f1416f1a"}}
     if reference is not None:
         out["reference"] = reference
@@ -56,6 +62,14 @@ def test_search_is_never_called_inferroutes_without_the_signed_reference():
     signed = T.build(_receipt(), _search(reference={"ok": True}), ADDRESS, date_bound="2020-01-01")
     assert "run by InferRoute" in _item(signed, "search")["summary"]
     assert "InferRoute's own" in " ".join(signed["limits"])
+
+
+def test_an_authentic_reference_alone_does_not_earn_the_identity_line():
+    # The reference file verified, but nothing compared THIS enclave with it: no "run by InferRoute".
+    s = T.build(_receipt(), _search(reference={"ok": True}, identity=False), ADDRESS)
+    assert "run by InferRoute" not in _item(s, "search")["summary"]
+    assert "InferRoute's own" not in " ".join(s["limits"])
+    assert T.search_is_inferroutes(_search(reference={"ok": True}, identity=True))
 
 
 def test_a_failed_reference_does_not_earn_the_identity_line():

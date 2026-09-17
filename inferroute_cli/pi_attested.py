@@ -235,7 +235,9 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
 # A sibling of Pi, started by this launcher, so it stays outside anything applied to Pi's process tree.
 # Configured by INFERROUTE_HOME/confidential/search.json:
 #   {"python": ".../bin/python", "cwd": "<dir holding the verifier package>", "enclave": "<address>",
-#    "expect_host_data": "<pinned container policy hash>", "expect_index": optional, "pins": optional,
+#    "reference": "<signed reference JSON>", "reference_key": "<publication key hex>" (production identity),
+#    "expect_host_data": "<pinned container policy hash>" (fallback, or cross-check), "expect_index": optional,
+#    "pins": optional, "policy_file": optional base64 CCE policy archived into each evidence bundle,
 #    "cutoff_date": optional YYYYMMDD (the matter's date bound; host-held), "state_file": optional path
 #    to the matter state file OUTSIDE the sandbox (approvals/marks/cutoff the agent must not forge)}
 
@@ -257,11 +259,7 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     except (OSError, ValueError):
         return None
     argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
-            "--expect-host-data", cfg["expect_host_data"], "--port", "0"]
-    if cfg.get("expect_index"):
-        argv += ["--expect-index", cfg["expect_index"]]
-    if cfg.get("pins"):
-        argv += ["--pins", cfg["pins"]]
+            *_search_pin_args(cfg), "--port", "0"]
     # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir surveyor open` sets
     # them in the env from the host-held matter record, so the shared search.json is never mutated per
     # launch (no race, no writable date bound). Fall back to search.json only when no matter is open.
@@ -323,6 +321,23 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     return f"http://127.0.0.1:{port}"
 
 
+def _search_pin_args(cfg: dict) -> list[str]:
+    """How the search verifier knows which enclave is ours. With a signed reference and its publication key
+    (the production path) the verifier checks the signature at startup and derives the pins from it; a bare
+    expect_host_data is the fallback for setups without one. Both are passed when both are configured — the
+    verifier refuses if they disagree."""
+    argv: list[str] = []
+    if cfg.get("reference") and cfg.get("reference_key"):
+        argv += ["--reference", str(cfg["reference"]), f"--reference-key={cfg['reference_key']}"]
+    if cfg.get("expect_host_data"):
+        argv += ["--expect-host-data", cfg["expect_host_data"]]
+    if cfg.get("expect_index"):
+        argv += ["--expect-index", cfg["expect_index"]]
+    if cfg.get("pins"):
+        argv += ["--pins", cfg["pins"]]
+    return argv
+
+
 def verify_search_once(timeout: float = 120.0) -> dict | None:
     """One live check of the configured search enclave, outside any session (`ir surveyor proof`). Same
     verifier, same pins as a session's proxy. None when search is not configured on this computer."""
@@ -332,11 +347,7 @@ def verify_search_once(timeout: float = 120.0) -> dict | None:
     except (OSError, ValueError):
         return None
     argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
-            "--expect-host-data", cfg["expect_host_data"]]
-    if cfg.get("expect_index"):
-        argv += ["--expect-index", cfg["expect_index"]]
-    if cfg.get("pins"):
-        argv += ["--pins", cfg["pins"]]
+            *_search_pin_args(cfg)]
     try:
         out = subprocess.run(argv, cwd=cfg.get("cwd"), capture_output=True, text=True, timeout=timeout).stdout
         res = json.loads(out)

@@ -204,6 +204,7 @@ interface SearchProof {
 	ok: boolean;
 	refusal: string;
 	testRoots: boolean;
+	ours: boolean;
 	phase: "verify" | "search" | "declined";
 	steps: SearchStep[];
 	measurement: string;
@@ -219,6 +220,7 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"]): SearchP
 		ok: out.ok && phase !== "declined",
 		refusal: phase === "declined" ? "the user declined to send a sealed query" : String(out.refusal ?? ""),
 		testRoots: out.test_roots === true,
+		ours: isInferRoutes(out),
 		phase,
 		steps: out.steps ?? [],
 		measurement: String(out.enclave?.measurement ?? ""),
@@ -291,9 +293,14 @@ function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	const text = p.ok
 		? p.testRoots
 			? `◐ Search: TEST machine, not a real verification`
-			: `🔒 Search: sealed machine, checked at ${hhmm(p.at)}${p.phase === "search" ? ` · ${p.hits} results` : ""}`
+			: `🔒 Search: ${p.ours ? "InferRoute's sealed machine" : "sealed machine"}, checked at ${hhmm(p.at)}${p.phase === "search" ? ` · ${p.hits} results` : ""}`
 		: `⛔ Search: ${plainRefusal(p.refusal)}`;
 	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
+}
+
+// Same rule as surveyor_trust.search_is_inferroutes: the reference is authentic AND this enclave matched it.
+function isInferRoutes(v: SearchVerdict): boolean {
+	return v.ok && v.reference?.ok === true && (v.steps ?? []).some((s) => s.ok && s.step.startsWith("enclave identity"));
 }
 
 function fmtDate(yyyymmdd: number | string): string {
@@ -322,7 +329,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 		line(theme.fg("success", theme.bold(p.phase === "search"
 			? `🔒 Sealed search: ${p.hits} results, opened on this computer only`
 			: "🔒 The search machine is a sealed machine this computer just checked")));
-		line("Genuine sealed hardware running exactly the software this computer expects. The search text was encrypted here; only that machine could open it.");
+		line(`Genuine sealed hardware running ${p.ours ? "exactly the software InferRoute published (signed reference checked)" : "exactly the software this computer expects"}. The search text was encrypted here; only that machine could open it.`);
 	} else {
 		line(theme.fg("error", theme.bold(`⛔ Search: ${plainRefusal(p.refusal)}`)));
 	}
@@ -632,7 +639,7 @@ export default function (pi: ExtensionAPI) {
 			const measurement = String(e.measurement ?? "");
 			if (!(matter.approved ?? []).includes(measurement)) {
 				const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
-				const identity = verified.reference?.ok
+				const identity = isInferRoutes(verified)
 					? "running exactly the software InferRoute published (signed reference checked)"
 					: "running exactly the software this computer expects";
 				const preview = params.text.length > 400 ? `${params.text.slice(0, 400)}…` : params.text;

@@ -386,6 +386,15 @@
     if (ev.details && ev.details.searchNo) title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
     const d = ev.details || {};
     const s = stick();
+    // The assistant's own parameter slip (no text, or `like` on a document it never got back): nothing was
+    // verified or sent, and it retries. Say so quietly instead of showing a red refusal the professional
+    // might read as a problem with the search machine. Any other failure keeps the red card.
+    const slip = /needs a self-contained description|was not returned by a search in this session/.test(String(ev.text || ""));
+    if (!ev.ok && slip) {
+      card.replaceWith(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant's search request was incomplete, so nothing was sent; it corrected it.")));
+      cards.delete(ev.call);
+      return;
+    }
     if (!ev.ok || !d.ok) {
       sub.textContent = "not sent";
       card.append(el("div", "card-note bad", plainRefusal(ev.text || d.refusal)));

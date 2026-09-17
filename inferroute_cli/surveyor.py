@@ -379,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
     rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
     rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
+    hm = sub.add_parser("home", help="the home page in your browser: every matter, past sessions, new matters and sessions, help")
+    hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
     pf.add_argument("matter")
     a = p.parse_args(argv)
@@ -400,6 +402,9 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_list()
         if a.cmd == "proof":
             return cmd_proof(a.matter)
+        if a.cmd == "home":
+            from . import surveyor_home
+            return surveyor_home.run(open_browser=not a.no_browser)
     except SurveyorError as e:
         sys.stderr.write(f"\n  {e}\n\n")
         return 2

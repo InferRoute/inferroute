@@ -21,92 +21,7 @@
     try { key = sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { key = ""; }
   }
 
-  // ── DOM helpers: text only ──
-  function el(tag, cls, ...children) {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    for (const c of children) {
-      if (c === null || c === undefined || c === false) continue;
-      n.append(typeof c === "string" || typeof c === "number" ? document.createTextNode(String(c)) : c);
-    }
-    return n;
-  }
-  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
-
-  // A small formatter for the assistant's markdown: headings, lists, tables, code, **bold**, *italic*,
-  // `code`. Links are shown as their text and address in plain type; images are not shown.
-  function inline(text) {
-    const frag = document.createDocumentFragment();
-    const re = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\*[^*\s][^*\n]*\*|\[[^\]\n]+\]\([^)\n]+\))/g;
-    let last = 0, m;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) frag.append(document.createTextNode(text.slice(last, m.index)));
-      const t = m[0];
-      if (t.startsWith("**")) frag.append(el("strong", "", t.slice(2, -2)));
-      else if (t.startsWith("`")) frag.append(el("code", "", t.slice(1, -1)));
-      else if (t.startsWith("[")) {
-        const mm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(t);
-        frag.append(document.createTextNode(mm ? `${mm[1]} (${mm[2]})` : t));
-      } else frag.append(el("em", "", t.slice(1, -1)));
-      last = m.index + t.length;
-    }
-    if (last < text.length) frag.append(document.createTextNode(text.slice(last)));
-    return frag;
-  }
-
-  function markdown(src) {
-    const out = document.createDocumentFragment();
-    const lines = String(src || "").replace(/\r/g, "").split("\n");
-    let i = 0;
-    const isTable = (l) => /^\s*\|.*\|\s*$/.test(l);
-    while (i < lines.length) {
-      const line = lines[i];
-      if (/^\s*```/.test(line)) {
-        const buf = [];
-        i++;
-        while (i < lines.length && !/^\s*```/.test(lines[i])) buf.push(lines[i++]);
-        i++;
-        out.append(el("pre", "", el("code", "", buf.join("\n"))));
-        continue;
-      }
-      if (!line.trim()) { i++; continue; }
-      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.append(el("hr", "")); i++; continue; }
-      const h = /^\s*#{1,6}\s+(.*)$/.exec(line);
-      if (h) { out.append(el("h4", "", inline(h[1]))); i++; continue; }
-      if (/^\s*!\[/.test(line)) { i++; continue; }
-      if (isTable(line)) {
-        const table = el("table", "");
-        let header = true;
-        while (i < lines.length && isTable(lines[i])) {
-          const row = lines[i++];
-          if (/^[\s|:-]+$/.test(row) && row.includes("-")) { header = false; continue; }   // | --- | :--: |
-          const cells = row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
-          const tr = el("tr", "");
-          for (const c of cells) tr.append(el(header ? "th" : "td", "", inline(c.trim())));
-          table.append(tr);
-          header = false;
-        }
-        out.append(table);
-        continue;
-      }
-      const ul = /^\s*[-*•]\s+(.*)$/, ol = /^\s*\d+[.)]\s+(.*)$/;
-      if (ul.test(line) || ol.test(line)) {
-        const ordered = ol.test(line) && !ul.test(line);
-        const list = el(ordered ? "ol" : "ul", "");
-        // Keep the model's own numbering: items separated by a paragraph are still 1, 2, 3, not 1, 1, 1.
-        if (ordered) list.start = Number(/^\s*(\d+)/.exec(line)[1]) || 1;
-        const re = ordered ? ol : ul;
-        while (i < lines.length && re.test(lines[i])) list.append(el("li", "", inline(re.exec(lines[i++])[1])));
-        out.append(list);
-        continue;
-      }
-      const para = [];
-      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|```|[-*•]\s|\d+[.)]\s|\||-{3,}\s*$)/.test(lines[i])) para.push(lines[i++].trim());
-      if (!para.length) { para.push(lines[i++].trim()); }
-      out.append(el("p", "", inline(para.join(" "))));
-    }
-    return out;
-  }
+  const { el, clear, markdown } = window.SurveyorUI;
 
   // ── talking to the bridge ──
   async function api(path, body) {
@@ -273,14 +188,44 @@
   };
 
   // Once something in a card is marked relevant, offer the obvious next move in one click.
-  const DEEPER = "Read my relevance marks, then research around the documents I marked relevant: search their distinctive features one at a time and look for documents like them. Skip what I marked known or not relevant.";
+  // Every button sends exactly the words it shows.
+  const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
+  const LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
   function offerDeeper(card) {
     if (!card || card.querySelector(".deeper") || ended) return;
-    const b = el("button", "deeper", "Look deeper at the ones I marked relevant");
+    const b = el("button", "deeper", DEEPER);
     b.type = "button";
-    b.title = DEEPER;
     b.addEventListener("click", () => { b.remove(); send(DEEPER); });
     card.append(el("div", "card-actions", b));
+  }
+
+  // "From your marks": next steps built here, from the marks alone, so they change the moment a mark does.
+  // No call to the assistant and nothing hidden in the conversation; the assistant's own suggestions sit
+  // in the conversation, these sit above the message box.
+  const markOrder = [];                     // publication numbers, most recently marked first
+  function noteMarked(keyNo) {
+    const i = markOrder.indexOf(keyNo);
+    if (i >= 0) markOrder.splice(i, 1);
+    markOrder.unshift(keyNo);
+  }
+  function renderMarkSteps() {
+    const bar = $("mark-steps");
+    const list = $("mark-steps-list");
+    clear(list);
+    const relevant = markOrder.filter((k) => marks.get(k) === "relevant");
+    for (const k of Array.from(marks.keys())) if (marks.get(k) === "relevant" && !relevant.includes(k)) relevant.push(k);
+    const excluded = Array.from(marks.values()).some((v) => v === "known" || v === "not-relevant");
+    const steps = [];
+    if (relevant.length) steps.push(DEEPER);
+    for (const k of relevant.slice(0, 2)) steps.push(`Find documents like ${k}`);
+    if (excluded) steps.push(LEAVE_OUT);
+    for (const step of steps) {
+      const b = el("button", "", step);
+      b.type = "button";
+      b.addEventListener("click", () => send(step));
+      list.append(b);
+    }
+    bar.hidden = !steps.length || ended;
   }
 
   // Next steps offered by the assistant: each button shows exactly the message it sends. Shown when the
@@ -317,7 +262,9 @@
         try {
           await api("/api/mark", { key: keyNo, mark: value });
           marks.set(keyNo, value);
+          noteMarked(keyNo);
           refreshMarks(keyNo);
+          renderMarkSteps();
           toast(`Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
           if (value === "relevant") offerDeeper(card);
         } catch (e) { toast(`Couldn't record the mark: ${e.message}`, "error"); }
@@ -525,12 +472,14 @@
     box.hidden = false;
     $("composer").hidden = true;
     $("end").hidden = true;
+    $("mark-steps").hidden = true;
   }
 
   function handle(ev) {
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
       case "busy": busy = ev.value; updateActivity(); if (!busy) renderNext(); break;
+      case "conversation_kept": $("kept-note").hidden = false; break;
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
       case "assistant_end": assistantEnd(ev); break;
@@ -635,6 +584,7 @@
     try {
       const m = await api("/api/marks");
       for (const [k, v] of Object.entries(m.marks || {})) marks.set(k, v);
+      renderMarkSteps();
     } catch (_) { /* no search in this session */ }
     if (s.ended) showEnded(s.ended);
     stream();

@@ -6,6 +6,7 @@
 <meta name="referrer" content="no-referrer">
 <title>Surveyor</title>
 <link rel="stylesheet" href="/app.css">
+<script src="/common.js" defer></script>
 <script src="/app.js" defer></script>
 </head>
 <body>
@@ -35,10 +36,16 @@
       <div id="suggestions" class="suggestions"></div>
       <p class="hint">Everything you type is encrypted on this computer before it goes to the AI's sealed machine.
         The assistant asks you before its first search.</p>
+      <p class="hint" id="kept-note" hidden>This conversation is kept with the matter on this computer, readable only by
+        your account, so you can come back to it from the Surveyor home page.</p>
     </div>
     <div id="log" class="log" aria-live="polite"></div>
     <div id="activity" class="activity" hidden><span class="dot"></span><span id="activity-text">Working…</span></div>
     <div id="ended" class="ended" hidden></div>
+    <div id="mark-steps" class="mark-steps" hidden>
+      <div class="next-title">From your marks</div>
+      <div id="mark-steps-list" class="mark-steps-list"></div>
+    </div>
     <form id="composer" class="composer" autocomplete="off">
       <textarea id="input" rows="2" placeholder="Ask the assistant about this matter…" aria-label="Message"></textarea>
       <div class="composer-actions">

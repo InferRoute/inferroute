@@ -105,7 +105,7 @@ def test_only_prompt_abort_and_dialog_answers_ever_reach_the_agent(client):
 def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
-    assert paths == {"/", "/app.js", "/app.css", "/api/session", "/api/events", "/api/prompt", "/api/abort",
+    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/events", "/api/prompt", "/api/abort",
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/close", "/api/end"}
 
 
@@ -188,8 +188,9 @@ def test_pump_splits_on_newline_only_and_ends_with_a_summary(tmp_path):
 
 # ── the page's code ──
 
-def test_the_page_code_never_parses_markup_or_makes_links_or_resources():
-    js = (STATIC / "app.js").read_text()
+@pytest.mark.parametrize("script", ["app.js", "common.js"])
+def test_the_page_code_never_parses_markup_or_makes_links_or_resources(script):
+    js = (STATIC / script).read_text()
     code = re.sub(r"//[^\n]*", "", js)                  # the header comment names these constructs on purpose
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
                       "DOMParser", "createContextualFragment", ".href", ".src", "srcdoc", "window.open",
@@ -203,7 +204,9 @@ def test_the_page_code_never_parses_markup_or_makes_links_or_resources():
 def test_the_page_loads_nothing_from_outside():
     html = (STATIC / "index.html").read_text()
     assert "http://" not in html and "https://" not in html
-    assert re.search(r"<script(?![^>]*\bsrc=\"/app\.js\")", html) is None     # no inline script
+    scripts = re.findall(r"<script\b([^>]*)>(.*?)</script>", html, re.S)
+    assert scripts and all(re.fullmatch(r'\s*src="/[a-z]+\.js"\s*(defer)?\s*', attrs) and not body.strip()
+                           for attrs, body in scripts)                             # local files only, no inline code
     assert re.search(r"\son[a-z]+=", html) is None                            # no inline handlers
     css = (STATIC / "app.css").read_text()
     assert "url(" not in css and "@import" not in css

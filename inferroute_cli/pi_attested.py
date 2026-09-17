@@ -250,6 +250,9 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
 #    to the matter state file OUTSIDE the sandbox (approvals/marks/cutoff the agent must not forge)}
 
 SEARCH_TOOL = "prior_art_search"
+# The id of the session records the search verifier writes for the current launch (set by start_search_proxy);
+# the browser page keeps its conversation beside them under the same id.
+LAST_SESSION_ID: str | None = None
 # Offered with search: the professional's marks (read-only) and one-click next steps. Every tool must be in the
 # launch allowlist, or the extension refuses the call.
 MARKS_TOOL = "matter_marks"
@@ -309,6 +312,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     # that matter's records dir; otherwise in the flat attested-records dir.
     import time as _time
     sess_id = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime()) + "-" + os.urandom(4).hex()
+    global LAST_SESSION_ID
+    LAST_SESSION_ID = sess_id
     rec_dir = os.environ.get("IR_MATTER_RECORD_DIR")
     rec_dir = Path(rec_dir) if rec_dir else \
         Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "attested-records"

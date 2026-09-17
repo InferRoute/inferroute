@@ -27,6 +27,7 @@ import json
 import os
 import re
 import secrets
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -51,6 +52,31 @@ SECURITY_HEADERS = {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
 }
+
+
+def install_guard(app: Any, port: Callable[[], int], token: Callable[[], str]) -> None:
+    """The rules every local Surveyor page lives by, installed once per app so the session page and the home
+    page cannot drift: answer only our own Host (a name rebound to 127.0.0.1 still sends its own Host), refuse
+    another origin, require the per-launch key on every /api call, and send the strict page headers."""
+    from fastapi.responses import JSONResponse, Response
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        p = port()
+        host = request.headers.get("host", "")
+        if host not in (f"127.0.0.1:{p}", f"localhost:{p}"):
+            return Response("wrong host", status_code=421)
+        origin = request.headers.get("origin")
+        if origin is not None and origin not in (f"http://127.0.0.1:{p}", f"http://localhost:{p}"):
+            return Response("cross-origin request refused", status_code=403)
+        if request.url.path.startswith("/api/"):
+            given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not given or not hmac.compare_digest(given, token()):
+                return JSONResponse({"error": "this link has no session key; open the link printed in your terminal"}, status_code=401)
+        resp = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            resp.headers.setdefault(k, v)
+        return resp
 
 
 def strip_ansi(text: Any) -> str:
@@ -144,7 +170,8 @@ def disclosure_info(workspace: Path) -> Dict[str, Any]:
 class Bridge:
     def __init__(self, *, matter: str, date_bound: str, workspace: Path, summary: Dict[str, Any],
                  search_endpoint: Optional[str], receipt: Callable[[], Any],
-                 rebuild_summary: Callable[[], Dict[str, Any]], export: Callable[[], Path]):
+                 rebuild_summary: Callable[[], Dict[str, Any]], export: Callable[[], Path],
+                 conversation_file: Optional[Path] = None):
         self.matter, self.date_bound, self.workspace = matter, date_bound, workspace
         self.summary = summary
         self.search_endpoint = search_endpoint
@@ -159,6 +186,9 @@ class Bridge:
         self.proc: Any = None
         self._seq = 0
         self.closed = asyncio.Event()
+        # The conversation, kept with the matter's records (under confidential/, outside the agent's reach,
+        # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
+        self.conversation_file = conversation_file
 
     # ── events ──
     def publish(self, event: Dict[str, Any]) -> None:
@@ -169,10 +199,41 @@ class Bridge:
         if event["kind"] == "dialog":
             self.dialogs[str(event["id"])] = event
         self.history.append(event)
+        self._keep(event)
         if len(self.history) > HISTORY_CAP:
             del self.history[: len(self.history) - HISTORY_CAP]
         for q in list(self.subscribers):
             q.put_nowait(event)
+
+    def _keep(self, event: Dict[str, Any]) -> None:
+        """What the home page needs to show a past conversation: the professional's messages, the assistant's
+        answers, each search in one line, reading the marks, the approval. Not streaming deltas, statuses or
+        documents (those are in the search records already)."""
+        if self.conversation_file is None:
+            return
+        kind, at = event.get("kind"), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        row: Optional[Dict[str, Any]] = None
+        if kind == "user":
+            row = {"kind": "user", "text": event.get("text", "")}
+        elif kind == "assistant_end" and (event.get("text") or "").strip():
+            row = {"kind": "assistant", "text": event.get("text", "")}
+        elif kind == "tool_end" and event.get("tool") == "prior_art_search":
+            d = event.get("details") or {}
+            row = {"kind": "search", "ok": bool(event.get("ok") and d.get("ok")), "search_no": d.get("searchNo"),
+                   "feature": d.get("feature"), "like": d.get("like"), "k": d.get("k"), "documents": len(d.get("docs") or []),
+                   "refusal": "" if event.get("ok") else str(event.get("text") or "")[:300]}
+        elif kind == "tool_end" and event.get("tool") == "matter_marks":
+            row = {"kind": "marks_read"}
+        elif kind == "dialog_closed":
+            row = {"kind": "approval", "answer": event.get("answer")}
+        if row is None:
+            return
+        try:
+            fd = os.open(self.conversation_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"at": at, **row}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     async def send(self, obj: Dict[str, Any]) -> None:
         if self.proc is None or self.proc.stdin is None or self.proc.stdin.is_closing():
@@ -221,22 +282,7 @@ class Bridge:
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         bridge = self
 
-        @app.middleware("http")
-        async def guard(request: Request, call_next):
-            host = request.headers.get("host", "")
-            if host not in (f"127.0.0.1:{bridge.port}", f"localhost:{bridge.port}"):
-                return Response("wrong host", status_code=421)
-            origin = request.headers.get("origin")
-            if origin is not None and origin not in (f"http://127.0.0.1:{bridge.port}", f"http://localhost:{bridge.port}"):
-                return Response("cross-origin request refused", status_code=403)
-            if request.url.path.startswith("/api/"):
-                given = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-                if not given or not hmac.compare_digest(given, bridge.token):
-                    return JSONResponse({"error": "this link has no session key; open the link printed in your terminal"}, status_code=401)
-            resp = await call_next(request)
-            for k, v in SECURITY_HEADERS.items():
-                resp.headers[k] = v
-            return resp
+        install_guard(app, lambda: bridge.port, lambda: bridge.token)
 
         def static(name: str, media: str):
             async def handler():
@@ -244,6 +290,7 @@ class Bridge:
             return handler
 
         app.get("/")(static("index.html", "text/html; charset=utf-8"))
+        app.get("/common.js")(static("common.js", "text/javascript; charset=utf-8"))
         app.get("/app.js")(static("app.js", "text/javascript; charset=utf-8"))
         app.get("/app.css")(static("app.css", "text/css; charset=utf-8"))
 
@@ -436,10 +483,15 @@ async def start(*, surveyor: Dict[str, Any], session: Any, search_endpoint: Opti
         return surveyor_trust.build(session.receipt, found, pi_attested.confinement_label(), matter=matter,
                                     date_bound=surveyor.get("date_bound", ""), surface="browser")
 
+    from .surveyor import records_dir
+    kept = (records_dir(client, name) / f"{pi_attested.LAST_SESSION_ID}.conversation.jsonl"
+            if search_endpoint and pi_attested.LAST_SESSION_ID else None)
     bridge = Bridge(matter=matter, date_bound=surveyor.get("date_bound", ""), workspace=workspace,
                     summary=surveyor.get("summary") or {}, search_endpoint=search_endpoint,
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
-                    export=lambda: surveyor_export.write_bundle(client, name, None))
+                    export=lambda: surveyor_export.write_bundle(client, name, None), conversation_file=kept)
+    if kept is not None:
+        bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         bridge.port = sock.getsockname()[1]

@@ -457,6 +457,8 @@ class SessionRecord {
 		return {
 			schema: "inferroute.attested-session/1",
 			session_id: this.sessionId,
+			// Which screen the professional used ("terminal" or "browser"), for the home page's history.
+			surface: process.env.IR_SURVEYOR_SURFACE ?? "",
 			started_at: this.startedAt,
 			written_at: new Date().toISOString(),
 			contract: {

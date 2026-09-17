@@ -1,0 +1,432 @@
+// Surveyor home page. Served by `ir surveyor home` on 127.0.0.1; talks only to it.
+//
+// Same rule as the session page: TEXT NODES only. The one place this page leaves itself is openLocal(), and
+// it only opens addresses this computer produced: a session page on 127.0.0.1 with its key, or a record link
+// from this home page. tests/test_surveyor_home.py pins both.
+"use strict";
+
+(() => {
+  const { el, clear, markdown } = window.SurveyorUI;
+  const $ = (id) => document.getElementById(id);
+  const KEY_STORE = "surveyor-home-key";
+
+  // ── the key: from the URL fragment (never sent to a server), then out of the address bar ──
+  let key = "";
+  const frag = new URLSearchParams(location.hash.slice(1));
+  if (frag.get("k")) {
+    key = frag.get("k");
+    try { sessionStorage.setItem(KEY_STORE, key); } catch (_) { /* keep it in memory */ }
+    history.replaceState(null, "", `${location.pathname}#/`);
+  } else {
+    try { key = sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { key = ""; }
+  }
+
+  async function api(path, body) {
+    const res = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: Object.assign({ authorization: `Bearer ${key}` }, body === undefined ? {} : { "content-type": "application/json" }),
+      body: body === undefined ? undefined : JSON.stringify(body),
+      cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer",
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) { data = {}; }
+    if (res.status === 401) { showNoKey(); throw new Error("no key"); }
+    if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+    return data;
+  }
+
+  // The only way this page opens anything: addresses this computer made for this page.
+  const SESSION_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}$/;
+  const RECORD_LINK = /^\/record\?id=[^#]*&name=[A-Za-z0-9._%-]+&v=[0-9a-f]{32}$/;
+  function openLocal(url) {
+    if (!SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  function toast(message, level) {
+    const t = el("div", `toast ${level || "info"}`, String(message || ""));
+    $("toasts").append(t);
+    setTimeout(() => t.remove(), level === "error" ? 12000 : 6000);
+  }
+
+  const localTime = (iso) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? String(iso || "") : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false });
+  };
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const enc = (s) => encodeURIComponent(s);
+  function button(label, cls, onClick) {
+    const b = el("button", cls || "", label);
+    b.type = "button";
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  // ── dialogs ──
+  function dialog(title, bodyNodes, actions) {
+    $("dialog-title").textContent = title;
+    const body = $("dialog-body");
+    clear(body);
+    for (const n of bodyNodes) body.append(n);
+    const act = $("dialog-actions");
+    clear(act);
+    for (const a of actions) act.append(a);
+    $("dialog").hidden = false;
+  }
+  const closeDialog = () => { $("dialog").hidden = true; };
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDialog(); });
+
+  function field(label, input, hint) {
+    return el("label", "field", el("span", "field-label", label), input, hint ? el("span", "field-hint", hint) : null);
+  }
+  function input(type, placeholder) {
+    const i = document.createElement(type === "textarea" ? "textarea" : "input");
+    if (type !== "textarea") i.type = type;
+    if (placeholder) i.placeholder = placeholder;
+    return i;
+  }
+
+  function newMatterDialog() {
+    const client = input("text", "e.g. Acme");
+    const matter = input("text", "e.g. cooling-system");
+    const date = input("date");
+    const text = input("textarea", "Describe the invention in plain technical terms. You can also add it later.");
+    text.rows = 9;
+    const err = el("p", "form-error");
+    const create = button("Create matter", "primary", async () => {
+      err.textContent = "";
+      create.disabled = true;
+      try {
+        const r = await api("/api/matters", { client: client.value, matter: matter.value, priority_date: date.value, disclosure: text.value });
+        closeDialog();
+        toast(`Matter ${r.id} created.`, "info");
+        location.hash = `#/matter/${enc(r.id)}`;
+      } catch (e) { err.textContent = e.message; } finally { create.disabled = false; }
+    });
+    dialog("New matter", [
+      el("p", "", "A matter is one invention you research: its folder, its date bound, its sessions and its records."),
+      field("Client", client, "Letters, digits, spaces, dots, dashes."),
+      field("Matter", matter),
+      field("Priority date", date, "Only documents published before this date are searched. Leave empty to use today until you know it."),
+      field("Disclosure", text, "Stays on this computer. Only its sealed searches leave it, encrypted."),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), create]);
+    setTimeout(() => client.focus(), 0);
+  }
+
+  async function editDisclosureDialog(matterId, onSaved) {
+    let current = "";
+    try { current = (await api(`/api/disclosure?id=${enc(matterId)}`)).text; } catch (e) { toast(e.message, "error"); return; }
+    const text = input("textarea");
+    text.rows = 16;
+    text.value = current;
+    const err = el("p", "form-error");
+    const save = button("Save", "primary", async () => {
+      try {
+        const r = await api("/api/disclosure", { id: matterId, text: text.value });
+        closeDialog();
+        toast(`Disclosure saved (${plural(r.words, "word", "words")}).`, "info");
+        onSaved();
+      } catch (e) { err.textContent = e.message; }
+    });
+    dialog("Disclosure", [
+      el("p", "", "The invention, as the assistant will read it. Saved in the matter's folder on this computer."),
+      text, err,
+    ], [button("Cancel", "ghost", closeDialog), save]);
+  }
+
+  // ── starting a session ──
+  const watching = new Map();       // launch id → timer
+  function launchBox(matterId, launch, onChange) {
+    const box = el("div", "launch");
+    const paint = (l) => {
+      clear(box);
+      if (!l) return;
+      if (l.state === "starting") {
+        box.className = "launch starting";
+        box.append(el("div", "", el("span", "dot"), el("b", "", " Starting a session… "),
+          `checking the AI machine and the search machine from this computer (${l.elapsed} s; usually under a minute).`));
+      } else if (l.state === "ready") {
+        box.className = "launch ready";
+        box.append(el("div", "", el("b", "", "Your session is ready. "), "It opens in its own tab, checked and private."),
+          button("Open the session", "primary", () => openLocal(l.url)));
+      } else if (l.state === "failed") {
+        box.className = "launch failed";
+        box.append(el("div", "", el("b", "", "The session didn't start. "), l.message));
+      } else {
+        box.className = "launch";
+        box.append(el("div", "", l.message || "The session has ended."));
+      }
+    };
+    paint(launch);
+    if (launch && launch.state === "starting" && !watching.has(launch.id)) {
+      const timer = setInterval(async () => {
+        try {
+          const l = await api(`/api/launch?id=${enc(launch.id)}`);
+          paint(l);
+          if (l.state !== "starting") { clearInterval(timer); watching.delete(launch.id); onChange(); }
+        } catch (_) { /* keep trying */ }
+      }, 1500);
+      watching.set(launch.id, timer);
+    }
+    return box;
+  }
+
+  async function startSession(matterId, onChange) {
+    try {
+      await api("/api/sessions", { id: matterId });
+      onChange();
+    } catch (e) { toast(e.message, "error"); }
+  }
+
+  // ── pages ──
+  const page = () => $("page");
+  function stopWatching() { for (const t of watching.values()) clearInterval(t); watching.clear(); }
+
+  async function renderMatters() {
+    const p = page();
+    let data;
+    try { data = await api("/api/overview"); } catch (e) { return; }
+    clear(p);
+    p.append(el("div", "page-head", el("h1", "", "Matters"),
+      el("p", "sub", "Each matter is one invention: its disclosure, its sessions with the assistant, and the records you keep.")));
+    for (const l of data.running || []) {
+      p.append(el("div", "running-row", el("span", "", `Session for ${l.matter}: `),
+        l.state === "ready" ? button("Open the session", "primary small", () => openLocal(l.url)) : el("span", "sub", "starting…")));
+    }
+    if (!data.matters.length) {
+      p.append(el("div", "empty-card",
+        el("h2", "", "No matters yet"),
+        el("p", "", "Create a matter, paste the invention's disclosure, then start a session. The assistant surveys published patents for related art, in sealed machines this computer checks first."),
+        el("div", "row", button("Create your first matter", "primary", newMatterDialog), button("How it works", "ghost", () => { location.hash = "#/help"; }))));
+      return;
+    }
+    const grid = el("div", "matters");
+    for (const m of data.matters) {
+      const card = el("div", "matter-card",
+        el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
+        el("div", "sub", `date bound ${m.date_bound || "—"}`),
+        el("div", "stats",
+          el("span", "", plural(m.sessions, "session", "sessions")),
+          el("span", "", plural(m.searches, "search", "searches")),
+          el("span", "", plural(m.marks, "mark", "marks")),
+          m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
+        el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
+        el("div", "row",
+          button("Start a session", "primary small", () => startSession(m.id, () => { location.hash = `#/matter/${enc(m.id)}`; })),
+          button("Open matter", "ghost small", () => { location.hash = `#/matter/${enc(m.id)}`; })));
+      grid.append(card);
+    }
+    p.append(grid);
+    if (data.recent.length) {
+      p.append(el("h2", "section", "Recent sessions"));
+      p.append(sessionTable(data.recent, true));
+    }
+  }
+
+  function sessionTable(sessions, withMatter) {
+    const t = el("div", "sessions");
+    for (const s of sessions) {
+      const matterId = s.matter;
+      const row = el("button", "session-row",
+        el("span", "when", localTime(s.started_at)),
+        withMatter ? el("span", "matter-of", matterId) : null,
+        el("span", "how", s.surface === "browser" ? "browser" : s.surface === "terminal" ? "terminal" : "—"),
+        el("span", "", plural(s.searches, "search", "searches")),
+        el("span", "", plural(s.documents, "document", "documents")),
+        el("span", s.ai_verified && s.boxed ? "ok-text" : "warn-text", s.ai_verified && s.boxed ? "✓ checked" : "◐ see details"));
+      row.type = "button";
+      row.addEventListener("click", () => { location.hash = `#/session/${enc(matterId)}/${enc(s.id)}`; });
+      t.append(row);
+    }
+    return t;
+  }
+
+  async function renderMatter(matterId) {
+    const p = page();
+    let m;
+    try { m = await api(`/api/matter?id=${enc(matterId)}`); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
+    clear(p);
+    const refresh = () => renderMatter(matterId);
+    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
+    const words = m.disclosure.disclosure_words;
+    p.append(el("div", "page-head",
+      el("h1", "", `${m.client} / ${m.matter}`),
+      el("p", "sub", `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
+    p.append(el("div", "row actions",
+      button("Start a session", "primary", () => startSession(m.id, refresh)),
+      button(words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
+      button("Export the record", "ghost", async (ev) => {
+        const b = ev.currentTarget;
+        b.disabled = true;
+        try {
+          const r = await api("/api/export", { id: m.id });
+          toast("Record exported.", "info");
+          await renderMatter(matterId);
+          openLocal(r.view);
+        } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
+      })));
+    if (!words) p.append(el("p", "warn-text", "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
+    if (m.running) p.append(launchBox(m.id, m.running, refresh));
+
+    p.append(el("h2", "section", "Sessions"));
+    if (!m.sessions.length) p.append(el("p", "sub", "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
+    else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false));
+
+    const markEntries = Object.entries(m.marks || {});
+    p.append(el("h2", "section", "Your marks"));
+    if (!markEntries.length) p.append(el("p", "sub", "No marks yet. Mark documents in a session as relevant, not relevant, or known."));
+    else {
+      const counts = { relevant: 0, "not-relevant": 0, known: 0 };
+      for (const [, v] of markEntries) counts[v] = (counts[v] || 0) + 1;
+      p.append(el("p", "", `${counts.relevant} relevant · ${counts["not-relevant"]} not relevant · ${counts.known} known`));
+      p.append(el("div", "mark-list", ...markEntries.map(([k, v]) => el("span", `mark-chip m-${v}`, `${k} · ${v.replace("-", " ")}`))));
+    }
+
+    p.append(el("h2", "section", "Records"));
+    if (!m.exports.length) p.append(el("p", "sub", "No exported records yet. Export one to keep, share or check the matter's research."));
+    else {
+      const list = el("div", "sessions");
+      for (const e of m.exports) {
+        list.append(el("div", "record-row", el("span", "when", `Exported ${localTime(e.made_at)}`),
+          el("span", "mono sub", e.folder), button("Open record", "ghost small", () => openLocal(e.view))));
+      }
+      p.append(list);
+    }
+    p.append(el("p", "sub folder-line", `Matter folder: ${m.disclosure.folder}`));
+  }
+
+  async function renderSession(matterId, sid) {
+    const p = page();
+    let s;
+    try { s = await api(`/api/session?id=${enc(matterId)}&sid=${enc(sid)}`); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
+    clear(p);
+    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; }), el("span", "sub", " / "),
+      button(matterId, "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
+    p.append(el("div", "page-head", el("h1", "", `Session of ${localTime(s.started_at)}`),
+      el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${plural(s.searches.length, "search", "searches")} · ${plural(s.documents || 0, "document", "documents")}`)));
+    p.append(el("div", "checks",
+      el("div", s.model.verified ? "ok-text" : "bad-text", s.model.verified ? `✓ The AI ran in a sealed machine this computer verified (${s.model.checks || "checks passed"})` : "✗ The AI machine was not verified in this session"),
+      el("div", s.boxed ? "ok-text" : "warn-text", s.boxed ? "✓ The assistant worked in a closed box: no internet, only the matter's folder" : "◐ The assistant was not fully boxed in this session"),
+      s.unanswered ? el("div", "warn-text", `◐ ${plural(s.unanswered, "search was", "searches were")} sent but never answered`) : null));
+
+    p.append(el("h2", "section", "Conversation"));
+    if (!s.conversation) {
+      p.append(el("p", "sub", s.surface === "browser"
+        ? "This session's conversation wasn't kept (it ran before conversations were kept)."
+        : "Conversations aren't kept for terminal sessions. The searches below are."));
+    } else {
+      const conv = el("div", "conversation");
+      for (const row of s.conversation) {
+        if (row.kind === "user") conv.append(el("div", "msg msg-user", row.text));
+        else if (row.kind === "assistant") { const n = el("div", "msg msg-assistant"); n.append(markdown(row.text)); conv.append(n); }
+        else if (row.kind === "search") {
+          const what = row.feature ? ` · ${row.feature}` : row.like ? ` · documents like ${row.like}` : "";
+          conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "",
+            row.ok ? `Sealed search${row.search_no ? ` ${row.search_no}` : ""}${what}: ${plural(row.documents, "document", "documents")}` : "A search was not sent")));
+        } else if (row.kind === "marks_read") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "Read your relevance marks")));
+        else if (row.kind === "approval") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", row.answer === "allowed" ? "You allowed searches to the search machine" : "You declined a search")));
+      }
+      conv.append(el("p", "sub", "Kept with the matter on this computer, readable only by your account."));
+      p.append(conv);
+    }
+
+    p.append(el("h2", "section", "Searches"));
+    if (!s.searches.length) p.append(el("p", "sub", "No sealed search completed in this session."));
+    for (const x of s.searches) {
+      const card = el("div", "card");
+      card.append(el("div", "card-head", el("span", "title", `🔍 Search ${x.n}`), el("span", "sub", `${localTime(x.at)} · ${plural(x.documents.length, "document", "documents")}`)));
+      if (x.query) card.append(el("div", "card-query", x.query.length > 400 ? `${x.query.slice(0, 400)}…` : x.query));
+      const list = el("ol", "docs");
+      x.documents.forEach((d, i) => {
+        const mark = s.marks[d.key];
+        list.append(el("li", "doc",
+          el("span", "rank", String(i + 1)),
+          el("div", "", el("span", "key", d.key), d.year ? el("span", "year", String(d.year)) : null, el("div", "dtitle", d.title)),
+          mark ? el("span", `mark-chip m-${mark}`, mark.replace("-", " ")) : el("span", "")));
+      });
+      card.append(list);
+      p.append(card);
+    }
+  }
+
+  function renderHelp() {
+    const p = page();
+    clear(p);
+    const sec = (title, ...nodes) => el("section", "help-section", el("h2", "", title), ...nodes);
+    const para = (t) => el("p", "", t);
+    const list = (...items) => el("ul", "", ...items.map((t) => el("li", "", t)));
+    p.append(el("div", "page-head", el("h1", "", "How Surveyor works"),
+      el("p", "sub", "A private assistant for prior-art research: it surveys published patents with you, and every search leaves a record anyone can check.")));
+    p.append(
+      sec("1. Create a matter",
+        para("A matter is one invention. Give it a client and a name, the priority date, and the disclosure: the invention described in plain technical terms."),
+        list("The priority date is the matter's date bound: only documents published before it are searched. The assistant can't change it.",
+          "The disclosure stays on this computer, in the matter's folder. You can edit it any time.")),
+      sec("2. Start a session",
+        para("Start a session from the matter. Before anything is sent, this computer checks two sealed machines: the one the AI runs in, and the one the patent search runs in. A sealed machine encrypts its own memory with a key held by its chip, so even the people who run it can't look inside."),
+        list("The session opens in its own tab. The panel on the right says what protects the matter, in plain words, with the technical detail one click away.",
+          "A green Private means both machines checked out and the assistant works in a closed box: no internet, and no files beyond the matter's folder.")),
+      sec("3. Research with the assistant",
+        list("Ask for a prior-art survey of the disclosure, or anything more specific.",
+          "Before its first search, the assistant shows you the exact text it wants to send. Nothing is searched until you allow it.",
+          "Ask for a search on one feature on its own, for documents like one it found, or for more results (quick 10, standard 25, broad 50).",
+          "After each answer, next-step buttons suggest where to go. Each sends exactly the words it shows.")),
+      sec("4. Mark what matters",
+        list("Mark returned documents as relevant, not relevant, or known. Marks save as you click.",
+          "The assistant reads your marks to steer its next searches, and the steps under “From your marks” update as you mark. It can't make or change a mark: they are your judgement.",
+          "“Look deeper at the ones I marked relevant” researches around what you marked.")),
+      sec("5. Keep the record",
+        list("Export the record from the matter or the session. It opens with “At a glance”: what it holds, and who stands behind each line.",
+          "Each search in it is signed by the search machine, with the hardware report that identifies it. Anyone can check it without trusting InferRoute: in the record's folder, run python3 verify_record.py with InferRoute's reference file and the key from your engagement letter.",
+          "The record holds the disclosure in plain text: store it like the client file.")),
+      sec("What stays private",
+        list("Your disclosure and conversation are read only on this computer and inside the two sealed machines.",
+          "The services in between see when you work and how much you send, never the words.",
+          "Browser conversations are kept with the matter on this computer, readable only by your account. Terminal sessions keep their searches, not the conversation.")),
+      sec("What it can't prove",
+        list("The chips prove where your text can be read, not what the software there does with it. The search machine runs InferRoute's own published software; the AI machine runs its operator's published software, which InferRoute re-checks in part.",
+          "A search finds related documents. It doesn't prove novelty, or that nothing else exists.",
+          "Browser extensions allowed to read every page can read these pages too. For client matters, use a browser profile without extensions.")),
+      sec("Limits right now",
+        list("The assistant reads each document's title and the start of its abstract, not the full text.",
+          "There are no filters yet for classification, country or applicant.",
+          "Record checks currently show one known failure, completeness, until the next update of the search machine.")),
+      sec("In the terminal",
+        para("Everything here also works in a terminal:"),
+        list("ir surveyor new <client> <matter> --priority-date YYYY-MM-DD",
+          "ir surveyor open <client>/<matter>   (add --web for the browser)",
+          "In a session: /relevant <number>, /not-relevant, /known, /marks, /next <n>, /proof, /quit",
+          "ir surveyor export <client>/<matter>, and ir surveyor proof <client>/<matter> for the technical detail")));
+  }
+
+  // ── routing ──
+  async function route() {
+    stopWatching();
+    closeDialog();
+    const h = location.hash || "#/";
+    const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
+    for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === (parts[0] === "help" ? "#/help" : "#/"));
+    // A matter id ("client/matter") travels encoded as ONE segment: #/matter/Acme%2Fcooling.
+    if (parts[0] === "matter" && parts[1]) return renderMatter(parts[1]);
+    if (parts[0] === "session" && parts[1] && parts[2]) return renderSession(parts[1], parts[2]);
+    if (parts[0] === "help") return renderHelp();
+    return renderMatters();
+  }
+
+  function showNoKey() {
+    $("nokey").hidden = false;
+    $("page").hidden = true;
+    $("nav").hidden = true;
+    $("new-matter").hidden = true;
+  }
+
+  if (!key) { showNoKey(); return; }
+  $("page").hidden = false;
+  $("nav").hidden = false;
+  $("new-matter").hidden = false;
+  $("new-matter").addEventListener("click", newMatterDialog);
+  for (const b of document.querySelectorAll("#nav button")) b.addEventListener("click", () => { location.hash = b.dataset.route; });
+  window.addEventListener("hashchange", route);
+  route();
+})();

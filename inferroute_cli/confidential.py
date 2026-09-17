@@ -185,6 +185,10 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
     from . import resume as resume_mod
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
+    # `ir surveyor open --web`: the same session, with Pi in RPC mode behind a local page (surveyor_web).
+    web = bool(surveyor and surveyor.get("web"))
+    if web:
+        passthrough = [*passthrough, "--mode", "rpc"]
     if user_model is None and _interactive(passthrough):
         # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.
         from . import choose as choose_mod
@@ -244,15 +248,17 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 from . import pi_attested, surveyor_trust
                 search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)
                 summary = surveyor_trust.build(receipt, search_result, pi_attested.confinement_label(),
-                                               matter=surveyor.get("matter", ""), date_bound=surveyor.get("date_bound", ""))
+                                               matter=surveyor.get("matter", ""), date_bound=surveyor.get("date_bound", ""),
+                                               surface="browser" if web else "terminal")
                 surveyor["summary"] = summary
                 surveyor_trust.render_card(summary, console)
-                surveyor_trust.render_howto(surveyor.get("matter", ""), console)
+                if not web:
+                    surveyor_trust.render_howto(surveyor.get("matter", ""), console)
             else:
                 display.render_panel(receipt, console)
             if not receipt.is_confidential:
                 return 3
-            if _interactive(passthrough):
+            if _interactive(passthrough) and not web:
                 # Claude Code's full-screen TUI replaces this screen the moment it starts, so give
                 # the panel a beat: Enter (or 20 s) to continue. The 🔒 status line inside Claude
                 # Code and `ir confidential show` carry the proof from there on.
@@ -267,6 +273,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
             env["IR_CONFIDENTIAL"] = "1"
+            if surveyor is not None:
+                env["IR_SURVEYOR_SURFACE"] = "browser" if web else "terminal"
             local = f"http://127.0.0.1:{port}"
             session.shown_model = shown_model if agent == "claude" else alias.short
             if agent == "claude":
@@ -345,8 +353,17 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 else:
                     preexec = pi_attested.preexec_confine(pi_confine_ports, write_paths=write_paths, then=reset_sigint)
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
-            proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
-            rc = await proc.wait()
+            page = None
+            if web:
+                from . import surveyor_web
+                page = await surveyor_web.start(surveyor=surveyor, session=session, search_endpoint=search_endpoint,
+                                                workspace=Path(os.getcwd()), console=console)
+                proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec,
+                                                            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                rc = await page.bridge.pump(proc)
+            else:
+                proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
+                rc = await proc.wait()
             if agent == "pi":
                 from . import pi_attested
                 if sandbox is not None:
@@ -357,6 +374,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
             session.close()
             console.print("")
             display.render_summary(session.receipt, console)
+            if page is not None:
+                await page.linger(console)                     # the page stays up so the record can be exported
             return rc
 
     try:

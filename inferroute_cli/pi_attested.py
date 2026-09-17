@@ -249,6 +249,21 @@ def search_config_path() -> Path:
     return Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "search.json"
 
 
+def _die_with_parent() -> None:
+    """Linux: have the kernel end the search verifier when the launcher dies, however it dies. A launcher
+    killed outright runs none of its own cleanup, and a verifier left behind keeps a matter's state file and a
+    loopback port. Elsewhere this is a no-op; the launcher's normal exit still stops it."""
+    import sys
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+        import signal as _signal
+        ctypes.CDLL(None, use_errno=True).prctl(1, int(_signal.SIGTERM))      # PR_SET_PDEATHSIG
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
 def start_search_proxy(timeout: float = 30.0) -> str | None:
     """Start the verifier and return its loopback address, or None (the session then has no search tool)."""
     import select
@@ -304,7 +319,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
     try:
-        proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                                preexec_fn=_die_with_parent)
     except (OSError, KeyError):
         sys.stderr.write("\n  prior-art search is unavailable this session: the local search verifier did not start.\n\n")
         return None

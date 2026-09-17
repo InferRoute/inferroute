@@ -48,7 +48,9 @@ bundle the exporter produced; `ots` needs the opentimestamps-client and is not e
 
 One line per check (PASS / FAIL / SKIP with the reason). Exit 0 only if EVERY check passed under production
 roots; 1 if any failed (including "no reference" and "no sealed searches"); 2 if refused (bad flags, old
-library); 3 if it passed but under test roots. The file is short on purpose — read it before trusting it.
+library); 3 if it passed but under test roots; 4 if it passed but the reference was signed and no
+`--reference-key` was given — the identity then rests on a file nobody authenticated, so pass the
+publication key from your engagement letter. The file is short on purpose — read it before trusting it.
 
 ## 2. Bundle integrity (an index, not a seal)
 
@@ -342,7 +344,10 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
                 ev_sha = _sha256_hex(blob)
                 ev_file = f"{ev_sha[:16]}.evidence.json"
                 evidence[ev_sha] = blob.decode("utf-8")
-            searches.append({"n": n, "session_id": s["session_id"], "at": x.get("at"), "statement": stmt,
+            # `kind` on every row: the verifier dispatches on it, and a document read must be as visible as a
+            # search (it takes a sequence number, so a record that hid one would show a gap).
+            searches.append({"kind": str(stmt.get("kind") or "search"),
+                             "n": n, "session_id": s["session_id"], "at": x.get("at"), "statement": stmt,
                              "reply_to": x.get("reply_to"),
                              "result": x.get("result"), "query_text": x.get("query_text"),
                              "signer_pub": x.get("signer_pub"), "cutoff_date": x.get("cutoff_date"),

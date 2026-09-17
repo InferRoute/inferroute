@@ -638,3 +638,170 @@ def test_a_manifest_of_no_files_never_counts_as_identity(V, kms):
     c = V.verify_offer(_offer(V, kms, rd))
     assert "index manifest names real bytes" in c.failed
     assert any("SHA-256 of nothing" in d for _, _, d in c.rows)
+
+
+# ───────────── document reads, per-session completeness, an unauthenticated reference ─────────────
+
+def _ops_bundle(tmp_path, V, kms, ops, *, name="bundle"):
+    """A record of mixed operations. Each op: {kind, session, seq, ...overrides} — kind "search" or
+    "document"; session None puts the old per-enclave seq on the statement instead of a session_seq."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    key = Ed25519PrivateKey.generate()
+    pub = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+    rd = {"v": 1, "kind": "sealed-search", "lifetime_id": "ab" * 8, "statement_signer_pub": pub,
+          "enclave_x25519_pub": "cd" * 32, "index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    rd_bytes = json.dumps(rd).encode()
+    offer = {"evidence": kms["evidence"], "endorsements": kms["endorsements"], "uvm_endorsements": kms["uvm_endorsements"],
+             "runtime_data": base64.b64encode(rd_bytes).decode()}
+    ev_bytes = json.dumps({"offer": offer}, indent=1).encode()
+    ev_sha = hashlib.sha256(ev_bytes).hexdigest()
+    d = tmp_path / name
+    d.mkdir(parents=True)
+    (d / f"{ev_sha[:16]}.evidence.json").write_bytes(ev_bytes)
+    rows = []
+    for i, op in enumerate(ops, 1):
+        rid = f"{i:032x}"
+        reply_priv = bytes([(i * 7 + j) % 256 for j in range(32)])
+        st = {"v": 1, "kind": op.get("kind", "search"), "lifetime_id": rd["lifetime_id"], "request_id": rid,
+              "started_utc": "2026-06-01T12:00:00Z", "runtime_data_sha256": hashlib.sha256(rd_bytes).hexdigest(),
+              "index_manifest_sha256": rd["index_manifest_sha256"], "model_manifest_sha256": rd["model_manifest_sha256"],
+              "cutoff_date": 20200115, "outcome": "answered", "reply_to_sha256": hashlib.sha256(reply_priv).hexdigest()}
+        row = {"n": i, "at": "t", "signer_pub": pub, "reply_to": reply_priv.hex(),
+               "evidence_file": f"{ev_sha[:16]}.evidence.json", "evidence_sha256": ev_sha}
+        if op.get("session"):
+            st["session_id"], st["session_seq"] = op["session"], op["seq"]
+        else:
+            st["seq"] = op["seq"]
+        if st["kind"] == "document":
+            text = op.get("text", f"Abstract of document {i}.")
+            st["key"] = op.get("key", f"US-{i}000-B2")
+            st["text_sha256"] = V.salted(rid, op.get("sign_text", text))
+            st["coverage"] = {"abstract": "held", "claims": "not_held", "description": "not_held"}
+            st["publication_date"] = op.get("publication_date", 19980417)
+            row.update({"kind": "document", "key": st["key"], "text": text})
+        else:
+            q, res = f"query {i}", {"hits": [{"key": f"US-{i}-A"}]}
+            st.update({"hits_n": 1, "query_sha256": V.salted(rid, q), "result_sha256": V.salted(rid, res)})
+            row.update({"kind": "search", "query_text": q, "result": res})
+        st["sig"] = key.sign(V.canonical(st)).hex()
+        row["statement"] = st
+        rows.append(row)
+    (d / "searches.json").write_text(json.dumps(rows))
+    (d / "record.html").write_text("<html>record</html>")
+    (d / "VERIFY.md").write_text("# verify\n")
+    (d / "verify_record.py").write_bytes(SCRIPT.read_bytes())
+    files = {n: hashlib.sha256((d / n).read_bytes()).hexdigest() for n in os.listdir(d)}
+    (d / "MANIFEST.json").write_text(json.dumps({"files": files, "matter_cutoff": 20200115}))
+    host = V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+    return d, host
+
+
+def test_a_document_read_is_bound_to_the_text_the_enclave_signed(tmp_path, V, kms):
+    d, host = _ops_bundle(tmp_path, V, kms, [{"kind": "document", "session": "s1", "seq": 1}])
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "PASS document text is the one signed" in out
+    assert "PASS document is the one signed" in out and "US-1000-B2" in out and "abstract: held" in out
+    assert "PASS the document predates the date bound" in out
+    assert "SKIP query text is the one searched" not in out    # a read is not a search with a missing query
+    assert "result is the signed result" not in out
+
+
+def test_a_document_whose_text_was_changed_fails_the_record(tmp_path, V, kms):
+    d, host = _ops_bundle(tmp_path, V, kms, [{"kind": "document", "session": "s1", "seq": 1,
+                                              "text": "Abstract of document 1.", "sign_text": "what the enclave really sent"}])
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "FAIL document text is the one signed" in out and code == 1
+
+
+def test_a_document_published_on_or_after_the_date_bound_fails_the_record(tmp_path, V, kms):
+    # The enclave refuses such a read live; if one ever got through, the record must not pass it.
+    d, host = _ops_bundle(tmp_path, V, kms, [{"kind": "document", "session": "s1", "seq": 1, "publication_date": 20200115}])
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "FAIL the document predates the date bound" in out and "NOT before the matter's bound" in out and code == 1
+
+
+def test_completeness_counts_searches_and_reads_of_one_session(tmp_path, V, kms):
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1},
+                                             {"kind": "document", "session": "s1", "seq": 2},
+                                             {"session": "s1", "seq": 3}])
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "PASS completeness (per-session sequence)" in out
+    assert "seq 1..3 contiguous (2 searches, 1 document read)" in out and "every operation of each session SHOWN" in out
+
+
+def test_completeness_is_per_session_so_other_clients_are_not_missing(tmp_path, V, kms):
+    # The counter the enclave keeps is per session: a record starting at 1 for ITS session is complete, whatever
+    # anyone else did on the same enclave — and it says nothing about how much anyone else used it.
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}, {"session": "s1", "seq": 2},
+                                             {"session": "s2", "seq": 1}])
+    code, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "PASS completeness (per-session sequence)" in out and code == 1  # identity/report still fail on fixtures
+    assert "session s1…" in out and "session s2…" in out
+
+
+def test_a_gap_inside_a_session_still_fails(tmp_path, V, kms):
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}, {"kind": "document", "session": "s1", "seq": 3}])
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "FAIL completeness (per-session sequence)" in out and "missing [2]" in out
+
+
+def test_records_made_before_session_numbering_verify_exactly_as_before(tmp_path, V, kms):
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": None, "seq": 1}, {"session": None, "seq": 2}])
+    _, out = _run(d, "--reference", str(_ref(tmp_path, "r.json", [host])))
+    assert "PASS completeness (per-enclave sequence)" in out and "seq 1..2 contiguous (2 searches)" in out
+    assert "every search of each enclave SHOWN" in out and "entire lifetime dropped" in out
+
+
+def _signing_key():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization
+    k = Ed25519PrivateKey.generate()
+    return k, k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
+
+
+def test_a_signed_reference_checked_without_its_key_is_not_a_clean_pass(tmp_path, V, kms):
+    """Every line can pass while identity rests on a file nobody authenticated. The exit code must say so:
+    a reader who reads only the number would otherwise be told the strongest verdict."""
+    key, pub = _signing_key()
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = _ref(tmp_path, "signed.json", [host], sign_with=key)
+    code_without, out_without = _run(d, "--reference", str(ref))
+    assert "SKIP reference signature" in out_without and "no --reference-key was given" in out_without
+    code_with, out_with = _run(d, "--reference", str(ref), f"--reference-key={pub}")
+    assert "PASS reference signature" in out_with
+    # These fixtures fail the hardware binding either way; the verdict difference is what this pins.
+    assert (code_without, code_with) == (1, 1)   # these fixtures fail the hardware binding either way
+
+
+def test_exit_four_is_reserved_for_the_unauthenticated_reference(tmp_path, V, kms, monkeypatch):
+    """Exit 4 only when the reference is SIGNED and no key was given: an unsigned reference (three hashes an
+    attorney typed) keeps its own verdict, and a key that verifies keeps a clean 0."""
+    key, pub = _signing_key()
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    signed, unsigned = _ref(tmp_path, "s.json", [host], sign_with=key), _ref(tmp_path, "u.json", [host])
+
+    def codes(passing):
+        # neutralise the fixture's unrelated failures (real report vs synthetic runtime data) to read the verdict
+        monkeypatch.setattr(V, "check_hardware", lambda c, *a, **k: {"host_data": host, "product": "Milan"})
+        monkeypatch.setattr(V, "check_identity", lambda *a, **k: None)
+        return V.main([str(d), f"--reference={passing}"])
+    assert codes(signed) == 4
+    assert V.main([str(d), f"--reference={signed}", f"--reference-key={pub}"]) == 0
+    assert V.main([str(d), f"--reference={unsigned}"]) == 0
+
+
+def test_a_firmware_floor_can_travel_in_the_reference(tmp_path, V, kms):
+    """A firm should not have to know SPL numbers to hold a floor: the reference can carry one, and it is
+    covered by the reference's own signature."""
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = json.loads(_ref(tmp_path, "r.json", [host]).read_text())
+    ref["min_tcb"] = {"Milan": {"snpSPL": 99, "ucodeSPL": 1}}
+    p = tmp_path / "floor.json"
+    p.write_text(json.dumps(ref))
+    _, out = _run(d, "--reference", str(p))
+    assert "FAIL firmware TCB at or above minimum" in out
+    ref["min_tcb"] = {"Milan": {"snpSPL": 1, "ucodeSPL": 1}}
+    p.write_text(json.dumps(ref))
+    _, out = _run(d, "--reference", str(p))
+    assert "PASS firmware TCB at or above minimum" in out

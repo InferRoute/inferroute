@@ -437,9 +437,11 @@ def run(open_browser: bool = True) -> int:
         sock.bind(("127.0.0.1", 0))
         home.port = sock.getsockname()[1]
     url = f"http://127.0.0.1:{home.port}/#k={home.token}"
-    print(f"\n  Surveyor home:  {url}")
-    print("  The link works on this computer only; don't share it. Keep this terminal open while you work:")
-    print("  closing it (Ctrl+C) also ends any session started from the page.\n")
+    # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
+    # full buffer, and the link is the one thing it needs.
+    print(f"\n  Surveyor home:  {url}", flush=True)
+    print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
+    print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
     if open_browser:
         launch_browser(url)
     uvicorn.run(home.app(), host="127.0.0.1", port=home.port, log_level="warning")

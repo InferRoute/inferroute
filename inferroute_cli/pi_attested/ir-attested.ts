@@ -214,9 +214,18 @@ interface SearchProof {
 	hits: number;
 	// The documents themselves, for a surface that shows results (the local browser page). Tool `details`
 	// never reach the model; the model gets hitsText in `content`.
-	docs: { key: string; year?: number; title?: string }[];
+	docs: { key: string; year?: number; title?: string; alsoIn?: number }[];
+	// What this search was, as the professional sees it on the card: its number in the session, the feature it
+	// covered, the document it looked for neighbours of, and how many references were asked for.
+	searchNo?: number;
+	feature?: string;
+	like?: string;
+	k?: number;
 	at: string;
 }
+
+// `depth`, in the words the tool offers the model; the numbers are what the card says, never "a deeper search".
+const DEPTH_K: Record<string, number> = { quick: 10, standard: 25, broad: 50 };
 
 // `checked`: for a search, the verification that preceded it. The search response itself does not repeat the
 // reference block; but the search was pinned to that enclave's lifetime and the verifier re-runs the identity
@@ -335,7 +344,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	const passed = p.steps.filter((s) => s.ok).length;
 	if (p.ok) {
 		line(theme.fg("success", theme.bold(p.phase === "search"
-			? `🔒 Sealed search: ${p.hits} results, opened on this computer only`
+			? `🔒 Sealed search${p.searchNo ? ` ${p.searchNo}` : ""}${p.feature ? ` · ${p.feature}` : ""}${p.like ? ` · like ${p.like}` : ""}: ${p.hits} results, opened on this computer only`
 			: "🔒 The search machine is a sealed machine this computer just checked")));
 		line(`Genuine sealed hardware running ${p.ours ? "exactly the software InferRoute published (signed reference checked)" : "exactly the software this computer expects"}. The search text was encrypted here; only that machine could open it.`);
 	} else {
@@ -355,14 +364,33 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	return box;
 }
 
-function hitsText(out: SearchVerdict): string {
+function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number>): string {
 	const hits = out.result?.hits ?? [];
 	const lines = [
-		`${hits.length} references surfaced by a sealed search over ${out.enclave?.index_snapshot ?? "the index"}. ` +
+		`${label}: ${hits.length} references surfaced by a sealed search over ${out.enclave?.index_snapshot ?? "the index"}. ` +
 		`${out.result?.claim_boundary ?? "It surfaces related art; it does not certify completeness or absence."}`,
 	];
-	hits.forEach((h, i) => lines.push(`${i + 1}. ${h.key}${h.year ? ` (${h.year})` : ""}${h.title ? ` ${h.title}` : ""}`));
+	hits.forEach((h, i) => {
+		const seen = earlier.get(String(h.key));
+		lines.push(`${i + 1}. ${h.key}${h.year ? ` (${h.year})` : ""}${h.title ? ` ${h.title}` : ""}${seen ? ` [also returned by search ${seen}]` : ""}`);
+	});
 	return lines.join("\n");
+}
+
+// A suggested next step is sent as the professional's own message when they choose it. It must never be a
+// command or a shell line: "/relevant X" would record a mark as the professional's, and "!…" runs a shell.
+const NEXT_MAX = 4;
+const NEXT_LEN = 160;
+function cleanSteps(raw: unknown): string[] {
+	const out: string[] = [];
+	for (const item of Array.isArray(raw) ? raw : []) {
+		let t = String(item ?? "").replace(/\s+/g, " ").trim().replace(/^[\/!\s]+/, "").trim();
+		if (t.length < 4) continue;
+		if (t.length > NEXT_LEN) t = `${t.slice(0, NEXT_LEN - 1)}…`;
+		if (!out.includes(t)) out.push(t);
+		if (out.length >= NEXT_MAX) break;
+	}
+	return out;
 }
 
 // ───────────────────────── the extension ─────────────────────────
@@ -480,6 +508,12 @@ class SessionRecord {
 export default function (pi: ExtensionAPI) {
 	let timer: ReturnType<typeof setInterval> | undefined;
 	const disclosure = new SessionRecord();
+	// In-session memory of searches: which search first returned each document, each document's returned text
+	// (for `like`), and the last next steps offered (for /next).
+	let searchNo = 0;
+	const firstSeen = new Map<string, number>();
+	const docText = new Map<string, string>();
+	let lastSteps: string[] = [];
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
 	pi.registerEntryRenderer<SearchProof>(SEARCH_PROOF_ENTRY, (entry, { expanded }, theme) => renderSearchProof(entry.data, expanded, theme));
@@ -529,7 +563,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
-					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Show the checks again: /proof.",
+					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Send a suggested next step: /next <n>. Show the checks again: /proof.",
 					`Leave with /quit, then keep the record: ir surveyor export ${MATTER}`].join("\n"),
 				"info",
 			);
@@ -607,8 +641,11 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Search published patents for prior art related to a technical description. The description is sealed on " +
 			"the user's machine to a search enclave that this machine verifies first; the user approves the first query " +
-			"to each enclave. Returns references with publication numbers and titles. It surfaces related art; it does " +
-			"not certify completeness or absence.",
+			"to each enclave. Returns references with publication numbers and titles, numbered as searches in this session, " +
+			"noting documents an earlier search already returned. To cover one feature of the disclosure, search it on its " +
+			"own and name it in `feature`. To find documents like a returned one, pass its publication number as `like` " +
+			"(no text needed). `depth` sets how many references come back: quick 10, standard 25, broad 50. It surfaces " +
+			"related art; it does not certify completeness or absence.",
 		promptSnippet: "Search published patents for related prior art (sealed, user-approved)",
 		promptGuidelines: [
 			"Use prior_art_search when the user asks for prior art, related patents, or novelty context for a technical idea; pass a self-contained technical description of at least a few sentences.",
@@ -616,14 +653,32 @@ export default function (pi: ExtensionAPI) {
 		],
 		// No cutoff parameter: the date bound is the matter's, held by the host verifier, not the model's to set.
 		parameters: Type.Object({
-			text: Type.String({ description: "A self-contained technical description to search for (20 characters or more)" }),
-			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "How many references to return (default 10)" })),
+			text: Type.Optional(Type.String({ description: "A self-contained technical description to search for (20 characters or more). Not needed with `like`." })),
+			feature: Type.Optional(Type.String({ maxLength: 80, description: "A short name for the one feature of the disclosure this search covers" })),
+			like: Type.Optional(Type.String({ description: "A publication number returned earlier in this session: search for documents like it" })),
+			depth: Type.Optional(Type.Union([Type.Literal("quick"), Type.Literal("standard"), Type.Literal("broad")], { description: "How many references: quick 10 (default), standard 25, broad 50" })),
+			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Exact number of references to return; overrides depth" })),
 		}),
 
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
 				throw new Error("prior_art_search needs the user at this machine to approve sealed queries; refused without sending anything");
 			}
+			// What to send, settled before anything is verified or sent.
+			const like = String(params.like ?? "").trim().toUpperCase();
+			let text = String(params.text ?? "").trim();
+			if (like) {
+				const known = docText.get(like);
+				if (!known) {
+					throw new Error(`${like} was not returned by a search in this session, so there is nothing to search like; nothing was sent`);
+				}
+				text = known;
+			}
+			if (text.length < 20) {
+				throw new Error("prior_art_search needs a self-contained description of 20 characters or more, or `like` with a publication number returned in this session; nothing was sent");
+			}
+			const feature = String(params.feature ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+			const k = params.k ?? DEPTH_K[params.depth ?? "quick"] ?? 10;
 			let verified: SearchVerdict;
 			try {
 				verified = await searchCall("/enclave", undefined, signal);
@@ -651,7 +706,7 @@ export default function (pi: ExtensionAPI) {
 				const identity = isInferRoutes(verified)
 					? "running exactly the software InferRoute published (signed reference checked)"
 					: "running exactly the software this computer expects";
-				const preview = params.text.length > 400 ? `${params.text.slice(0, 400)}…` : params.text;
+				const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
 				const ok = await ctx.ui.confirm(
 					"Allow a sealed patent search?",
 					[
@@ -679,11 +734,14 @@ export default function (pi: ExtensionAPI) {
 			let out: SearchVerdict;
 			try {
 				// No cutoff here: the host verifier applies the matter's date bound.
-				out = await searchCall("/search", { text: params.text, k: params.k ?? 10, expect_lifetime_id: e.lifetime_id }, signal);
+				out = await searchCall("/search", { text, k, expect_lifetime_id: e.lifetime_id }, signal);
 			} catch {
 				throw new Error("the local search verifier did not answer; the search did not complete");
 			}
 			const sp = searchProofOf(out, "search", verified);
+			sp.feature = feature || undefined;
+			sp.like = like || undefined;
+			sp.k = k;
 			searchStatus(ctx, sp);
 			disclosure.searches.push({
 				at: sp.at, ok: sp.ok, testRoots: sp.testRoots, measurement: sp.measurement, policy: sp.policy,
@@ -694,7 +752,22 @@ export default function (pi: ExtensionAPI) {
 				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
 				throw new Error(`the sealed search was refused (${sp.refusal})`);
 			}
-			return { content: [{ type: "text", text: hitsText(out) }], details: sp };
+			// Number the search, and note which documents an earlier search in this session already returned.
+			searchNo += 1;
+			sp.searchNo = searchNo;
+			const earlier = new Map<string, number>();
+			for (const d of sp.docs) {
+				const first = firstSeen.get(d.key);
+				if (first) {
+					earlier.set(d.key, first);
+					d.alsoIn = first;
+				} else {
+					firstSeen.set(d.key, searchNo);
+				}
+				if (d.title) docText.set(d.key, d.title);
+			}
+			const label = `Search ${searchNo}${feature ? ` (feature: ${feature})` : ""}${like ? ` (documents like ${like})` : ""}`;
+			return { content: [{ type: "text", text: hitsText(out, label, earlier) }], details: sp };
 		},
 
 		renderResult(result, { expanded }, theme) {
@@ -790,6 +863,94 @@ export default function (pi: ExtensionAPI) {
 					"The operator sees when your containers start and stop (timing and size), never their content."].filter(Boolean).join("\n"),
 				"info",
 			);
+		},
+	});
+
+	// The professional's marks, readable by the assistant so they can steer its research. Read-only: no tool or
+	// endpoint the assistant can reach makes or changes a mark (those are typed or clicked by the professional).
+	pi.registerTool({
+		name: "matter_marks",
+		label: "Your relevance marks",
+		description:
+			"Read the professional's relevance marks for this matter: which returned documents they marked relevant, not " +
+			"relevant, or known, and whether a search in this matter returned them. Read-only. Marks are the professional's " +
+			"judgment; use them to steer follow-up searches, report them as theirs, and never adopt them as your own conclusion.",
+		promptSnippet: "Read the professional's relevance marks (read-only)",
+		parameters: Type.Object({}),
+		async execute(_toolCallId, _params, signal) {
+			let state: MatterMarks;
+			try {
+				state = (await searchCall("/matter/state", undefined, signal)) as unknown as MatterMarks;
+			} catch {
+				throw new Error("the local search verifier did not answer; the marks could not be read");
+			}
+			const entries = Object.entries(state.marks ?? {});
+			const lines = entries.map(([key, m]) => {
+				const l = m.latest ?? {};
+				const exp = l.surfaced ? `; ${EXPOSURE_NOTE[l.surfaced] ?? l.surfaced}${l.surfaced === "this_session" && l.rank ? `, rank ${l.rank}` : ""}` : "";
+				return `- ${key}: ${MARK_LABEL[String(l.value)] ?? l.value}${exp}`;
+			});
+			const text = entries.length
+				? ["The professional's relevance marks for this matter (their judgment, not yours):", ...lines].join("\n")
+				: "The professional has not marked any document on this matter yet.";
+			return { content: [{ type: "text", text }], details: { count: entries.length } };
+		},
+		renderResult(result, _options, theme) {
+			const n = Number((result.details as { count?: number } | undefined)?.count ?? 0);
+			const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+			box.addChild(new Text(theme.fg("dim", `Read your relevance marks (${n})`), 0, 0));
+			return box;
+		},
+	});
+
+	pi.registerTool({
+		name: "suggest_next_steps",
+		label: "Next steps",
+		description:
+			"Offer the professional two to four next research actions they can send with one click, exactly as written. " +
+			"Call it last in an answer that reports or discusses search results, and write nothing after it. Each step is an " +
+			"instruction to you within your tools (a follow-up search on one feature, documents like a returned one, reading " +
+			"their marks), never a judgment and never a command. Never mention this tool or the steps in your written answer.",
+		promptSnippet: "Offer the professional one-click next research steps (call last)",
+		parameters: Type.Object({
+			steps: Type.Array(Type.String({ maxLength: 200 }), { minItems: 1, maxItems: NEXT_MAX }),
+		}),
+		async execute(_toolCallId, params) {
+			const steps = cleanSteps(params.steps);
+			lastSteps = steps;
+			return {
+				// A neutral acknowledgement: anything that reads as an instruction ("end your answer here") gets
+				// answered in the transcript, as the model once did with "(no further output follows …)".
+				content: [{ type: "text", text: steps.length ? "Shown." : "No usable steps were given." }],
+				details: { steps },
+			};
+		},
+		renderResult(result, _options, theme) {
+			const steps = ((result.details as { steps?: string[] } | undefined)?.steps ?? []);
+			const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+			if (!steps.length) return box;
+			box.addChild(new Text(theme.bold("Next steps") + theme.fg("dim", "  · send one with /next <number>"), 0, 0));
+			steps.forEach((st, i) => box.addChild(new Text(`  ${i + 1}. ${st}`, 0, 0)));
+			return box;
+		},
+	});
+
+	pi.registerCommand("next", {
+		description: "Send one of the suggested next steps as your message: /next 1",
+		handler: async (args, ctx) => {
+			const n = Number(String(args ?? "").trim());
+			const step = Number.isInteger(n) ? lastSteps[n - 1] : undefined;
+			if (!step) {
+				if (ctx.hasUI) {
+					ctx.ui.notify(lastSteps.length ? `Choose a step from 1 to ${lastSteps.length}, e.g. /next 1` : "No next steps have been suggested yet.", "info");
+				}
+				return;
+			}
+			try {
+				pi.sendUserMessage(step);
+			} catch {
+				pi.sendUserMessage(step, { deliverAs: "followUp" });
+			}
 		},
 	});
 

@@ -357,3 +357,46 @@ def test_a_surveyor_session_keeps_no_transcript_and_offers_no_resume(tmp_path, u
     assert "--no-session" in argv
     plain = P.env_argv("pi", {}, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
     assert "--no-session" not in plain
+
+
+def test_marks_and_next_steps_come_only_with_search_and_are_allowlisted(tmp_path, monkeypatch):
+    # The extension refuses any tool outside the launch allowlist, so a tool it registers but the launcher
+    # does not list would silently never run.
+    from inferroute_cli import pi_attested as P, models as M
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
+    alias = M.get("kimi-k2.6")
+    env: dict = {}
+    argv = P.env_argv("pi", env, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u",
+                      search_endpoint="http://127.0.0.1:2")
+    tools = argv[argv.index("--tools") + 1].split(",")
+    assert {"prior_art_search", "matter_marks", "suggest_next_steps"} <= set(tools)
+    assert env["IR_ATTESTED_TOOLS"] == ",".join(tools)
+    bare = P.env_argv("pi", {}, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
+    assert not {"prior_art_search", "matter_marks", "suggest_next_steps"} & set(bare[bare.index("--tools") + 1].split(","))
+
+
+def test_no_tool_can_make_a_mark_and_a_suggested_step_is_never_a_command():
+    from pathlib import Path
+    from inferroute_cli import pi_attested as P
+    ts = P.EXTENSION.read_text()
+    # The only way a mark is written is a command the professional types; no registered tool posts one.
+    import re
+    writes = [m.start() for m in re.finditer(r'"/matter/mark"', ts)]
+    assert writes, "the mark endpoint is still used by the professional's commands"
+    for at in writes:
+        enclosing = re.findall(r"function (\w+)\(", ts[:at])[-1]
+        assert enclosing == "markCommand", f"/matter/mark is posted from {enclosing}, not only from the typed mark commands"
+    assert ts.count("markCommand(") == 4          # the definition and /relevant, /not-relevant, /known
+    # A step chosen by the professional is sent as their message: leading "/" (extension command, e.g. a mark)
+    # and "!" (shell) are stripped before it is stored or shown.
+    assert 'replace(/^[\\/!\\s]+/, "")' in ts
+    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "surveyor_web" / "app.js").read_text()
+    assert "!/^[\\/!]/.test(t)" in js
+
+
+def test_the_contract_says_how_marks_and_next_steps_may_be_used():
+    from inferroute_cli import pi_attested as P
+    text = " ".join(P.load_contract()["text"].split())
+    assert "matter_marks" in text and "suggest_next_steps" in text
+    assert "never adopt it as your own conclusion" in text and "never a judgment" in text
+    assert P.load_contract()["modified"] is False

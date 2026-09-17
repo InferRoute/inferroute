@@ -117,6 +117,15 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .marks button[aria-pressed="true"].m-not-relevant { background: var(--user); color: var(--ink); border-color: var(--faint); }
 .marks button[aria-pressed="true"].m-known { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .card-foot { padding: 8px 14px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--line); }
+.card-head { flex-wrap: wrap; }
+.card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }
+.doc .seen { font-size: 11px; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 7px; margin-left: 8px; }
+.card-actions { padding: 8px 14px 12px; }
+.card-actions button { border-radius: 999px; font-size: 13px; }
+.next { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 4px 0 6px; }
+.next-title { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); font-weight: 650; }
+.next button { text-align: left; border-radius: 12px; max-width: 100%; font-size: 14px; background: var(--panel); border-color: var(--accent); color: var(--ink); }
+.next button:hover { background: var(--accent-soft); }
 
 /* activity + composer */
 .activity { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 4px max(20px, calc((100% - 820px) / 2)); }

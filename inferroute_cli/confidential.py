@@ -171,7 +171,9 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
 
 # ───────────────────────── ir --confidential ─────────────────────────
 
-def launch(args: list[str], agent: str = "claude") -> int:
+def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = None) -> int:
+    """`surveyor`: set by `ir surveyor open` ({"matter", "date_bound"}). The pre-launch screen is then the
+    plain-language Surveyor card (surveyor_trust) instead of the technical panel, and `summary` is filled in."""
     _need_extra()
     from . import launch as launch_mod, agents as agents_mod
     from inferroute_local.confidential import display
@@ -223,14 +225,39 @@ def launch(args: list[str], agent: str = "claude") -> int:
     async def _run() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
             session, receipt = await _open_session(alias, session_id, http, console)
-            display.render_panel(receipt, console)
+            search_endpoint = None
+            if agent == "pi" and receipt.is_confidential:
+                from . import pi_attested
+                try:
+                    pi_attested.check_workspace(os.getcwd())      # W1: never make a protected tree writable
+                except pi_attested.UnsafeWorkspace as e:
+                    console.print(f"[red]{e}[/]")
+                    session.close()
+                    return 2
+                # Decided before the verifier starts: the verifier stamps the confinement line into every
+                # record from this flag. If the sandbox cannot then be built, the launch is REFUSED below.
+                os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"
+                # Started before anything is shown, so the Surveyor card reports a search check that RAN for
+                # this launch, not one promised for later.
+                search_endpoint = pi_attested.start_search_proxy()
+            if surveyor is not None and receipt.is_confidential:
+                from . import pi_attested, surveyor_trust
+                search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)
+                summary = surveyor_trust.build(receipt, search_result, pi_attested.confinement_label(),
+                                               matter=surveyor.get("matter", ""), date_bound=surveyor.get("date_bound", ""))
+                surveyor["summary"] = summary
+                surveyor_trust.render_card(summary, console)
+                surveyor_trust.render_howto(surveyor.get("matter", ""), console)
+            else:
+                display.render_panel(receipt, console)
             if not receipt.is_confidential:
                 return 3
             if _interactive(passthrough):
                 # Claude Code's full-screen TUI replaces this screen the moment it starts, so give
                 # the panel a beat: Enter (or 20 s) to continue. The 🔒 status line inside Claude
                 # Code and `ir confidential show` carry the proof from there on.
-                await _pause(f"Enter to open {agent} · `ir confidential show` re-prints this proof any time")
+                await _pause("Enter to start the assistant (or wait 20 s)" if surveyor is not None
+                             else f"Enter to open {agent} · `ir confidential show` re-prints this proof any time")
             port = _free_port()
             server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
             server_task = asyncio.create_task(server.serve())
@@ -262,18 +289,6 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
                 from . import pi_attested
-                try:
-                    pi_attested.check_workspace(os.getcwd())      # W1: never make a protected tree writable
-                except pi_attested.UnsafeWorkspace as e:
-                    console.print(f"[red]{e}[/]")
-                    server.should_exit = True
-                    await server_task
-                    session.close()
-                    return 2
-                # Decided before the verifier starts: the verifier stamps the confinement line into every
-                # record from this flag. If the sandbox cannot then be built, the launch is REFUSED below.
-                os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"
-                search_endpoint = pi_attested.start_search_proxy()
                 argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
                                             alias=alias, upstream_name=f"{alias.model_id} [confidential]",
                                             search_endpoint=search_endpoint)
@@ -313,7 +328,11 @@ def launch(args: list[str], agent: str = "claude") -> int:
                     # expects, THEN applies the same Landlock+seccomp confinement, then execs the agent.
                     try:
                         sandbox = pi_attested.netns_sandbox(ports=pi_confine_ports, cfg_dir=env["PI_CODING_AGENT_DIR"],
-                                                            rw=[os.getcwd()], binary=binary)
+                                                            rw=[os.getcwd()], binary=binary,
+                                                            # the one file of ours Pi loads by path. Read-only and
+                                                            # exact: installed, it sits in the bound runtime anyway;
+                                                            # run from source, nothing else would make it visible.
+                                                            ro=[str(pi_attested.EXTENSION)])
                         argv = sandbox.wrap(argv, write_paths=write_paths)
                     except Exception as e:                                          # noqa: BLE001
                         console.print("[red]refusing to launch: address-level confinement was promised to this "
@@ -343,6 +362,9 @@ def launch(args: list[str], agent: str = "claude") -> int:
     try:
         return asyncio.run(_run())
     except KeyboardInterrupt:
+        if agent == "pi":
+            from . import pi_attested
+            pi_attested.stop_search_proxy()              # it now starts before the pause; never leave it running
         # Only reachable BEFORE claude starts (verification / instance discovery): after the
         # launch the parent ignores SIGINT and claude owns it. Nothing has been sent yet.
         console.print("\n[grey58]cancelled before anything was sent.[/]")

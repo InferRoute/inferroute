@@ -28,9 +28,10 @@ def home(tmp_path, monkeypatch):
 
 
 def _patch_launch(monkeypatch, captured):
-    def fake_launch(args, agent="claude"):
+    def fake_launch(args, agent="claude", *, surveyor=None):
         captured["args"] = args
         captured["agent"] = agent
+        captured["surveyor"] = surveyor
         captured["env"] = {k: os.environ.get(k) for k in
                            ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR",
                             "IR_ATTESTED_CONFINE", "IR_SURVEYOR_DEV_UNCONFINED")}
@@ -110,6 +111,8 @@ def test_open_passes_per_matter_env_and_never_touches_search_json(home, monkeypa
     _patch_launch(monkeypatch, captured)
     assert S.main(["open", "Acme/m7"]) == 0
     assert captured["agent"] == "pi" and captured["args"] == []
+    # The plain-language card is drawn for THIS matter: its name and host-held date bound, never the model's.
+    assert captured["surveyor"] == {"matter": "Acme/m7", "date_bound": "2021-07-08"}
     env = captured["env"]
     # S2: the cutoff/state/record are per-matter env from the host record, and all live under confidential/.
     assert env["IR_MATTER_CUTOFF"] == "20210708"

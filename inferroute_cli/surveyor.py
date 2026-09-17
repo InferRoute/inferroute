@@ -269,7 +269,68 @@ def cmd_open(spec: str, dev_unconfined: bool = False) -> int:
     os.chdir(ws)
     print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     from . import confidential as confidential_mod
-    return confidential_mod.launch([], agent="pi")
+    return confidential_mod.launch([], agent="pi", surveyor={"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]})
+
+
+def latest_session_record(client: str, matter: str) -> dict | None:
+    """The newest host-written session record for this matter (never an agent-writable file)."""
+    files = sorted(p for p in records_dir(client, matter).glob("*.json") if not p.name.endswith(".searches.json"))
+    for p in reversed(files):
+        try:
+            return json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def cmd_proof(spec: str) -> int:
+    """The technical detail behind the plain card: the matter's last session, as recorded on this computer,
+    and a fresh live check of the search machine."""
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+    from . import pi_attested
+    client, matter = _split_matter(spec)
+    rec = load_record(client, matter)
+    console = Console()
+    console.print(Text(f"\nTechnical proof · {client}/{matter} · date bound {rec['date_bound']}", style="bold"))
+    last = latest_session_record(client, matter)
+    if last is None:
+        console.print(Text("  No session has been opened on this matter yet.", style="grey58"))
+    else:
+        model = last.get("model_lane") or {}
+        console.print(Text(f"\nAI machine — last session {last.get('session_id', '')[:8]}, started {last.get('started_at', '')}", style="bold"))
+        receipt_path = model.get("receipt")
+        shown = False
+        if receipt_path and Path(receipt_path).is_file():
+            from inferroute_local.confidential import display, receipt as receipt_mod
+            display.render_panel(receipt_mod.Receipt.load(Path(receipt_path)), console)
+            shown = True
+        if not shown:
+            t = Table(box=None, show_header=False, pad_edge=False)
+            for c in model.get("check_list") or []:
+                t.add_row(Text("✓" if c.get("ok") else "✗", style="spring_green3" if c.get("ok") else "red"),
+                          Text(str(c.get("label", "")), style="bold"), Text(str(c.get("why", "")), style="grey58"))
+            console.print(t)
+        conf = last.get("confinement")
+        if conf:
+            console.print(Text.assemble(("\nThis computer  ", "bold"), (str(conf), "grey58")))
+    console.print(Text("\nSearch machine — checked now", style="bold"))
+    with console.status("checking the search machine from this computer…"):
+        live = pi_attested.verify_search_once()
+    if live is None:
+        console.print(Text("  Search is not set up on this computer.", style="grey58"))
+        return 0
+    t = Table(box=None, show_header=False, pad_edge=False)
+    for st in live.get("steps") or []:
+        t.add_row(Text("✓" if st.get("ok") else "✗", style="spring_green3" if st.get("ok") else "red"),
+                  Text(str(st.get("step", "")), style="bold"), Text(str(st.get("detail", "")), style="grey58"))
+    console.print(t)
+    if not live.get("ok"):
+        console.print(Text(f"  Not verified: {live.get('refusal')}", style="bold red"))
+    console.print(Text("\nEvery line above was computed on this computer. The record you export carries the same "
+                       "evidence, and its verifier re-checks it without trusting InferRoute.\n", style="grey58"))
+    return 0 if live.get("ok") else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -286,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
     rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
+    pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
+    pf.add_argument("matter")
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
@@ -303,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
             return reference_mod.main(a.args)
         if a.cmd == "list":
             return cmd_list()
+        if a.cmd == "proof":
+            return cmd_proof(a.matter)
     except SurveyorError as e:
         sys.stderr.write(f"\n  {e}\n\n")
         return 2

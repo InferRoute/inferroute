@@ -27,6 +27,7 @@ const LIFECYCLE_STATUS_KEY = "ir-enclave-lifecycle";
 const PROOF_ENTRY = "ir-attested-proof";
 const SEARCH_PROOF_ENTRY = "ir-search-proof";
 const REFRESH_MS = 30_000;
+const MATTER = process.env.IR_REPORT_MATTER ?? "";
 const SEARCH_TIMEOUT_MS = 300_000;
 
 // ───────────────────────── model enclave ─────────────────────────
@@ -111,9 +112,17 @@ async function readVerdict(): Promise<Verdict> {
 	}
 }
 
+// Local wall-clock HH:MM — the attorney's clock, not UTC.
+function hhmm(iso: string): string {
+	const d = new Date(iso);
+	return Number.isNaN(d.getTime()) ? iso.slice(11, 16) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// Plain words first; the checks themselves are one expand away (/proof). Same vocabulary as the launch card
+// (surveyor_trust.py): "sealed machine", "checked at", "nothing is sent".
 function statusText(v: Verdict): string {
-	if (!v.ok) return `⛔ model enclave not verified: model requests blocked (${v.reason})`;
-	return `🔒 model enclave verified ${v.verifiedAt.slice(11, 16)}Z · ${v.passed}/${v.total} checks · sealed on this machine`;
+	if (!v.ok) return `⛔ AI: sealed machine NOT verified, so nothing is sent (${v.reason})`;
+	return `🔒 AI: sealed machine, checked at ${hhmm(v.verifiedAt)}`;
 }
 
 function showStatus(ctx: ExtensionContext, v: Verdict): void {
@@ -137,9 +146,10 @@ function renderModelProof(v: Verdict | undefined, expanded: boolean, theme: Them
 		return box;
 	}
 	line(v.ok
-		? theme.fg("success", theme.bold(`🔒 Model enclave verified by this machine at ${v.verifiedAt}`))
-		: theme.fg("error", theme.bold(`⛔ Model enclave NOT verified: ${v.reason}. Model requests are blocked.`)));
-	line(theme.fg("dim", "Read from ir's local endpoint on this machine, not from the model. Not sent to the model."));
+		? theme.fg("success", theme.bold(`🔒 The AI runs in a sealed machine this computer checked at ${hhmm(v.verifiedAt)}`))
+		: theme.fg("error", theme.bold(`⛔ The AI's sealed machine could NOT be verified (${v.reason}), so nothing is sent to it.`)));
+	if (v.ok) line("Genuine sealed hardware running a build InferRoute has on record. Your text is encrypted here; only that machine can open it.");
+	line(theme.fg("dim", "Checked by this computer, not by the AI, and never shown to the AI."));
 	if (CONTRACT.modified) {
 		line(theme.fg("warning", theme.bold("⚠ contract modified: the mission contract on disk differs from the pinned version.")));
 	} else if (CONTRACT.contract_sha) {
@@ -149,7 +159,7 @@ function renderModelProof(v: Verdict | undefined, expanded: boolean, theme: Them
 	if (v.sealing) line(`${theme.fg("muted", "sealing  ")} ${v.sealing}, keys made on this machine`);
 	if (v.transport) line(`${theme.fg("muted", "carrier  ")} ${v.transport}`);
 	if (v.total) {
-		line(`${theme.fg("muted", "checks   ")} ${v.passed}/${v.total} passed${expanded ? "" : " (expand to list)"}`);
+		line(`${theme.fg("muted", "checks   ")} ${v.passed}/${v.total} passed${expanded ? "" : " (expand for the technical list)"}`);
 		for (const c of v.checks) {
 			if (!expanded && c.ok) continue;
 			line(`  ${c.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${c.label}${expanded && c.why ? theme.fg("dim", ` · ${c.why}`) : ""}`);
@@ -173,6 +183,7 @@ interface SearchStep {
 
 interface SearchVerdict {
 	ok: boolean;
+	reference?: { ok?: boolean; published?: string; key_prefix?: string };
 	refusal?: string | null;
 	test_roots?: boolean;
 	steps: SearchStep[];
@@ -277,11 +288,26 @@ function showLifecycle(ctx: ExtensionContext, s: LifecycleStatus | null): void {
 function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	if (!ctx.hasUI) return;
 	const t = ctx.ui.theme;
-	const passed = p.steps.filter((s) => s.ok).length;
 	const text = p.ok
-		? `🔒 search enclave verified${p.testRoots ? " (TEST ROOTS)" : ""} · policy ${p.policy.slice(0, 8)}… · ${passed}/${p.steps.length} checks`
-		: `⛔ search enclave: ${p.refusal}`;
+		? p.testRoots
+			? `◐ Search: TEST machine, not a real verification`
+			: `🔒 Search: sealed machine, checked at ${hhmm(p.at)}${p.phase === "search" ? ` · ${p.hits} results` : ""}`
+		: `⛔ Search: ${plainRefusal(p.refusal)}`;
 	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
+}
+
+function fmtDate(yyyymmdd: number | string): string {
+	const d = String(yyyymmdd);
+	return /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d;
+}
+
+function plainRefusal(refusal: string): string {
+	const r = refusal.toLowerCase();
+	if (["did not answer", "unreachable", "connection", "timed out", "timeout"].some((m) => r.includes(m))) {
+		return "the search machine isn't answering; nothing was sent";
+	}
+	if (r.includes("declined")) return "you declined; nothing was sent";
+	return `not verified, so nothing was sent (${refusal})`;
 }
 
 function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme: Theme) {
@@ -294,18 +320,19 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	const passed = p.steps.filter((s) => s.ok).length;
 	if (p.ok) {
 		line(theme.fg("success", theme.bold(p.phase === "search"
-			? `🔒 Sealed prior-art search: enclave verified by this machine, ${p.hits} results opened here`
-			: "🔒 Search enclave verified by this machine")));
+			? `🔒 Sealed search: ${p.hits} results, opened on this computer only`
+			: "🔒 The search machine is a sealed machine this computer just checked")));
+		line("Genuine sealed hardware running exactly the software this computer expects. The search text was encrypted here; only that machine could open it.");
 	} else {
-		line(theme.fg("error", theme.bold(`⛔ Sealed prior-art search refused: ${p.refusal}`)));
+		line(theme.fg("error", theme.bold(`⛔ Search: ${plainRefusal(p.refusal)}`)));
 	}
-	if (p.testRoots) line(theme.fg("warning", theme.bold("TEST ROOTS PINNED: this is a test enclave, not a production one")));
-	line(theme.fg("dim", "Checked by the local search verifier on this machine, not by the model. Not sent to the model."));
+	if (p.testRoots) line(theme.fg("warning", theme.bold("TEST machine: checked against test keys, not a real verification")));
+	line(theme.fg("dim", "Checked by this computer, not by the AI, and never shown to the AI."));
 	if (p.measurement) line(`${theme.fg("muted", "utility VM ")} ${p.measurement.slice(0, 24)}…`);
 	if (p.policy) line(`${theme.fg("muted", "policy     ")} ${p.policy.slice(0, 24)}…`);
 	if (p.index) line(`${theme.fg("muted", "index      ")} ${p.index}`);
 	if (p.enclaveKey) line(`${theme.fg("muted", "sealed to  ")} ${p.enclaveKey}…`);
-	line(`${theme.fg("muted", "checks     ")} ${passed}/${p.steps.length} passed${expanded ? "" : " (expand to list)"}`);
+	line(`${theme.fg("muted", "checks     ")} ${passed}/${p.steps.length} passed${expanded ? "" : " (expand for the technical list)"}`);
 	for (const s of p.steps) {
 		if (!expanded && s.ok) continue;
 		line(`  ${s.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${s.step}${expanded ? theme.fg("dim", ` · ${s.detail}`) : ""}`);
@@ -473,9 +500,23 @@ export default function (pi: ExtensionAPI) {
 		await record(ctx);
 		if (SEARCH && ctx.hasUI) {
 			const t = ctx.ui.theme;
-			const text = "search enclave: verified before the first sealed query";
+			const text = "Search: checking the sealed machine…";
 			ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg("dim", text) : text);
+			// A real check now, so the footer never implies a search machine that isn't there. Not awaited:
+			// the offer fetch can take seconds and the attorney should be able to type meanwhile.
+			searchCall("/enclave", undefined, undefined)
+				.then((v) => searchStatus(ctx, searchProofOf(v, "verify")))
+				.catch(() => searchStatus(ctx, searchProofOf({ ok: false, refusal: "the local search verifier did not answer", steps: [] }, "verify")));
 			showLifecycle(ctx, await lifecycleCall("/lifecycle", false));
+		}
+		if (ctx.hasUI && MATTER) {
+			ctx.ui.notify(
+				[`Matter ${MATTER}.`,
+					"Ask for a prior-art survey of the disclosure in this folder.",
+					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Show the checks again: /proof.",
+					`Leave with Ctrl+C twice, then keep the record: ir surveyor export ${MATTER}`].join("\n"),
+				"info",
+			);
 		}
 		if (timer) clearInterval(timer);
 		timer = setInterval(async () => showStatus(ctx, await readVerdict()), REFRESH_MS);
@@ -590,20 +631,22 @@ export default function (pi: ExtensionAPI) {
 			}
 			const measurement = String(e.measurement ?? "");
 			if (!(matter.approved ?? []).includes(measurement)) {
-				const bound = matter.cutoff_date ? `art published before ${matter.cutoff_date}` : "the matter's date bound";
+				const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
+				const identity = verified.reference?.ok
+					? "running exactly the software InferRoute published (signed reference checked)"
+					: "running exactly the software this computer expects";
+				const preview = params.text.length > 400 ? `${params.text.slice(0, 400)}…` : params.text;
 				const ok = await ctx.ui.confirm(
-					"Send a sealed prior-art query?",
+					"Allow a sealed patent search?",
 					[
-						vp.testRoots ? "TEST ROOTS PINNED: this is a test enclave, not a production one.\n" : "",
-						"This machine verified the search enclave: AMD SEV-SNP hardware, the utility VM Microsoft endorses, ",
-						"and the container policy this client pins.\n",
-						`  utility VM   ${measurement.slice(0, 24)}…\n`,
-						`  policy       ${String(e.host_data ?? "").slice(0, 24)}…\n`,
-						`  index        ${e.index_snapshot ?? ""}\n`,
-						`  enclave key  ${e.enclave_key ?? ""}…\n`,
-						`  date bound   ${bound}\n`,
-						"The model's search text will be sealed here to that key. The host sees its size and timing, not its words. ",
-						"Approve queries to this enclave for this matter?",
+						vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
+						"The assistant wants to search for:\n",
+						`  "${preview}"\n\n`,
+						`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
+						"This text is encrypted here and only that machine can open it. ",
+						`Only documents ${bound} come back.\n\n`,
+						"Allow searches to this machine for this matter? You won't be asked again for it.\n",
+						`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
 					].join(""),
 				);
 				if (!ok) {

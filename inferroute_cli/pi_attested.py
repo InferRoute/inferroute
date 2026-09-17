@@ -323,6 +323,42 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     return f"http://127.0.0.1:{port}"
 
 
+def verify_search_once(timeout: float = 120.0) -> dict | None:
+    """One live check of the configured search enclave, outside any session (`ir surveyor proof`). Same
+    verifier, same pins as a session's proxy. None when search is not configured on this computer."""
+    import subprocess
+    try:
+        cfg = json.loads(search_config_path().read_text())
+    except (OSError, ValueError):
+        return None
+    argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
+            "--expect-host-data", cfg["expect_host_data"]]
+    if cfg.get("expect_index"):
+        argv += ["--expect-index", cfg["expect_index"]]
+    if cfg.get("pins"):
+        argv += ["--pins", cfg["pins"]]
+    try:
+        out = subprocess.run(argv, cwd=cfg.get("cwd"), capture_output=True, text=True, timeout=timeout).stdout
+        res = json.loads(out)
+        return res if isinstance(res, dict) else {"ok": False, "refusal": "the search verifier answered nonsense", "steps": []}
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):
+        return {"ok": False, "refusal": "the search verifier did not answer", "steps": []}
+
+
+def search_verification(endpoint: str | None, timeout: float = 90.0) -> dict | None:
+    """The search verifier's live check of the search enclave (GET /enclave), for the launch screen. None when
+    this session has no search; a refusal dict when the verifier does not answer — never an exception."""
+    if not endpoint:
+        return None
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{endpoint}/enclave", timeout=timeout) as r:     # loopback only
+            out = json.loads(r.read())
+        return out if isinstance(out, dict) else {"ok": False, "refusal": "the local search verifier answered nonsense", "steps": []}
+    except Exception:                                        # noqa: BLE001
+        return {"ok": False, "refusal": "the local search verifier did not answer", "steps": []}
+
+
 def stop_search_proxy() -> None:
     while _SEARCH_PROXIES:
         proc = _SEARCH_PROXIES.pop()

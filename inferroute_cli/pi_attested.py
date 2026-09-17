@@ -43,7 +43,7 @@ LOOPBACK = ("127.0.0.1", "localhost", "::1")
 PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "08a79e5159d8097a6507111f9dfc06dc5fa62136fd7456ba0755cc2a69a459ab"
+PINNED_CONTRACT_SHA = "1d9422a139614fdcd175a3066bcd75b431fd09066802848351169a1d83e1d702"
 
 
 def _strip_comments(text: str) -> str:
@@ -198,7 +198,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_SURVEYOR_SURFACE")))
-    tools = TOOLS + ((SEARCH_TOOL,) if search_endpoint else ())
+    tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
     env["PI_SKIP_VERSION_CHECK"] = "1"
@@ -250,6 +250,10 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
 #    to the matter state file OUTSIDE the sandbox (approvals/marks/cutoff the agent must not forge)}
 
 SEARCH_TOOL = "prior_art_search"
+# Offered with search: the professional's marks (read-only) and one-click next steps. Every tool must be in the
+# launch allowlist, or the extension refuses the call.
+MARKS_TOOL = "matter_marks"
+NEXT_TOOL = "suggest_next_steps"
 _SEARCH_PROXIES: list = []
 
 

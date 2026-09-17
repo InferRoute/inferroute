@@ -202,6 +202,7 @@
 
   function addUser(text) {
     hideWelcome();
+    clearNext();
     const s = stick();
     log.append(el("div", "msg msg-user", text));
     s();
@@ -267,10 +268,44 @@
     find: () => "Searched the matter folder for files",
     grep: (a) => `Searched the matter folder for “${a.pattern || ""}”`,
     edit: (a) => `Edited ${String(a.path || "").split("/").pop()}`,
+    matter_marks: () => "Read your relevance marks",
     write: (a) => `Wrote ${String(a.path || "").split("/").pop()}`,
   };
 
-  function markButtons(keyNo) {
+  // Once something in a card is marked relevant, offer the obvious next move in one click.
+  const DEEPER = "Read my relevance marks, then research around the documents I marked relevant: search their distinctive features one at a time and look for documents like them. Skip what I marked known or not relevant.";
+  function offerDeeper(card) {
+    if (!card || card.querySelector(".deeper") || ended) return;
+    const b = el("button", "deeper", "Look deeper at the ones I marked relevant");
+    b.type = "button";
+    b.title = DEEPER;
+    b.addEventListener("click", () => { b.remove(); send(DEEPER); });
+    card.append(el("div", "card-actions", b));
+  }
+
+  // Next steps offered by the assistant: each button shows exactly the message it sends. Shown when the
+  // assistant has finished, cleared when a new message goes out.
+  let pendingNext = [];
+  function clearNext() {
+    for (const n of Array.from(document.querySelectorAll(".next"))) n.remove();
+  }
+  function renderNext() {
+    if (!pendingNext.length || ended) return;
+    clearNext();
+    const row = el("div", "next", el("div", "next-title", "Next steps"));
+    for (const step of pendingNext) {
+      const b = el("button", "", step);
+      b.type = "button";
+      b.addEventListener("click", () => { clearNext(); send(step); });
+      row.append(b);
+    }
+    pendingNext = [];
+    const s = stick();
+    log.append(row);
+    s();
+  }
+
+  function markButtons(keyNo, card) {
     const wrap = el("div", "marks");
     const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"]];
     const buttons = opts.map(([value, label]) => {
@@ -283,6 +318,8 @@
           await api("/api/mark", { key: keyNo, mark: value });
           marks.set(keyNo, value);
           refreshMarks(keyNo);
+          toast(`Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
+          if (value === "relevant") offerDeeper(card);
         } catch (e) { toast(`Couldn't record the mark: ${e.message}`, "error"); }
       });
       wrap.append(b);
@@ -301,14 +338,20 @@
   function toolStart(ev) {
     hideWelcome();
     const s = stick();
+    if (ev.tool === "suggest_next_steps") {
+      return;
+    }
     if (ev.tool === "prior_art_search") {
+      const a = ev.args || {};
       const card = el("div", "card");
       const sub = el("span", "sub", "checking the search machine…");
-      card.append(el("div", "card-head", el("span", "title", "🔍 Sealed patent search"), sub));
-      const q = String((ev.args || {}).text || "");
-      card.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
+      const title = el("span", "title", "🔍 Sealed patent search");
+      const what = a.feature ? el("span", "what", `feature: ${a.feature}`) : a.like ? el("span", "what", `documents like ${String(a.like).toUpperCase()}`) : null;
+      card.append(el("div", "card-head", title, what, sub));
+      const q = String(a.text || "");
+      if (q) card.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
       log.append(card);
-      cards.set(ev.call, { card, sub });
+      cards.set(ev.call, { card, sub, title });
       toolRunning = "Searching the patent database in its sealed machine…";
     } else {
       const fn = STEP_TEXT[ev.tool];
@@ -330,10 +373,17 @@
   function toolEnd(ev) {
     toolRunning = "";
     updateActivity();
+    if (ev.tool === "suggest_next_steps") {
+      const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];
+      pendingNext = steps.map(String).filter((t) => t && !/^[\/!]/.test(t)).slice(0, 4);
+      if (!busy) renderNext();
+      return;
+    }
     if (ev.tool !== "prior_art_search") return;
     const entry = cards.get(ev.call);
     if (!entry) return;
-    const { card, sub } = entry;
+    const { card, sub, title } = entry;
+    if (ev.details && ev.details.searchNo) title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
     const d = ev.details || {};
     const s = stick();
     if (!ev.ok || !d.ok) {
@@ -343,7 +393,8 @@
       return;
     }
     const docs = Array.isArray(d.docs) ? d.docs : [];
-    sub.textContent = `${docs.length} documents · opened on this computer only`;
+    const again = docs.filter((d) => d.alsoIn).length;
+    sub.textContent = `${docs.length} documents${again ? ` (${again} already seen)` : ""} · opened on this computer only`;
     if (d.testRoots) card.append(el("div", "card-note warn", "TEST machine: checked against test keys, not a real verification."));
     else card.append(el("div", "card-note", `🔒 ${d.ours ? "InferRoute's sealed search machine" : "Sealed search machine"}, checked just before the search. Only that machine could read the query.`));
     const list = el("ol", "docs");
@@ -352,13 +403,15 @@
       const title = el("div", "dtitle", String(doc.title || ""));
       const row = el("li", "doc",
         el("span", "rank", String(idx + 1)),
-        el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null, title),
-        markButtons(keyNo));
+        el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
+          doc.alsoIn ? el("span", "seen", `also in search ${doc.alsoIn}`) : null, title),
+        markButtons(keyNo, card));
       title.addEventListener("click", () => row.classList.toggle("open"));
       list.append(row);
     });
     card.append(list);
-    card.append(el("div", "card-foot", "Mark what matters. Marks are your judgement: kept with the matter, and the assistant can't make or change them. A search finds related documents; it doesn't prove novelty."));
+    card.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty."));
+    if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
     s();
   }
 
@@ -468,7 +521,7 @@
   function handle(ev) {
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
-      case "busy": busy = ev.value; updateActivity(); break;
+      case "busy": busy = ev.value; updateActivity(); if (!busy) renderNext(); break;
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
       case "assistant_end": assistantEnd(ev); break;
@@ -531,6 +584,7 @@
   async function send(text) {
     const t = String(text || "").trim();
     if (!t || ended) return;
+    clearNext();
     $("input").value = "";
     autosize();
     try { await api("/api/prompt", { text: t }); } catch (e) { toast(`Not sent: ${e.message}`, "error"); $("input").value = t; }

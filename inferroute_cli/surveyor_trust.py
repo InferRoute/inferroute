@@ -267,6 +267,7 @@ def render_howto(matter: str, console: Any = None) -> None:
     console = console or Console()
     rows = [("In the session", "ask for a prior-art survey of the disclosure in this folder"),
             ("", "/relevant US-1234567-B2  mark a result (also /not-relevant, /known, /marks)"),
+            ("", "/next 2  send the assistant's suggested next step number 2"),
             ("", "/proof  show the checks again · /quit  leave"),
             ("Afterwards", f"ir surveyor export {matter}   the record to keep")]
     for head, text in rows:

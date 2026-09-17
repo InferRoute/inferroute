@@ -232,6 +232,86 @@ def test_expired_pool_is_refreshed_before_use(world):
     assert carrier.instances_calls == 2
 
 
+def _reject_nonces(carrier, times: int):
+    """The gateway's answer to a stale nonce, for the first `times` invokes."""
+    real = carrier.invoke
+    state = {"left": times}
+
+    async def invoke(**kw):
+        if state["left"] > 0:
+            state["left"] -= 1
+            carrier.calls.append((kw["instance_id"], kw["nonce"], kw["stream"]))
+
+            async def body():
+                yield b'{"detail":"Invalid, expired, or already-used nonce"}'
+            return 403, {"content-type": "application/json"}, body()
+        return await real(**kw)
+    carrier.invoke = invoke
+
+
+def test_a_rejected_nonce_is_replaced_and_the_request_resent_once(world):
+    carrier = FakeCarrier(world["enclaves"], nonces_per=5)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    _reject_nonces(carrier, 1)
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "there"}]}))
+    assert st == 200 and json.loads(body)["content"][0]["text"] == "hi there"
+    assert carrier.instances_calls == 2, "the stale pool was dropped and fresh nonces fetched"
+    first, second = carrier.calls[0][1], carrier.calls[1][1]
+    assert first != second and second.endswith("-2"), "the resend used a nonce from the fresh listing"
+    assert s.receipt.counters["requests"] == 1 and s.receipt.counters["errors"] == 0
+    assert any(e["kind"] == "nonce-rejected" for e in s.receipt.events)
+
+
+def test_a_second_nonce_rejection_is_reported_not_looped(world):
+    carrier = FakeCarrier(world["enclaves"], nonces_per=5)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    _reject_nonces(carrier, 10)
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
+    assert st == 403 and "nonce" in body.decode()
+    assert len(carrier.calls) == 2, "one resend, never a loop"
+    assert s.receipt.counters["errors"] == 1
+
+
+def test_an_ordinary_refusal_is_not_retried(world):
+    carrier = FakeCarrier(world["enclaves"], nonces_per=5)
+    s = _session(carrier)
+    asyncio.run(s.open())
+
+    async def refuse(**kw):
+        carrier.calls.append((kw["instance_id"], kw["nonce"], kw["stream"]))
+
+        async def body():
+            yield b'{"detail":"quota exceeded"}'
+        return 403, {}, body()
+    carrier.invoke = refuse
+    st, _, _ = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
+    assert st == 403 and len(carrier.calls) == 1 and carrier.instances_calls == 1
+
+
+def test_nonce_lifetime_runs_from_when_they_were_fetched_not_from_the_end_of_verification(world, monkeypatch):
+    # Measured 2026-09-17: verification took 68 s against a 60 s nonce life, and the pool, timed from the
+    # end of verification, was handed out already expired. With the clock started at the listing, the
+    # first request after a slow verification refreshes instead of sending a dead nonce.
+    clock = {"t": 1_000_000.0}
+    monkeypatch.setattr(S.time, "time", lambda: clock["t"])
+    real_online = attest.verify_online
+
+    async def slow_online(report, inst, nonce, http, timeout=0):
+        clock["t"] += 34                                  # two instances: 68 s of checking
+        return await real_online(report, inst, nonce, http, timeout)
+    monkeypatch.setattr(attest, "verify_online", slow_online)
+    carrier = FakeCarrier(world["enclaves"], nonces_per=5, expires_in=60)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    assert carrier.instances_calls == 1
+    st, _, _ = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
+    assert st == 200
+    assert carrier.instances_calls == 2, "the pool fetched 68 s ago was recognised as expired and refreshed"
+    assert carrier.calls[0][1].endswith("-2")
+
+
 def test_pinned_instance_vanishing_switches_only_to_a_verified_one_and_records_it(world):
     carrier = FakeCarrier(world["enclaves"], nonces_per=1)
     s = _session(carrier)

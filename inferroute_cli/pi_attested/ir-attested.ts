@@ -212,15 +212,22 @@ interface SearchProof {
 	index: string;
 	enclaveKey: string;
 	hits: number;
+	// The documents themselves, for a surface that shows results (the local browser page). Tool `details`
+	// never reach the model; the model gets hitsText in `content`.
+	docs: { key: string; year?: number; title?: string }[];
 	at: string;
 }
 
-function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"]): SearchProof {
+// `checked`: for a search, the verification that preceded it. The search response itself does not repeat the
+// reference block; but the search was pinned to that enclave's lifetime and the verifier re-runs the identity
+// check on every search, so a successful search on the SAME enclave inherits the identity it was checked under.
+function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict): SearchProof {
 	return {
 		ok: out.ok && phase !== "declined",
 		refusal: phase === "declined" ? "the user declined to send a sealed query" : String(out.refusal ?? ""),
 		testRoots: out.test_roots === true,
-		ours: isInferRoutes(out),
+		ours: isInferRoutes(out) || Boolean(checked && out.ok && isInferRoutes(checked)
+			&& out.enclave?.host_data === checked.enclave?.host_data && out.enclave?.lifetime_id === checked.enclave?.lifetime_id),
 		phase,
 		steps: out.steps ?? [],
 		measurement: String(out.enclave?.measurement ?? ""),
@@ -228,6 +235,7 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"]): SearchP
 		index: String(out.enclave?.index_snapshot ?? ""),
 		enclaveKey: String(out.enclave?.enclave_key ?? ""),
 		hits: Number(out.statement?.hits_n ?? 0),
+		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title })),
 		at: new Date().toISOString(),
 	};
 }
@@ -516,7 +524,8 @@ export default function (pi: ExtensionAPI) {
 				.catch(() => searchStatus(ctx, searchProofOf({ ok: false, refusal: "the local search verifier did not answer", steps: [] }, "verify")));
 			showLifecycle(ctx, await lifecycleCall("/lifecycle", false));
 		}
-		if (ctx.hasUI && MATTER) {
+		// The terminal gets a how-to; the browser page has its own welcome, and "Ctrl+C twice" means nothing there.
+		if (ctx.hasUI && MATTER && process.env.IR_SURVEYOR_SURFACE !== "browser") {
 			ctx.ui.notify(
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
@@ -674,7 +683,7 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				throw new Error("the local search verifier did not answer; the search did not complete");
 			}
-			const sp = searchProofOf(out, "search");
+			const sp = searchProofOf(out, "search", verified);
 			searchStatus(ctx, sp);
 			disclosure.searches.push({
 				at: sp.at, ok: sp.ok, testRoots: sp.testRoots, measurement: sp.measurement, policy: sp.policy,

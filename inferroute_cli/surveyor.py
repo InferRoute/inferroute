@@ -235,7 +235,7 @@ def cmd_verify_export(bundle_dir: str) -> int:
     return surveyor_export.verify_bundle(bundle_dir)
 
 
-def cmd_open(spec: str, dev_unconfined: bool = False) -> int:
+def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     client, matter = _split_matter(spec)
     rec = load_record(client, matter)
     ws = Path(rec["workspace"])
@@ -269,7 +269,10 @@ def cmd_open(spec: str, dev_unconfined: bool = False) -> int:
     os.chdir(ws)
     print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     from . import confidential as confidential_mod
-    return confidential_mod.launch([], agent="pi", surveyor={"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]})
+    surveyor = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
+    if web:
+        surveyor["web"] = True
+    return confidential_mod.launch([], agent="pi", surveyor=surveyor)
 
 
 def latest_session_record(client: str, matter: str) -> dict | None:
@@ -341,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
     o = sub.add_parser("open"); o.add_argument("matter")
     o.add_argument("--dev-unconfined", action="store_true",
                    help="developer override: open UNCONFINED (no sandbox, no trusted state). Never for a real matter.")
+    o.add_argument("--web", action="store_true",
+                   help="work in a local browser page instead of the terminal (same checks, same sandbox)")
     x = sub.add_parser("export"); x.add_argument("matter"); x.add_argument("-o", "--out", default=None)
     x.add_argument("--anchor", action="store_true", help="OpenTimestamps-anchor MANIFEST.json (publishes only a hash)")
     ve = sub.add_parser("verify-export"); ve.add_argument("bundle")
@@ -356,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "set-date":
             return cmd_set_date(a.matter, a.date)
         if a.cmd == "open":
-            return cmd_open(a.matter, dev_unconfined=a.dev_unconfined)
+            return cmd_open(a.matter, dev_unconfined=a.dev_unconfined, web=a.web)
         if a.cmd == "export":
             return cmd_export(a.matter, a.out, anchor=a.anchor)
         if a.cmd == "verify-export":

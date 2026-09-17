@@ -77,6 +77,10 @@ class ConfidentialSession:
     async def open(self, progress: Callable[[str], None] | None = None) -> Receipt:
         say = progress or (lambda s: None)
         say("asking which instances accept sealed requests, and for their encryption keys…")
+        # The nonces in this listing start expiring NOW, not after verification: the Intel and NVIDIA pass
+        # below can take longer than a nonce lives (68 s measured, against 60 s), and a pool timed from the
+        # end of verification was handed out already dead.
+        fetched_at = time.time()
         try:
             e2 = await self.transport.instances(self.fleet_id)
         except Exception as e:
@@ -99,7 +103,7 @@ class ConfidentialSession:
         await self._online_pass(e2)
         verified = self.fleet.verified_ids
         say("evidence verified; pinning an enclave for this session…")
-        self._absorb_pool(e2)
+        self._absorb_pool(e2, fetched_at=fetched_at)
         eligible = [i for i in self._pool if i in verified]
         self.receipt.fleet = {"instances": len(self.fleet.instances), "verified": len(verified),
                               "e2ee_capable": len(e2.get("instances") or []), "eligible": len(eligible),
@@ -129,11 +133,12 @@ class ConfidentialSession:
         self.receipt.save()
         return self.receipt
 
-    def _absorb_pool(self, e2: dict) -> None:
-        """Only instances that VERIFIED enter the pool; the rest are never candidates."""
+    def _absorb_pool(self, e2: dict, fetched_at: float | None = None) -> None:
+        """Only instances that VERIFIED enter the pool; the rest are never candidates. `fetched_at`: when the
+        listing was requested — the nonces' lifetime runs from then."""
         reports = {i.instance_id: i for i in (self.fleet.instances if self.fleet else [])}
         ttl = e2.get("nonce_expires_in")
-        expires = time.time() + float(55 if ttl is None else ttl) - NONCE_SAFETY_S
+        expires = (time.time() if fetched_at is None else fetched_at) + float(55 if ttl is None else ttl) - NONCE_SAFETY_S
         fresh: dict[str, Pinned] = {}
         for inst in e2.get("instances") or []:
             iid = inst.get("instance_id")
@@ -178,9 +183,10 @@ class ConfidentialSession:
             return p, p.nonces.pop(0)
 
     async def _refresh_pool(self) -> None:
+        fetched_at = time.time()
         e2 = await self.transport.instances(self.fleet_id)
         current = self.pinned.instance_id if self.pinned else None
-        self._absorb_pool(e2)
+        self._absorb_pool(e2, fetched_at=fetched_at)
         if current in self._pool and self._pool[current].nonces:
             self.pinned = self._pool[current]
             return
@@ -227,6 +233,47 @@ class ConfidentialSession:
 
     # ───────────────────────── the request path ─────────────────────────
 
+    async def _send_sealed(self, oai: dict, streaming: bool):
+        """Seal `oai` to the pinned, verified key and hand it to the carrier. Returns ("ok", pinned, sealed, raw)
+        or ("error", status, message).
+
+        A nonce the gateway rejects (expired, or already used) says nothing about the enclave — only that this
+        client's pool is stale — but left alone it fails every later request too, since the next nonce comes
+        from the same pool. So the pool is dropped and the request is sealed again and sent ONCE more, to a key
+        that passed the same checks (the refresh admits verified instances only). A second rejection is
+        returned as it is: a retry that loops would hide a real refusal."""
+        c = self.receipt.counters
+        for attempt in (1, 2):
+            try:
+                pinned, nonce = await self._take_nonce()
+                sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
+            except Refused as e:
+                return ("error", 503, str(e))
+            except Exception as e:
+                return ("error", 500, f"could not seal the request: {public_reason(e)}")
+            if attempt == 1:
+                c["requests"] += 1
+            c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
+            c["ciphertext_bytes_sent"] += len(sealed.blob)
+            try:
+                status, headers, raw = await self.transport.invoke(
+                    fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
+            except httpx.HTTPError as e:
+                return ("error", 502, f"the relay is unreachable: {public_reason(e)}")
+            if status == 200:
+                return ("ok", pinned, sealed, raw)
+            try:
+                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
+            except Exception as e:                       # the error body itself may be cut short
+                detail = f"(body unreadable: {type(e).__name__})"
+            if attempt == 1 and status in (400, 401, 403) and "nonce" in detail.lower():
+                async with self._lock:
+                    self._pool_expire = 0.0
+                self.receipt.note("nonce-rejected", f"the gateway refused a nonce ({status}); fetched fresh nonces and resent once")
+                continue
+            return ("error", status, f"upstream {status}: {detail}")
+        return ("error", 502, "the request could not be sent")
+
     async def messages(self, body: dict) -> tuple[int, dict, AsyncIterator[bytes]]:
         """Anthropic request in → Anthropic response out; everything in between is sealed."""
         c = self.receipt.counters
@@ -234,30 +281,14 @@ class ConfidentialSession:
         t0 = time.monotonic()
         try:
             oai = translate.to_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
-            pinned, nonce = await self._take_nonce()
-            sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
-        except Refused as e:
-            c["errors"] += 1
-            return self._error(streaming, 503, str(e))
         except Exception as e:
             c["errors"] += 1
             return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}")
-        c["requests"] += 1
-        c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
-        c["ciphertext_bytes_sent"] += len(sealed.blob)
-        try:
-            status, headers, raw = await self.transport.invoke(
-                fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
-        except httpx.HTTPError as e:
+        out = await self._send_sealed(oai, streaming)
+        if out[0] == "error":
             c["errors"] += 1
-            return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}")
-        if status != 200:
-            c["errors"] += 1
-            try:
-                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
-            except Exception as e:                       # the error body itself may be cut short
-                detail = f"(body unreadable: {type(e).__name__})"
-            return self._error(streaming, status, f"upstream {status}: {detail}")
+            return self._error(streaming, out[1], out[2])
+        _, pinned, sealed, raw = out
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed, t0)
         return 200, {"content-type": "application/json"}, self._open_json(raw, sealed, t0)
@@ -273,30 +304,14 @@ class ConfidentialSession:
         t0 = time.monotonic()
         try:
             oai = translate.native_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
-            pinned, nonce = await self._take_nonce()
-            sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
-        except Refused as e:
-            c["errors"] += 1
-            return self._error(streaming, 503, str(e), openai=True)
         except Exception as e:
             c["errors"] += 1
             return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}", openai=True)
-        c["requests"] += 1
-        c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
-        c["ciphertext_bytes_sent"] += len(sealed.blob)
-        try:
-            status, headers, raw = await self.transport.invoke(
-                fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)
-        except httpx.HTTPError as e:
+        out = await self._send_sealed(oai, streaming)
+        if out[0] == "error":
             c["errors"] += 1
-            return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}", openai=True)
-        if status != 200:
-            c["errors"] += 1
-            try:
-                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
-            except Exception as e:
-                detail = f"(body unreadable: {type(e).__name__})"
-            return self._error(streaming, status, f"upstream {status}: {detail}", openai=True)
+            return self._error(streaming, out[1], out[2], openai=True)
+        _, pinned, sealed, raw = out
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed, t0)
         return 200, {"content-type": "application/json"}, self._open_json_native(raw, sealed, t0)

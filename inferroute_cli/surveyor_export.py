@@ -517,7 +517,9 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
             pass
 
     print(f"wrote {dest}")
-    print(f"  {len(b['searches'])} sealed search(es), {len(b['evidence'])} evidence bundle(s); verify with: python3 verify_record.py .")
+    print(f"  {len(b['searches'])} sealed search(es), {len(b['evidence'])} evidence bundle(s)")
+    print(f"  check it here:        ir surveyor verify-export {dest}")
+    print("  anyone, without ir:   python3 verify_record.py .   (in that folder; needs Python's cryptography 42 or newer)")
     print("  contains the disclosure in plain text — store it accordingly")
     if anchor:
         _anchor(dest / "MANIFEST.json")

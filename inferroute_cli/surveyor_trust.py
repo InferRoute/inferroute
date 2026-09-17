@@ -142,16 +142,21 @@ def search_item(search: Optional[dict], date_bound: str = "") -> Dict[str, Any]:
             "points": points, "more": more, "technical": technical}
 
 
-def computer_item(confinement: str) -> Dict[str, Any]:
+BROWSER_POINT = ("This page is served by this computer alone. It loads nothing from the internet and never turns "
+                 "what the assistant writes into a link.")
+
+
+def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]:
     label = confinement or ""
     technical = [{"label": "confinement", "ok": True, "value": label}]
+    browser = [BROWSER_POINT] if surface == "browser" else []
     if label.startswith("require, address-level"):
         return {"key": "computer", "state": OK, "title": "This computer",
                 "summary": "The assistant works in a closed box.",
-                "points": ["No internet, and no files beyond this matter's folder."],
+                "points": ["No internet, and no files beyond this matter's folder."] + browser,
                 "more": ["It has no internet connection. Its only ways out are the two sealed machines above, "
                          "through this computer's own checks.",
-                         "It sees only this matter's folder. Your other files don't exist inside the box."],
+                         "It sees only this matter's folder. Your other files don't exist inside the box."] + browser,
                 "technical": technical}
     if label.startswith("unconfined") or label == "not confined":
         return {"key": "computer", "state": FAIL, "title": "This computer",
@@ -180,7 +185,7 @@ EXPLAINER = ("A sealed machine encrypts its own memory with a key held by its ch
              "can't look inside. This computer checks each machine's hardware signature before sending it anything.")
 
 
-def limits(search_state: str, search_is_ours: bool = False) -> List[str]:
+def limits(search_state: str, search_is_ours: bool = False, surface: str = "terminal") -> List[str]:
     search_sw = ("The search machine runs InferRoute's own published software; " if search_is_ours else
                  "The search machine runs the software this computer expects; ")
     out = ["The chips prove where your text can be read, not what the software there does with it. "
@@ -190,11 +195,16 @@ def limits(search_state: str, search_is_ours: bool = False) -> List[str]:
            "The services in between can see when you work and how much you send, never the words."]
     if search_state in (OK, WARN):
         out.append("A search finds related documents. It doesn't prove novelty, or that nothing else exists.")
+    if surface == "browser":
+        out.append("Browser extensions allowed to read every page can read this one too. For client matters, use "
+                   "a browser profile without extensions.")
     return out
 
 
-def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str = "", date_bound: str = "") -> Dict[str, Any]:
-    items = [ai_item(receipt), search_item(search, date_bound), computer_item(confinement), control_item(matter)]
+def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str = "", date_bound: str = "",
+          surface: str = "terminal") -> Dict[str, Any]:
+    """`surface`: "terminal" or "browser" — the browser page adds what it guarantees and what it can't."""
+    items = [ai_item(receipt), search_item(search, date_bound), computer_item(confinement, surface), control_item(matter)]
     states = {i["key"]: i["state"] for i in items}
     if states["ai"] == FAIL:
         verdict, headline = "blocked", "Not opened: the AI machine could not be verified, so nothing was sent."
@@ -205,7 +215,7 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
                                         "inside two sealed machines, both checked just now.")
     return {"schema": "inferroute.surveyor-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items,
-            "limits": limits(states["search"], search_is_inferroutes(search)), "matter": matter, "date_bound": date_bound, "checked_at": _now()}
+            "limits": limits(states["search"], search_is_inferroutes(search), surface), "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}
 
 
 # ───────────────────────── terminal ─────────────────────────

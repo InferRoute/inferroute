@@ -158,3 +158,31 @@ def test_new_refuses_a_cloud_sync_root(home, monkeypatch):
     monkeypatch.setenv("IR_SURVEYOR_ROOT", str(home / "OneDrive" / "Surveyor"))
     assert S.main(["new", "Acme", "m9"]) == 2
     assert not S.record_path("Acme", "m9").exists()
+
+
+def test_a_matter_is_private_to_this_account_even_under_a_permissive_umask(home, monkeypatch):
+    # Records hold the search text (the invention) and results. Under umask 0002, the default on many
+    # desktops, they were readable by every other account on the computer.
+    import stat
+    old = os.umask(0o002)
+    try:
+        S.main(["new", "Acme", "priv"])
+        rec = _rec(home, "Acme", "priv")
+        for d in (Path(rec["workspace"]), S.records_dir("Acme", "priv"), S.matters_dir(), S._irhome() / "confidential"):
+            assert stat.S_IMODE(d.stat().st_mode) == 0o700, d
+        assert stat.S_IMODE(S.record_path("Acme", "priv").stat().st_mode) & 0o077 == 0
+        assert os.umask(0o002) == 0o077, "the command leaves this process creating owner-only files"
+    finally:
+        os.umask(old)
+
+
+def test_open_tightens_a_matter_created_before_it_was_private(home, monkeypatch):
+    import stat
+    S.main(["new", "Acme", "loose"])
+    ws = Path(_rec(home, "Acme", "loose")["workspace"])
+    os.chmod(ws, 0o775)
+    os.chmod(S.records_dir("Acme", "loose"), 0o775)
+    _patch_launch(monkeypatch, {})
+    S.main(["open", "Acme/loose"])
+    assert stat.S_IMODE(ws.stat().st_mode) == 0o700
+    assert stat.S_IMODE(S.records_dir("Acme", "loose").stat().st_mode) == 0o700

@@ -123,6 +123,21 @@ def _split_matter(spec: str) -> tuple[str, str]:
     return sanitize(client, "client"), sanitize(matter, "matter")
 
 
+def make_private(client: str, matter: str) -> None:
+    """Owner-only access to everything that holds a matter's words: the workspace (the disclosure), and the
+    host-side records, state and receipts under confidential/. A folder at 0700 keeps other accounts on this
+    computer out of every file inside it, whatever mode an editor gave that file. Applied on `new` and on every
+    `open`, so a matter created before this existed is tightened the next time it is used."""
+    for d in (surveyor_root(), surveyor_root() / client, workspace_path(client, matter),
+              _irhome(), _irhome() / "confidential", matters_dir(), matters_dir() / client,
+              records_dir(client, matter).parent, records_dir(client, matter)):
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
+
+
 def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
     client, matter = sanitize(client, "client"), sanitize(matter, "matter")
     if record_path(client, matter).exists():
@@ -136,6 +151,7 @@ def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
     bound = priority_date or _today()
     _to_yyyymmdd(bound)                                      # validate
     ws.mkdir(parents=True, exist_ok=True)
+    make_private(client, matter)
     disclosure = ws / "disclosure.md"
     if not disclosure.exists():
         disclosure.write_text(TEMPLATE_DISCLOSURE)
@@ -168,10 +184,8 @@ def cmd_set_date(spec: str, date: str) -> int:
 
 def cmd_list() -> int:
     root = matters_dir()
-    if not root.exists():
-        print("no matters yet — create one: ir surveyor new <client> <matter>")
-        return 0
-    for cdir in sorted(root.iterdir()):
+    shown = 0
+    for cdir in (sorted(root.iterdir()) if root.exists() else []):
         if not cdir.is_dir():
             continue
         for f in sorted(cdir.glob("*.json")):
@@ -182,6 +196,10 @@ def cmd_list() -> int:
             except (OSError, ValueError):
                 continue
             print(f"  {r.get('client')}/{r.get('matter'):<20} date bound {r.get('date_bound')}  {r.get('workspace')}")
+            shown += 1
+    if not shown:
+        # An emptied directory used to print nothing at all, which reads as a broken command.
+        print("no matters yet — create one: ir surveyor new <client> <matter> --priority-date YYYY-MM-DD")
     return 0
 
 
@@ -241,6 +259,11 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     ws = Path(rec["workspace"])
     if not ws.is_dir():
         raise SurveyorError(f"the matter workspace is missing: {ws}")
+    make_private(client, matter)
+    try:
+        os.chmod(ws, 0o700)                                  # the recorded workspace, wherever it lives
+    except OSError:
+        pass
     sync = _under_sync_root(ws)
     if sync:
         raise SurveyorError(f"the matter workspace is under a cloud-sync folder ({sync}); refusing to open it.")
@@ -337,6 +360,10 @@ def cmd_proof(spec: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Everything a Surveyor command writes, and everything it starts (the search verifier, Pi), is created
+    # owner-only: records hold search text and results, receipts and state hold the matter's history. A
+    # common default umask (0002 or 0022) would leave them readable by every other account on this computer.
+    os.umask(0o077)
     p = argparse.ArgumentParser(prog="ir surveyor", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)

@@ -70,6 +70,7 @@
         continue;
       }
       if (!line.trim()) { i++; continue; }
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.append(el("hr", "")); i++; continue; }
       const h = /^\s*#{1,6}\s+(.*)$/.exec(line);
       if (h) { out.append(el("h4", "", inline(h[1]))); i++; continue; }
       if (/^\s*!\[/.test(line)) { i++; continue; }
@@ -92,13 +93,15 @@
       if (ul.test(line) || ol.test(line)) {
         const ordered = ol.test(line) && !ul.test(line);
         const list = el(ordered ? "ol" : "ul", "");
+        // Keep the model's own numbering: items separated by a paragraph are still 1, 2, 3, not 1, 1, 1.
+        if (ordered) list.start = Number(/^\s*(\d+)/.exec(line)[1]) || 1;
         const re = ordered ? ol : ul;
         while (i < lines.length && re.test(lines[i])) list.append(el("li", "", inline(re.exec(lines[i++])[1])));
         out.append(list);
         continue;
       }
       const para = [];
-      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|```|[-*•]\s|\d+[.)]\s|\|)/.test(lines[i])) para.push(lines[i++].trim());
+      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|```|[-*•]\s|\d+[.)]\s|\||-{3,}\s*$)/.test(lines[i])) para.push(lines[i++].trim());
       if (!para.length) { para.push(lines[i++].trim()); }
       out.append(el("p", "", inline(para.join(" "))));
     }
@@ -177,7 +180,7 @@
     }
     body.append(el("h2", "", "What this can't prove"));
     body.append(el("ul", "limits", ...(t.limits || []).map((l) => el("li", "", l))));
-    body.append(el("div", "checked", `Checked ${new Date(t.checked_at).toLocaleString()}`));
+    body.append(el("div", "checked", `Checked ${new Date(t.checked_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`));
   }
 
   // ── conversation ──
@@ -518,6 +521,7 @@
 
   function showNoKey() {
     $("nokey").hidden = false;
+    $("matter").hidden = true;
     $("layout").hidden = true;
     $("verdict").hidden = true;
     $("end").hidden = true;
@@ -601,8 +605,10 @@
       copy.addEventListener("click", () => navigator.clipboard.writeText(r.path).then(() => toast("Copied.", "info")).catch(() => {}));
       out.append(el("div", "", el("b", "", "Record exported."), " It holds the disclosure in plain text: store it like the client file."),
         el("span", "mono", r.path),
-        el("div", "", "Open record.html in that folder to read it. Anyone can check it, without trusting InferRoute, with:"),
-        el("span", "mono", r.verify), copy);
+        el("div", "", "Open record.html in that folder to read it. Check it on this computer with:"),
+        el("span", "mono", r.verify_here),
+        el("div", "", "Anyone else can check it without InferRoute's software, from inside that folder (needs Python's cryptography library, version 42 or newer):"),
+        el("span", "mono", r.verify_anyone), copy);
       out.hidden = false;
     } catch (e) { toast(e.message, "error"); }
     finally { b.disabled = false; b.textContent = "Export the record"; }

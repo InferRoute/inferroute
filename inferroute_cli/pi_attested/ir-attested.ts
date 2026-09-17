@@ -524,13 +524,13 @@ export default function (pi: ExtensionAPI) {
 				.catch(() => searchStatus(ctx, searchProofOf({ ok: false, refusal: "the local search verifier did not answer", steps: [] }, "verify")));
 			showLifecycle(ctx, await lifecycleCall("/lifecycle", false));
 		}
-		// The terminal gets a how-to; the browser page has its own welcome, and "Ctrl+C twice" means nothing there.
+		// The terminal gets a how-to; the browser page has its own welcome, and "/quit" means nothing there.
 		if (ctx.hasUI && MATTER && process.env.IR_SURVEYOR_SURFACE !== "browser") {
 			ctx.ui.notify(
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
 					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Show the checks again: /proof.",
-					`Leave with Ctrl+C twice, then keep the record: ir surveyor export ${MATTER}`].join("\n"),
+					`Leave with /quit, then keep the record: ir surveyor export ${MATTER}`].join("\n"),
 				"info",
 			);
 		}

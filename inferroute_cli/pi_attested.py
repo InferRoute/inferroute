@@ -117,7 +117,8 @@ def _with_loopback(value: str | None) -> str:
 _CFG_KEEP = ("models.json", "settings.json", "bin", "sessions", "tmp", "attested-sessions")
 
 
-def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None) -> Path:
+def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
+               quiet: bool = False) -> Path:
     """A stable ir-owned Pi config dir, scrubbed on every launch to exactly the known-good entries. Keeps
     `bin/` (Pi's helper binaries) so offline launches still have them; sessions are a REAL dir here (not a
     symlink out), so Pi can write them under the filesystem confinement; nothing of the user's is mirrored."""
@@ -132,7 +133,10 @@ def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: 
             entry.unlink()                    # a prior symlink-out; replace with a real dir below
     doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None)
     (d / "models.json").write_text(json.dumps(doc, indent=1))
-    (d / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "defaultProjectTrust": "never"}, indent=1))
+    # `quiet`: a Surveyor session hides Pi's developer start-up header (key bindings, "! bash", resource
+    # paths) and the model's thinking; the attorney has been shown what matters on the card, and reads the answer.
+    (d / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "defaultProjectTrust": "never",
+                                                 **({"quietStartup": True, "hideThinkingBlock": True} if quiet else {})}, indent=1))
     (d / "sessions").mkdir(exist_ok=True)     # real dir, writable under confinement (was a symlink to ~/.pi)
     (d / "attested-sessions").mkdir(exist_ok=True)
     # cfg/bin helpers run inside the sandbox and are agent-writable; re-copy them each launch so a prior
@@ -193,7 +197,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
              headers: dict | None = None, search_endpoint: str | None = None) -> list[str]:
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
-    cfg = config_dir(base_url, api_key, alias, upstream_name, headers)
+    cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_SURVEYOR_SURFACE")))
     tools = TOOLS + ((SEARCH_TOOL,) if search_endpoint else ())
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"

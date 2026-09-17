@@ -168,3 +168,36 @@ def test_disclosure_content_gates_prewarm(matter):
     assert S.disclosure_has_content(ws) is False
     ws.joinpath("disclosure.md").write_text(S.TEMPLATE_DISCLOSURE + "\nThe invention is a phase-change cooling loop.\n")
     assert S.disclosure_has_content(ws) is True
+
+
+# ── the record's first screen ──
+
+def _sess(conf="require, address-level (empty network namespace)", verified=True):
+    return {"record": {"confinement": conf, "model_lane": {"verified": verified}}}
+
+
+def test_glance_never_asserts_the_search_machine_was_inferroutes():
+    from inferroute_cli import surveyor_export as X
+    html = X._glance([_sess()], 2, {}, {"date_bound": "2020-01-01"})
+    assert "Whether the search machine was InferRoute's" in html and "does not assert it" in html
+    assert "was InferRoute's</b> is checked" in html
+
+
+def test_glance_says_who_stands_behind_each_line():
+    from inferroute_cli import surveyor_export as X
+    html = X._glance([_sess()], 1, {"US-1-B2": {}}, {"date_bound": "2020-01-01"})
+    assert html.count("As reported by this computer") == 2 and "Anyone can check these from this folder alone" in html
+    assert "the start of the session." in html
+
+
+def test_glance_reports_an_unboxed_or_unverified_session_as_a_problem():
+    from inferroute_cli import surveyor_export as X
+    html = X._glance([_sess(), _sess(conf="unconfined (developer override)", verified=False)], 1, {}, {"date_bound": "x"})
+    assert "WITHOUT its box" in html and "not verified in 1 of 2" in html
+    assert "worked in a closed box" not in html and "ran in a sealed machine" not in html
+
+
+def test_glance_claims_no_date_bound_search_when_nothing_was_searched():
+    from inferroute_cli import surveyor_export as X
+    html = X._glance([_sess()], 0, {}, {"date_bound": "2020-01-01"})
+    assert "No sealed search completed" in html and "were searched" not in html

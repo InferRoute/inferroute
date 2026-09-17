@@ -229,9 +229,14 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "th{background:#f6f6f6}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#f6f8fa;padding:.8rem;border-radius:6px;overflow:auto;font-size:12px;white-space:pre-wrap}"
       ".ok{color:#127a2b}.warn{color:#b25000;font-weight:600}.bad{color:#b00020;font-weight:600}"
       ".note{color:#666;font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}"
+      ".glance{background:#f4f8f5;border:1px solid #d5e6da;border-radius:8px;padding:.6rem 1.2rem 1rem;margin:1.2rem 0}"
+      ".glance h2{border:0;margin:.4rem 0 .2rem}.glance ul{margin:.3rem 0;padding-left:1.2rem}.glance li{margin:.35rem 0}"
+      ".who{color:#666;font-size:12px}"
       "</style></head><body>")
     A("<h1>Prior-art research record</h1>")
     A(f"<div class=sub>{_e(client)} / {_e(matter)}</div>")
+    glance_at = len(out)
+    A("")                                  # "At a glance", filled in once the searches below are known
     A("<p class=note>Every statement below is a fact this device checked or recorded, not a promise. What a stranger "
       "can re-derive from this bundle alone is marked; what only this device attests is marked too. See "
       "<code>VERIFY.md</code> and run <code>verify_record.py</code>.</p>")
@@ -371,6 +376,8 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     if n == 0:
         A("<p class=note>No sealed search completed for this matter.</p>")
 
+    out[glance_at] = _glance(sessions, n, marks, rec)
+
     A("<h2>What this record does and does not prove</h2>")
     any_policy = any(x.get("evidence", {}).get("policy_b64") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict))
     A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
@@ -418,6 +425,54 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A("</body></html>")
     return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff,
             "unanswered": unanswered}
+
+
+def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
+    """The record's first screen, in plain words: what it holds and who stands behind each line. Built only from
+    what this bundle contains; it never says more than the sections below it."""
+    confs = [str((s.get("record") or {}).get("confinement") or "") for s in sessions]
+    models = [bool(((s.get("record") or {}).get("model_lane") or {}).get("verified")) for s in sessions]
+    items = []
+    if n_searches:
+        items.append(f"<li><b>{n_searches} sealed patent search{'es' if n_searches != 1 else ''}</b>, each answer signed by the "
+                     "search machine, with the hardware report that identifies that machine. "
+                     "<span class=who>Anyone can check these from this folder alone.</span></li>")
+    else:
+        items.append("<li>No sealed search completed for this matter.</li>")
+    if n_searches:
+        items.append("<li><b>Whether the search machine was InferRoute's</b> is checked against InferRoute's signed "
+                     "reference, which you hold separately (see <i>How to check</i>). This page does not assert it on its own."
+                     "</li>")
+    if sessions:
+        if all(models):
+            when = "the session" if len(sessions) == 1 else f"each of the {len(sessions)} sessions"
+            items.append("<li><b>The AI assistant ran in a sealed machine</b> that this computer verified at the start of "
+                         f"{when}. <span class=who>As reported by this computer.</span></li>")
+        else:
+            items.append(f"<li class=bad>The AI machine was not verified in {models.count(False)} of {len(sessions)} "
+                         "sessions. <span class=who>As reported by this computer.</span></li>")
+        if confs and all(c.startswith("require, address-level") for c in confs):
+            items.append("<li><b>The assistant worked in a closed box</b>: no internet, and no files beyond this matter's "
+                         "folder. <span class=who>As reported by this computer.</span></li>")
+        elif any("unconfined" in c or c == "not confined" for c in confs):
+            items.append("<li class=bad>At least one session ran the assistant WITHOUT its box (developer mode). "
+                         "<span class=who>As reported by this computer.</span></li>")
+        else:
+            items.append("<li class=warn>The assistant was only partly boxed in at least one session; see the sessions "
+                         "below. <span class=who>As reported by this computer.</span></li>")
+    if n_searches:
+        items.append(f"<li><b>Date bound {_e(rec.get('date_bound'))}</b>: only documents published before it were searched. "
+                     "<span class=who>Each search's signed statement carries it.</span></li>")
+    if marks:
+        items.append(f"<li><b>{len(marks)} relevance mark{'s' if len(marks) != 1 else ''}</b>, the attorney's own "
+                     "judgements; the assistant cannot make or change one. <span class=who>As recorded by this computer."
+                     "</span></li>")
+    items.append("<li><b>Not claimed</b>: novelty, patentability, or that no other prior art exists.</li>")
+    how = ("<p class=note><b>How to check</b>: in this folder, run <code>python3 verify_record.py . "
+           "--reference=&lt;InferRoute's reference file&gt; --reference-key=&lt;the key in your engagement letter&gt;</code> "
+           "(it needs Python's <code>cryptography</code> library, version 42 or newer). It reads only this folder and "
+           "the reference; every line it prints says PASS, FAIL or SKIP, and why.</p>")
+    return "<div class=glance><h2>At a glance</h2><ul>" + "".join(items) + "</ul>" + how + "</div>"
 
 
 def _reach_note(recorded: str) -> str:

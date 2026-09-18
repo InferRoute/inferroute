@@ -141,6 +141,14 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .ended { margin: 0 max(20px, calc((100% - 820px) / 2)) 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--accent-soft); color: var(--ink); }
 .ended b { color: var(--accent); }
 
+/* the assistant went silent mid-answer: say so where the spinner was, in the same place the eye is already looking */
+.stalled { margin: 0 max(20px, calc((100% - 820px) / 2)) 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--ink); }
+.stalled .stalled-title { font-weight: 650; color: var(--warn); margin-bottom: 4px; }
+.stalled p { margin: 4px 0; font-size: 14px; }
+.stalled p.sub { font-size: 13px; }
+.stalled p.warn { color: var(--warn); font-weight: 600; }
+.stalled .row { margin-top: 10px; }
+
 /* trust panel */
 .trust h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 20px 0 8px; font-weight: 650; }
 .verdict { padding: 12px 14px; border-radius: var(--radius); font-weight: 600; margin-bottom: 8px; }

@@ -366,3 +366,59 @@ def test_the_browser_summary_states_what_the_page_guarantees_and_what_it_cannot(
     assert any("Browser extensions" in lim for lim in s["limits"])
     terminal = T.build(_receipt(), _search(reference={"ok": True}), netns.ADDRESS_LEVEL_LABEL)
     assert not any("Browser extensions" in lim for lim in terminal["limits"])
+
+
+def test_a_tool_that_never_finishes_is_a_stall_even_when_the_turn_is_not_busy(tmp_path, monkeypatch):
+    """Henry, 18 Sep: "the first search gives results directly, then the others stall, just checking the
+    search machine". The agent had gone silent with a search tool call outstanding — and `busy` was not set,
+    so the watchdog never armed and the page showed "checking the search machine…" for ever. He had to ask a
+    human why it was stuck, which is the exact failure the stall notice exists to prevent."""
+    monkeypatch.setattr(W, "STALL_SECONDS", 0.05)
+    b = _bridge(tmp_path)
+    got = []
+
+    async def run():
+        reader = asyncio.StreamReader()
+        # A tool starts. No agent_start, so `busy` stays False — and then nothing ever comes back.
+        reader.feed_data(b'{"type": "tool_execution_start", "toolCallId": "c1", "toolName": "prior_art_search"}\n')
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=None)
+        b.subscribers.append(q := asyncio.Queue())
+        pump = asyncio.ensure_future(b.pump(proc))
+        await asyncio.sleep(0.3)
+        assert b.busy is False, "the premise: no turn is in flight, only a tool"
+        stalled = b.stalled
+        reader.feed_eof()
+        proc.returncode = 0
+        await pump
+        while not q.empty():
+            got.append(q.get_nowait())
+        return stalled
+    assert asyncio.run(run()) is True
+    assert [e["value"] for e in got if e["kind"] == "stall"] == [True]
+
+
+def test_a_tool_that_finishes_leaves_nothing_outstanding(tmp_path, monkeypatch):
+    # The control: a completed tool must not keep the session looking busy for ever.
+    monkeypatch.setattr(W, "STALL_SECONDS", 0.05)
+    b = _bridge(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'{"type": "tool_execution_start", "toolCallId": "c1", "toolName": "prior_art_search"}\n')
+        reader.feed_data(b'{"type": "tool_execution_end", "toolCallId": "c1", "toolName": "prior_art_search", "result": {}}\n')
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=None)
+        pump = asyncio.ensure_future(b.pump(proc))
+        await asyncio.sleep(0.3)
+        out = (dict(b.running_tools), b.stalled)
+        reader.feed_eof()
+        proc.returncode = 0
+        await pump
+        return out
+    running, stalled = asyncio.run(run())
+    assert running == {} and stalled is False

@@ -56,131 +56,47 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .pill-wait { color: var(--muted); }
 
 /* layout */
-.layout { flex: 1; display: grid; grid-template-columns: 218px minmax(0, 1fr) 380px; min-height: 0; }
+.layout { flex: 1; display: grid; grid-template-columns: 244px minmax(0, 1fr) 380px; min-height: 0; }
 /* The index goes first, because it is the thing that makes a long session navigable — but it is the first
    thing to drop when there is no room: the conversation and the proof panel both outrank it. */
 @media (max-width: 1240px) { .layout { grid-template-columns: minmax(0, 1fr) 380px; } .outline { display: none; } }
 @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .outline { display: none; }
   .trust { border-left: 0; border-top: 1px solid var(--line); } }
 
-/* the index down the left */
-.outline { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 16px 10px 24px 14px; }
+/* the index down the left.
+   Rules learned the hard way on 18 Sep: nothing is absolutely positioned over text (that is how a click
+   lands on the wrong control and how the text gets clipped), every row is a flex box with a min-width:0
+   text cell so long words wrap instead of overflowing, and what distinguishes one row from another is the
+   DESCRIPTION, never a document count. */
+.outline { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 16px 8px 24px 12px; }
 .outline h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 4px 0 10px; font-weight: 650; }
 .outline ol { list-style: none; margin: 0; padding: 0; }
-.outline li { margin: 1px 0; }
-.o-link { display: block; width: 100%; text-align: left; border: 0; background: none; border-left: 2px solid transparent;
-  border-radius: 0 6px 6px 0; padding: 5px 8px; color: var(--ink); font-size: 13px; line-height: 1.3; }
+.outline .sub { font-size: 12px; color: var(--faint); padding: 0 6px; }
+
+.o-row { display: flex; align-items: flex-start; gap: 2px; }
+.o-link { flex: 1 1 auto; min-width: 0; display: block; text-align: left; border: 0; background: none;
+  border-left: 2px solid transparent; border-radius: 0 6px 6px 0; padding: 5px 7px; color: var(--ink); }
 .o-link:hover { background: var(--user); }
-.o-label { display: block; font-weight: 600; font-size: 12px; color: var(--muted); }
-.o-detail { display: block; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-kicker { display: block; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase;
+  font-weight: 650; color: var(--faint); }
+.o-note { color: var(--accent); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.o-note::before { content: " · "; color: var(--faint); }
+/* Two lines, then an ellipsis — and `anywhere` so a long unbroken token cannot push the row wider than
+   the rail and get sliced by the border. */
+.o-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 12.5px; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+.outline li.here > .o-row > .o-link, .outline li.here > .o-link { background: var(--user); border-left-color: var(--accent); }
 
-/* A question is a heading you can find at a glance; the searches it caused hang under it, quieter and
-   smaller, so the eye lands on what YOU asked rather than on what the assistant did about it. */
-.o-you { position: relative; margin-top: 8px; }
-.o-you > .o-link { padding-left: 16px; }
-.o-you .o-label { color: var(--ink); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
-.o-you > .o-link .o-detail { color: var(--muted); font-size: 12.5px; white-space: normal;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.o-fold { position: absolute; left: 0; top: 4px; border: 0; background: none; color: var(--faint);
-  font-size: 11px; line-height: 1; padding: 2px 3px; border-radius: 4px; }
-.o-fold:hover { color: var(--ink); }
-.o-children { margin-left: 16px !important; border-left: 1px solid var(--line); }
-.o-children .o-link { padding: 2px 8px; font-size: 12px; }
-.o-children .o-label { display: inline; font-size: 11px; font-weight: 650; color: var(--accent); }
-.o-children .o-detail { display: inline; font-size: 11px; margin-left: 5px; }
-.o-children li { margin: 0; }
-.outline li.here .o-link { background: var(--user); border-left-color: var(--accent); }
-.outline .sub { font-size: 12px; color: var(--faint); padding: 0 8px; }
-.chat { display: flex; flex-direction: column; min-height: 0; }
-.log { flex: 1; overflow-y: auto; padding: 20px max(20px, calc((100% - 820px) / 2)); display: flex; flex-direction: column; gap: 14px; }
-.trust { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 18px 20px 24px; }
-
-/* welcome */
-.empty { padding: 48px max(24px, calc((100% - 720px) / 2)) 8px; }
-.empty h1 { font-size: 22px; margin: 0 0 6px; font-weight: 650; }
-.disclosure-line { color: var(--muted); margin: 0 0 18px; }
-.disclosure-line.warn { color: var(--warn); }
-.suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-.suggestions button { border-radius: 999px; }
-.hint { color: var(--faint); font-size: 13px; max-width: 60ch; }
-
-/* messages */
-/* Items in the scrolling column keep their height: a card with overflow:hidden would otherwise shrink to a
-   sliver and clip its documents and mark buttons. */
-.log > * { flex-shrink: 0; }
-.msg { max-width: 100%; }
-.msg-assistant hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
-.msg-user { align-self: flex-end; background: var(--user); padding: 9px 14px; border-radius: 14px 14px 4px 14px; max-width: 80%; white-space: pre-wrap; }
-.msg-assistant { padding: 2px 2px; }
-.msg-assistant p { margin: 0 0 10px; }
-.msg-assistant h4 { margin: 14px 0 6px; font-size: 15px; }
-.msg-assistant ul, .msg-assistant ol { margin: 0 0 10px; padding-left: 22px; }
-.msg-assistant li { margin: 2px 0; }
-.msg-assistant pre { background: var(--user); padding: 10px 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
-.msg-assistant table { border-collapse: collapse; margin: 6px 0 12px; font-size: 14px; }
-.msg-assistant td, .msg-assistant th { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
-.msg-error { color: var(--bad); font-size: 14px; background: var(--bad-soft); border-radius: 8px; padding: 8px 12px; }
-.msg-error .count { color: var(--muted); }
-.err-detail { margin-top: 4px; color: var(--muted); font-size: 12px; }
-.err-detail summary { cursor: pointer; }
-.err-detail .mono { word-break: break-all; margin-top: 4px; }
-.step-dot { color: var(--faint); }
-.step { color: var(--muted); font-size: 13px; display: flex; gap: 8px; align-items: center; }
-
-/* search card */
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-.card-head { display: flex; gap: 10px; align-items: baseline; padding: 11px 14px; border-bottom: 1px solid var(--line); }
-.card-head .title { font-weight: 600; }
-.card-head .sub { color: var(--muted); font-size: 13px; margin-left: auto; text-align: right; }
-.card-query { padding: 9px 14px; color: var(--muted); font-size: 13px; border-bottom: 1px solid var(--line); white-space: pre-wrap; }
-.card-note { padding: 8px 14px; font-size: 13px; color: var(--accent); background: var(--accent-soft); }
-.card-note.bad { color: var(--bad); background: var(--bad-soft); }
-.card-note.warn { color: var(--warn); background: var(--warn-soft); }
-.docs { list-style: none; margin: 0; padding: 0; }
-.doc { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px 10px; padding: 10px 14px; border-top: 1px solid var(--line); align-items: start; }
-.doc:first-child { border-top: 0; }
-.doc .rank { color: var(--faint); font-size: 13px; padding-top: 1px; }
-.doc .key { font-family: var(--mono); font-size: 13px; font-weight: 600; }
-.doc .year { color: var(--muted); font-size: 13px; margin-left: 6px; }
-.doc .dtitle { font-size: 14px; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.doc.open .dtitle { -webkit-line-clamp: unset; }
-.marks { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-.marks button { padding: 2px 8px; font-size: 12px; border-radius: 999px; color: var(--muted); }
-.marks button[aria-pressed="true"].m-relevant { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.marks button[aria-pressed="true"].m-not-relevant { background: var(--user); color: var(--ink); border-color: var(--faint); }
-.marks button[aria-pressed="true"].m-known { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
-.card-foot { padding: 8px 14px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--line); }
-.card-head { flex-wrap: wrap; }
-.card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }
-.doc .seen { font-size: 11px; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 7px; margin-left: 8px; }
-.card-actions { padding: 8px 14px 12px; }
-.card-actions button { border-radius: 999px; font-size: 13px; }
-.mark-steps { padding: 8px max(20px, calc((100% - 820px) / 2)) 0; }
-.mark-steps-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.mark-steps-list button { border-radius: 999px; font-size: 13px; border-color: var(--accent); }
-.mark-steps-list button:hover { background: var(--accent-soft); }
-.next { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 4px 0 6px; }
-.next-title { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); font-weight: 650; }
-.next button { text-align: left; border-radius: 12px; max-width: 100%; font-size: 14px; background: var(--panel); border-color: var(--accent); color: var(--ink); }
-.next button:hover { background: var(--accent-soft); }
-
-/* activity + composer */
-.activity { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 4px max(20px, calc((100% - 820px) / 2)); }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
-@keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
-.composer { display: flex; gap: 10px; align-items: flex-end; padding: 12px max(20px, calc((100% - 820px) / 2)) 16px; border-top: 1px solid var(--line); background: var(--bg); }
-.composer textarea { flex: 1; resize: none; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; max-height: 40vh; }
-.composer-actions { display: flex; gap: 8px; }
-.ended { margin: 0 max(20px, calc((100% - 820px) / 2)) 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--accent-soft); color: var(--ink); }
-.ended b { color: var(--accent); }
-
-/* the assistant went silent mid-answer: say so where the spinner was, in the same place the eye is already looking */
-.stalled { margin: 0 max(20px, calc((100% - 820px) / 2)) 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--ink); }
-.stalled .stalled-title { font-weight: 650; color: var(--warn); margin-bottom: 4px; }
-.stalled p { margin: 4px 0; font-size: 14px; }
-.stalled p.sub { font-size: 13px; }
-.stalled p.warn { color: var(--warn); font-weight: 600; }
-.stalled .row { margin-top: 10px; }
+/* a question is the heading you navigate by; what it caused hangs under it, quieter and smaller */
+.o-you { margin-top: 10px; }
+.o-you .o-text { font-weight: 550; }
+.o-fold { flex: 0 0 auto; margin-top: 6px; border: 0; background: none; color: var(--faint);
+  font-size: 10px; line-height: 1; padding: 3px 2px; border-radius: 4px; }
+.o-fold:hover { color: var(--ink); background: var(--user); }
+.o-children { margin: 2px 0 0 9px; padding-left: 7px; border-left: 1px solid var(--line); }
+.o-children .o-link { padding: 3px 7px; }
+.o-children .o-which { color: var(--accent); }
+.o-children .o-text { font-size: 12px; color: var(--muted); -webkit-line-clamp: 2; }
 
 /* trust panel */
 .trust h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 20px 0 8px; font-weight: 650; }

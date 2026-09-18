@@ -290,12 +290,63 @@
     else {
       const list = el("div", "sessions");
       for (const e of m.exports) {
+        const result = el("div", "check-result");
+        result.hidden = true;
         list.append(el("div", "record-row", el("span", "when", `Exported ${localTime(e.made_at)}`),
-          el("span", "mono sub", e.folder), button("Open record", "ghost small", () => openLocal(e.view))));
+          el("span", "mono sub", e.folder), button("Open record", "ghost small", () => openLocal(e.view)),
+          button("Check this record", "ghost small", (ev) => runCheck(m.id, e.name, ev.currentTarget, result))),
+          result);
       }
       p.append(list);
     }
     p.append(el("p", "sub folder-line", `Matter folder: ${m.disclosure.folder}`));
+  }
+
+  // ── checking an exported record, here, without a terminal ──
+  //
+  // The verdict shown is the verifier's own exit code; these are its words, not a second opinion. Every
+  // failure says what it costs the person holding the record and what to do — a bare red line naming a
+  // check tells a patent attorney nothing about whether the record is still usable.
+  const CHECK_PILL = { passed: "✓ Checked out", failed: "✗ Did not check out", refused: "○ Could not run",
+    test: "◐ Test run", unauthenticated: "◐ Reference unauthenticated" };
+
+  async function runCheck(matterId, name, btn, box) {
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    clear(box);
+    box.hidden = false;
+    box.append(el("p", "sub", "Running the record's own verifier. This takes a few seconds."));
+    let r;
+    try { r = await api("/api/check", { id: matterId, name }); }
+    catch (e) { clear(box); box.append(el("p", "form-error", `The check could not be run: ${e.message}`)); return; }
+    finally { btn.disabled = false; btn.textContent = "Check this record"; }
+    clear(box);
+    box.append(el("div", `check-verdict ${r.verdict}`, CHECK_PILL[r.verdict] || r.verdict));
+    box.append(el("div", "check-headline", r.headline));
+    box.append(el("p", "", r.explainer || ""));
+    if (r.note) box.append(el("p", "warn-text", r.note));
+    for (const g of r.groups || []) {
+      const item = el("div", `check-group ${g.status}`);
+      item.append(el("div", "check-q", g.question));
+      item.append(el("p", "", g.answer || ""));
+      if (g.todo) item.append(el("p", "check-todo", el("b", "", "What to do: "), g.todo));
+      if (g.not_checked) item.append(el("p", "sub", `Not checked — ${g.not_checked.join("; ")}`));
+      const detail = el("div", "check-rows");
+      detail.hidden = true;
+      for (const row of g.rows || []) {
+        detail.append(el("div", `check-row r-${row.status.toLowerCase()}`,
+          el("span", "check-status", row.status), el("span", "check-name", row.name),
+          el("span", "sub", row.detail)));
+      }
+      const toggle = button("Show the technical lines", "link small", () => {
+        detail.hidden = !detail.hidden;
+        toggle.textContent = detail.hidden ? "Show the technical lines" : "Hide the technical lines";
+      });
+      item.append(toggle, detail);
+      box.append(item);
+    }
+    box.append(el("p", "sub", `${r.checks} checks ran. Anyone can repeat this without InferRoute's software: `
+      + `run verify_record.py inside the record's folder.`));
   }
 
   async function renderSession(matterId, sid) {

@@ -225,7 +225,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .sessions { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
 .session-row, .record-row { display: grid; grid-template-columns: 170px minmax(0, 1fr) 90px 100px 120px 110px; gap: 10px; align-items: center; padding: 10px 14px; border: 0; border-top: 1px solid var(--line); border-radius: 0; text-align: left; background: var(--panel); font-size: 14px; }
 .session-row:not(:has(.matter-of)) { grid-template-columns: 170px 90px 100px 120px 1fr; }
-.record-row { grid-template-columns: 200px minmax(0, 1fr) auto; }
+.record-row { grid-template-columns: 200px minmax(0, 1fr) auto auto; }
 .session-row:first-child, .record-row:first-child { border-top: 0; }
 .session-row:hover { background: var(--user); }
 .session-row .matter-of { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -256,3 +256,26 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .ended-actions { margin-top: 10px; }
 .disclosure-actions { margin: 0 0 18px; }
 .dialog-body textarea { width: 100%; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+
+/* checking an exported record from the home page: the verifier's own verdict, in words */
+.check-result { padding: 12px 16px; border-top: 1px solid var(--line); background: var(--panel); font-size: 14px; }
+.check-verdict { display: inline-block; font-weight: 650; border-radius: 999px; padding: 3px 12px; margin-bottom: 8px; }
+.check-verdict.passed { background: var(--accent-soft); color: var(--accent); }
+.check-verdict.failed { background: var(--bad-soft); color: var(--bad); }
+.check-verdict.test, .check-verdict.unauthenticated, .check-verdict.refused { background: var(--warn-soft); color: var(--warn); }
+.check-headline { font-weight: 650; margin-bottom: 2px; }
+.check-result p { margin: 4px 0; }
+.check-group { border-top: 1px solid var(--line); padding: 10px 0 8px; }
+.check-group .check-q { font-weight: 600; }
+.check-group.pass .check-q::before { content: "\2713\00a0"; color: var(--accent); }
+.check-group.fail .check-q::before { content: "\2717\00a0"; color: var(--bad); }
+.check-group.skip .check-q::before { content: "\25cb\00a0"; color: var(--faint); }
+.check-todo { color: var(--warn); }
+.check-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.check-row { display: grid; grid-template-columns: 46px minmax(0, 260px) minmax(0, 1fr); gap: 8px; font-size: 12.5px; }
+.check-status { font-weight: 700; }
+.check-row.r-pass .check-status { color: var(--accent); }
+.check-row.r-fail .check-status { color: var(--bad); }
+.check-row.r-skip .check-status { color: var(--faint); }
+.check-name { color: var(--ink); }
+@media (max-width: 760px) { .check-row { grid-template-columns: 46px minmax(0, 1fr); } .check-row .sub { grid-column: 2; } }

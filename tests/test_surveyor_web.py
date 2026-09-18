@@ -292,6 +292,21 @@ def test_ending_a_wedged_session_escalates_until_the_agent_is_gone(tmp_path, mon
     assert acts == ["terminate", "kill"] and b.proc.stdin.closed
 
 
+def test_the_event_stream_lets_go_when_the_page_is_shutting_down(tmp_path):
+    """The stream is a long poll that never ends on its own, and uvicorn's graceful shutdown waits for open
+    requests. Without this the launcher waits for the browser tab to be closed before it can exit — which is
+    why `kill` on a wedged session looked like SIGTERM being ignored and needed SIGKILL."""
+    b = _bridge(tmp_path)
+
+    async def run():
+        b.subscribers.append(q := asyncio.Queue())
+        b.stop_streams()
+        assert b.shutdown.is_set()
+        # Woken at once, not left parked in its 15-second wait.
+        return await asyncio.wait_for(q.get(), 0.2)
+    assert asyncio.run(run())["kind"] == "ping"
+
+
 def test_an_event_the_page_has_no_word_for_is_counted_by_name_for_the_session_summary(tmp_path):
     b = _bridge(tmp_path)
 

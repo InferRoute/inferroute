@@ -197,6 +197,11 @@ class Bridge:
         self.proc: Any = None
         self._seq = 0
         self.closed = asyncio.Event()
+        # Set when this page is going away. The event stream never ends on its own — it is a long poll that
+        # pings for ever — and uvicorn's graceful shutdown waits for open requests, so without this a launcher
+        # asked to stop waits for the browser tab to be closed first. That is how `kill` on a wedged session
+        # looked like a signal being ignored, and it needed SIGKILL.
+        self.shutdown = asyncio.Event()
         # Liveness. `last_agent` moves only when PI says something; our own events (a mark, a trust
         # recheck, the stall notice itself) must not make a dead turn look alive.
         self.last_agent = time.monotonic()
@@ -319,6 +324,13 @@ class Bridge:
         except asyncio.CancelledError:
             pass
 
+    def stop_streams(self) -> None:
+        """End the page's long-poll streams so the server can actually shut down. Waking each subscriber
+        matters: a stream parked in a 15-second wait would otherwise hold the shutdown for that long."""
+        self.shutdown.set()
+        for q in list(self.subscribers):
+            q.put_nowait({"seq": -1, "kind": "ping"})
+
     async def settle(self, timeout: float) -> bool:
         """Wait for the agent to finish its turn. False means it did not, and the caller must say so."""
         deadline = time.monotonic() + timeout
@@ -431,7 +443,7 @@ class Bridge:
                     for e in backlog:
                         yield json.dumps(e) + "\n"
                     last = backlog[-1]["seq"] if backlog else after
-                    while True:
+                    while not bridge.shutdown.is_set():
                         if await request.is_disconnected():
                             break
                         try:
@@ -589,6 +601,7 @@ class Page:
         await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
         for w in waiters:
             w.cancel()
+        self.bridge.stop_streams()                     # or the graceful shutdown waits for the open tab
         self.server.should_exit = True
         await self.task
 
@@ -621,7 +634,8 @@ async def start(*, surveyor: Dict[str, Any], session: Any, search_endpoint: Opti
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         bridge.port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(bridge.app(), host="127.0.0.1", port=bridge.port, log_level="critical"))
+    server = uvicorn.Server(uvicorn.Config(bridge.app(), host="127.0.0.1", port=bridge.port,
+                                       log_level="critical", timeout_graceful_shutdown=5))
     task = asyncio.create_task(server.serve())
     while not server.started:
         if task.done():

@@ -186,6 +186,130 @@ def test_pump_splits_on_newline_only_and_ends_with_a_summary(tmp_path):
     assert got[-1]["kind"] == "ended" and got[-1]["summary"]["plaintext_left"] == 0
 
 
+# ── a turn that never ends ──
+#
+# On 17 Sep a session went silent part-way through an answer: the page said "The assistant is working…"
+# for 25 minutes, Stop did nothing, and a new message was accepted and never delivered. The agent was idle
+# — it held no connection and no request — so nothing was going to arrive, ever. These pin the three
+# things that were wrong, none of which depend on knowing WHY the agent went quiet.
+
+def test_the_page_is_told_when_the_assistant_goes_silent_mid_turn(tmp_path, monkeypatch):
+    monkeypatch.setattr(W, "STALL_SECONDS", 0.05)
+    b = _bridge(tmp_path)
+    got = []
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'{"type": "agent_start"}\n')            # busy, and then nothing at all
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=None)
+        b.subscribers.append(q := asyncio.Queue())
+        pump = asyncio.ensure_future(b.pump(proc))
+        await asyncio.sleep(0.3)
+        stalled = b.stalled
+        reader.feed_eof()                                          # the agent exits; the pump finishes
+        proc.returncode = 0
+        await pump
+        while not q.empty():
+            got.append(q.get_nowait())
+        return stalled
+    assert asyncio.run(run()) is True
+    stall = [e for e in got if e["kind"] == "stall"]
+    assert stall and stall[0]["value"] is True
+
+
+def test_the_stall_notice_is_withdrawn_the_moment_the_assistant_speaks_again(tmp_path, monkeypatch):
+    monkeypatch.setattr(W, "STALL_SECONDS", 0.05)
+    b = _bridge(tmp_path)
+    got = []
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'{"type": "agent_start"}\n')
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=None)
+        b.subscribers.append(q := asyncio.Queue())
+        pump = asyncio.ensure_future(b.pump(proc))
+        await asyncio.sleep(0.3)
+        assert b.stalled is True
+        reader.feed_data(b'{"type": "agent_settled"}\n')            # it was slow, not dead
+        await asyncio.sleep(0.1)
+        alive = not b.stalled
+        reader.feed_eof()
+        proc.returncode = 0
+        await pump
+        while not q.empty():
+            got.append(q.get_nowait())
+        return alive
+    assert asyncio.run(run()) is True
+    assert [e["value"] for e in got if e["kind"] == "stall"] == [True, False]
+
+
+def test_stop_says_whether_the_turn_actually_stopped(client, monkeypatch):
+    b, c = client
+    monkeypatch.setattr(W, "ABORT_GRACE", 0.05)
+    b.busy = True                                                   # nothing will clear it: the agent is wedged
+    r = c.post("/api/abort", json={})
+    assert r.status_code == 200 and r.json()["settled"] is False
+    assert b.proc.stdin.lines == [{"type": "abort"}]                # it was still asked, properly
+
+
+def test_a_message_is_refused_while_the_assistant_is_not_responding(client):
+    b, c = client
+    b.busy, b.stalled = True, True
+    r = c.post("/api/prompt", json={"text": "any news?"})
+    assert r.status_code == 409 and "not responding" in r.json()["error"]
+    assert b.proc.stdin.lines == []                                 # not accepted and quietly dropped
+
+
+def test_ending_a_wedged_session_escalates_until_the_agent_is_gone(tmp_path, monkeypatch):
+    monkeypatch.setattr(W, "END_GRACE", 0.05)
+    monkeypatch.setattr(W, "KILL_GRACE", 0.05)
+    b = _bridge(tmp_path)
+    acts = []
+
+    async def run():
+        done = asyncio.get_running_loop().create_future()
+
+        def terminate():
+            acts.append("terminate")                                # a wedged agent ignores this too
+
+        def kill():
+            acts.append("kill")
+            proc.returncode = -9
+            done.set_result(-9)
+
+        async def waiter():
+            return proc.returncode if proc.returncode is not None else await done
+        proc = SimpleNamespace(stdin=FakeStdin(), wait=waiter, returncode=None, terminate=terminate, kill=kill)
+        b.proc = proc
+        return await b.stop_agent()
+    assert asyncio.run(run()) == "killed"
+    assert acts == ["terminate", "kill"] and b.proc.stdin.closed
+
+
+def test_an_event_the_page_has_no_word_for_is_counted_by_name_for_the_session_summary(tmp_path):
+    b = _bridge(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'{"type": "some_future_event", "detail": "a secret the trail must not carry"}\n')
+        reader.feed_eof()
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=0)
+        await b.pump(proc)
+        return b.ended
+    end = asyncio.run(run())
+    assert end["unrecognised"] == {"some_future_event": 1}
+    assert "secret" not in json.dumps(end)
+
+
 # ── the page's code ──
 
 @pytest.mark.parametrize("script", ["app.js", "common.js"])

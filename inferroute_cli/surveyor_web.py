@@ -41,6 +41,17 @@ PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
 HISTORY_CAP = 5000
 
+# How long the assistant may say nothing at all, mid-turn, before the page stops claiming it is working.
+# Measured against real turns: a sealed search takes 20-60 s and streams status lines throughout, so two
+# minutes of COMPLETE silence is not slowness. A turn that goes quiet forever has happened (17 Sep: the
+# model stream ended mid-answer, Pi never learned, and the page said "The assistant is working…" until the
+# session was killed from a shell) and the page must never again present that as work in progress.
+STALL_SECONDS = float(os.environ.get("IR_SURVEYOR_STALL_SECONDS", "120"))
+# How long `abort` and `end` wait for the agent to do as it is told before saying it did not.
+ABORT_GRACE = float(os.environ.get("IR_SURVEYOR_ABORT_GRACE", "6"))
+END_GRACE = float(os.environ.get("IR_SURVEYOR_END_GRACE", "5"))
+KILL_GRACE = float(os.environ.get("IR_SURVEYOR_KILL_GRACE", "3"))
+
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
        "font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 SECURITY_HEADERS = {
@@ -186,12 +197,25 @@ class Bridge:
         self.proc: Any = None
         self._seq = 0
         self.closed = asyncio.Event()
+        # Liveness. `last_agent` moves only when PI says something; our own events (a mark, a trust
+        # recheck, the stall notice itself) must not make a dead turn look alive.
+        self.last_agent = time.monotonic()
+        self.stalled = False
+        self._watchdog: Any = None
+        # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
+        # so that a turn that ends in an event we don't understand leaves a trail instead of a mystery.
+        self.dropped: Dict[str, int] = {}
         # The conversation, kept with the matter's records (under confidential/, outside the agent's reach,
         # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
         self.conversation_file = conversation_file
 
     # ── events ──
-    def publish(self, event: Dict[str, Any]) -> None:
+    def publish(self, event: Dict[str, Any], *, agent: bool = False) -> None:
+        if agent:
+            self.last_agent = time.monotonic()
+            if self.stalled:                       # it spoke again: withdraw the notice, don't leave it standing
+                self.stalled = False
+                self.publish({"kind": "stall", "value": False})
         self._seq += 1
         event = {"seq": self._seq, **event}
         if event["kind"] == "busy":
@@ -244,35 +268,105 @@ class Bridge:
     async def pump(self, proc: Any) -> int:
         """Read Pi's stdout (strict JSONL: split on LF only) until it exits; return its exit code."""
         self.proc = proc
+        self.last_agent = time.monotonic()
+        self._watchdog = asyncio.ensure_future(self._watch())
         buf = b""
-        while True:
-            chunk = await proc.stdout.read(65536)
-            if not chunk:
-                break
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line = line.rstrip(b"\r")
-                if not line.strip():
-                    continue
-                try:
-                    ev = json.loads(line)
-                except ValueError:
-                    continue
-                for out in normalize(ev):
-                    self.publish(out)
+        try:
+            while True:
+                chunk = await proc.stdout.read(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.rstrip(b"\r")
+                    if not line.strip():
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    outs = normalize(ev)
+                    if not outs:
+                        name = str(ev.get("type") or "?")[:60]
+                        self.dropped[name] = self.dropped.get(name, 0) + 1
+                    # Anything Pi says is a sign of life, including an event the page does not render:
+                    # a turn is stalled when NOTHING arrives, not when nothing is shown.
+                    self.last_agent = time.monotonic()
+                    for out in outs:
+                        self.publish(out, agent=True)
+        finally:
+            if self._watchdog is not None:
+                self._watchdog.cancel()
+                self._watchdog = None
         rc = await proc.wait()
         self.busy = False
+        self.stalled = False
         self.ended = self.session_end()
         self.publish({"kind": "ended", "summary": self.ended})
         return rc
 
+    async def _watch(self) -> None:
+        """Say so when the assistant goes silent mid-turn. This makes no judgement about why — the page's
+        job is only to stop claiming work is happening when nothing has arrived for two minutes."""
+        try:
+            while True:
+                await asyncio.sleep(min(2.0, max(0.02, STALL_SECONDS / 4)))
+                quiet = time.monotonic() - self.last_agent
+                if self.busy and not self.stalled and quiet >= STALL_SECONDS:
+                    self.stalled = True
+                    self.publish({"kind": "stall", "value": True, "seconds": int(quiet)})
+        except asyncio.CancelledError:
+            pass
+
+    async def settle(self, timeout: float) -> bool:
+        """Wait for the agent to finish its turn. False means it did not, and the caller must say so."""
+        deadline = time.monotonic() + timeout
+        while self.busy and self.proc is not None and self.proc.returncode is None:
+            if time.monotonic() >= deadline:
+                return False
+            await asyncio.sleep(0.1)
+        return True
+
+    async def stop_agent(self) -> str:
+        """End the agent process for good, however wedged it is. Returns what it took, for the page to
+        report honestly: a session that cannot be ended is worse than one that ends abruptly."""
+        proc = self.proc
+        if proc is None or proc.returncode is not None:
+            return "already-ended"
+        try:
+            if proc.stdin is not None and not proc.stdin.is_closing():
+                proc.stdin.close()                      # the polite end: Pi exits when its input closes
+        except Exception:                               # noqa: BLE001
+            pass
+        try:
+            await asyncio.wait_for(asyncio.shield(proc.wait()), END_GRACE)
+            return "closed"
+        except Exception:                               # noqa: BLE001
+            pass
+        for how, act in (("terminated", proc.terminate), ("killed", proc.kill)):
+            try:
+                act()
+            except Exception:                           # noqa: BLE001
+                continue
+            try:
+                await asyncio.wait_for(asyncio.shield(proc.wait()), KILL_GRACE)
+                return how
+            except Exception:                           # noqa: BLE001
+                continue
+        return "would-not-end"
+
     def session_end(self) -> Dict[str, Any]:
         r = self._receipt()
         c = dict(getattr(r, "counters", None) or {})
-        return {"requests": c.get("requests", 0), "sealed_bytes": c.get("plaintext_bytes_sealed_here", 0),
-                "opened_bytes": c.get("response_bytes_opened_here", 0), "plaintext_left": 0,
-                "export_command": f"ir surveyor export {self.matter}"}
+        end = {"requests": c.get("requests", 0), "sealed_bytes": c.get("plaintext_bytes_sealed_here", 0),
+               "opened_bytes": c.get("response_bytes_opened_here", 0), "plaintext_left": 0,
+               "export_command": f"ir surveyor export {self.matter}"}
+        if self.dropped:
+            # Names of event types only, never their content. A turn that ends in an event the page has no
+            # word for is exactly the shape of the 17 Sep hang; this is the trail that names it next time.
+            end["unrecognised"] = dict(sorted(self.dropped.items()))
+        return end
 
     # ── the app ──
     def app(self):
@@ -298,7 +392,7 @@ class Bridge:
         async def session():
             return {"matter": bridge.matter, "date_bound": bridge.date_bound, "trust": bridge.summary,
                     "disclosure": disclosure_info(bridge.workspace), "busy": bridge.busy, "ended": bridge.ended,
-                    "search": bool(bridge.search_endpoint),
+                    "stalled": bridge.stalled, "search": bool(bridge.search_endpoint),
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
                     "home": os.environ.get("IR_SURVEYOR_HOME_URL", "")}
@@ -369,6 +463,11 @@ class Bridge:
                 return JSONResponse({"error": "empty message"}, status_code=400)
             if len(text) > 20000:
                 return JSONResponse({"error": "message too long"}, status_code=400)
+            if bridge.stalled:
+                # A follow-up is delivered when the current turn finishes. A stalled turn never finishes, so
+                # accepting one here is how "sending a new message doesn't work" looked from the page.
+                return JSONResponse({"error": "The assistant is not responding, so this would not be delivered. "
+                                              "Stop the current attempt first."}, status_code=409)
             cmd: Dict[str, Any] = {"type": "prompt", "message": text}
             if bridge.busy:
                 cmd["streamingBehavior"] = "followUp"
@@ -381,11 +480,14 @@ class Bridge:
 
         @app.post("/api/abort")
         async def abort():
+            """Stop the current turn — and say whether it actually stopped. Writing `abort` into the agent's
+            input always succeeds; an agent that is wedged never acts on it, and answering {"ok": true}
+            regardless is how the page came to show a stopped session as a working one."""
             try:
                 await bridge.send({"type": "abort"})
             except RuntimeError as e:
                 return JSONResponse({"error": str(e)}, status_code=409)
-            return {"ok": True}
+            return {"ok": True, "settled": await bridge.settle(ABORT_GRACE)}
 
         @app.post("/api/dialog")
         async def dialog(request: Request):
@@ -451,12 +553,10 @@ class Bridge:
 
         @app.post("/api/end")
         async def end():
-            if bridge.proc is not None and bridge.proc.returncode is None:
-                try:
-                    bridge.proc.stdin.close()
-                except Exception:                               # noqa: BLE001
-                    pass
-            return {"ok": True}
+            """End the session. Closing the agent's input is the polite way and is usually enough; when it
+            is not, this escalates rather than leaving the person with a page they cannot leave and a
+            process only a shell can kill. The matter keeps everything either way."""
+            return {"ok": True, "how": await bridge.stop_agent()}
 
         return app
 

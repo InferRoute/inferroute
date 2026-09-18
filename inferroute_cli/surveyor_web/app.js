@@ -139,7 +139,20 @@
   const docRows = new Map(); // publication number → [row button groups]
   let busy = false;
   let ended = false;
+  let stalled = false;
   let toolRunning = "";
+
+  // One way out that always works, wherever it is offered from. The bridge escalates on its side; here the
+  // button must never sit on "Ending…" for ever, so a failure is said out loud.
+  async function endSession(button) {
+    if (button) { button.disabled = true; button.textContent = "Ending…"; }
+    try {
+      await api("/api/end", {});
+    } catch (e) {
+      toast(`Could not end the session: ${e.message}`, "error");
+      if (button) { button.disabled = false; button.textContent = "End session"; }
+    }
+  }
 
   function stick() {
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 160;
@@ -413,11 +426,47 @@
 
   function updateActivity() {
     const a = $("activity");
-    a.hidden = !(busy || toolRunning) || ended;
+    a.hidden = !(busy || toolRunning) || ended || stalled;
     $("activity-text").textContent = toolRunning || "The assistant is working…";
-    $("input").placeholder = busy ? "The assistant is working. Anything you send now is delivered when it finishes."
+    $("input").placeholder = stalled ? "Stop the current attempt before sending anything else."
+      : busy ? "The assistant is working. Anything you send now is delivered when it finishes."
       : "Ask the assistant about this matter…";
-    $("stop").hidden = !busy || ended;
+    $("stop").hidden = !busy || ended || stalled;
+  }
+
+  // The assistant has said nothing at all for two minutes, mid-answer. Say that plainly — a spinner that
+  // never stops is a worse answer than bad news — and give both real ways forward. Nothing here is lost:
+  // every search and mark is already recorded with the matter on this computer.
+  function showStalled(on, seconds) {
+    stalled = on;
+    const box = $("stalled");
+    box.hidden = !on || ended;
+    clear(box);
+    updateActivity();
+    if (!on || ended) return;
+    const mins = Math.max(1, Math.round((Number(seconds) || 120) / 60));
+    box.append(el("div", "stalled-title", "The assistant has stopped answering."));
+    box.append(el("p", "", `Nothing has come back from the sealed AI machine for ${mins} minute${mins === 1 ? "" : "s"}, `
+      + "part-way through an answer. This is a fault on our side, not something you did."));
+    box.append(el("p", "sub", "Your searches and your marks are already saved with the matter, and the record can "
+      + "still be exported. Starting again costs you the last answer only."));
+    const row = el("div", "row");
+    const stop = el("button", "primary", "Stop this attempt and carry on");
+    const finish = el("button", "ghost", "End the session and keep the record");
+    stop.type = finish.type = "button";
+    stop.addEventListener("click", async () => {
+      stop.disabled = true;
+      stop.textContent = "Stopping…";
+      let settled = false;
+      try { settled = (await api("/api/abort", {})).settled === true; } catch (_) { settled = false; }
+      if (settled) { showStalled(false); toast("Stopped. You can ask again.", "info"); return; }
+      stop.hidden = true;
+      box.append(el("p", "warn", "It would not stop. Ending the session is the way out — the matter keeps "
+        + "everything, and you can start another session on it straight away."));
+    });
+    finish.addEventListener("click", () => endSession(finish));
+    row.append(stop, finish);
+    box.append(row);
   }
 
   // Write the invention without leaving the session: the file lives in the matter's folder on this computer,
@@ -538,6 +587,8 @@
   function showEnded(summary) {
     ended = true;
     busy = false;
+    stalled = false;
+    $("stalled").hidden = true;
     updateActivity();
     const box = $("ended");
     clear(box);
@@ -559,6 +610,7 @@
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
       case "busy": busy = ev.value; updateActivity(); if (!busy) renderNext(); break;
+      case "stall": showStalled(ev.value === true, ev.seconds); break;
       case "conversation_kept": $("kept-note").hidden = false; break;
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
@@ -689,7 +741,17 @@
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send($("input").value); }
   });
   $("input").addEventListener("input", autosize);
-  $("stop").addEventListener("click", () => api("/api/abort", {}).catch((e) => toast(e.message, "error")));
+  $("stop").addEventListener("click", async () => {
+    const b = $("stop");
+    b.disabled = true;
+    try {
+      const r = await api("/api/abort", {});
+      // `settled: false` means the assistant was told to stop and did not. Saying "Stopped." then would be
+      // the same small lie as the spinner: let the stall notice appear instead, or say it plainly now.
+      if (r.settled === false && !stalled) toast("It hasn't stopped yet. Give it a moment — if nothing happens, end the session.", "warning");
+    } catch (e) { toast(e.message, "error"); }
+    finally { b.disabled = false; }
+  });
   $("verdict").addEventListener("click", () => $("trust").scrollIntoView({ behavior: "smooth", block: "start" }));
   $("recheck").addEventListener("click", async () => {
     const b = $("recheck");
@@ -720,9 +782,9 @@
     } catch (e) { toast(e.message, "error"); }
     finally { b.disabled = false; b.textContent = "Export the record"; }
   });
-  $("end").addEventListener("click", async () => {
+  $("end").addEventListener("click", () => {
     if (!window.confirm("End this session? The assistant stops; your marks and records stay with the matter.")) return;
-    try { await api("/api/end", {}); } catch (e) { toast(e.message, "error"); }
+    endSession($("end"));
   });
 
   init();

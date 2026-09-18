@@ -362,6 +362,20 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                                                 workspace=Path(os.getcwd()), console=console)
                 proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec,
                                                             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                # A browser session outlives its terminal, so `kill` from a shell is a real way to end one —
+                # and on 17 Sep a wedged session took SIGKILL, which runs none of this program's cleanup and
+                # leaves the matter's search verifier and its port behind. Handle it explicitly: end the
+                # agent, and stop the page lingering afterwards, because the person asked for it all to stop.
+                def _asked_to_stop() -> None:
+                    page.bridge.closed.set()
+                    asyncio.ensure_future(page.bridge.stop_agent())
+
+                loop = asyncio.get_running_loop()
+                for sig in (signal.SIGTERM, signal.SIGHUP):
+                    try:
+                        loop.add_signal_handler(sig, _asked_to_stop)
+                    except (NotImplementedError, RuntimeError, ValueError):       # not POSIX, or no loop slot
+                        pass
                 rc = await page.bridge.pump(proc)
             else:
                 proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
@@ -376,6 +390,12 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
             session.close()
             console.print("")
             display.render_summary(session.receipt, console)
+            unknown = ((page.bridge.ended or {}) if page is not None else {}).get("unrecognised") or {}
+            if unknown:
+                # Names only, never content. If a session ever hangs again, this line is the first thing to
+                # ask for: an event the page could not act on is the shape the 17 Sep hang took.
+                console.print("[grey58]for us, if anything looked stuck: the assistant sent "
+                              + ", ".join(f"{k}×{v}" for k, v in unknown.items()) + " — events this page has no word for.[/]")
             if surveyor is not None and not web:
                 console.print(f"\n  Keep the record of this matter:  [bold]ir surveyor export {surveyor.get('matter', '')}[/]\n")
             if page is not None:

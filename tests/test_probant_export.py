@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from inferroute_cli import probant as S
+from inferroute_cli import probant_export as E
 
 
 @pytest.fixture
@@ -201,3 +202,39 @@ def test_glance_claims_no_date_bound_search_when_nothing_was_searched():
     from inferroute_cli import probant_export as X
     html = X._glance([_sess()], 0, {}, {"date_bound": "2020-01-01"})
     assert "No sealed search completed" in html and "were searched" not in html
+
+
+# ── how much of each document was read ──
+#
+# The record used to promise that "each report states how many of the documents it examined most closely it
+# was able to read in full" and that "the signed result records the shortfall". Measured against a real
+# bundle on 2026-09-18: text_coverage is null on every statement, because the deployed sealed lane runs the
+# dense pass alone. The record was describing evidence it did not carry, in the one document that leaves the
+# firm. The paragraph is now derived from the statements.
+
+def _sessions(*coverages):
+    return [{"session_id": "s1", "record": {},
+             "searches": [{"statement": {"sig": "aa", "text_coverage": c}} for c in coverages]}]
+
+
+def test_the_record_says_nothing_was_read_in_full_when_nothing_says_it_was():
+    note = E._coverage_note(_sessions(None, None, None, None))
+    assert "none of the 4 sealed searches" in note
+    assert "title and the start of its abstract" in note
+    # It must not read as a hole in the record: the sealed machine has no full text to hold.
+    assert "not a gap in the record" in note
+
+
+def test_an_unsigned_row_is_not_counted_as_a_search_that_read_nothing():
+    s = _sessions(None)
+    s[0]["searches"].append({"statement": {"text_coverage": None}})      # no sig: not an enclave statement
+    assert "none of the 1 sealed search in this record" in E._coverage_note(s)
+    assert E._coverage_note([{"session_id": "s", "record": {}, "searches": []}]) == ""
+
+
+def test_a_signed_coverage_figure_is_reported_as_the_engine_counter_it_is():
+    note = E._coverage_note(_sessions({"rescoring": {"examined": 300}}, None))
+    assert "1 of the 2 sealed searches carry a signed" in note
+    # The figure is the engine's own counter over rescored candidates. Calling it a count of documents read
+    # in full is the overclaim this replaced.
+    assert "NOT a count of documents read in full" in note

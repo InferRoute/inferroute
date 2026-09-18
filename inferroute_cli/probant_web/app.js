@@ -164,7 +164,10 @@
     hideWelcome();
     clearNext();
     const s = stick();
-    log.append(el("div", "msg msg-user", text));
+    const node = el("div", "msg msg-user", text);
+    log.append(node);
+    const short = String(text).replace(/\s+/g, " ").trim();
+    outlineAdd({ kind: "you", el: node, label: "You", detail: short.length > 52 ? `${short.slice(0, 52)}…` : short });
     s();
   }
 
@@ -318,6 +321,7 @@
           noteMarked(keyNo);
           refreshMarks(keyNo);
           renderMarkSteps();
+          for (const e of cards.values()) if (e.keys && e.keys.includes(keyNo)) refreshCardSummary(e);
           toast(`Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
           if (value === "relevant") offerDeeper(card);
         } catch (e) { toast(`Couldn't record the mark: ${e.message}`, "error"); }
@@ -335,6 +339,90 @@
     }
   }
 
+  // ── folding searches, and the index down the left ──────────────────────────────────────────────
+  //
+  // Henry, 18 Sep: by the third search the trace is too expanded to read. A results card is 25 documents
+  // long, so the feed becomes a wall and the conversation above it is lost. Two halves of one answer: a
+  // search folds to its one-line summary, and an index on the left says where everything is.
+  //
+  // The rule for folding is "the one you are looking at stays open": a new search folds the finished ones.
+  // A card you opened or closed yourself is never folded by us afterwards — the moment we override a
+  // deliberate click, the control stops being trustworthy.
+
+  function setCollapsed(entry, on, byUser) {
+    if (!entry || !entry.body) return;
+    entry.collapsed = !!on;
+    if (byUser) entry.byUser = true;
+    entry.body.hidden = entry.collapsed;
+    entry.card.classList.toggle("collapsed", entry.collapsed);
+    entry.toggle.textContent = entry.collapsed ? "▸" : "▾";
+    entry.toggle.setAttribute("aria-expanded", String(!entry.collapsed));
+    entry.toggle.setAttribute("aria-label", entry.collapsed ? "Expand this search" : "Collapse this search");
+    refreshCardSummary(entry);
+  }
+
+  function autoCollapse() {
+    for (const e of cards.values()) {
+      if (!e.byUser && !e.failed && !e.collapsed) setCollapsed(e, true);
+    }
+  }
+
+  // What the head says when the body is folded away. The document count alone is not enough to fold
+  // safely — what you would lose sight of is your own marking, so that goes in the summary.
+  function refreshCardSummary(entry) {
+    if (!entry || entry.n === undefined) return;
+    const marked = entry.keys.filter((k) => marks.get(k)).length;
+    const relevant = entry.keys.filter((k) => marks.get(k) === "relevant").length;
+    const bits = [`${entry.n} document${entry.n === 1 ? "" : "s"}`];
+    if (marked) bits.push(`${marked} marked${relevant ? `, ${relevant} relevant` : ""}`);
+    bits.push(entry.collapsed ? "click to open" : "opened on this computer only");
+    entry.sub.textContent = bits.join(" · ");
+    if (entry.outline) outlineUpdate(entry, bits.slice(0, 2).join(" · "));
+  }
+
+  // The index. One row per landmark — what you asked, and each search — so a long session stays navigable.
+  const outlineRows = [];
+  function outlineAdd(item) {
+    const list = $("outline-list");
+    const row = el("li", `o-${item.kind}`);
+    const b = el("button", "o-link");
+    b.type = "button";
+    const label = el("span", "o-label", item.label);
+    const detail = el("span", "o-detail", item.detail || "");
+    b.append(label, detail);
+    b.addEventListener("click", () => {
+      // Jumping to a folded search opens it: being sent to a closed box is not arriving.
+      if (item.entry && item.entry.collapsed) setCollapsed(item.entry, false, true);
+      item.el.scrollIntoView({ behavior: "smooth", block: "start" });
+      for (const r of outlineRows) r.row.classList.toggle("here", r === rec);
+    });
+    row.append(b);
+    list.append(row);
+    $("outline-empty").hidden = true;
+    const rec = { row, item, detail, label };
+    outlineRows.push(rec);
+    if (item.entry) item.entry.outline = rec;
+    return rec;
+  }
+
+  function outlineDrop(entry) {
+    const rec = entry && entry.outline;
+    if (!rec) return;
+    rec.row.remove();
+    const i = outlineRows.indexOf(rec);
+    if (i >= 0) outlineRows.splice(i, 1);
+    entry.outline = null;
+    if (!outlineRows.length) $("outline-empty").hidden = false;
+  }
+
+  function outlineUpdate(entry, text) {
+    const rec = entry && entry.outline;
+    if (!rec) return;
+    if (entry.searchNo) rec.item.label = `Search ${entry.searchNo}`;
+    rec.label.textContent = rec.item.label;
+    rec.detail.textContent = text;
+  }
+
   function toolStart(ev) {
     hideWelcome();
     const s = stick();
@@ -347,11 +435,28 @@
       const sub = el("span", "sub", "checking the search machine…");
       const title = el("span", "title", "🔍 Sealed patent search");
       const what = a.feature ? el("span", "what", `feature: ${a.feature}`) : a.like ? el("span", "what", `documents like ${String(a.like).toUpperCase()}`) : null;
-      card.append(el("div", "card-head", title, what, sub));
+      // A real button carries the state for a screen reader and the keyboard; the whole head is also a
+      // click target, because a 12px chevron is not one.
+      const toggle = el("button", "card-toggle", "▾");
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Collapse this search");
+      const head = el("div", "card-head", toggle, title, what, sub);
+      card.append(head);
+      const body = el("div", "card-body");
       const q = String(a.text || "");
-      if (q) card.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
+      if (q) body.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
+      card.append(body);
+      const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false };
+      const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
+      toggle.addEventListener("click", flip);
+      head.addEventListener("click", flip);
+      // Earlier searches fold away as soon as a new one starts: by the third search the feed is unreadable,
+      // and what you want on screen is the one running now.
+      autoCollapse();
       log.append(card);
-      cards.set(ev.call, { card, sub, title });
+      cards.set(ev.call, entry);
+      outlineAdd({ kind: "search", el: card, label: "Search", detail: a.feature ? `feature: ${a.feature}` : a.like ? `like ${String(a.like).toUpperCase()}` : q.slice(0, 60), entry });
       toolRunning = "Searching the patent database in its sealed machine…";
     } else {
       const fn = STEP_TEXT[ev.tool];
@@ -382,8 +487,11 @@
     if (ev.tool !== "prior_art_search") return;
     const entry = cards.get(ev.call);
     if (!entry) return;
-    const { card, sub, title } = entry;
-    if (ev.details && ev.details.searchNo) title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
+    const { card, sub, title, body } = entry;
+    if (ev.details && ev.details.searchNo) {
+      title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
+      entry.searchNo = ev.details.searchNo;
+    }
     const d = ev.details || {};
     const s = stick();
     // The assistant's own parameter slip (no text, or `like` on a document it never got back): nothing was
@@ -393,19 +501,23 @@
     if (!ev.ok && slip) {
       card.replaceWith(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant's search request was incomplete, so nothing was sent; it corrected it.")));
       cards.delete(ev.call);
+      outlineDrop(entry);          // the card is gone; an index row pointing at a detached node goes nowhere
       return;
     }
     if (!ev.ok || !d.ok) {
       sub.textContent = "not sent";
-      card.append(el("div", "card-note bad", plainRefusal(ev.text || d.refusal)));
+      body.append(el("div", "card-note bad", plainRefusal(ev.text || d.refusal)));
+      setCollapsed(entry, false);                 // a refusal is short and worth reading; never fold it away
+      entry.failed = true;
+      outlineUpdate(entry, "not sent");
       s();
       return;
     }
     const docs = Array.isArray(d.docs) ? d.docs : [];
     const again = docs.filter((d) => d.alsoIn).length;
     sub.textContent = `${docs.length} documents${again ? ` (${again} already seen)` : ""} · opened on this computer only`;
-    if (d.testRoots) card.append(el("div", "card-note warn", "TEST machine: checked against test keys, not a real verification."));
-    else card.append(el("div", "card-note", `🔒 ${d.ours ? "InferRoute's sealed search machine" : "Sealed search machine"}, checked just before the search. Only that machine could read the query.`));
+    if (d.testRoots) body.append(el("div", "card-note warn", "TEST machine: checked against test keys, not a real verification."));
+    else body.append(el("div", "card-note", `🔒 ${d.ours ? "InferRoute's sealed search machine" : "Sealed search machine"}, checked just before the search. Only that machine could read the query.`));
     const list = el("ol", "docs");
     docs.forEach((doc, idx) => {
       const keyNo = String(doc.key || "");
@@ -418,9 +530,13 @@
       title.addEventListener("click", () => row.classList.toggle("open"));
       list.append(row);
     });
-    card.append(list);
-    card.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty."));
+    body.append(list);
+    body.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty."));
     if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
+    entry.keys = docs.map((doc) => String(doc.key || ""));
+    entry.n = docs.length;
+    refreshCardSummary(entry);
+    outlineUpdate(entry, `${docs.length} document${docs.length === 1 ? "" : "s"}`);
     s();
   }
 

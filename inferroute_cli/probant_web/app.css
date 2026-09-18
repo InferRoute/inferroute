@@ -56,8 +56,27 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 .pill-wait { color: var(--muted); }
 
 /* layout */
-.layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-height: 0; }
-@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .trust { border-left: 0; border-top: 1px solid var(--line); } }
+.layout { flex: 1; display: grid; grid-template-columns: 218px minmax(0, 1fr) 380px; min-height: 0; }
+/* The index goes first, because it is the thing that makes a long session navigable — but it is the first
+   thing to drop when there is no room: the conversation and the proof panel both outrank it. */
+@media (max-width: 1240px) { .layout { grid-template-columns: minmax(0, 1fr) 380px; } .outline { display: none; } }
+@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .outline { display: none; }
+  .trust { border-left: 0; border-top: 1px solid var(--line); } }
+
+/* the index down the left */
+.outline { border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 16px 10px 24px 14px; }
+.outline h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 4px 0 10px; font-weight: 650; }
+.outline ol { list-style: none; margin: 0; padding: 0; }
+.outline li { margin: 1px 0; }
+.o-link { display: block; width: 100%; text-align: left; border: 0; background: none; border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0; padding: 5px 8px; color: var(--ink); font-size: 13px; line-height: 1.3; }
+.o-link:hover { background: var(--user); }
+.o-label { display: block; font-weight: 600; font-size: 12px; color: var(--muted); }
+.o-you .o-label { color: var(--muted); }
+.o-search .o-label { color: var(--accent); }
+.o-detail { display: block; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.outline li.here .o-link { background: var(--user); border-left-color: var(--accent); }
+.outline .sub { font-size: 12px; color: var(--faint); padding: 0 8px; }
 .chat { display: flex; flex-direction: column; min-height: 0; }
 .log { flex: 1; overflow-y: auto; padding: 20px max(20px, calc((100% - 820px) / 2)); display: flex; flex-direction: column; gap: 14px; }
 .trust { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 18px 20px 24px; }
@@ -279,3 +298,10 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .check-row.r-skip .check-status { color: var(--faint); }
 .check-name { color: var(--ink); }
 @media (max-width: 760px) { .check-row { grid-template-columns: 46px minmax(0, 1fr); } .check-row .sub { grid-column: 2; } }
+
+/* a search folds to its head: by the third search the trace is a wall of documents */
+.card-head { cursor: pointer; }
+.card-toggle { border: 0; background: none; padding: 0 4px 0 0; color: var(--faint); font-size: 13px; line-height: 1; border-radius: 4px; }
+.card-toggle:hover { color: var(--ink); }
+.card.collapsed { box-shadow: none; }
+.card.collapsed .card-head { border-bottom: 0; }

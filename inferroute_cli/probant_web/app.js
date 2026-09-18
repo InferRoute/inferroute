@@ -167,7 +167,7 @@
     const node = el("div", "msg msg-user", text);
     log.append(node);
     const short = String(text).replace(/\s+/g, " ").trim();
-    outlineAdd({ kind: "you", el: node, label: "You", detail: short.length > 52 ? `${short.slice(0, 52)}…` : short });
+    outlineAdd({ kind: "you", el: node, label: "You asked", detail: short.length > 110 ? `${short.slice(0, 110)}…` : short });
     s();
   }
 
@@ -382,8 +382,12 @@
 
   // The index. One row per landmark — what you asked, and each search — so a long session stays navigable.
   const outlineRows = [];
+  // The index is a list of TURNS, not a flat list of events. What you ask is what you navigate by — you
+  // hold the session in your head as "the thing I asked about X" — so each question is a heading and the
+  // searches it caused hang under it, smaller and indented. A turn can be folded away entirely.
+  let currentTurn = null;
+
   function outlineAdd(item) {
-    const list = $("outline-list");
     const row = el("li", `o-${item.kind}`);
     const b = el("button", "o-link");
     b.type = "button";
@@ -396,10 +400,39 @@
       item.el.scrollIntoView({ behavior: "smooth", block: "start" });
       for (const r of outlineRows) r.row.classList.toggle("here", r === rec);
     });
-    row.append(b);
-    list.append(row);
-    $("outline-empty").hidden = true;
     const rec = { row, item, detail, label };
+    if (item.kind === "you") {
+      // A question opens a turn: its own row, a fold control, and a place for what follows.
+      const kids = el("ol", "o-children");
+      const fold = el("button", "o-fold", "▾");
+      fold.type = "button";
+      fold.hidden = true;                       // nothing under it yet; an empty control is a puzzle
+      fold.setAttribute("aria-expanded", "true");
+      fold.setAttribute("aria-label", "Hide the searches from this question");
+      fold.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const hide = !kids.hidden;
+        kids.hidden = hide;
+        fold.textContent = hide ? "▸" : "▾";
+        fold.setAttribute("aria-expanded", String(!hide));
+        fold.setAttribute("aria-label", hide ? "Show the searches from this question" : "Hide the searches from this question");
+      });
+      row.append(fold, b, kids);
+      $("outline-list").append(row);
+      currentTurn = { kids, fold, n: 0 };
+      rec.turn = currentTurn;
+    } else {
+      row.append(b);
+      // A search belongs to the question that caused it. Before any question (a replayed session can start
+      // mid-flight), it stands on its own rather than being invented a parent.
+      (currentTurn ? currentTurn.kids : $("outline-list")).append(row);
+      if (currentTurn) {
+        rec.parent = currentTurn;
+        currentTurn.n += 1;
+        currentTurn.fold.hidden = false;
+      }
+    }
+    $("outline-empty").hidden = true;
     outlineRows.push(rec);
     if (item.entry) item.entry.outline = rec;
     return rec;
@@ -411,6 +444,10 @@
     rec.row.remove();
     const i = outlineRows.indexOf(rec);
     if (i >= 0) outlineRows.splice(i, 1);
+    if (rec.parent) {
+      rec.parent.n -= 1;
+      if (rec.parent.n <= 0) rec.parent.fold.hidden = true;
+    }
     entry.outline = null;
     if (!outlineRows.length) $("outline-empty").hidden = false;
   }

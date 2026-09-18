@@ -72,9 +72,23 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
   border-radius: 0 6px 6px 0; padding: 5px 8px; color: var(--ink); font-size: 13px; line-height: 1.3; }
 .o-link:hover { background: var(--user); }
 .o-label { display: block; font-weight: 600; font-size: 12px; color: var(--muted); }
-.o-you .o-label { color: var(--muted); }
-.o-search .o-label { color: var(--accent); }
 .o-detail { display: block; color: var(--faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A question is a heading you can find at a glance; the searches it caused hang under it, quieter and
+   smaller, so the eye lands on what YOU asked rather than on what the assistant did about it. */
+.o-you { position: relative; margin-top: 8px; }
+.o-you > .o-link { padding-left: 16px; }
+.o-you .o-label { color: var(--ink); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.o-you > .o-link .o-detail { color: var(--muted); font-size: 12.5px; white-space: normal;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.o-fold { position: absolute; left: 0; top: 4px; border: 0; background: none; color: var(--faint);
+  font-size: 11px; line-height: 1; padding: 2px 3px; border-radius: 4px; }
+.o-fold:hover { color: var(--ink); }
+.o-children { margin-left: 16px !important; border-left: 1px solid var(--line); }
+.o-children .o-link { padding: 2px 8px; font-size: 12px; }
+.o-children .o-label { display: inline; font-size: 11px; font-weight: 650; color: var(--accent); }
+.o-children .o-detail { display: inline; font-size: 11px; margin-left: 5px; }
+.o-children li { margin: 0; }
 .outline li.here .o-link { background: var(--user); border-left-color: var(--accent); }
 .outline .sub { font-size: 12px; color: var(--faint); padding: 0 8px; }
 .chat { display: flex; flex-direction: column; min-height: 0; }

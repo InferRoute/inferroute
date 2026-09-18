@@ -49,6 +49,15 @@
     setTimeout(() => { t.remove(); recentToasts.delete(text); }, level === "error" ? 12000 : 7000);
   }
 
+  // Back to the home page that started this session. Same rule as the home page's own opener: only an
+  // address this computer made (a local page with its key), never anything from the conversation.
+  const HOME_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}$/;
+  let homeUrl = "";
+  function goHome() {
+    if (!HOME_LINK.test(homeUrl)) { toast("This session was started from a terminal, so there is no home page to return to.", "info"); return; }
+    window.open(homeUrl, "_blank", "noopener,noreferrer");
+  }
+
   // ── trust panel ──
   const SYM = { ok: "✓", warn: "◐", fail: "✗", off: "○", info: "●" };
   const VERDICT_PILL = { private: "🔒 Private", limited: "◐ Partly protected", blocked: "⛔ Not opened" };
@@ -380,6 +389,42 @@
     $("stop").hidden = !busy || ended;
   }
 
+  // Write the invention without leaving the session: the file lives in the matter's folder on this computer,
+  // and being told a path to go and edit is not an answer when the assistant is waiting for it.
+  async function disclosureDialog() {
+    let current = "";
+    try { current = (await api("/api/disclosure")).text; } catch (e) { toast(e.message, "error"); return; }
+    const box = document.createElement("textarea");
+    box.rows = 14;
+    box.value = current;
+    box.placeholder = "Describe the invention in plain technical terms.";
+    const err = el("p", "form-error");
+    const save = el("button", "primary", "Save");
+    const cancel = el("button", "ghost", "Cancel");
+    save.type = cancel.type = "button";
+    cancel.addEventListener("click", () => { $("dialog").hidden = true; });
+    save.addEventListener("click", async () => {
+      try {
+        const r = await api("/api/disclosure", { text: box.value });
+        $("dialog").hidden = true;
+        toast(`Disclosure saved (${r.words} words). Ask for a prior-art survey when you are ready.`, "info");
+        const line = $("disclosure-line");
+        line.classList.remove("warn");
+        line.textContent = `The disclosure is in the matter folder: disclosure.md, ${r.words} words.`;
+        for (const n of Array.from(document.querySelectorAll(".disclosure-actions"))) n.remove();
+      } catch (e) { err.textContent = e.message; }
+    });
+    $("dialog-title").textContent = "Disclosure";
+    const body = $("dialog-body");
+    clear(body);
+    body.append(el("p", "", "The invention, as the assistant will read it. It stays on this computer; only its sealed searches leave, encrypted."), box, err);
+    const actions = $("dialog-actions");
+    clear(actions);
+    actions.append(cancel, save);
+    $("dialog").hidden = false;
+    setTimeout(() => box.focus(), 0);
+  }
+
   // ── dialogs (the approval before a search) ──
   let openDialog = null;
   function showDialog(ev) {
@@ -466,9 +511,16 @@
     const box = $("ended");
     clear(box);
     const kb = (n) => `${Math.round((Number(n) || 0) / 1024)} KB`;
+    const did = Number(summary.requests) > 0;
     box.append(el("div", "", el("b", "", "Session closed. "),
-      `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} encrypted here · plaintext that left this computer: 0 bytes.`));
-    box.append(el("div", "", "Export the record to keep it (button on the right), then close this tab."));
+      did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} encrypted here · plaintext that left this computer: 0 bytes.`
+          : "Nothing was asked in this session, so there is nothing to export."));
+    box.append(el("div", "", did ? "Export the record to keep it (button on the right), then close this tab."
+                                 : "Start another session when you are ready — a session is just a sitting, and the matter keeps everything."));
+    const back = el("button", "primary", "Back to Surveyor home");
+    back.type = "button";
+    back.addEventListener("click", goHome);
+    if (HOME_LINK.test(homeUrl)) box.append(el("div", "row ended-actions", back));
     box.hidden = false;
     $("composer").hidden = true;
     $("end").hidden = true;
@@ -562,6 +614,14 @@
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
+    homeUrl = String(s.home || "");
+    if (HOME_LINK.test(homeUrl)) {
+      const b = el("button", "ghost", "Surveyor home");
+      b.type = "button";
+      b.addEventListener("click", goHome);
+      $("top-home").replaceWith(b);
+      b.id = "top-home";
+    }
     const d = s.disclosure || {};
     $("welcome-title").textContent = `Ready to work on ${String(s.matter || "").replace("/", " / ")}`;
     const line = $("disclosure-line");
@@ -569,7 +629,11 @@
       line.textContent = `The disclosure is in the matter folder: disclosure.md, ${d.disclosure_words} words.`;
     } else {
       line.classList.add("warn");
-      line.textContent = `disclosure.md is still empty. Write the invention into ${d.folder}/disclosure.md, then ask.`;
+      line.textContent = "This matter has no disclosure yet — the assistant has nothing to survey.";
+      const write = el("button", "primary", "Write the disclosure");
+      write.type = "button";
+      write.addEventListener("click", disclosureDialog);
+      $("empty").insertBefore(el("div", "row disclosure-actions", write), $("suggestions"));
     }
     const sugg = $("suggestions");
     const ideas = s.search

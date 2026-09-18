@@ -171,9 +171,10 @@ class Launches:
     """Sessions started from the home page: the child's state, its link once it prints one, and a plain
     reason if it stops before that."""
 
-    def __init__(self) -> None:
+    def __init__(self, home_url: str = "") -> None:
         self.items: Dict[str, Dict[str, Any]] = {}
         self.lock = threading.Lock()
+        self.home_url = home_url
 
     def view(self, it: Dict[str, Any]) -> Dict[str, Any]:
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
@@ -191,7 +192,8 @@ class Launches:
         if existing:
             return existing
         from . import pi_attested
-        env = dict(os.environ, IR_SURVEYOR_NO_BROWSER="1")
+        # The child's page shows a way back here, so a finished session is not a dead end.
+        env = dict(os.environ, IR_SURVEYOR_NO_BROWSER="1", IR_SURVEYOR_HOME_URL=self.home_url)
         argv = [sys.executable, "-m", "inferroute_cli", "surveyor", "open", matter_id, "--web"]
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
@@ -242,6 +244,10 @@ class Home:
         self.token = secrets.token_urlsafe(32)
         self.port = 0
         self.launches = Launches()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/#k={self.token}"
 
     def record_cap(self, matter_id: str, name: str) -> str:
         return hmac.new(self.token.encode(), f"{matter_id}|{name}".encode(), hashlib.sha256).hexdigest()[:32]
@@ -436,7 +442,8 @@ def run(open_browser: bool = True) -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         home.port = sock.getsockname()[1]
-    url = f"http://127.0.0.1:{home.port}/#k={home.token}"
+    url = home.url
+    home.launches.home_url = url
     # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
     # full buffer, and the link is the one thing it needs.
     print(f"\n  Surveyor home:  {url}", flush=True)

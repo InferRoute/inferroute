@@ -298,7 +298,33 @@ class Bridge:
         async def session():
             return {"matter": bridge.matter, "date_bound": bridge.date_bound, "trust": bridge.summary,
                     "disclosure": disclosure_info(bridge.workspace), "busy": bridge.busy, "ended": bridge.ended,
-                    "search": bool(bridge.search_endpoint)}
+                    "search": bool(bridge.search_endpoint),
+                    # Where this session came from, so a finished session is not a dead end. Only what the
+                    # launcher was told; a session started from a terminal has none and the page shows no link.
+                    "home": os.environ.get("IR_SURVEYOR_HOME_URL", "")}
+
+        @app.get("/api/disclosure")
+        async def get_disclosure():
+            try:
+                text = (bridge.workspace / "disclosure.md").read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            lines = text.splitlines()
+            if lines and lines[0].strip() == "# Disclosure":
+                text = "\n".join(lines[1:]).strip()
+            return {"text": "" if "Describe the invention here" in text else text}
+
+        @app.post("/api/disclosure")
+        async def put_disclosure(request: Request):
+            data = await body(request)
+            text = str(data.get("text") or "")
+            if len(text) > 200_000:
+                return JSONResponse({"error": "that is too long for one disclosure"}, status_code=400)
+            try:
+                (bridge.workspace / "disclosure.md").write_text(f"# Disclosure\n\n{text.strip()}\n", encoding="utf-8")
+            except OSError as e:
+                return JSONResponse({"error": f"could not write the disclosure ({e.__class__.__name__})"}, status_code=500)
+            return {"ok": True, "words": disclosure_info(bridge.workspace)["disclosure_words"]}
 
         @app.get("/api/events")
         async def events(request: Request, after: int = 0):

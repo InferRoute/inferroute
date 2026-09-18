@@ -244,3 +244,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .field input, .dialog-body textarea { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: 100%; }
 .form-error { color: var(--bad); font-size: 14px; }
 .folder-line { margin-top: 26px; word-break: break-all; }
+
+.ended-actions { margin-top: 10px; }
+.disclosure-actions { margin: 0 0 18px; }
+.dialog-body textarea { width: 100%; font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }

@@ -105,7 +105,7 @@ def test_only_prompt_abort_and_dialog_answers_ever_reach_the_agent(client):
 def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
-    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/events", "/api/prompt", "/api/abort",
+    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/close", "/api/end"}
 
 
@@ -193,9 +193,15 @@ def test_the_page_code_never_parses_markup_or_makes_links_or_resources(script):
     js = (STATIC / script).read_text()
     code = re.sub(r"//[^\n]*", "", js)                  # the header comment names these constructs on purpose
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
-                      "DOMParser", "createContextualFragment", ".href", ".src", "srcdoc", "window.open",
+                      "DOMParser", "createContextualFragment", ".href", ".src", "srcdoc",
                       "location.assign", "location.href ="):
         assert forbidden not in code, forbidden
+    # The ONE place a page may leave itself: back to the home page that started this session, and only to an
+    # address this computer made. Never to anything from the conversation.
+    assert code.count("window.open(") == (1 if script == "app.js" else 0)
+    if script == "app.js":
+        opener = js[js.index("function goHome"):js.index("function renderTrust")]
+        assert "window.open(" in opener and "HOME_LINK.test(homeUrl)" in opener
     for tag in ("a", "img", "iframe", "script", "link", "object", "embed", "video", "audio", "source", "form"):
         assert f'createElement("{tag}")' not in code and f'el("{tag}"' not in code, tag
     assert re.search(r'setAttribute\("(href|src|action|formaction|style|on\w+)"', code) is None

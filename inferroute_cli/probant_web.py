@@ -41,11 +41,6 @@ PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
 HISTORY_CAP = 5000
 
-# How long the assistant may say nothing at all, mid-turn, before the page stops claiming it is working.
-# Measured against real turns: a sealed search takes 20-60 s and streams status lines throughout, so two
-# minutes of COMPLETE silence is not slowness. A turn that goes quiet forever has happened (17 Sep: the
-# model stream ended mid-answer, Pi never learned, and the page said "The assistant is working…" until the
-# session was killed from a shell) and the page must never again present that as work in progress.
 def env(name: str, default: str = "") -> str:
     """A Probant setting, under its own name or the name it had while the product was called Surveyor.
     The old spelling is not decoration: a home page already running passes IR_SURVEYOR_HOME_URL to the
@@ -53,6 +48,11 @@ def env(name: str, default: str = "") -> str:
     return os.environ.get(f"IR_PROBANT_{name}") or os.environ.get(f"IR_SURVEYOR_{name}") or default
 
 
+# How long the assistant may say nothing at all, mid-turn, before the page stops claiming it is working.
+# Measured against real turns: a sealed search takes 20-60 s and streams status lines throughout, so two
+# minutes of COMPLETE silence is not slowness. A turn that goes quiet forever has happened (17 Sep: the
+# model stream ended mid-answer, Pi never learned, and the page said "The assistant is working…" until the
+# session was killed from a shell) and the page must never again present that as work in progress.
 STALL_SECONDS = float(env("STALL_SECONDS", "120"))
 # How long `abort` and `end` wait for the agent to do as it is told before saying it did not.
 ABORT_GRACE = float(os.environ.get("IR_PROBANT_ABORT_GRACE", "6"))
@@ -214,6 +214,8 @@ class Bridge:
         self.last_agent = time.monotonic()
         self.stalled = False
         self._watchdog: Any = None
+        # toolCallId → tool name, for calls that started and have not ended.
+        self.running_tools: Dict[str, str] = {}
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
         # so that a turn that ends in an event we don't understand leaves a trail instead of a mystery.
         self.dropped: Dict[str, int] = {}
@@ -234,6 +236,14 @@ class Bridge:
             self.busy = bool(event["value"])
         if event["kind"] == "dialog":
             self.dialogs[str(event["id"])] = event
+        # A tool call the agent started and never finished. The page shows "checking the search machine…"
+        # for one of these, and that card is NOT covered by `busy`: an agent can go silent with a tool
+        # outstanding while busy is false, and then nothing on the page ever says so. Henry hit exactly
+        # that on 18 Sep and had to ask a human why it was stuck.
+        if event["kind"] == "tool_start":
+            self.running_tools[str(event.get("call"))] = str(event.get("tool") or "")
+        if event["kind"] == "tool_end":
+            self.running_tools.pop(str(event.get("call")), None)
         self.history.append(event)
         self._keep(event)
         if len(self.history) > HISTORY_CAP:
@@ -325,7 +335,8 @@ class Bridge:
             while True:
                 await asyncio.sleep(min(2.0, max(0.02, STALL_SECONDS / 4)))
                 quiet = time.monotonic() - self.last_agent
-                if self.busy and not self.stalled and quiet >= STALL_SECONDS:
+                working = self.busy or bool(self.running_tools)
+                if working and not self.stalled and quiet >= STALL_SECONDS:
                     self.stalled = True
                     self.publish({"kind": "stall", "value": True, "seconds": int(quiet)})
         except asyncio.CancelledError:

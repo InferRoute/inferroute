@@ -449,10 +449,37 @@ def test_the_search_card_folds_and_the_session_has_an_index():
     assert 'id="outline-list"' in html and 'id="outline-empty"' in html
     # A fold must never hide a refusal, and must never override a deliberate click.
     assert "entry.failed = true" in js and "if (!e.byUser && !e.failed" in js
-    # The index has to survive a narrow window by disappearing, not by squeezing the conversation.
+    # Selecting the text of a head must not also fold it — one click doing two jobs.
+    assert "sel.isCollapsed" in js and "head.contains(sel.anchorNode)" in js
     assert ".outline { display: none; }" in css
-    for cls in (".card-toggle", ".card.collapsed", ".o-link", ".o-detail"):
+    for cls in (".card-toggle", ".card.collapsed"):
         assert cls in css, cls
+
+
+def test_a_row_in_the_index_says_what_the_search_WAS_not_how_many_it_found():
+    """Henry, 18 Sep: "search six, seven, eight doesn't say anything ... it would be much better if we could
+    have a description of what the search is. So fifty documents, it's taking a lot of space and it doesn't
+    give a lot of information." The count was overwriting the one line that told them apart."""
+    js = (STATIC / "app.js").read_text()
+    # outlineUpdate carries the search number and your marking; it must not touch the description.
+    body = js[js.index("function outlineUpdate"):js.index("function outlineUpdate") + 700]
+    assert "rec.note.textContent = note" in body
+    assert "rec.text" not in body, "outlineUpdate must never rewrite the description"
+    assert 'document${docs.length === 1 ? "" : "s"}`)' not in js.replace("\n", " "), "no document count in the index"
+
+
+def test_the_index_never_stacks_a_control_on_top_of_its_text():
+    """Henry, 18 Sep: "it's overlapping, the text is being cut, and the selection versus expanding
+    collapsing is also overlapping with the clicks". The cause was an absolutely positioned fold button
+    over the row's text; flex cells cannot overlap."""
+    css = (STATIC / "app.css").read_text()
+    outline = css[css.index("/* the index down the left"):css.index("/* trust panel */")]
+    assert "position: absolute" not in outline, "nothing in the index may be positioned over text"
+    assert ".o-row { display: flex" in outline and "flex: 0 0 auto" in outline
+    # A text cell that cannot shrink below its content is what pushes a row wider than the rail and gets
+    # its text sliced by the border.
+    assert "min-width: 0" in outline and "overflow-wrap: anywhere" in outline
+    assert "-webkit-line-clamp: 2" in outline
 
 
 def test_the_index_hangs_each_search_under_the_question_that_caused_it():
@@ -462,12 +489,9 @@ def test_the_index_hangs_each_search_under_the_question_that_caused_it():
     js = (STATIC / "app.js").read_text()
     css = (STATIC / "app.css").read_text()
     assert 'if (item.kind === "you")' in js and 'el("ol", "o-children")' in js
-    # A search goes under the open question; with no question yet it stands on its own rather than
-    # being given an invented parent.
     assert '(currentTurn ? currentTurn.kids : $("outline-list")).append(row)' in js
-    # The fold control only appears once there is something under it.
     assert 'fold.hidden = true' in js and 'currentTurn.fold.hidden = false' in js
     for cls in (".o-children", ".o-fold", ".o-you"):
         assert cls in css, cls
-    # Children must read as smaller than their heading, or the nesting carries no signal.
-    assert ".o-children .o-link { padding: 2px 8px; font-size: 12px; }" in css
+    # Children must read as smaller and quieter than their heading, or the nesting carries no signal.
+    assert ".o-children .o-text { font-size: 12px; color: var(--muted)" in css

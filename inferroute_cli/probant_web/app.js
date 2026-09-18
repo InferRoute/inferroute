@@ -377,7 +377,7 @@
     if (marked) bits.push(`${marked} marked${relevant ? `, ${relevant} relevant` : ""}`);
     bits.push(entry.collapsed ? "click to open" : "opened on this computer only");
     entry.sub.textContent = bits.join(" · ");
-    if (entry.outline) outlineUpdate(entry, bits.slice(0, 2).join(" · "));
+    if (entry.outline) outlineUpdate(entry, relevant ? `${relevant} relevant` : marked ? `${marked} marked` : "");
   }
 
   // The index. One row per landmark — what you asked, and each search — so a long session stays navigable.
@@ -389,20 +389,26 @@
 
   function outlineAdd(item) {
     const row = el("li", `o-${item.kind}`);
-    const b = el("button", "o-link");
-    b.type = "button";
-    const label = el("span", "o-label", item.label);
-    const detail = el("span", "o-detail", item.detail || "");
-    b.append(label, detail);
-    b.addEventListener("click", () => {
+    const link = el("button", "o-link");
+    link.type = "button";
+    // Two parts, always: a kicker that says WHICH this is, and the description, which is the only thing
+    // that tells them apart. "Search 7 · 50 documents" is a row that says nothing — a count is not a
+    // description, and it was overwriting the one useful line.
+    const kicker = el("span", "o-kicker");
+    const which = el("span", "o-which", item.label);
+    const note = el("span", "o-note", "");
+    note.hidden = true;
+    kicker.append(which, note);
+    const text = el("span", "o-text", item.detail || "");
+    link.append(kicker, text);
+    link.addEventListener("click", () => {
       // Jumping to a folded search opens it: being sent to a closed box is not arriving.
       if (item.entry && item.entry.collapsed) setCollapsed(item.entry, false, true);
       item.el.scrollIntoView({ behavior: "smooth", block: "start" });
       for (const r of outlineRows) r.row.classList.toggle("here", r === rec);
     });
-    const rec = { row, item, detail, label };
+    const rec = { row, item, which, note, text };
     if (item.kind === "you") {
-      // A question opens a turn: its own row, a fold control, and a place for what follows.
       const kids = el("ol", "o-children");
       const fold = el("button", "o-fold", "▾");
       fold.type = "button";
@@ -417,12 +423,14 @@
         fold.setAttribute("aria-expanded", String(!hide));
         fold.setAttribute("aria-label", hide ? "Show the searches from this question" : "Hide the searches from this question");
       });
-      row.append(fold, b, kids);
+      // The fold and the link are separate cells of one flex row, never stacked on each other: an absolutely
+      // positioned control over text is how a click lands on the wrong thing and how the text gets clipped.
+      row.append(el("div", "o-row", fold, link), kids);
       $("outline-list").append(row);
       currentTurn = { kids, fold, n: 0 };
       rec.turn = currentTurn;
     } else {
-      row.append(b);
+      row.append(link);
       // A search belongs to the question that caused it. Before any question (a replayed session can start
       // mid-flight), it stands on its own rather than being invented a parent.
       (currentTurn ? currentTurn.kids : $("outline-list")).append(row);
@@ -452,12 +460,14 @@
     if (!outlineRows.length) $("outline-empty").hidden = false;
   }
 
-  function outlineUpdate(entry, text) {
+  // Only the parts that actually change: which search this became, and your marking. The description of
+  // what was searched is written once and never overwritten by a count.
+  function outlineUpdate(entry, note) {
     const rec = entry && entry.outline;
     if (!rec) return;
-    if (entry.searchNo) rec.item.label = `Search ${entry.searchNo}`;
-    rec.label.textContent = rec.item.label;
-    rec.detail.textContent = text;
+    if (entry.searchNo) rec.which.textContent = `Search ${entry.searchNo}`;
+    rec.note.textContent = note || "";
+    rec.note.hidden = !note;
   }
 
   function toolStart(ev) {
@@ -487,7 +497,13 @@
       const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false };
       const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
       toggle.addEventListener("click", flip);
-      head.addEventListener("click", flip);
+      // Clicking the head also folds — but NOT when you were selecting its text. Dragging across the
+      // query to copy it ended with the card slamming shut, which is the same click doing two jobs.
+      head.addEventListener("click", (e) => {
+        const sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && head.contains(sel.anchorNode)) return;
+        flip(e);
+      });
       // Earlier searches fold away as soon as a new one starts: by the third search the feed is unreadable,
       // and what you want on screen is the one running now.
       autoCollapse();
@@ -573,7 +589,7 @@
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.n = docs.length;
     refreshCardSummary(entry);
-    outlineUpdate(entry, `${docs.length} document${docs.length === 1 ? "" : "s"}`);
+    outlineUpdate(entry, "");            // the description stays; the count lives in the card head
     s();
   }
 

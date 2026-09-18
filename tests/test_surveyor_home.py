@@ -66,7 +66,8 @@ def test_no_route_beyond_what_the_page_needs(home):
     h, c, _ = home
     paths = {r.path for r in h.app().routes}
     assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
-                     "/api/disclosure", "/api/sessions", "/api/launch", "/api/session", "/api/export", "/record"}
+                     "/api/disclosure", "/api/sessions", "/api/launch", "/api/session", "/api/export",
+                     "/api/check", "/record"}
 
 
 # ── matters ──
@@ -195,6 +196,26 @@ def test_a_record_opens_only_with_its_own_link_and_sandboxed(home):
     assert c.get(e["view"].replace("&v=", "&v=0"), headers={"authorization": ""}).status_code == 403
     other = e["view"].replace("cooling-prior-art-record-20260917T160005Z", "cooling-prior-art-record-20990101T000000Z")
     assert c.get(other, headers={"authorization": ""}).status_code == 403
+
+
+def test_a_record_can_be_checked_from_the_page_and_only_a_real_one(home, monkeypatch):
+    h, c, tmp_path = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    d = S.surveyor_root() / "Acme" / "exports" / "cooling-prior-art-record-20260917T160005Z"
+    d.mkdir(parents=True)
+    (d / "record.html").write_text("<h1>record</h1>")
+    # The bundle's OWN verifier is what runs — the same file a stranger would run, not a copy of the verdict.
+    (d / "verify_record.py").write_text("import sys\nprint('  PASS MANIFEST.json: 1 file')\n"
+                                        "print('RESULT: every check PASSED under production roots')\nsys.exit(0)\n")
+    from inferroute_cli import pi_attested
+    monkeypatch.setattr(pi_attested, "search_config_path", lambda: tmp_path / "none.json")
+    r = c.post("/api/check", json={"id": "Acme/cooling", "name": d.name})
+    assert r.status_code == 200 and r.json()["verdict"] == "passed"
+    assert r.json()["groups"][0]["question"].startswith("Is the record whole")
+    assert c.post("/api/check", json={"id": "Acme/cooling", "name": "../../etc"}).status_code == 404
+    assert c.post("/api/check", json={"id": "Acme/nope", "name": d.name}).status_code == 404
+    assert c.post("/api/check", json={"id": "Acme/cooling", "name": d.name},
+                  headers={"authorization": ""}).status_code == 401
 
 
 # ── the bridge keeps the conversation ──

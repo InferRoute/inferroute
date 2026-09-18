@@ -415,6 +415,29 @@ class Home:
             return {"ok": True, "folder": str(path), "view": home.record_link(mid, path.name),
                     "verify_here": f"ir surveyor verify-export {path}", "verify_anyone": "python3 verify_record.py ."}
 
+        @app.post("/api/check")
+        async def check(request: Request):
+            """Check one exported record, here, and say what it means. The verifier that runs is the
+            bundle's own — the same file a stranger would run — so this is convenience, not a second
+            opinion: its exit code is the verdict this answers with."""
+            import asyncio
+            from . import surveyor_check
+            d = await body(request)
+            try:
+                client, matter, _ = matter_of(str(d.get("id") or ""))
+            except S.SurveyorError as e:
+                return problem(str(e), 404)
+            name = str(d.get("name") or "")
+            match = next((e for e in list_exports(client, matter) if e["name"] == name), None)
+            if not match:
+                return problem("no such record", 404)
+            try:
+                out = await asyncio.to_thread(surveyor_check.check, match["folder"])
+            except Exception as e:                              # noqa: BLE001
+                return problem(f"the check could not be run: {type(e).__name__}", 500)
+            out["folder"] = match["folder"]
+            return out
+
         @app.get("/record")
         async def record(id: str = "", name: str = "", v: str = ""):
             # A capability link for ONE exported record (a new tab cannot send the key header). The record is

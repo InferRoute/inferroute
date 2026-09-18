@@ -5,13 +5,13 @@ still be prevented from shipping a bundle that overstates what confined the agen
 """
 import pytest
 
-from inferroute_cli import pi_attested, surveyor_export
+from inferroute_cli import pi_attested, probant_export
 from inferroute_local import netns
 
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for var in ("IR_ATTESTED_CONFINE", "IR_ATTESTED_NETNS_BIND", "IR_SURVEYOR_DEV_UNCONFINED"):
+    for var in ("IR_ATTESTED_CONFINE", "IR_ATTESTED_NETNS_BIND", "IR_PROBANT_DEV_UNCONFINED"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -37,9 +37,9 @@ def test_the_bind_is_planned_only_in_require_mode(monkeypatch):
     assert pi_attested.plan_netns_bind() is False                      # default (best-effort) mode
     monkeypatch.setenv("IR_ATTESTED_CONFINE", "require")
     assert pi_attested.plan_netns_bind() is True
-    monkeypatch.setenv("IR_SURVEYOR_DEV_UNCONFINED", "1")
+    monkeypatch.setenv("IR_PROBANT_DEV_UNCONFINED", "1")
     assert pi_attested.plan_netns_bind() is False                      # dev override never promises it
-    monkeypatch.delenv("IR_SURVEYOR_DEV_UNCONFINED")
+    monkeypatch.delenv("IR_PROBANT_DEV_UNCONFINED")
     monkeypatch.setenv("IR_ATTESTED_CONFINE", "off")
     assert pi_attested.plan_netns_bind() is False
 
@@ -64,7 +64,7 @@ def test_the_plan_and_the_precheck_ask_the_same_question(monkeypatch):
     (netns.ADDRESS_LEVEL_LABEL, "not present in the agent's filesystem"),
 ])
 def test_the_export_says_only_what_the_recorded_line_supports(recorded, expected):
-    assert expected in surveyor_export._reach_note(recorded)
+    assert expected in probant_export._reach_note(recorded)
 
 
 def test_an_egress_only_require_session_does_not_claim_its_files_were_invisible():
@@ -72,12 +72,12 @@ def test_an_egress_only_require_session_does_not_claim_its_files_were_invisible(
     left the record directory merely write-denied. The word "address-level" in the recorded line is
     therefore NOT the discriminator — the line saying the files were absent is."""
     legacy = "require (address-level egress enforced or the session does not start)"
-    assert "not present" not in surveyor_export._reach_note(legacy)
-    assert "write access" in surveyor_export._reach_note(legacy)
+    assert "not present" not in probant_export._reach_note(legacy)
+    assert "write access" in probant_export._reach_note(legacy)
 
 
 def test_a_best_effort_session_is_never_described_as_required():
     """The defect this check exists for: every non-'unconfined' line used to read 'require-mode
     confinement', so a session that would have run even with no confinement available claimed a guarantee."""
-    note = surveyor_export._reach_note("best-effort (port-level; not required)")
+    note = probant_export._reach_note("best-effort (port-level; not required)")
     assert "require-mode" not in note and "would still have run" in note

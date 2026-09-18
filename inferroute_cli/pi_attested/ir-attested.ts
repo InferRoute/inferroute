@@ -119,7 +119,7 @@ function hhmm(iso: string): string {
 }
 
 // Plain words first; the checks themselves are one expand away (/proof). Same vocabulary as the launch card
-// (surveyor_trust.py): "sealed machine", "checked at", "nothing is sent".
+// (probant_trust.py): "sealed machine", "checked at", "nothing is sent".
 function statusText(v: Verdict): string {
 	if (!v.ok) return `⛔ AI: sealed machine NOT verified, so nothing is sent (${v.reason})`;
 	return `🔒 AI: sealed machine, checked at ${hhmm(v.verifiedAt)}`;
@@ -315,7 +315,7 @@ function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
 }
 
-// Same rule as surveyor_trust.search_is_inferroutes: the reference is authentic AND this enclave matched it.
+// Same rule as probant_trust.search_is_inferroutes: the reference is authentic AND this enclave matched it.
 function isInferRoutes(v: SearchVerdict): boolean {
 	return v.ok && v.reference?.ok === true && (v.steps ?? []).some((s) => s.ok && s.step.startsWith("enclave identity"));
 }
@@ -476,7 +476,7 @@ class SessionRecord {
 			schema: "inferroute.attested-session/1",
 			session_id: this.sessionId,
 			// Which screen the professional used ("terminal" or "browser"), for the home page's history.
-			surface: process.env.IR_SURVEYOR_SURFACE ?? "",
+			surface: process.env.IR_PROBANT_SURFACE ?? "",
 			started_at: this.startedAt,
 			written_at: new Date().toISOString(),
 			contract: {
@@ -579,12 +579,12 @@ export default function (pi: ExtensionAPI) {
 			showLifecycle(ctx, await lifecycleCall("/lifecycle", false));
 		}
 		// The terminal gets a how-to; the browser page has its own welcome, and "/quit" means nothing there.
-		if (ctx.hasUI && MATTER && process.env.IR_SURVEYOR_SURFACE !== "browser") {
+		if (ctx.hasUI && MATTER && process.env.IR_PROBANT_SURFACE !== "browser") {
 			ctx.ui.notify(
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
 					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Send a suggested next step: /next <n>. Show the checks again: /proof.",
-					`Leave with /quit, then keep the record: ir surveyor export ${MATTER}`].join("\n"),
+					`Leave with /quit, then keep the record: ir probant export ${MATTER}`].join("\n"),
 				"info",
 			);
 		}

@@ -1,13 +1,13 @@
-// Surveyor, local browser page. Served by the session's own bridge on 127.0.0.1; talks only to it.
+// Probant, local browser page. Served by the session's own bridge on 127.0.0.1; talks only to it.
 //
 // One rule governs this file: it builds TEXT NODES. Nothing received — the assistant's words, a patent
 // title, a dialog — is ever parsed as markup, turned into a link, or used as a resource address. The agent
 // has no network; this page runs in a browser that does, so it must never become the agent's way out.
-// tests/test_surveyor_web.py greps this file for the constructs that would break that rule.
+// tests/test_probant_web.py greps this file for the constructs that would break that rule.
 "use strict";
 
 (() => {
-  const KEY_STORE = "surveyor-session-key";
+  const KEY_STORE = "probant-session-key";
   const $ = (id) => document.getElementById(id);
 
   // ── the session key: from the URL fragment (never sent to a server), then out of the address bar ──
@@ -21,7 +21,7 @@
     try { key = sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { key = ""; }
   }
 
-  const { el, clear, markdown } = window.SurveyorUI;
+  const { el, clear, markdown } = window.ProbantUI;
 
   // ── talking to the bridge ──
   async function api(path, body) {
@@ -66,13 +66,13 @@
     const row = el("div", "row ended-actions");
     if (HOME_LINK.test(homeUrl)) {
       const again = el("button", "primary", "Start another session on this matter");
-      const home = el("button", "ghost", "Surveyor home");
+      const home = el("button", "ghost", "Probant home");
       again.type = home.type = "button";
       again.addEventListener("click", () => goHome(`/matter/${matterId}`));
       home.addEventListener("click", () => goHome(""));
       row.append(again, home);
     } else {
-      const cmd = `ir surveyor open ${matterId} --web`;
+      const cmd = `ir probant open ${matterId} --web`;
       const copy = el("button", "ghost small", "Copy the command");
       copy.type = "button";
       copy.addEventListener("click", () => navigator.clipboard.writeText(cmd).then(() => toast("Copied.", "info")).catch(() => {}));
@@ -690,14 +690,14 @@
     let s;
     try { s = await api("/api/session"); } catch (e) { showNoKey(); return; }
     $("layout").hidden = false;
-    document.title = `Surveyor · ${s.matter}`;
+    document.title = `Probant · ${s.matter}`;
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
     homeUrl = String(s.home || "");
     matterId = String(s.matter || "");
     if (HOME_LINK.test(homeUrl)) {
-      const b = el("button", "ghost", "Surveyor home");
+      const b = el("button", "ghost", "Probant home");
       b.type = "button";
       b.addEventListener("click", () => goHome(""));
       $("top-home").replaceWith(b);

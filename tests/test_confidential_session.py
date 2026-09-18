@@ -470,7 +470,7 @@ def test_native_openai_round_trip_is_sealed_and_passed_through_untranslated(worl
 def test_a_reply_that_stops_part_way_ends_the_stream_instead_of_leaving_the_agent_waiting(world):
     """An OpenAI SSE ends at "data: [DONE]"; an agent waits for it. Byte-for-byte passthrough has no
     translator to close the stream for it, so an enclave whose answer stopped part-way used to reach the
-    agent as a body that simply stopped — no terminator, no error. That is how a Surveyor session sat on
+    agent as a body that simply stopped — no terminator, no error. That is how a Probant session sat on
     "The assistant is working…" for 25 minutes on 17 Sep with the agent idle and holding no connection.
     A truncated answer is bad news; silence is worse."""
     carrier = FakeCarrier(world["enclaves"])

@@ -1,15 +1,15 @@
-"""`ir surveyor reference` — issue the out-of-band reference that lets a record say "InferRoute's enclave".
+"""`ir probant reference` — issue the out-of-band reference that lets a record say "InferRoute's enclave".
 
 THIS IS THE OPERATOR'S SIDE OF THE PROOF, not the attorney's. A record bundle proves, on its own, that a
 genuine AMD SEV-SNP container ran inside Microsoft's utility VM. It proves the container was OURS only when
 the reader compares the container-policy hash and the index / encoder manifest hashes against values they
 obtained from InferRoute through a channel they already trust. These commands produce and sign those values.
 
-    ir surveyor reference new-key   --out KEY        once, on an OFFLINE machine; prints the public key
-    ir surveyor reference build     --from-offer F   derive the values from a deployment YOU control
-    ir surveyor reference retire    --value HEX      withdraw an entry (an explicit act, never a silent swap)
-    ir surveyor reference sign      --key KEY        on the OFFLINE machine that holds the key
-    ir surveyor reference verify    --key-hex HEX    what a firm sees; also a check before you publish
+    ir probant reference new-key   --out KEY        once, on an OFFLINE machine; prints the public key
+    ir probant reference build     --from-offer F   derive the values from a deployment YOU control
+    ir probant reference retire    --value HEX      withdraw an entry (an explicit act, never a silent swap)
+    ir probant reference sign      --key KEY        on the OFFLINE machine that holds the key
+    ir probant reference verify    --key-hex HEX    what a firm sees; also a check before you publish
 
 `verify` exit codes, because a reference has two independent verdicts and the code must carry both:
     0  signed by the key you gave, and something is current for every field — usable
@@ -524,7 +524,7 @@ def _passphrase(var: Optional[str], prompt: bool = False, confirm: bool = False)
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
-    p = argparse.ArgumentParser(prog="ir surveyor reference", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="ir probant reference", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
 
     k = sub.add_parser("new-key", help="OFFLINE MACHINE: generate the long-lived publication key")

@@ -1,13 +1,13 @@
-"""`ir surveyor home` — the Surveyor home page: every matter and its past sessions, a new matter, a new session,
+"""`ir probant home` — the Probant home page: every matter and its past sessions, a new matter, a new session,
 and a plain guide.
 
-It is a small web server on 127.0.0.1 with the same rules as a session's page (surveyor_web.install_guard):
+It is a small web server on 127.0.0.1 with the same rules as a session's page (probant_web.install_guard):
 our own Host only, same origin only, a per-launch key on every /api call, strict page headers, pages that
-build text nodes only. It reads what Surveyor already keeps host-side — the matter records, each session's
+build text nodes only. It reads what Probant already keeps host-side — the matter records, each session's
 record and searches, the marks, the exported records — and writes only three things, each on the
 professional's click: a new matter, the disclosure text, an export.
 
-Starting a session runs exactly `ir surveyor open <matter> --web` as a child process: the same verification,
+Starting a session runs exactly `ir probant open <matter> --web` as a child process: the same verification,
 the same sandbox, its own page and key. The home page shows progress while the sealed machines are checked,
 then offers the session's link. Sessions end with the home page's process (PR_SET_PDEATHSIG), because the
 child is started from the server's main thread.
@@ -30,8 +30,8 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
-from . import surveyor as S
-from .surveyor_web import STATIC, disclosure_info, install_guard, launch_browser, strip_ansi
+from . import probant as S
+from .probant_web import STATIC, disclosure_info, install_guard, launch_browser, strip_ansi
 
 SESSION_URL = re.compile(r"(http://127\.0\.0\.1:\d+/#k=[A-Za-z0-9_-]+)")
 SESSION_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
@@ -42,7 +42,7 @@ MAX_DISCLOSURE = 200_000
 BOX_LINE = re.compile(r"[│╭╮╰╯─━┃┏┓┗┛]+")
 
 
-# ───────────────────────── reading what Surveyor keeps ─────────────────────────
+# ───────────────────────── reading what Probant keeps ─────────────────────────
 
 def _json(p: Path) -> Optional[dict]:
     try:
@@ -104,7 +104,7 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
 
 
 def list_exports(client: str, matter: str) -> List[Dict[str, Any]]:
-    root = S.surveyor_root() / client / "exports"
+    root = S.probant_root() / client / "exports"
     pattern = re.compile(rf"^{re.escape(matter)}-prior-art-record-(\d{{8}}T\d{{6}}Z)$")
     out = []
     for d in (root.iterdir() if root.is_dir() else []):
@@ -193,8 +193,8 @@ class Launches:
             return existing
         from . import pi_attested
         # The child's page shows a way back here, so a finished session is not a dead end.
-        env = dict(os.environ, IR_SURVEYOR_NO_BROWSER="1", IR_SURVEYOR_HOME_URL=self.home_url)
-        argv = [sys.executable, "-m", "inferroute_cli", "surveyor", "open", matter_id, "--web"]
+        env = dict(os.environ, IR_PROBANT_NO_BROWSER="1", IR_PROBANT_HOME_URL=self.home_url)
+        argv = [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"]
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
         proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -226,7 +226,7 @@ def failure_message(tail: List[str]) -> str:
     text = " ".join(tail)
     low = text.lower()
     if "nested agent session" in low:
-        return "This was started from inside another assistant session. Start Surveyor home from a normal terminal."
+        return "This was started from inside another assistant session. Start Probant home from a normal terminal."
     if "not opened" in low or "refused" in low or "could not open the confidential session" in low:
         return "The AI machine could not be verified, so the session was not opened and nothing was sent. Try again in a minute."
     if "cannot reach the carrier" in low or "key was refused" in low:
@@ -234,7 +234,7 @@ def failure_message(tail: List[str]) -> str:
     if "workspace is missing" in low:
         return "This matter's folder is missing, so the session was not opened."
     reasons = [ln for ln in tail if re.search(r"refus|error|could not|cannot|missing|invalid", ln, re.I)]
-    return "The session did not start. " + (reasons[-1] if reasons else "See the terminal where Surveyor home runs.")
+    return "The session did not start. " + (reasons[-1] if reasons else "See the terminal where Probant home runs.")
 
 
 # ───────────────────────── the app ─────────────────────────
@@ -310,7 +310,7 @@ class Home:
                 import io
                 with contextlib.redirect_stdout(io.StringIO()):
                     S.cmd_new(client, matter, date or None)
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e))
             text = str(d.get("disclosure") or "")
             if text.strip():
@@ -323,7 +323,7 @@ class Home:
         async def matter_view(id: str = ""):
             try:
                 client, matter, rec = matter_of(id)
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             mid = f"{client}/{matter}"
             ws = Path(str(rec.get("workspace") or ""))
@@ -340,7 +340,7 @@ class Home:
         async def get_disclosure(id: str = ""):
             try:
                 client, matter, rec = matter_of(id)
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             try:
                 text = (Path(str(rec["workspace"])) / "disclosure.md").read_text(encoding="utf-8")
@@ -358,7 +358,7 @@ class Home:
             d = await body(request)
             try:
                 client, matter, rec = matter_of(str(d.get("id") or ""))
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             text = str(d.get("text") or "")
             if len(text) > MAX_DISCLOSURE:
@@ -374,7 +374,7 @@ class Home:
             d = await body(request)
             try:
                 client, matter, _ = matter_of(str(d.get("id") or ""))
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
@@ -387,7 +387,7 @@ class Home:
         async def session_view(id: str = "", sid: str = ""):
             try:
                 client, matter, _ = matter_of(id)
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             detail = session_detail(client, matter, sid)
             return detail if detail else problem("no such session", 404)
@@ -397,23 +397,23 @@ class Home:
             d = await body(request)
             try:
                 client, matter, _ = matter_of(str(d.get("id") or ""))
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             import asyncio
             import contextlib
             import io
-            from . import surveyor_export
+            from . import probant_export
 
             def run() -> Path:
                 with contextlib.redirect_stdout(io.StringIO()):
-                    return surveyor_export.write_bundle(client, matter, None)
+                    return probant_export.write_bundle(client, matter, None)
             try:
                 path = await asyncio.to_thread(run)
             except Exception as e:                              # noqa: BLE001
                 return problem(f"export failed: {e}", 500)
             mid = f"{client}/{matter}"
             return {"ok": True, "folder": str(path), "view": home.record_link(mid, path.name),
-                    "verify_here": f"ir surveyor verify-export {path}", "verify_anyone": "python3 verify_record.py ."}
+                    "verify_here": f"ir probant verify-export {path}", "verify_anyone": "python3 verify_record.py ."}
 
         @app.post("/api/check")
         async def check(request: Request):
@@ -421,18 +421,18 @@ class Home:
             bundle's own — the same file a stranger would run — so this is convenience, not a second
             opinion: its exit code is the verdict this answers with."""
             import asyncio
-            from . import surveyor_check
+            from . import probant_check
             d = await body(request)
             try:
                 client, matter, _ = matter_of(str(d.get("id") or ""))
-            except S.SurveyorError as e:
+            except S.ProbantError as e:
                 return problem(str(e), 404)
             name = str(d.get("name") or "")
             match = next((e for e in list_exports(client, matter) if e["name"] == name), None)
             if not match:
                 return problem("no such record", 404)
             try:
-                out = await asyncio.to_thread(surveyor_check.check, match["folder"])
+                out = await asyncio.to_thread(probant_check.check, match["folder"])
             except Exception as e:                              # noqa: BLE001
                 return problem(f"the check could not be run: {type(e).__name__}", 500)
             out["folder"] = match["folder"]
@@ -446,7 +446,7 @@ class Home:
                 return Response("this record link is not valid for this home page", status_code=403)
             try:
                 client, matter, _ = matter_of(id)
-            except S.SurveyorError:
+            except S.ProbantError:
                 return Response("no such matter", status_code=404)
             match = next((e for e in list_exports(client, matter) if e["name"] == name), None)
             if not match:
@@ -469,7 +469,7 @@ def run(open_browser: bool = True) -> int:
     home.launches.home_url = url
     # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
     # full buffer, and the link is the one thing it needs.
-    print(f"\n  Surveyor home:  {url}", flush=True)
+    print(f"\n  Probant home:  {url}", flush=True)
     print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
     print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
     if open_browser:

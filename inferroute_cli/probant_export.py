@@ -1,4 +1,4 @@
-"""`ir surveyor export` — the one-directory record an attorney hands a client, built so that its claims can
+"""`ir probant export` — the one-directory record an attorney hands a client, built so that its claims can
 be RE-DERIVED by a stranger from the bundle alone, with no InferRoute code and no trust in this machine.
 
     <matter>-prior-art-record-<stamp>/
@@ -192,7 +192,7 @@ def _load_sessions(S, client: str, matter: str) -> list:
 def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     """Assemble everything: the HTML, the machine record, and the evidence files, from host-held files.
     Returns {"html": str, "searches": list, "evidence": {sha: json_str}, "matter_cutoff": int|None}."""
-    from . import surveyor as S
+    from . import probant as S
     rec = S.load_record(client, matter)
     ws = Path(rec["workspace"])
     try:
@@ -236,7 +236,9 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       ".who{color:#666;font-size:12px}"
       "</style></head><body>")
     A("<h1>Prior-art research record</h1>")
-    A(f"<div class=sub>{_e(client)} / {_e(matter)}</div>")
+    # The record is the one thing here that leaves the firm — opposing counsel, a client's CTO, an examiner
+    # may read it — so it carries the full product name and who stands behind it, not the in-product short one.
+    A(f"<div class=sub>{_e(client)} / {_e(matter)} · made with InferRoute Probant</div>")
     glance_at = len(out)
     A("")                                  # "At a glance", filled in once the searches below are known
     A("<p class=note>Every statement below is a fact this device checked or recorded, not a promise. What a stranger "
@@ -527,22 +529,22 @@ def _is_within(child: Path, parent: Path) -> bool:
 def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bool = False) -> Path:
     """Write the bundle directory (0700, files 0600). Refuses the matter workspace and cloud-sync roots: the
     bundle holds the invention in plain text. Returns the directory."""
-    from . import surveyor as S
+    from . import probant as S
     rec = S.load_record(client, matter)
     ws = Path(rec["workspace"])
     b = build_bundle(client, matter)
     if out_dir:
         dest = Path(out_dir)
         if _is_within(dest, ws):
-            raise S.SurveyorError("refusing to write the export inside the matter workspace, where a later session "
+            raise S.ProbantError("refusing to write the export inside the matter workspace, where a later session "
                                   "could alter it before it is filed. Choose a directory outside the workspace.")
         sync = S._under_sync_root(dest)
         if sync:
-            raise S.SurveyorError(f"refusing to write the export under a cloud-sync folder ({sync}): it holds the "
+            raise S.ProbantError(f"refusing to write the export under a cloud-sync folder ({sync}): it holds the "
                                   "invention in plain text. Choose a local directory outside any synced folder.")
     else:
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dest = S.surveyor_root() / client / "exports" / f"{matter}-prior-art-record-{stamp}"
+        dest = S.probant_root() / client / "exports" / f"{matter}-prior-art-record-{stamp}"
     dest.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(dest, 0o700)
@@ -558,7 +560,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         files[f"{sha[:16]}.evidence.json"] = content.encode("utf-8")
     verifier_src = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"
     if not verifier_src.exists():
-        raise S.SurveyorError("the independent verifier (pi_attested/verify_record.py) is missing from this installation; "
+        raise S.ProbantError("the independent verifier (pi_attested/verify_record.py) is missing from this installation; "
                               "refusing to write a record that VERIFY.md tells the reader to verify with it")
     files["verify_record.py"] = verifier_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
@@ -578,13 +580,13 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
 
     print(f"wrote {dest}")
     print(f"  {len(b['searches'])} sealed search(es), {len(b['evidence'])} evidence bundle(s)")
-    print(f"  check it here:        ir surveyor verify-export {dest}")
+    print(f"  check it here:        ir probant verify-export {dest}")
     print("  anyone, without ir:   python3 verify_record.py .   (in that folder; needs Python's cryptography 42 or newer)")
     print("  contains the disclosure in plain text — store it accordingly")
     if anchor:
         _anchor(dest / "MANIFEST.json")
     else:
-        print("  to timestamp this record (open source, publishes only a hash): ir surveyor export ... --anchor, or `ots stamp MANIFEST.json`")
+        print("  to timestamp this record (open source, publishes only a hash): ir probant export ... --anchor, or `ots stamp MANIFEST.json`")
     return dest
 
 

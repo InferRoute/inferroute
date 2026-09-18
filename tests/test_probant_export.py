@@ -1,4 +1,4 @@
-"""`ir surveyor export` — the one-directory record the attorney hands a client, built so a stranger can
+"""`ir probant export` — the one-directory record the attorney hands a client, built so a stranger can
 re-derive its claims from the bundle alone. Checks the bundle's shape (record.html, searches.json, evidence
 files, MANIFEST.json, VERIFY.md, the standalone verify_record.py), the honest per-session reach note, the
 model lane's full check list and limitations, the query-text binding, and the output-path safety.
@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from inferroute_cli import surveyor as S
+from inferroute_cli import probant as S
 
 
 @pytest.fixture
 def matter(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
-    monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "Surveyor"))
-    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_SURVEYOR_DEV_UNCONFINED",
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_PROBANT_DEV_UNCONFINED",
               "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
         monkeypatch.delenv(k, raising=False)
     assert S.main(["new", "AcmeCorp", "battery-cooling", "--priority-date", "2020-01-15"]) == 0
@@ -140,7 +140,7 @@ def test_export_refuses_workspace_and_sync_root(matter):
 
 def test_export_default_path_is_outside_the_workspace_and_warns_plaintext(matter, capsys):
     assert S.main(["export", "AcmeCorp/battery-cooling"]) == 0
-    dirs = list((S.surveyor_root() / "AcmeCorp" / "exports").iterdir())
+    dirs = list((S.probant_root() / "AcmeCorp" / "exports").iterdir())
     assert dirs and (dirs[0] / "record.html").exists()
     assert "plain text" in capsys.readouterr().out
 
@@ -177,27 +177,27 @@ def _sess(conf="require, address-level (empty network namespace)", verified=True
 
 
 def test_glance_never_asserts_the_search_machine_was_inferroutes():
-    from inferroute_cli import surveyor_export as X
+    from inferroute_cli import probant_export as X
     html = X._glance([_sess()], 2, {}, {"date_bound": "2020-01-01"})
     assert "Whether the search machine was InferRoute's" in html and "does not assert it" in html
     assert "was InferRoute's</b> is checked" in html
 
 
 def test_glance_says_who_stands_behind_each_line():
-    from inferroute_cli import surveyor_export as X
+    from inferroute_cli import probant_export as X
     html = X._glance([_sess()], 1, {"US-1-B2": {}}, {"date_bound": "2020-01-01"})
     assert html.count("As reported by this computer") == 2 and "Anyone can check these from this folder alone" in html
     assert "the start of the session." in html
 
 
 def test_glance_reports_an_unboxed_or_unverified_session_as_a_problem():
-    from inferroute_cli import surveyor_export as X
+    from inferroute_cli import probant_export as X
     html = X._glance([_sess(), _sess(conf="unconfined (developer override)", verified=False)], 1, {}, {"date_bound": "x"})
     assert "WITHOUT its box" in html and "not verified in 1 of 2" in html
     assert "worked in a closed box" not in html and "ran in a sealed machine" not in html
 
 
 def test_glance_claims_no_date_bound_search_when_nothing_was_searched():
-    from inferroute_cli import surveyor_export as X
+    from inferroute_cli import probant_export as X
     html = X._glance([_sess()], 0, {}, {"date_bound": "2020-01-01"})
     assert "No sealed search completed" in html and "were searched" not in html

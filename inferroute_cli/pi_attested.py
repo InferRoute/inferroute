@@ -133,7 +133,7 @@ def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: 
             entry.unlink()                    # a prior symlink-out; replace with a real dir below
     doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None)
     (d / "models.json").write_text(json.dumps(doc, indent=1))
-    # `quiet`: a Surveyor session hides Pi's developer start-up header (key bindings, "! bash", resource
+    # `quiet`: a Probant session hides Pi's developer start-up header (key bindings, "! bash", resource
     # paths) and the model's thinking; the attorney has been shown what matters on the card, and reads the answer.
     (d / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "defaultProjectTrust": "never",
                                                  **({"quietStartup": True, "hideThinkingBlock": True} if quiet else {})}, indent=1))
@@ -197,7 +197,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
              headers: dict | None = None, search_endpoint: str | None = None) -> list[str]:
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
-    cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_SURVEYOR_SURFACE")))
+    cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
     tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
@@ -229,10 +229,10 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # The disclosure record goes to a writable, ir-owned dir (cfg is in the write allow-set), NOT under
     # confidential/ which the filesystem confinement denies the agent.
     env["IR_ATTESTED_RECORD_DIR"] = str(cfg / "attested-sessions")
-    # A Surveyor session keeps no Pi transcript. The record of a matter is the host-side record the export
+    # A Probant session keeps no Pi transcript. The record of a matter is the host-side record the export
     # reads; a transcript would be a second, plain-text copy of the disclosure nobody is told about, and Pi's
     # exit line "To resume this session: pi --session …" would invite continuing it in plain `pi`, unsealed.
-    ephemeral = ["--no-session"] if env.get("IR_SURVEYOR_SURFACE") else []
+    ephemeral = ["--no-session"] if env.get("IR_PROBANT_SURFACE") else []
     return [binary, "-ne", "-e", str(EXTENSION), "-na", "-nc", *ephemeral, "--tools", ",".join(tools),
             "--system-prompt", str(sp),
             "--provider", PROVIDER, "--model", alias.short, "--models", f"{PROVIDER}/{alias.short}", *passthrough]
@@ -290,7 +290,7 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         return None
     argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg), "--port", "0"]
-    # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir surveyor open` sets
+    # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir probant open` sets
     # them in the env from the host-held matter record, so the shared search.json is never mutated per
     # launch (no race, no writable date bound). Fall back to search.json only when no matter is open.
     cutoff = os.environ.get("IR_MATTER_CUTOFF") or cfg.get("cutoff_date")
@@ -372,7 +372,7 @@ def _search_pin_args(cfg: dict) -> list[str]:
 
 
 def verify_search_once(timeout: float = 120.0) -> dict | None:
-    """One live check of the configured search enclave, outside any session (`ir surveyor proof`). Same
+    """One live check of the configured search enclave, outside any session (`ir probant proof`). Same
     verifier, same pins as a session's proxy. None when search is not configured on this computer."""
     import subprocess
     try:
@@ -440,7 +440,7 @@ def plan_netns_bind() -> bool:
     build it. Decided BEFORE the verifier starts, because the verifier stamps the confinement line into
     every record from this decision — and the launcher refuses to start if the sandbox then fails to build,
     so a record can never claim a confinement its session did not run under."""
-    if confine_disabled() or os.environ.get("IR_SURVEYOR_DEV_UNCONFINED") == "1" or not confine_required():
+    if confine_disabled() or os.environ.get("IR_PROBANT_DEV_UNCONFINED") == "1" or not confine_required():
         return False
     from inferroute_local import confinement
     return confinement.netns_bind_available()
@@ -463,7 +463,7 @@ def confinement_label() -> str:
     """The confinement line the verifier stamps into every disclosure record — asserted host-side from the
     launch env, not from anything the sandbox composes. In require mode the launch refuses unless the
     sandbox actually applies, so by the time any search runs the line is accurate."""
-    if os.environ.get("IR_SURVEYOR_DEV_UNCONFINED") == "1":
+    if os.environ.get("IR_PROBANT_DEV_UNCONFINED") == "1":
         return "unconfined (developer override)"
     if confine_disabled():
         return "not confined"

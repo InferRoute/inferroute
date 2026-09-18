@@ -346,13 +346,13 @@ def test_planted_context_files_do_not_reach_the_model(tmp_path, user_pi):
         assert "prior-art research assistant" in sysmsg
 
 
-def test_a_surveyor_session_keeps_no_transcript_and_offers_no_resume(tmp_path, user_pi, monkeypatch):
+def test_a_probant_session_keeps_no_transcript_and_offers_no_resume(tmp_path, user_pi, monkeypatch):
     # Pi's exit line offered "pi --session <id>", which would continue the matter in plain, unsealed Pi, and the
-    # transcript it resumes from was a plain-text copy of the disclosure. Surveyor runs Pi with --no-session.
+    # transcript it resumes from was a plain-text copy of the disclosure. Probant runs Pi with --no-session.
     from inferroute_cli import pi_attested as P, models as M
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
     alias = M.get("kimi-k2.6")
-    env = {"IR_SURVEYOR_SURFACE": "terminal"}
+    env = {"IR_PROBANT_SURFACE": "terminal"}
     argv = P.env_argv("pi", env, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
     assert "--no-session" in argv
     plain = P.env_argv("pi", {}, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u")
@@ -390,7 +390,7 @@ def test_no_tool_can_make_a_mark_and_a_suggested_step_is_never_a_command():
     # A step chosen by the professional is sent as their message: leading "/" (extension command, e.g. a mark)
     # and "!" (shell) are stripped before it is stored or shown.
     assert 'replace(/^[\\/!\\s]+/, "")' in ts
-    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "surveyor_web" / "app.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "app.js").read_text()
     assert "!/^[\\/!]/.test(t)" in js
 
 

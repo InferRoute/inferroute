@@ -304,13 +304,16 @@ def main(argv: list[str] | None = None) -> int:
         from . import cowork as cowork_mod
         return cowork_mod.cmd_cowork(rest)
 
-    if cmd == "surveyor":
-        # `ir surveyor new|set-date|open|list` — the attorney entry to the attested prior-art assistant.
+    if cmd in ("probant", "surveyor"):
+        # `ir probant new|set-date|open|list` — the attorney entry to the attested prior-art assistant.
+        # `surveyor` was its name until 2026-09-18 and still answers, silently: the rehearsal notes, the
+        # wrapper script and a home page already running all say `surveyor`, and a command that stops
+        # working mid-rehearsal is a worse introduction to the new name than one that quietly still does.
         # Matters are created and their date bound changed OUT of session, by the human, through this
         # unconfined launcher; `open` chdirs into the matter workspace and launches the attested Pi with
         # the matter's cutoff/state/record held host-side under confidential/ (write-denied to the agent).
-        from . import surveyor as surveyor_mod
-        return surveyor_mod.main(rest)
+        from . import probant as probant_mod
+        return probant_mod.main(rest)
 
     if cmd in ("pi", "opencode"):
         # `ir pi` / `ir opencode [--model M] [--plain] [agent args]` — other Anthropic-native

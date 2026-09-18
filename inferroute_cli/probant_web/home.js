@@ -1,14 +1,14 @@
-// Surveyor home page. Served by `ir surveyor home` on 127.0.0.1; talks only to it.
+// Probant home page. Served by `ir probant home` on 127.0.0.1; talks only to it.
 //
 // Same rule as the session page: TEXT NODES only. The one place this page leaves itself is openLocal(), and
 // it only opens addresses this computer produced: a session page on 127.0.0.1 with its key, or a record link
-// from this home page. tests/test_surveyor_home.py pins both.
+// from this home page. tests/test_probant_home.py pins both.
 "use strict";
 
 (() => {
-  const { el, clear, markdown } = window.SurveyorUI;
+  const { el, clear, markdown } = window.ProbantUI;
   const $ = (id) => document.getElementById(id);
-  const KEY_STORE = "surveyor-home-key";
+  const KEY_STORE = "probant-home-key";
 
   // ── the key: from the URL fragment (never sent to a server), then out of the address bar ──
   let key = "";
@@ -409,7 +409,7 @@
     const sec = (title, ...nodes) => el("section", "help-section", el("h2", "", title), ...nodes);
     const para = (t) => el("p", "", t);
     const list = (...items) => el("ul", "", ...items.map((t) => el("li", "", t)));
-    p.append(el("div", "page-head", el("h1", "", "How Surveyor works"),
+    p.append(el("div", "page-head", el("h1", "", "How Probant works"),
       el("p", "sub", "A private assistant for prior-art research: it surveys published patents with you, and every search leaves a record anyone can check.")));
     p.append(
       sec("1. Create a matter",
@@ -447,10 +447,10 @@
           "Record checks currently show one known failure, completeness, until the next update of the search machine.")),
       sec("In the terminal",
         para("Everything here also works in a terminal:"),
-        list("ir surveyor new <client> <matter> --priority-date YYYY-MM-DD",
-          "ir surveyor open <client>/<matter>   (add --web for the browser)",
+        list("ir probant new <client> <matter> --priority-date YYYY-MM-DD",
+          "ir probant open <client>/<matter>   (add --web for the browser)",
           "In a session: /relevant <number>, /not-relevant, /known, /marks, /next <n>, /proof, /quit",
-          "ir surveyor export <client>/<matter>, and ir surveyor proof <client>/<matter> for the technical detail")));
+          "ir probant export <client>/<matter>, and ir probant proof <client>/<matter> for the technical detail")));
   }
 
   // ── routing ──

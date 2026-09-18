@@ -171,9 +171,9 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
 
 # ───────────────────────── ir --confidential ─────────────────────────
 
-def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = None) -> int:
-    """`surveyor`: set by `ir surveyor open` ({"matter", "date_bound"}). The pre-launch screen is then the
-    plain-language Surveyor card (surveyor_trust) instead of the technical panel, and `summary` is filled in."""
+def launch(args: list[str], agent: str = "claude", *, probant: dict | None = None) -> int:
+    """`probant`: set by `ir probant open` ({"matter", "date_bound"}). The pre-launch screen is then the
+    plain-language Probant card (probant_trust) instead of the technical panel, and `summary` is filled in."""
     _need_extra()
     from . import launch as launch_mod, agents as agents_mod
     from inferroute_local.confidential import display
@@ -185,13 +185,13 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
     from . import resume as resume_mod
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
-    # `ir surveyor open --web`: the same session, with Pi in RPC mode behind a local page (surveyor_web).
-    web = bool(surveyor and surveyor.get("web"))
+    # `ir probant open --web`: the same session, with Pi in RPC mode behind a local page (probant_web).
+    web = bool(probant and probant.get("web"))
     if web:
         passthrough = [*passthrough, "--mode", "rpc"]
-    # Surveyor never asks an attorney to pick a model from a price list: it runs the default, the model its
+    # Probant never asks an attorney to pick a model from a price list: it runs the default, the model its
     # mission contract is written and tested against.
-    if user_model is None and _interactive(passthrough) and surveyor is None:
+    if user_model is None and _interactive(passthrough) and probant is None:
         # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.
         from . import choose as choose_mod
         user_model = choose_mod.pick(choose_mod.confidential_options(),
@@ -243,19 +243,19 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 # Decided before the verifier starts: the verifier stamps the confinement line into every
                 # record from this flag. If the sandbox cannot then be built, the launch is REFUSED below.
                 os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"
-                # Started before anything is shown, so the Surveyor card reports a search check that RAN for
+                # Started before anything is shown, so the Probant card reports a search check that RAN for
                 # this launch, not one promised for later.
                 search_endpoint = pi_attested.start_search_proxy()
-            if surveyor is not None and receipt.is_confidential:
-                from . import pi_attested, surveyor_trust
+            if probant is not None and receipt.is_confidential:
+                from . import pi_attested, probant_trust
                 search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)
-                summary = surveyor_trust.build(receipt, search_result, pi_attested.confinement_label(),
-                                               matter=surveyor.get("matter", ""), date_bound=surveyor.get("date_bound", ""),
+                summary = probant_trust.build(receipt, search_result, pi_attested.confinement_label(),
+                                               matter=probant.get("matter", ""), date_bound=probant.get("date_bound", ""),
                                                surface="browser" if web else "terminal")
-                surveyor["summary"] = summary
-                surveyor_trust.render_card(summary, console)
+                probant["summary"] = summary
+                probant_trust.render_card(summary, console)
                 if not web:
-                    surveyor_trust.render_howto(surveyor.get("matter", ""), console)
+                    probant_trust.render_howto(probant.get("matter", ""), console)
             else:
                 display.render_panel(receipt, console)
             if not receipt.is_confidential:
@@ -264,7 +264,7 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 # Claude Code's full-screen TUI replaces this screen the moment it starts, so give
                 # the panel a beat: Enter (or 20 s) to continue. The 🔒 status line inside Claude
                 # Code and `ir confidential show` carry the proof from there on.
-                await _pause("Enter to start the assistant (or wait 20 s)" if surveyor is not None
+                await _pause("Enter to start the assistant (or wait 20 s)" if probant is not None
                              else f"Enter to open {agent} · `ir confidential show` re-prints this proof any time")
             port = _free_port()
             server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
@@ -275,8 +275,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
             env["IR_CONFIDENTIAL"] = "1"
-            if surveyor is not None:
-                env["IR_SURVEYOR_SURFACE"] = "browser" if web else "terminal"
+            if probant is not None:
+                env["IR_PROBANT_SURFACE"] = "browser" if web else "terminal"
             local = f"http://127.0.0.1:{port}"
             session.shown_model = shown_model if agent == "claude" else alias.short
             if agent == "claude":
@@ -357,8 +357,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             page = None
             if web:
-                from . import surveyor_web
-                page = await surveyor_web.start(surveyor=surveyor, session=session, search_endpoint=search_endpoint,
+                from . import probant_web
+                page = await probant_web.start(probant=probant, session=session, search_endpoint=search_endpoint,
                                                 workspace=Path(os.getcwd()), console=console)
                 proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec,
                                                             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
@@ -396,8 +396,8 @@ def launch(args: list[str], agent: str = "claude", *, surveyor: dict | None = No
                 # ask for: an event the page could not act on is the shape the 17 Sep hang took.
                 console.print("[grey58]for us, if anything looked stuck: the assistant sent "
                               + ", ".join(f"{k}×{v}" for k, v in unknown.items()) + " — events this page has no word for.[/]")
-            if surveyor is not None and not web:
-                console.print(f"\n  Keep the record of this matter:  [bold]ir surveyor export {surveyor.get('matter', '')}[/]\n")
+            if probant is not None and not web:
+                console.print(f"\n  Keep the record of this matter:  [bold]ir probant export {probant.get('matter', '')}[/]\n")
             if page is not None:
                 await page.linger(console)                     # the page stays up so the record can be exported
             return rc

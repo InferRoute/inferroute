@@ -7,12 +7,12 @@ import json
 
 import pytest
 
-from inferroute_cli import surveyor_check as C
+from inferroute_cli import probant_check as C
 
 # A shortened but faithful sample of what verify_record.py prints. Kept verbatim in shape (two leading
 # spaces, "STATUS name: detail") so that a change to the verifier's own wording fails a test here rather
 # than silently emptying the page.
-PASSING = """Verifying record in /home/henry/Surveyor/Acme/exports/cooling-prior-art-record-20260918T010203Z
+PASSING = """Verifying record in /home/henry/Probant/Acme/exports/cooling-prior-art-record-20260918T010203Z
 
   PASS MANIFEST.json: 14 files listed, all present
   PASS bundle integrity (MANIFEST is an index, not a seal): every listed file matches its sha256

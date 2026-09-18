@@ -1,9 +1,9 @@
-// Shared by the Surveyor pages (the live session page and the home page). Builds TEXT NODES only: nothing
-// received is parsed as markup, made a link, or used as a resource address. tests/test_surveyor_web.py and
-// tests/test_surveyor_home.py grep this file for the constructs that would break that rule.
+// Shared by the Probant pages (the live session page and the home page). Builds TEXT NODES only: nothing
+// received is parsed as markup, made a link, or used as a resource address. tests/test_probant_web.py and
+// tests/test_probant_home.py grep this file for the constructs that would break that rule.
 "use strict";
 
-window.SurveyorUI = (() => {
+window.ProbantUI = (() => {
   // ── DOM helpers: text only ──
   function el(tag, cls, ...children) {
     const n = document.createElement(tag);

@@ -453,3 +453,21 @@ def test_the_search_card_folds_and_the_session_has_an_index():
     assert ".outline { display: none; }" in css
     for cls in (".card-toggle", ".card.collapsed", ".o-link", ".o-detail"):
         assert cls in css, cls
+
+
+def test_the_index_hangs_each_search_under_the_question_that_caused_it():
+    """Henry, 18 Sep: searches should "be collapsed under the You turns or at least appear as smaller to
+    take less space and differentiate with the You, which the user is mapping in his head with each new
+    request". The question is the heading; what it caused hangs under it, quieter."""
+    js = (STATIC / "app.js").read_text()
+    css = (STATIC / "app.css").read_text()
+    assert 'if (item.kind === "you")' in js and 'el("ol", "o-children")' in js
+    # A search goes under the open question; with no question yet it stands on its own rather than
+    # being given an invented parent.
+    assert '(currentTurn ? currentTurn.kids : $("outline-list")).append(row)' in js
+    # The fold control only appears once there is something under it.
+    assert 'fold.hidden = true' in js and 'currentTurn.fold.hidden = false' in js
+    for cls in (".o-children", ".o-fold", ".o-you"):
+        assert cls in css, cls
+    # Children must read as smaller than their heading, or the nesting carries no signal.
+    assert ".o-children .o-link { padding: 2px 8px; font-size: 12px; }" in css

@@ -170,6 +170,36 @@ def _read_jsonl(p: Path) -> list:
     return rows
 
 
+def _coverage_note(sessions: list) -> str:
+    """What the SIGNED results actually say about how much of each document was read — read off them, never
+    asserted in general.
+
+    This paragraph used to promise that "each report states how many of the documents it examined most
+    closely it was able to read in full" and that "the signed result records the shortfall". Measured against
+    a real bundle on 2026-09-18: `text_coverage` is null on every statement, because the deployed sealed lane
+    runs the dense pass alone and has no full-text rescoring to report on — and where it IS populated it holds
+    the engine's own counters, not a count of documents read in full. So the record was describing evidence it
+    did not carry, in the one document that leaves the firm. Say what is there."""
+    signed = [x.get("statement") or {} for s in sessions for x in s["searches"] if (x.get("statement") or {}).get("sig")]
+    if not signed:
+        return ""
+    with_figure = [st for st in signed if isinstance(st.get("text_coverage"), dict) and st["text_coverage"]]
+    n = len(signed)
+    plural = "es" if n != 1 else ""
+    if not with_figure:
+        return ("<p class=note><b>How much of each document was read</b>: none of the "
+                f"{n} sealed search{plural} in this record recorded any full-text reading — the signed "
+                "<code>text_coverage</code> is empty on every one of them. Read every document here as weighed "
+                "on its title and the start of its abstract. That is not a gap in the record: the sealed "
+                "machine holds no full text to read.</p>")
+    return ("<p class=note><b>How much of each document was read</b>: "
+            f"{len(with_figure)} of the {n} sealed search{plural} carry a signed <code>text_coverage</code> "
+            "record, and the rest carry none. Those figures are the search engine's own counters over the "
+            "candidates it rescored — they are signed, and they are NOT a count of documents read in full. "
+            "Where a document's own entry does not say which parts were held, read it as weighed on its title "
+            "and the start of its abstract.</p>")
+
+
 def _load_sessions(S, client: str, matter: str) -> list:
     rdir = S.records_dir(client, matter)
     sessions = []
@@ -410,7 +440,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     # ranked lower. Any recall figure we ever publish must carry the lane it was measured in.
     A("<p class=note><b>Which search this was</b>: the sealed one. Inside the enclave there is no route off the "
       "machine, so a search reads only the corpus resident there — for most documents, the title and abstract. "
-      "Each report states how many of the documents it examined most closely it was able to read in full. A "
+      "A "
       "search run WITHOUT this proof, on a machine you already trust, can fetch and read full descriptions. "
       "Whether that changes which documents surface is NOT established: measured against examiner-cited art, "
       "reading full text moved the result by about a fifth of a percentage point and our own pre-registered "
@@ -422,9 +452,9 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     # take those quotations for our characterisation of somebody's patent, and a bundle can be forwarded to
     # people who never saw this sentence spoken aloud. Each hit also records which text the quote came from.
     A("<p class=note><b>Quotations are source text</b>: where a report shows a passage, it is text from the cited "
-      "document itself, identified by its source, and not our summary, paraphrase or opinion of that document. "
-      "Where a search could read only a title and abstract, the report says so and the signed result records the "
-      "shortfall — a document weighed on its abstract alone was not read in full.</p>")
+      "document itself, identified by its source, and not our summary, paraphrase or opinion of that document.</p>")
+    # Derived from the signed statements, not asserted: see _coverage_note.
+    A(_coverage_note(sessions))
     reach = [f"{s['session_id']}: {_reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
     if reach:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")

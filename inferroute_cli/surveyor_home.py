@@ -474,5 +474,8 @@ def run(open_browser: bool = True) -> int:
     print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
     if open_browser:
         launch_browser(url)
-    uvicorn.run(home.app(), host="127.0.0.1", port=home.port, log_level="warning")
+    # timeout_graceful_shutdown: Ctrl-C and `kill` must end this, not wait on whatever request a
+    # browser tab happens to be holding open.
+    uvicorn.run(home.app(), host="127.0.0.1", port=home.port, log_level="warning",
+                timeout_graceful_shutdown=5)
     return 0

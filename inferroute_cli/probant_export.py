@@ -438,16 +438,22 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     # network can only read what is resident in it. A client who chose proof got less reach, and they must be
     # told that by the record itself rather than discover it when a local search surfaces something this one
     # ranked lower. Any recall figure we ever publish must carry the lane it was measured in.
+    #
+    # NO COMPARATIVE CLAIM, IN EITHER DIRECTION. This used to cite a measurement — "reading full text moved
+    # the result by about a fifth of a percentage point, and our pre-registered 'this does not pay' test
+    # fired" — which is unlicensed: that +0.002 was measured at 12.5% text coverage and the finding says so
+    # in terms, while the same mechanism at full coverage gave +0.060 on a smaller haystack. The licensed
+    # statement is conditional (it pays when most of the window is readable, and does nothing when little of
+    # it is), and a conditional result quoted flat becomes the claim that we PROVED reading more would not
+    # have helped. That is the easier error to make while sounding candid, and it flatters the lane we sell.
     A("<p class=note><b>Which search this was</b>: the sealed one. Inside the enclave there is no route off the "
-      "machine, so a search reads only the corpus resident there — for most documents, the title and abstract. "
-      "A "
-      "search run WITHOUT this proof, on a machine you already trust, can fetch and read full descriptions. "
-      "Whether that changes which documents surface is NOT established: measured against examiner-cited art, "
-      "reading full text moved the result by about a fifth of a percentage point and our own pre-registered "
-      "test for &lsquo;this does not pay&rsquo; fired. So the honest statement is about what this search could "
-      "READ, not "
-      "about how well it ranked: it read less, and we cannot tell you that reading more would have served you "
-      "better.</p>")
+      "machine, so a search reads only the corpus resident there — for most documents, the title and the "
+      "opening of the abstract. A search run WITHOUT this proof, on a machine you already trust, can fetch and "
+      "read full descriptions. Whether that would change which documents surface for YOUR matter is not "
+      "established, and we will not claim it in either direction: what we have measured about reading more "
+      "depends on how much of the corpus is readable, and it does not settle the question for a search like "
+      "this one. So the honest statement is about what this search could READ, not about how well it ranked: "
+      "it read less, and we cannot tell you whether reading more would have served you better.</p>")
     # Reports may quote passages from the documents themselves. A reader — or a court — must not be able to
     # take those quotations for our characterisation of somebody's patent, and a bundle can be forwarded to
     # people who never saw this sentence spoken aloud. Each hit also records which text the quote came from.

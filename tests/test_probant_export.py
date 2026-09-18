@@ -238,3 +238,20 @@ def test_a_signed_coverage_figure_is_reported_as_the_engine_counter_it_is():
     # The figure is the engine's own counter over rescored candidates. Calling it a count of documents read
     # in full is the overclaim this replaced.
     assert "NOT a count of documents read in full" in note
+
+
+def test_the_record_makes_no_comparative_claim_about_reading_more(matter):
+    """The record may say what the sealed search READ. It may not say what reading more would or would not
+    have done — in either direction. The measurement we have is conditional (full-text rescoring pays when
+    most of the window is readable; the +0.002 everyone reaches for was taken at 12.5% coverage, and the
+    same mechanism gave +0.060 at full coverage), and a conditional quoted flat becomes "we proved it would
+    not help" — the error that flatters the lane we sell and is easy to make while sounding candid."""
+    out = matter / "claims"
+    assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
+    html = (out / "record.html").read_text()                          # what the client actually reads
+    for claim in ("percentage point", "does not pay"):
+        assert claim not in html, f"the record must not carry the comparative claim {claim!r}"
+    # "cannot tell you THAT X" reads as "X is not so"; only "whether" leaves it open.
+    assert "we cannot tell you whether reading more" in html
+    assert "we cannot tell you that reading more" not in html
+    assert "the title and the opening of the abstract" in html

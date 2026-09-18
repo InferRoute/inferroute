@@ -16,7 +16,9 @@
   if (frag.get("k")) {
     key = frag.get("k");
     try { sessionStorage.setItem(KEY_STORE, key); } catch (_) { /* keep it in memory */ }
-    history.replaceState(null, "", `${location.pathname}#/`);
+    // `r`: open straight at a page of this home — a session page sends the professional back to its matter.
+    const r = String(frag.get("r") || "");
+    history.replaceState(null, "", `${location.pathname}#${/^\/[A-Za-z0-9_%./-]*$/.test(r) ? r : "/"}`);
   } else {
     try { key = sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { key = ""; }
   }

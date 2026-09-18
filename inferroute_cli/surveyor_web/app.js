@@ -51,11 +51,34 @@
 
   // Back to the home page that started this session. Same rule as the home page's own opener: only an
   // address this computer made (a local page with its key), never anything from the conversation.
-  const HOME_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}$/;
+  const HOME_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}(&r=[A-Za-z0-9_%./-]*)?$/;
   let homeUrl = "";
-  function goHome() {
-    if (!HOME_LINK.test(homeUrl)) { toast("This session was started from a terminal, so there is no home page to return to.", "info"); return; }
-    window.open(homeUrl, "_blank", "noopener,noreferrer");
+  let matterId = "";
+  // `route`: open the home page straight at a page of it (its own address, with its own key).
+  function goHome(route) {
+    const url = route ? `${homeUrl}&r=${encodeURIComponent(route)}` : homeUrl;
+    if (!HOME_LINK.test(url)) { toast("This session was started from a terminal, so there is no home page to return to.", "info"); return; }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+  // Every way out of a finished session, in one place, so a session is never a dead end: back to the
+  // matter (where another session is one click), back to home, or — with no home page — the command.
+  function wayOut(parent) {
+    const row = el("div", "row ended-actions");
+    if (HOME_LINK.test(homeUrl)) {
+      const again = el("button", "primary", "Start another session on this matter");
+      const home = el("button", "ghost", "Surveyor home");
+      again.type = home.type = "button";
+      again.addEventListener("click", () => goHome(`/matter/${matterId}`));
+      home.addEventListener("click", () => goHome(""));
+      row.append(again, home);
+    } else {
+      const cmd = `ir surveyor open ${matterId} --web`;
+      const copy = el("button", "ghost small", "Copy the command");
+      copy.type = "button";
+      copy.addEventListener("click", () => navigator.clipboard.writeText(cmd).then(() => toast("Copied.", "info")).catch(() => {}));
+      row.append(el("span", "sub", "Start another session with: "), el("span", "mono", cmd), copy);
+    }
+    parent.append(row);
   }
 
   // ── trust panel ──
@@ -217,6 +240,12 @@
     if (i >= 0) markOrder.splice(i, 1);
     markOrder.unshift(keyNo);
   }
+  // When nothing is marked yet the welcome's suggestions are gone as soon as the first message is sent, and
+  // the professional is left with an empty box and no idea what this thing takes. The bar always offers
+  // something: their marks when they have any, plain ideas when they do not.
+  const IDEAS = ["Run a prior-art survey of the disclosure",
+                 "Search one feature of the disclosure on its own",
+                 "Summarise what the searches have surfaced so far"];
   function renderMarkSteps() {
     const bar = $("mark-steps");
     const list = $("mark-steps-list");
@@ -228,13 +257,15 @@
     if (relevant.length) steps.push(DEEPER);
     for (const k of relevant.slice(0, 2)) steps.push(`Find documents like ${k}`);
     if (excluded) steps.push(LEAVE_OUT);
-    for (const step of steps) {
+    const fromMarks = steps.length > 0;
+    for (const step of (fromMarks ? steps : IDEAS)) {
       const b = el("button", "", step);
       b.type = "button";
       b.addEventListener("click", () => send(step));
       list.append(b);
     }
-    bar.hidden = !steps.length || ended;
+    bar.querySelector(".next-title").textContent = fromMarks ? "From your marks" : "Ideas";
+    bar.hidden = ended;
   }
 
   // Next steps offered by the assistant: each button shows exactly the message it sends. Shown when the
@@ -517,10 +548,7 @@
           : "Nothing was asked in this session, so there is nothing to export."));
     box.append(el("div", "", did ? "Export the record to keep it (button on the right), then close this tab."
                                  : "Start another session when you are ready — a session is just a sitting, and the matter keeps everything."));
-    const back = el("button", "primary", "Back to Surveyor home");
-    back.type = "button";
-    back.addEventListener("click", goHome);
-    if (HOME_LINK.test(homeUrl)) box.append(el("div", "row ended-actions", back));
+    wayOut(box);
     box.hidden = false;
     $("composer").hidden = true;
     $("end").hidden = true;
@@ -615,10 +643,11 @@
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
     homeUrl = String(s.home || "");
+    matterId = String(s.matter || "");
     if (HOME_LINK.test(homeUrl)) {
       const b = el("button", "ghost", "Surveyor home");
       b.type = "button";
-      b.addEventListener("click", goHome);
+      b.addEventListener("click", () => goHome(""));
       $("top-home").replaceWith(b);
       b.id = "top-home";
     }
@@ -650,6 +679,7 @@
       for (const [k, v] of Object.entries(m.marks || {})) marks.set(k, v);
       renderMarkSteps();
     } catch (_) { /* no search in this session */ }
+    renderMarkSteps();
     if (s.ended) showEnded(s.ended);
     stream();
   }

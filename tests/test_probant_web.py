@@ -422,3 +422,34 @@ def test_a_tool_that_finishes_leaves_nothing_outstanding(tmp_path, monkeypatch):
         return out
     running, stalled = asyncio.run(run())
     assert running == {} and stalled is False
+
+
+def test_every_element_the_page_reaches_for_exists_in_the_html():
+    """`$("outline-list")` on an id that is not in index.html fails silently in a browser — the feature
+    simply does nothing, and no test that only reads the page's source would notice. Cross-check the two
+    files against each other instead."""
+    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text()
+    wanted = set(re.findall(r'\$\("([a-z0-9-]+)"\)', js))
+    present = set(re.findall(r'id="([a-z0-9-]+)"', html))
+    assert wanted, "the page must look up something"
+    assert wanted <= present, f"app.js reaches for ids that index.html does not define: {sorted(wanted - present)}"
+
+
+def test_the_search_card_folds_and_the_session_has_an_index():
+    """Henry, 18 Sep: "it would be good if this view could be collapsable and expandable and perhaps
+    auto-collapse smartly ... to not make the feed/trace unreadable because too expanded", and "on the left
+    an index of the conversation to click and go back while having an overview"."""
+    js = (STATIC / "app.js").read_text()
+    css = (STATIC / "app.css").read_text()
+    html = (STATIC / "index.html").read_text()
+    for fn in ("function setCollapsed", "function autoCollapse", "function refreshCardSummary",
+               "function outlineAdd", "function outlineDrop"):
+        assert fn in js, fn
+    assert 'id="outline-list"' in html and 'id="outline-empty"' in html
+    # A fold must never hide a refusal, and must never override a deliberate click.
+    assert "entry.failed = true" in js and "if (!e.byUser && !e.failed" in js
+    # The index has to survive a narrow window by disappearing, not by squeezing the conversation.
+    assert ".outline { display: none; }" in css
+    for cls in (".card-toggle", ".card.collapsed", ".o-link", ".o-detail"):
+        assert cls in css, cls

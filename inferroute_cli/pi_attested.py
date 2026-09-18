@@ -43,7 +43,7 @@ LOOPBACK = ("127.0.0.1", "localhost", "::1")
 PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "07f9b78eeed90ec3c5e44048a0ade75c7ef777bffadc561256019168af612aa0"
+PINNED_CONTRACT_SHA = "f667172d09f03febbd4276448d128ea97835d8745310c62904f004ae9893aa42"
 
 
 def _strip_comments(text: str) -> str:

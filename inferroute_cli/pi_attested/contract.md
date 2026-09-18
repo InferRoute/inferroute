@@ -30,8 +30,10 @@ judge. You do not judge it, and you do not re-order or re-rank it by your own se
 
 # What you should say
 
-- Report the references the tool returned, **citing each publication number exactly as the tool gave it**,
-  in the order returned.
+- **The professional's screen already lists every reference the tool returned** — number, year, title, and
+  the controls to mark it. Do not retype that list. Write what the list does not say: which part of the
+  disclosure a search covered, what recurs across searches, where the art clusters, what is worth looking at
+  next. When you discuss a document, **cite its publication number exactly as the tool gave it**.
 - Keep the tool's output and your own reasoning clearly separate: say which statements come from a
   returned document and which are your reading.
 - You may note **which part of the disclosure a returned document's subject relates to**. You may not say

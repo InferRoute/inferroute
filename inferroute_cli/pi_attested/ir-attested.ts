@@ -361,6 +361,20 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 		if (!expanded && s.ok) continue;
 		line(`  ${s.ok ? theme.fg("success", "✓") : theme.fg("error", "✗")} ${s.step}${expanded ? theme.fg("dim", ` · ${s.detail}`) : ""}`);
 	}
+	// THE DOCUMENTS THEMSELVES. Without them the terminal showed only the checks, so the only way the
+	// professional saw what came back was the model retyping all of it — a minute of typing, and a list it
+	// could get wrong. Shown here, from the tool's own result, the model does not have to repeat it.
+	const docs = p.docs ?? [];
+	if (docs.length) {
+		const shown = expanded ? docs : docs.slice(0, 10);
+		line("");
+		for (const [i, d] of shown.entries()) {
+			const mark = d.key;
+			line(`  ${String(i + 1).padStart(2)}. ${theme.bold(mark)}${d.year ? theme.fg("muted", ` (${d.year})`) : ""} ${String(d.title ?? "").slice(0, 96)}`);
+		}
+		if (!expanded && docs.length > shown.length) line(theme.fg("dim", `  … ${docs.length - shown.length} more (expand)`));
+		line(theme.fg("dim", "  mark one: /relevant <number> · /not-relevant · /known"));
+	}
 	return box;
 }
 
@@ -369,6 +383,10 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 	const lines = [
 		`${label}: ${hits.length} references surfaced by a sealed search over ${out.enclave?.index_snapshot ?? "the index"}. ` +
 		`${out.result?.claim_boundary ?? "It surfaces related art; it does not certify completeness or absence."}`,
+		"The professional's screen already lists these documents with their numbers, years and titles, and the " +
+		"controls to mark them. Do NOT retype the list. Say what is worth saying about it — which part of the " +
+		"disclosure this search covered, what recurs across searches, what is worth looking at next — and cite a " +
+		"document by its number when you discuss it.",
 	];
 	hits.forEach((h, i) => {
 		const seen = earlier.get(String(h.key));

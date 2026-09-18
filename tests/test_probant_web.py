@@ -1,4 +1,4 @@
-"""The local browser page for a Surveyor session: what its bridge refuses, and what its page never does.
+"""The local browser page for a Probant session: what its bridge refuses, and what its page never does.
 
 The agent's sandbox has no network; the browser does. These tests pin the properties that keep the page
 from becoming the agent's way out, or another site's way in.
@@ -11,9 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from inferroute_cli import surveyor_web as W
+from inferroute_cli import probant_web as W
 
-STATIC = Path(W.__file__).resolve().parent / "surveyor_web"
+STATIC = Path(W.__file__).resolve().parent / "probant_web"
 
 
 class FakeStdin:
@@ -358,9 +358,9 @@ def test_the_page_loads_nothing_from_outside():
 
 
 def test_the_browser_summary_states_what_the_page_guarantees_and_what_it_cannot():
-    from inferroute_cli import surveyor_trust as T
+    from inferroute_cli import probant_trust as T
     from inferroute_local import netns
-    from tests.test_surveyor_trust import _receipt, _search
+    from tests.test_probant_trust import _receipt, _search
     s = T.build(_receipt(), _search(reference={"ok": True}), netns.ADDRESS_LEVEL_LABEL, surface="browser")
     assert T.BROWSER_POINT in next(i for i in s["items"] if i["key"] == "computer")["points"]
     assert any("Browser extensions" in lim for lim in s["limits"])

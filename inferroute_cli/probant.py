@@ -1,13 +1,13 @@
-"""`ir surveyor` — the attorney entry to the attested prior-art assistant. One matter at a time, in a
+"""`ir probant` — the attorney entry to the attested prior-art assistant. One matter at a time, in a
 folder confined to that matter, with the date bound and approvals held where the agent cannot reach them.
 
-    ir surveyor new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
-    ir surveyor set-date <client>/<matter> YYYY-MM-DD                 change the date bound (human, out of session)
-    ir surveyor open <client>/<matter>                               open the attested session on the matter
-    ir surveyor list                                                 list matters
+    ir probant new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
+    ir probant set-date <client>/<matter> YYYY-MM-DD                 change the date bound (human, out of session)
+    ir probant open <client>/<matter>                               open the attested session on the matter
+    ir probant list                                                 list matters
 
 The split that keeps it safe (decision record S1/S2):
-  WORKSPACE  ~/Surveyor/<client>/<matter>/  — disclosure.md and working files. Writable in-session; the
+  WORKSPACE  ~/Probant/<client>/<matter>/  — disclosure.md and working files. Writable in-session; the
              launcher trusts NOTHING read from it.
   RECORD     ~/.inferroute/confidential/matters/<client>/<matter>.json — client, ref, date bound, created,
              workspace path. Under confidential/, where the filesystem confinement denies the agent writes.
@@ -33,7 +33,7 @@ TEMPLATE_DISCLOSURE = ("# Disclosure\n\nDescribe the invention here, then open t
                        "prior-art survey.\n")
 
 
-class SurveyorError(ValueError):
+class ProbantError(ValueError):
     pass
 
 
@@ -45,8 +45,16 @@ def _irhome() -> Path:
     return Path(os.environ.get("INFERROUTE_HOME") or (_home() / ".inferroute"))
 
 
-def surveyor_root() -> Path:
-    return Path(os.environ.get("IR_SURVEYOR_ROOT") or (_home() / "Surveyor"))
+def probant_root() -> Path:
+    """Where matters live. `~/Probant` for a new install — but an existing `~/Surveyor` KEEPS BEING USED:
+    the matter records hold absolute workspace paths, so renaming the folder without rewriting them would
+    strand every matter already on this machine. Migration is a deliberate act, not a side effect of a
+    product being renamed."""
+    named = os.environ.get("IR_PROBANT_ROOT") or os.environ.get("IR_SURVEYOR_ROOT")
+    if named:
+        return Path(named)
+    new, old = _home() / "Probant", _home() / "Surveyor"
+    return old if old.is_dir() and not new.is_dir() else new
 
 
 def matters_dir() -> Path:
@@ -59,7 +67,7 @@ def sanitize(component: str, what: str) -> str:
     name = (component or "").strip()
     if "/" in name or "\\" in name or name in ("", ".", "..") or name.startswith(".") \
             or any(ord(c) < 0x20 for c in name) or not _NAME_RE.match(name):
-        raise SurveyorError(f"invalid {what} {component!r}: use letters, digits, space, dot, dash or underscore; "
+        raise ProbantError(f"invalid {what} {component!r}: use letters, digits, space, dot, dash or underscore; "
                             "no slashes, no leading dot, 1–64 characters.")
     return name
 
@@ -69,7 +77,7 @@ def record_path(client: str, matter: str) -> Path:
 
 
 def workspace_path(client: str, matter: str) -> Path:
-    return surveyor_root() / client / matter
+    return probant_root() / client / matter
 
 
 def state_path(client: str, matter: str) -> Path:
@@ -98,13 +106,13 @@ def _to_yyyymmdd(iso: str) -> int:
     try:
         return int(dt.date.fromisoformat(iso).strftime("%Y%m%d"))
     except ValueError as e:
-        raise SurveyorError(f"bad date {iso!r}: use YYYY-MM-DD") from e
+        raise ProbantError(f"bad date {iso!r}: use YYYY-MM-DD") from e
 
 
 def load_record(client: str, matter: str) -> dict:
     p = record_path(client, matter)
     if not p.exists():
-        raise SurveyorError(f"no such matter {client}/{matter}. Create it: ir surveyor new {client} {matter}")
+        raise ProbantError(f"no such matter {client}/{matter}. Create it: ir probant new {client} {matter}")
     return json.loads(p.read_text())
 
 
@@ -118,7 +126,7 @@ def _write_record(client: str, matter: str, rec: dict) -> None:
 
 def _split_matter(spec: str) -> tuple[str, str]:
     if "/" not in spec:
-        raise SurveyorError(f"give the matter as <client>/<matter>, not {spec!r}")
+        raise ProbantError(f"give the matter as <client>/<matter>, not {spec!r}")
     client, matter = spec.split("/", 1)
     return sanitize(client, "client"), sanitize(matter, "matter")
 
@@ -128,7 +136,7 @@ def make_private(client: str, matter: str) -> None:
     host-side records, state and receipts under confidential/. A folder at 0700 keeps other accounts on this
     computer out of every file inside it, whatever mode an editor gave that file. Applied on `new` and on every
     `open`, so a matter created before this existed is tightened the next time it is used."""
-    for d in (surveyor_root(), surveyor_root() / client, workspace_path(client, matter),
+    for d in (probant_root(), probant_root() / client, workspace_path(client, matter),
               _irhome(), _irhome() / "confidential", matters_dir(), matters_dir() / client,
               records_dir(client, matter).parent, records_dir(client, matter)):
         try:
@@ -141,13 +149,13 @@ def make_private(client: str, matter: str) -> None:
 def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
     client, matter = sanitize(client, "client"), sanitize(matter, "matter")
     if record_path(client, matter).exists():
-        raise SurveyorError(f"matter {client}/{matter} already exists")
+        raise ProbantError(f"matter {client}/{matter} already exists")
     ws = workspace_path(client, matter)
     sync = _under_sync_root(ws)
     if sync:
-        raise SurveyorError(f"refusing to create the matter under a cloud-sync folder ({sync}): a backup daemon "
-                            "outside the confinement would copy the disclosure. Put ~/Surveyor on local disk "
-                            "(or set IR_SURVEYOR_ROOT).")
+        raise ProbantError(f"refusing to create the matter under a cloud-sync folder ({sync}): a backup daemon "
+                            "outside the confinement would copy the disclosure. Put ~/Probant on local disk "
+                            "(or set IR_PROBANT_ROOT).")
     bound = priority_date or _today()
     _to_yyyymmdd(bound)                                      # validate
     ws.mkdir(parents=True, exist_ok=True)
@@ -155,7 +163,7 @@ def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
     disclosure = ws / "disclosure.md"
     if not disclosure.exists():
         disclosure.write_text(TEMPLATE_DISCLOSURE)
-    rec = {"schema": "inferroute.surveyor.matter/1", "client": client, "matter": matter,
+    rec = {"schema": "inferroute.probant.matter/1", "client": client, "matter": matter,
            "date_bound": bound, "pre_filing_default": priority_date is None,
            "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "workspace": str(ws.resolve()), "changes": []}
@@ -163,8 +171,8 @@ def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
     print(f"created matter {client}/{matter}")
     print(f"  workspace   {ws}")
     print(f"  date bound  {bound}" + (" (pre-filing default = today; set the real priority date with "
-                                      "`ir surveyor set-date`)" if priority_date is None else ""))
-    print(f"  open it:    ir surveyor open {client}/{matter}")
+                                      "`ir probant set-date`)" if priority_date is None else ""))
+    print(f"  open it:    ir probant open {client}/{matter}")
     return 0
 
 
@@ -199,13 +207,13 @@ def cmd_list() -> int:
             shown += 1
     if not shown:
         # An emptied directory used to print nothing at all, which reads as a broken command.
-        print("no matters yet — create one: ir surveyor new <client> <matter> --priority-date YYYY-MM-DD")
+        print("no matters yet — create one: ir probant new <client> <matter> --priority-date YYYY-MM-DD")
     return 0
 
 
 def disclosure_has_content(workspace: Path) -> bool:
     """True if the matter's disclosure.md holds a real invention description, not just the template stub
-    `ir surveyor new` writes. The enclave prewarms on session-open only when this is true (L3); otherwise it
+    `ir probant new` writes. The enclave prewarms on session-open only when this is true (L3); otherwise it
     waits for the first search, so a firm never pays for a container while the workspace is still empty."""
     p = Path(workspace) / "disclosure.md"
     try:
@@ -239,18 +247,18 @@ def _read_jsonl(p: Path) -> list:
 
 
 def cmd_export(spec: str, out_path: str | None, anchor: bool = False) -> int:
-    """The one-directory record: see surveyor_export. Refuses the workspace and sync roots (plaintext invention)."""
-    from . import surveyor_export
+    """The one-directory record: see probant_export. Refuses the workspace and sync roots (plaintext invention)."""
+    from . import probant_export
     client, matter = _split_matter(spec)
     load_record(client, matter)                              # exists?
-    surveyor_export.write_bundle(client, matter, out_path, anchor=anchor)
+    probant_export.write_bundle(client, matter, out_path, anchor=anchor)
     return 0
 
 
 def cmd_verify_export(bundle_dir: str) -> int:
     """Run the bundle's own independent verifier over it (convenience; the bundle needs no `ir` to verify)."""
-    from . import surveyor_export
-    return surveyor_export.verify_bundle(bundle_dir)
+    from . import probant_export
+    return probant_export.verify_bundle(bundle_dir)
 
 
 def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
@@ -258,7 +266,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     rec = load_record(client, matter)
     ws = Path(rec["workspace"])
     if not ws.is_dir():
-        raise SurveyorError(f"the matter workspace is missing: {ws}")
+        raise ProbantError(f"the matter workspace is missing: {ws}")
     make_private(client, matter)
     try:
         os.chmod(ws, 0o700)                                  # the recorded workspace, wherever it lives
@@ -266,9 +274,9 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
         pass
     sync = _under_sync_root(ws)
     if sync:
-        raise SurveyorError(f"the matter workspace is under a cloud-sync folder ({sync}); refusing to open it.")
+        raise ProbantError(f"the matter workspace is under a cloud-sync folder ({sync}); refusing to open it.")
     if (ws / ".git").exists():
-        raise SurveyorError(f"the matter workspace {ws} contains a .git repository. Its hooks would run "
+        raise ProbantError(f"the matter workspace {ws} contains a .git repository. Its hooks would run "
                             "outside the sandbox — remove it; a matter folder is not a code repo.")
     # Per-matter cutoff/state/record, passed to THIS matter's verifier as arguments via env (S2) — never
     # the shared search.json. All three live under confidential/, write-denied to the agent (S1).
@@ -283,7 +291,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     # is banner-loud, recorded as unconfined, and (in the verifier) never granted trusted state.
     if dev_unconfined:
         os.environ["IR_ATTESTED_CONFINE"] = "off"
-        os.environ["IR_SURVEYOR_DEV_UNCONFINED"] = "1"
+        os.environ["IR_PROBANT_DEV_UNCONFINED"] = "1"
         sys.stderr.write("\n  ⚠  DEVELOPER OVERRIDE: opening this matter UNCONFINED. The agent is NOT sandboxed;\n"
                          "     approvals are NOT persisted/trusted; this is recorded as an unconfined session.\n"
                          "     Never use this on a real client matter.\n\n")
@@ -292,10 +300,10 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     os.chdir(ws)
     print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     from . import confidential as confidential_mod
-    surveyor = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
+    probant = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
     if web:
-        surveyor["web"] = True
-    return confidential_mod.launch([], agent="pi", surveyor=surveyor)
+        probant["web"] = True
+    return confidential_mod.launch([], agent="pi", probant=probant)
 
 
 def latest_session_record(client: str, matter: str) -> dict | None:
@@ -360,11 +368,11 @@ def cmd_proof(spec: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Everything a Surveyor command writes, and everything it starts (the search verifier, Pi), is created
+    # Everything a Probant command writes, and everything it starts (the search verifier, Pi), is created
     # owner-only: records hold search text and results, receipts and state hold the matter's history. A
     # common default umask (0002 or 0022) would leave them readable by every other account on this computer.
     os.umask(0o077)
-    p = argparse.ArgumentParser(prog="ir surveyor", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="ir probant", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
     d = sub.add_parser("set-date"); d.add_argument("matter"); d.add_argument("date")
@@ -403,9 +411,9 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "proof":
             return cmd_proof(a.matter)
         if a.cmd == "home":
-            from . import surveyor_home
-            return surveyor_home.run(open_browser=not a.no_browser)
-    except SurveyorError as e:
+            from . import probant_home
+            return probant_home.run(open_browser=not a.no_browser)
+    except ProbantError as e:
         sys.stderr.write(f"\n  {e}\n\n")
         return 2
     return 0

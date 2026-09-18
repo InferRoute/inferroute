@@ -1,4 +1,4 @@
-"""`ir surveyor open <matter> --web` — the same confined session, shown in a local browser page.
+"""`ir probant open <matter> --web` — the same confined session, shown in a local browser page.
 
 Nothing about the session changes: the AI machine is verified and pinned, the search verifier runs beside
 Pi, and Pi runs in the same address-level sandbox. Only the screen differs. Pi runs in RPC mode, and this
@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 # in this module's globals. Imported locally, the name does not resolve, and every POST answers 422.
 from fastapi import Request
 
-STATIC = Path(__file__).resolve().parent / "surveyor_web"
+STATIC = Path(__file__).resolve().parent / "probant_web"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
@@ -46,11 +46,18 @@ HISTORY_CAP = 5000
 # minutes of COMPLETE silence is not slowness. A turn that goes quiet forever has happened (17 Sep: the
 # model stream ended mid-answer, Pi never learned, and the page said "The assistant is working…" until the
 # session was killed from a shell) and the page must never again present that as work in progress.
-STALL_SECONDS = float(os.environ.get("IR_SURVEYOR_STALL_SECONDS", "120"))
+def env(name: str, default: str = "") -> str:
+    """A Probant setting, under its own name or the name it had while the product was called Surveyor.
+    The old spelling is not decoration: a home page already running passes IR_SURVEYOR_HOME_URL to the
+    session it starts, and a session that loses its way back home is how a rename breaks someone's day."""
+    return os.environ.get(f"IR_PROBANT_{name}") or os.environ.get(f"IR_SURVEYOR_{name}") or default
+
+
+STALL_SECONDS = float(env("STALL_SECONDS", "120"))
 # How long `abort` and `end` wait for the agent to do as it is told before saying it did not.
-ABORT_GRACE = float(os.environ.get("IR_SURVEYOR_ABORT_GRACE", "6"))
-END_GRACE = float(os.environ.get("IR_SURVEYOR_END_GRACE", "5"))
-KILL_GRACE = float(os.environ.get("IR_SURVEYOR_KILL_GRACE", "3"))
+ABORT_GRACE = float(os.environ.get("IR_PROBANT_ABORT_GRACE", "6"))
+END_GRACE = float(os.environ.get("IR_PROBANT_END_GRACE", "5"))
+KILL_GRACE = float(os.environ.get("IR_PROBANT_KILL_GRACE", "3"))
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
        "font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -66,7 +73,7 @@ SECURITY_HEADERS = {
 
 
 def install_guard(app: Any, port: Callable[[], int], token: Callable[[], str]) -> None:
-    """The rules every local Surveyor page lives by, installed once per app so the session page and the home
+    """The rules every local Probant page lives by, installed once per app so the session page and the home
     page cannot drift: answer only our own Host (a name rebound to 127.0.0.1 still sends its own Host), refuse
     another origin, require the per-launch key on every /api call, and send the strict page headers."""
     from fastapi.responses import JSONResponse, Response
@@ -373,7 +380,7 @@ class Bridge:
         c = dict(getattr(r, "counters", None) or {})
         end = {"requests": c.get("requests", 0), "sealed_bytes": c.get("plaintext_bytes_sealed_here", 0),
                "opened_bytes": c.get("response_bytes_opened_here", 0), "plaintext_left": 0,
-               "export_command": f"ir surveyor export {self.matter}"}
+               "export_command": f"ir probant export {self.matter}"}
         if self.dropped:
             # Names of event types only, never their content. A turn that ends in an event the page has no
             # word for is exactly the shape of the 17 Sep hang; this is the trail that names it next time.
@@ -407,7 +414,7 @@ class Bridge:
                     "stalled": bridge.stalled, "search": bool(bridge.search_endpoint),
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
-                    "home": os.environ.get("IR_SURVEYOR_HOME_URL", "")}
+                    "home": os.environ.get("IR_PROBANT_HOME_URL", "")}
 
         @app.get("/api/disclosure")
         async def get_disclosure():
@@ -555,7 +562,7 @@ class Bridge:
                 path = await asyncio.to_thread(bridge._export)
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
-            return {"ok": True, "path": str(path), "verify_here": f"ir surveyor verify-export {path}",
+            return {"ok": True, "path": str(path), "verify_here": f"ir probant verify-export {path}",
                     "verify_anyone": "python3 verify_record.py ."}
 
         @app.post("/api/close")
@@ -583,7 +590,7 @@ class Page:
     async def linger(self, console: Any, seconds: float | None = None) -> None:
         import select
         import sys
-        seconds = float(os.environ.get("IR_SURVEYOR_WEB_LINGER", "1800")) if seconds is None else seconds
+        seconds = float(os.environ.get("IR_PROBANT_WEB_LINGER", "1800")) if seconds is None else seconds
         mins = max(1, int(seconds // 60))
         console.print(f"[grey58]The page stays open so you can export the record. Press Enter here to close it "
                       f"(it closes by itself after {mins} minute{'s' if mins != 1 else ''}).[/]")
@@ -606,29 +613,29 @@ class Page:
         await self.task
 
 
-async def start(*, surveyor: Dict[str, Any], session: Any, search_endpoint: Optional[str], workspace: Path,
+async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optional[str], workspace: Path,
                 console: Any) -> Page:
     """Start the bridge's web server and open the page. The agent is started by the launcher right after,
     with its stdin/stdout handed to `page.bridge.pump`."""
     import socket
     import uvicorn
-    from . import pi_attested, surveyor_export, surveyor_trust
-    from .surveyor import _split_matter
-    matter = surveyor.get("matter", "")
+    from . import pi_attested, probant_export, probant_trust
+    from .probant import _split_matter
+    matter = probant.get("matter", "")
     client, name = _split_matter(matter)
 
     def rebuild() -> Dict[str, Any]:
         found = pi_attested.search_verification(search_endpoint)
-        return surveyor_trust.build(session.receipt, found, pi_attested.confinement_label(), matter=matter,
-                                    date_bound=surveyor.get("date_bound", ""), surface="browser")
+        return probant_trust.build(session.receipt, found, pi_attested.confinement_label(), matter=matter,
+                                    date_bound=probant.get("date_bound", ""), surface="browser")
 
-    from .surveyor import records_dir
+    from .probant import records_dir
     kept = (records_dir(client, name) / f"{pi_attested.LAST_SESSION_ID}.conversation.jsonl"
             if search_endpoint and pi_attested.LAST_SESSION_ID else None)
-    bridge = Bridge(matter=matter, date_bound=surveyor.get("date_bound", ""), workspace=workspace,
-                    summary=surveyor.get("summary") or {}, search_endpoint=search_endpoint,
+    bridge = Bridge(matter=matter, date_bound=probant.get("date_bound", ""), workspace=workspace,
+                    summary=probant.get("summary") or {}, search_endpoint=search_endpoint,
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
-                    export=lambda: surveyor_export.write_bundle(client, name, None), conversation_file=kept)
+                    export=lambda: probant_export.write_bundle(client, name, None), conversation_file=kept)
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:
@@ -654,7 +661,7 @@ def open_url(bridge: Bridge) -> str:
 
 
 def launch_browser(url: str) -> bool:
-    if os.environ.get("IR_SURVEYOR_NO_BROWSER") == "1":
+    if os.environ.get("IR_PROBANT_NO_BROWSER") == "1":
         return False
     import webbrowser
     try:

@@ -1,4 +1,4 @@
-"""The Surveyor home page: what its server refuses, what it reads and writes, and what its page never does.
+"""The Probant home page: what its server refuses, what it reads and writes, and what its page never does.
 
 Same rules as a session's page (install_guard), plus the home page's own: it writes only a new matter, the
 disclosure and an export, each on request; it opens only links this computer made; a past session is read
@@ -13,17 +13,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from inferroute_cli import surveyor as S
-from inferroute_cli import surveyor_home as H
+from inferroute_cli import probant as S
+from inferroute_cli import probant_home as H
 
-STATIC = Path(H.__file__).resolve().parent / "surveyor_web"
+STATIC = Path(H.__file__).resolve().parent / "probant_web"
 SID = "20260917T163734Z-f973d8c0"
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
-    monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "Surveyor"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
     from fastapi.testclient import TestClient
     h = H.Home()
     h.port = 45678
@@ -89,7 +89,7 @@ def test_bad_names_and_dates_are_refused_before_any_path_is_built(home, client, 
     h, c, tmp = home
     r = c.post("/api/matters", json={"client": client, "matter": matter, "priority_date": date})
     assert r.status_code == 400
-    assert not (tmp / "Surveyor").exists() or not any((tmp / "Surveyor").rglob("disclosure.md"))
+    assert not (tmp / "Probant").exists() or not any((tmp / "Probant").rglob("disclosure.md"))
 
 
 def test_the_disclosure_round_trips_without_the_template(home):
@@ -160,7 +160,7 @@ def test_start_runs_the_same_open_command_and_offers_its_link(home, monkeypatch)
         return p
     monkeypatch.setattr(H.subprocess, "Popen", fake_popen)
     first = c.post("/api/sessions", json={"id": "Acme/cooling"}).json()
-    assert seen["argv"][-4:] == ["surveyor", "open", "Acme/cooling", "--web"] and seen["env"]["IR_SURVEYOR_NO_BROWSER"] == "1"
+    assert seen["argv"][-4:] == ["probant", "open", "Acme/cooling", "--web"] and seen["env"]["IR_PROBANT_NO_BROWSER"] == "1"
     for _ in range(40):
         v = c.get("/api/launch", params={"id": first["id"]}).json()
         if v["state"] == "ready":
@@ -187,7 +187,7 @@ def test_a_session_that_fails_to_open_is_explained_plainly(home, monkeypatch):
 def test_a_record_opens_only_with_its_own_link_and_sandboxed(home):
     h, c, _ = home
     c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
-    d = S.surveyor_root() / "Acme" / "exports" / "cooling-prior-art-record-20260917T160005Z"
+    d = S.probant_root() / "Acme" / "exports" / "cooling-prior-art-record-20260917T160005Z"
     d.mkdir(parents=True)
     (d / "record.html").write_text("<h1>record</h1>")
     e = c.get("/api/matter", params={"id": "Acme/cooling"}).json()["exports"][0]
@@ -201,7 +201,7 @@ def test_a_record_opens_only_with_its_own_link_and_sandboxed(home):
 def test_a_record_can_be_checked_from_the_page_and_only_a_real_one(home, monkeypatch):
     h, c, tmp_path = home
     c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
-    d = S.surveyor_root() / "Acme" / "exports" / "cooling-prior-art-record-20260917T160005Z"
+    d = S.probant_root() / "Acme" / "exports" / "cooling-prior-art-record-20260917T160005Z"
     d.mkdir(parents=True)
     (d / "record.html").write_text("<h1>record</h1>")
     # The bundle's OWN verifier is what runs — the same file a stranger would run, not a copy of the verdict.
@@ -221,7 +221,7 @@ def test_a_record_can_be_checked_from_the_page_and_only_a_real_one(home, monkeyp
 # ── the bridge keeps the conversation ──
 
 def test_the_session_page_keeps_its_conversation_privately(tmp_path):
-    from inferroute_cli import surveyor_web as W
+    from inferroute_cli import probant_web as W
     f = tmp_path / f"{SID}.conversation.jsonl"
     b = W.Bridge(matter="A/b", date_bound="", workspace=tmp_path, summary={}, search_endpoint=None,
                  receipt=lambda: SimpleNamespace(counters={}), rebuild_summary=dict, export=lambda: tmp_path,
@@ -254,7 +254,7 @@ def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made(
 
 def test_the_help_page_covers_the_whole_path_and_the_limits():
     js = (STATIC / "home.js").read_text()
-    for heading in ("How Surveyor works", "Create a matter", "Start a session", "Research with the assistant",
+    for heading in ("How Probant works", "Create a matter", "Start a session", "Research with the assistant",
                     "Mark what matters", "Keep the record", "What stays private", "What it can't prove", "Limits right now"):
         assert heading in js, heading
     html = (STATIC / "home.html").read_text()

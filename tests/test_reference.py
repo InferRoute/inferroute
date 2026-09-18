@@ -1,4 +1,4 @@
-"""`ir surveyor reference` — the operator side of the identity anchor.
+"""`ir probant reference` — the operator side of the identity anchor.
 
 The load-bearing tests are the cross-implementation ones: the issuer and the bundled verifier must agree on
 canonicalisation byte-for-byte (or every signed reference fails for every firm), and a reference this tool

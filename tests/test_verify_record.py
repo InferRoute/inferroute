@@ -273,7 +273,7 @@ def _multi_bundle(tmp_path, V, kms, seqs, started="2026-06-01T12:00:00Z", omit_r
 
 
 def _ref(tmp_path, name, policy_entries, idx="ef" * 32, mdl="12" * 32, sign_with=None):
-    # mirrors what `ir surveyor reference build` writes, schema included — a fixture that drifts from the
+    # mirrors what `ir probant reference build` writes, schema included — a fixture that drifts from the
     # issuer tests a document nobody issues.
     ref = {"schema": "inferroute.enclave-reference/1",
            "policy_sha256": policy_entries, "index_manifest_sha256": [idx], "model_manifest_sha256": [mdl],

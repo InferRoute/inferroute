@@ -1,4 +1,4 @@
-"""`ir surveyor` — the attorney-facing matter launcher. These tests cover the parts that must hold with
+"""`ir probant` — the attorney-facing matter launcher. These tests cover the parts that must hold with
 no Pi binary and no enclave: where the date bound and matter record live (host-side, under confidential/,
 NOT the writable workspace — S1), that the shared search.json is never touched (the cutoff/state/record
 travel as per-matter env — S2), that names are sanitized before any path is built (S3), and that a .git
@@ -13,28 +13,28 @@ from pathlib import Path
 
 import pytest
 
-from inferroute_cli import surveyor as S
+from inferroute_cli import probant as S
 
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
-    monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "Surveyor"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
     # A clean slate for the per-matter env the launcher sets.
     for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR",
-              "IR_ATTESTED_CONFINE", "IR_SURVEYOR_DEV_UNCONFINED"):
+              "IR_ATTESTED_CONFINE", "IR_PROBANT_DEV_UNCONFINED"):
         monkeypatch.delenv(k, raising=False)
     return tmp_path
 
 
 def _patch_launch(monkeypatch, captured):
-    def fake_launch(args, agent="claude", *, surveyor=None):
+    def fake_launch(args, agent="claude", *, probant=None):
         captured["args"] = args
         captured["agent"] = agent
-        captured["surveyor"] = surveyor
+        captured["probant"] = probant
         captured["env"] = {k: os.environ.get(k) for k in
                            ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR",
-                            "IR_ATTESTED_CONFINE", "IR_SURVEYOR_DEV_UNCONFINED")}
+                            "IR_ATTESTED_CONFINE", "IR_PROBANT_DEV_UNCONFINED")}
         captured["cwd"] = os.getcwd()
         return 0
     import inferroute_cli.confidential as confidential_mod
@@ -112,7 +112,7 @@ def test_open_passes_per_matter_env_and_never_touches_search_json(home, monkeypa
     assert S.main(["open", "Acme/m7"]) == 0
     assert captured["agent"] == "pi" and captured["args"] == []
     # The plain-language card is drawn for THIS matter: its name and host-held date bound, never the model's.
-    assert captured["surveyor"] == {"matter": "Acme/m7", "date_bound": "2021-07-08"}
+    assert captured["probant"] == {"matter": "Acme/m7", "date_bound": "2021-07-08"}
     env = captured["env"]
     # S2: the cutoff/state/record are per-matter env from the host record, and all live under confidential/.
     assert env["IR_MATTER_CUTOFF"] == "20210708"
@@ -131,7 +131,7 @@ def test_open_forces_require_even_when_the_shell_set_confine_off(home, monkeypat
     _patch_launch(monkeypatch, captured)
     assert S.main(["open", "Acme/m7b"]) == 0
     assert captured["env"]["IR_ATTESTED_CONFINE"] == "require"
-    assert captured["env"]["IR_SURVEYOR_DEV_UNCONFINED"] is None
+    assert captured["env"]["IR_PROBANT_DEV_UNCONFINED"] is None
 
 
 def test_dev_unconfined_override_is_loud_and_untrusted(home, monkeypatch, capsys):
@@ -141,7 +141,7 @@ def test_dev_unconfined_override_is_loud_and_untrusted(home, monkeypatch, capsys
     _patch_launch(monkeypatch, captured)
     assert S.main(["open", "Acme/m7c", "--dev-unconfined"]) == 0
     assert captured["env"]["IR_ATTESTED_CONFINE"] == "off"
-    assert captured["env"]["IR_SURVEYOR_DEV_UNCONFINED"] == "1"
+    assert captured["env"]["IR_PROBANT_DEV_UNCONFINED"] == "1"
     assert "DEVELOPER OVERRIDE" in capsys.readouterr().err
 
 
@@ -155,7 +155,7 @@ def test_open_refuses_a_git_repo_in_the_workspace(home, monkeypatch):
 
 
 def test_new_refuses_a_cloud_sync_root(home, monkeypatch):
-    monkeypatch.setenv("IR_SURVEYOR_ROOT", str(home / "OneDrive" / "Surveyor"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(home / "OneDrive" / "Probant"))
     assert S.main(["new", "Acme", "m9"]) == 2
     assert not S.record_path("Acme", "m9").exists()
 
@@ -186,3 +186,43 @@ def test_open_tightens_a_matter_created_before_it_was_private(home, monkeypatch)
     S.main(["open", "Acme/loose"])
     assert stat.S_IMODE(ws.stat().st_mode) == 0o700
     assert stat.S_IMODE(S.records_dir("Acme", "loose").stat().st_mode) == 0o700
+
+
+# ── the rename (Surveyor → Probant, 2026-09-18) ──
+#
+# The product was renamed the night before its first rehearsal. Neither of these is decoration: the
+# rehearsal notes, the wrapper script and a home page already running all say `surveyor`, and the matters
+# already on this machine live under ~/Surveyor with their absolute paths written into host-side records.
+
+def test_the_old_command_name_still_reaches_the_same_place(monkeypatch):
+    from inferroute_cli import main as main_mod
+    seen = []
+    monkeypatch.setattr(S, "main", lambda rest: seen.append(rest) or 0)
+    assert main_mod.main(["surveyor", "list"]) == 0
+    assert main_mod.main(["probant", "list"]) == 0
+    assert seen == [["list"], ["list"]]
+
+
+def test_matters_already_on_this_machine_are_not_stranded_by_the_rename(tmp_path, monkeypatch):
+    monkeypatch.delenv("IR_PROBANT_ROOT", raising=False)
+    monkeypatch.delenv("IR_SURVEYOR_ROOT", raising=False)
+    monkeypatch.setattr(S, "_home", lambda: tmp_path)
+    assert S.probant_root() == tmp_path / "Probant"          # a fresh install gets the new name
+    (tmp_path / "Surveyor").mkdir()
+    assert S.probant_root() == tmp_path / "Surveyor"         # an existing tree keeps being used
+    (tmp_path / "Probant").mkdir()
+    assert S.probant_root() == tmp_path / "Probant"          # once both exist, the new one wins
+    monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "named"))
+    assert S.probant_root() == tmp_path / "named"            # the old setting still names a root
+
+
+def test_a_setting_answers_to_both_spellings(monkeypatch):
+    from inferroute_cli import probant_web as W
+    monkeypatch.delenv("IR_PROBANT_HOME_URL", raising=False)
+    monkeypatch.setenv("IR_SURVEYOR_HOME_URL", "http://127.0.0.1:1/#k=x")
+    # A home page started before the rename passes the old spelling to the session it starts; a session
+    # that loses its way back home is how a rename breaks someone's day.
+    assert W.env("HOME_URL") == "http://127.0.0.1:1/#k=x"
+    monkeypatch.setenv("IR_PROBANT_HOME_URL", "http://127.0.0.1:2/#k=y")
+    assert W.env("HOME_URL") == "http://127.0.0.1:2/#k=y"
+    assert W.env("NOTHING_SET", "fallback") == "fallback"

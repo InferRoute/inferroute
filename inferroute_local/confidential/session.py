@@ -332,7 +332,7 @@ class ConfidentialSession:
         translator to close the response for it — unlike the Anthropic path, which always ends on
         `finish_events()` — so an upstream that stopped part-way used to reach the agent as a body that
         simply stopped, with no terminator and no error. A client waiting for the terminator waits for
-        ever: on 17 Sep a Surveyor session sat on "The assistant is working…" for 25 minutes with the
+        ever: on 17 Sep a Probant session sat on "The assistant is working…" for 25 minutes with the
         agent idle, holding no connection at all. A truncated answer is bad news; silence is worse."""
         opener = e2ee.StreamOpener(sealed.response_sk)
         c = self.receipt.counters

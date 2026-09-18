@@ -1,4 +1,4 @@
-"""start_search_proxy builds the verifier command line. Two things must hold that the surveyor relies on:
+"""start_search_proxy builds the verifier command line. Two things must hold that the probant relies on:
 the disclosure record goes to a fresh per-session file (Q2), and approvals are trusted from the state file
 ONLY when the launch is confined in require mode (Q1). These are checked by capturing the argv without
 starting a real verifier.
@@ -35,7 +35,7 @@ def rig(tmp_path, monkeypatch):
         "python": "/usr/bin/python3", "enclave": "http://enclave.invalid",
         "expect_host_data": "aa" * 32, "cwd": str(tmp_path)}))
     for k in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_ATTESTED_CONFINE",
-              "IR_SURVEYOR_DEV_UNCONFINED", "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
+              "IR_PROBANT_DEV_UNCONFINED", "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
         monkeypatch.delenv(k, raising=False)
     captured = {}
 
@@ -90,7 +90,7 @@ def test_confinement_label_is_passed_and_reflects_the_mode(rig, tmp_path, monkey
     assert "require" in argv[argv.index("--confinement") + 1]
     # dev-unconfined override wins over anything else
     monkeypatch.setattr(PA, "_SEARCH_PROXIES", [])
-    monkeypatch.setenv("IR_SURVEYOR_DEV_UNCONFINED", "1")
+    monkeypatch.setenv("IR_PROBANT_DEV_UNCONFINED", "1")
     monkeypatch.setenv("IR_ATTESTED_CONFINE", "off")
     PA.start_search_proxy()
     argv = rig["argv"]

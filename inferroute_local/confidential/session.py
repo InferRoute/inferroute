@@ -30,6 +30,14 @@ REVERIFY_EVERY_S = 30 * 60
 # confirm — which is exactly what an attacker who can drop our Intel and NVIDIA traffic wants.
 REVERIFY_FAILURES_ALLOWED = 3
 NONCE_SAFETY_S = 5.0
+# The terminator of an OpenAI SSE stream. Agents wait for it; a stream that ends without one has been cut
+# short, and passing that on as a body that simply stops leaves the agent waiting for ever.
+DONE = b"data: [DONE]\n\n"
+
+
+def _is_done(line: bytes) -> bool:
+    s = line.strip()
+    return s.startswith(b"data:") and s[5:].strip() == b"[DONE]"
 
 
 class Refused(Exception):
@@ -318,11 +326,19 @@ class ConfidentialSession:
 
     async def _open_stream_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         """The enclave's own OpenAI SSE, decrypted and passed through byte-for-byte; usage is
-        read off the stream for the receipt."""
+        read off the stream for the receipt.
+
+        Every exit from here ENDS THE STREAM, with `data: [DONE]`. Byte-for-byte passthrough has no
+        translator to close the response for it — unlike the Anthropic path, which always ends on
+        `finish_events()` — so an upstream that stopped part-way used to reach the agent as a body that
+        simply stopped, with no terminator and no error. A client waiting for the terminator waits for
+        ever: on 17 Sep a Surveyor session sat on "The assistant is working…" for 25 minutes with the
+        agent idle, holding no connection at all. A truncated answer is bad news; silence is worse."""
         opener = e2ee.StreamOpener(sealed.response_sk)
         c = self.receipt.counters
         linebuf = b""
         usage: dict = {}
+        done = False                      # the upstream's own terminator; the only thing that ends an OpenAI SSE
         try:
             async for chunk in raw:
                 plain = opener.feed(chunk)
@@ -330,6 +346,7 @@ class ConfidentialSession:
                     ev = opener.passthrough.pop()
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
                     yield ("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode()
+                    yield DONE
                     c["errors"] += 1
                     return
                 if not plain:
@@ -342,23 +359,33 @@ class ConfidentialSession:
                         break
                     line, linebuf = linebuf[:i + 1], linebuf[i + 1:]
                     translate.scan_openai_usage(line, usage)
+                    done = done or _is_done(line)
                     yield line
             tail = opener.flush()
             if tail:
                 translate.scan_openai_usage(tail, usage)
+                done = done or _is_done(tail)
                 yield tail
             if linebuf:
+                done = done or _is_done(linebuf)
                 yield linebuf
         except e2ee.E2EEError as e:
             c["errors"] += 1
             yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
+            yield DONE
             return
         except (httpx.HTTPError, OSError) as e:
             c["errors"] += 1
             yield ("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode()
+            yield DONE
             return
         finally:
             c["ciphertext_frames_received"] += opener.frames
+        if not done:
+            c["errors"] += 1
+            yield ("data: " + json.dumps(translate.openai_error(
+                "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode()
+            yield DONE
         self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
 
     async def _open_json_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:

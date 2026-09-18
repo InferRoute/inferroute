@@ -34,6 +34,9 @@ class FakeCarrier:
         self.reply = reply or (lambda body: {"id": "chatcmpl-1", "choices": [{"finish_reason": "stop", "message": {"content": "hi " + body["messages"][-1]["content"]}}],
                                              "usage": {"prompt_tokens": 5, "completion_tokens": 2}})
         self.usage_reports = []
+        # Cut the stream short, WITHOUT its "data: [DONE]" — what an enclave whose answer stops part-way
+        # looks like on the wire. Nothing else about the exchange changes.
+        self.truncate = False
 
     async def models(self):
         return [{"name": "fake/Model-TEE", "fleet_id": "fleet-x1"}]
@@ -59,7 +62,9 @@ class FakeCarrier:
             async def one():
                 yield out
             return 200, {"content-type": "application/octet-stream"}, one()
-        text = "".join(f"data: {json.dumps(c)}\n\n" for c in self.reply(body)) + "data: [DONE]\n\n"
+        text = "".join(f"data: {json.dumps(c)}\n\n" for c in self.reply(body))
+        if not self.truncate:
+            text += "data: [DONE]\n\n"
         wire = enc.stream(client_pk, [text.encode()[i:i + 13] for i in range(0, len(text), 13)])
 
         async def many():
@@ -460,6 +465,34 @@ def test_native_openai_round_trip_is_sealed_and_passed_through_untranslated(worl
     carrier.reply = lambda body: {"id": "chatcmpl-1", "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 1}}
     st, h, out = asyncio.run(_oai(s, {"model": "x", "stream": False, "messages": [{"role": "user", "content": "q"}]}))
     assert st == 200 and json.loads(out)["choices"][0]["message"]["content"] == "ok"
+
+
+def test_a_reply_that_stops_part_way_ends_the_stream_instead_of_leaving_the_agent_waiting(world):
+    """An OpenAI SSE ends at "data: [DONE]"; an agent waits for it. Byte-for-byte passthrough has no
+    translator to close the stream for it, so an enclave whose answer stopped part-way used to reach the
+    agent as a body that simply stopped — no terminator, no error. That is how a Surveyor session sat on
+    "The assistant is working…" for 25 minutes on 17 Sep with the agent idle and holding no connection.
+    A truncated answer is bad news; silence is worse."""
+    carrier = FakeCarrier(world["enclaves"])
+    carrier.truncate = True
+    s = _session(carrier)
+    asyncio.run(s.open())
+    st, h, out = asyncio.run(_oai(s, {"model": "x", "stream": True, "messages": [{"role": "user", "content": "go"}]}))
+    lines = [line for line in out.decode().split("\n") if line.startswith("data: ")]
+    assert st == 200
+    assert lines[-1] == "data: [DONE]", "the stream must always be ended"
+    said = json.loads(lines[-2][6:])
+    assert "ended part-way" in json.dumps(said), "and must say why, so the agent can report it or retry"
+    assert s.receipt.counters["errors"] == 1          # counted, not silently smoothed over
+
+
+def test_a_complete_reply_is_not_accused_of_stopping_part_way(world):
+    # The other half: the check must not fire on a normal stream, or every turn ends in a false alarm.
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    _, _, out = asyncio.run(_oai(s, {"model": "x", "stream": True, "messages": [{"role": "user", "content": "go"}]}))
+    assert "ended part-way" not in out.decode()
+    assert out.decode().count("data: [DONE]") == 1 and s.receipt.counters["errors"] == 0
 
 
 async def _oai(s, body):

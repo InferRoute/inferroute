@@ -461,7 +461,7 @@ def _run_marks_hook(script_tail):
     consts = ts[ts.index("const STEP_DEEPER"):ts.index("const NEXT_MAX")]
     label = next(ln for ln in ts.splitlines() if "const MARK_LABEL" in ln)
     hook = ts[ts.index("\tlet lastMarksNote"):ts.index("\t});\n", ts.index('pi.on("before_agent_start"')) + 5]
-    harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nlet STATE = {};\nlet searchNo = 0;\n"
+    harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nconst priorDocs = new Map();\nlet STATE = {};\nlet searchNo = 0;\n"
                "let FAIL = false;\nasync function searchCall(){ if (FAIL) throw new Error('down'); return STATE; }\n"
                "const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n" + hook + "\n"
                "const run = async () => { const r = await handlers.before_agent_start(); return r ? r.message : null; };\n"
@@ -523,3 +523,60 @@ def test_the_page_and_the_extension_word_the_mark_steps_identically():
     assert grab(ts, "const STEP_LEAVE_OUT") == grab(js, "const LEAVE_OUT")
     assert grab(ts, "const STEP_SURVEY") == grab(js, "const SURVEY")
     assert "`Find documents like ${key}`" in ts and "`Find documents like ${k}`" in js
+
+
+def test_a_document_from_an_earlier_session_is_named_in_the_marks_note():
+    out = _run_marks_hook(
+        "priorDocs.set('EP-7-A1', 'Sealed replay of agent traces across model updates');\n"
+        "STATE = { marks: { 'EP-7-A1': { latest: { value: 'relevant' } } } };\n"
+        "console.log(JSON.stringify({ note: (await run()).content }));")
+    assert 'Marked relevant: EP-7-A1 "Sealed replay of agent traces across model updates"' in out["note"]
+
+
+def test_like_accepts_a_document_an_earlier_session_returned():
+    """Henry, 19 Sep: ten "malformed request" lines. The recorder showed `like` with documents he had marked in
+    an EARLIER session: the page offered "Find documents like X" for them, but the extension only knew this
+    session's results and refused every one. Runs the extension's real resolution code."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    a = ts.index("\t\t\tconst like = String(params.like")
+    body = ts[a:ts.index("\t\t\t// The hints, normalised", a)]
+    js = ("const docText = new Map([['US-1-A1', 'Routing a request by the permission of its sender']]);\n"
+          "const priorDocs = new Map([['EP-7-A1', 'Sealed replay of agent traces across model updates']]);\n"
+          "function resolve(params) {\n" + body + "\nreturn text; }\n"
+          "const tryIt = (p) => { try { return resolve(p); } catch (e) { return 'ERR ' + e.message; } };\n"
+          "console.log(JSON.stringify({ now: tryIt({ like: 'us-1-a1' }), before: tryIt({ like: 'EP-7-A1' }),"
+          " never: tryIt({ like: 'WO-9-A1' }) }));")
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["now"].startswith("Routing a request")
+    assert out["before"] == "Sealed replay of agent traces across model updates"
+    assert out["never"].startswith("ERR WO-9-A1 was not returned by any search on this matter")
+    assert "nothing was sent" in out["never"]
+
+
+def test_the_launcher_hands_the_matters_earlier_documents_to_the_extension(tmp_path, monkeypatch):
+    import stat
+    from inferroute_cli import models as M
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    (rec / "s.searches.jsonl").write_text(json.dumps({"result": {"hits": [{"key": "EP-7-A1", "title": "Sealed replay"}]}}) + "\n")
+    alias = M.get("kimi-k2.6")
+    env = {"IR_MATTER_RECORD_DIR": str(rec)}
+    PA.env_argv("pi", env, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u",
+                search_endpoint="http://127.0.0.1:2")
+    f = Path(env["IR_MATTER_DOCS"])
+    assert json.loads(f.read_text()) == {"EP-7-A1": "Sealed replay"}
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600
+    # A matter with no recorded searches: no file named, and a stale name inherited from the shell is dropped.
+    env2 = {"IR_MATTER_RECORD_DIR": str(tmp_path / "none"), "IR_MATTER_DOCS": "/stale"}
+    PA.env_argv("pi", env2, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u",
+                search_endpoint="http://127.0.0.1:2")
+    assert "IR_MATTER_DOCS" not in env2

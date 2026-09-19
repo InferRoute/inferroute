@@ -792,6 +792,28 @@
     return `The search was not sent: ${text}`;
   }
 
+  // Parallel requests slip together: one line with a count, not a column of identical lines (19 Sep: ten in a
+  // row). A card's slip joins a slip line in the same run of search cards, looking both ways: parallel searches
+  // each put their card in first and their answers come back in any order, so the slip line can sit several
+  // cards away. The run ends at anything that is not a card or a slip — a message is a new moment.
+  function recordSlip(card) {
+    const inRun = (n) => n && n.classList && (n.classList.contains("card") || n.classList.contains("slip"));
+    let near = null;
+    for (const step of ["previousElementSibling", "nextElementSibling"]) {
+      for (let n = card[step]; !near && inRun(n); n = n[step]) if (n.classList.contains("slip")) near = n;
+    }
+    if (near) {
+      near.slipCount = (near.slipCount || 1) + 1;
+      near.querySelector(".slip-count").textContent = ` (${near.slipCount} requests)`;
+      card.remove();
+      return near;
+    }
+    const line = el("div", "step slip", el("span", "step-dot", "·"),
+      el("span", "", "The assistant's search request was malformed, so nothing was sent."), el("span", "slip-count", ""));
+    card.replaceWith(line);
+    return line;
+  }
+
   function toolEnd(ev) {
     toolRunning = "";
     updateActivity();
@@ -817,9 +839,9 @@
     // The assistant's own parameter slip (no text, or `like` on a document it never got back): nothing was
     // verified or sent, and it retries. Say so quietly instead of showing a red refusal the professional
     // might read as a problem with the search machine. Any other failure keeps the red card.
-    const slip = /needs a self-contained description|was not returned by a search in this session|Validation failed for tool/.test(String(ev.text || ""));
+    const slip = /needs a self-contained description|was not returned by (a|any) search|Validation failed for tool/.test(String(ev.text || ""));
     if (!ev.ok && slip) {
-      card.replaceWith(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant's search request was malformed, so nothing was sent.")));
+      recordSlip(card);
       cards.delete(ev.call);
       outlineDrop(entry);          // the card is gone; an index row pointing at a detached node goes nowhere
       return;

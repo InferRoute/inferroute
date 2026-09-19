@@ -35,6 +35,8 @@ from typing import Any, Callable, Dict, List, Optional
 # in this module's globals. Imported locally, the name does not resolve, and every POST answers 422.
 from fastapi import Request
 
+from . import pi_attested
+
 STATIC = Path(__file__).resolve().parent / "probant_web"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
@@ -188,31 +190,6 @@ def _search_call(endpoint: Optional[str], path: str, body: Optional[dict] = None
                                  headers={} if body is None else {"content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:                      # loopback only
         return json.loads(r.read())
-
-
-def matter_titles(records_dir: Optional[Path], keys: set) -> Dict[str, str]:
-    """Titles for these publication numbers, from the matter's recorded search results (host-side, owner-only).
-    Numbers only in, titles only out; nothing is written."""
-    out: Dict[str, str] = {}
-    if not records_dir or not keys or not records_dir.is_dir():
-        return out
-    for f in sorted(records_dir.glob("*.searches.jsonl")):
-        try:
-            lines = f.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for line in lines:
-            try:
-                hits = ((json.loads(line).get("result") or {}).get("hits") or [])
-            except ValueError:
-                continue
-            for h in hits:
-                k = str(h.get("key") or "")
-                if k in keys and k not in out and h.get("title"):
-                    out[k] = str(h["title"])[:300]
-        if len(out) == len(keys):
-            break
-    return out
 
 
 def disclosure_info(workspace: Path) -> Dict[str, Any]:
@@ -646,7 +623,7 @@ class Bridge:
             marks_now = {k: (v.get("latest") or {}).get("value") for k, v in (state.get("marks") or {}).items()}
             # What each marked document is about, from every search recorded on this matter — so a mark made in
             # an EARLIER session still says what it marks, although its results are not on this page.
-            titles = await asyncio.to_thread(matter_titles, bridge.records_dir, set(marks_now))
+            titles = await asyncio.to_thread(pi_attested.matter_titles, bridge.records_dir, set(marks_now))
             return {"marks": marks_now, "titles": titles}
 
         @app.post("/api/mark")

@@ -836,8 +836,11 @@ def test_marked_documents_carry_their_titles_from_every_recorded_search(tmp_path
     (rec / "a.searches.jsonl").write_text(json.dumps({"result": {"hits": [{"key": "EP-1-A1", "title": "Sealed ledger"},
                                                                           {"key": "US-2-B2", "title": "Unmarked"}]}}) + "\n")
     (rec / "b.searches.jsonl").write_text("not json\n" + json.dumps({"result": {"hits": [{"key": "WO-3-A1", "title": "Replay"}]}}) + "\n")
-    assert W.matter_titles(rec, {"EP-1-A1", "WO-3-A1", "XX-9"}) == {"EP-1-A1": "Sealed ledger", "WO-3-A1": "Replay"}
-    assert W.matter_titles(None, {"EP-1-A1"}) == {} and W.matter_titles(rec, set()) == {}
+    from inferroute_cli.pi_attested import matter_titles
+    assert matter_titles(rec, {"EP-1-A1", "WO-3-A1", "XX-9"}) == {"EP-1-A1": "Sealed ledger", "WO-3-A1": "Replay"}
+    assert matter_titles(None, {"EP-1-A1"}) == {} and matter_titles(rec, set()) == {}
+    # No key filter: every document the matter's searches returned (the launcher hands these to the assistant).
+    assert matter_titles(rec) == {"EP-1-A1": "Sealed ledger", "US-2-B2": "Unmarked", "WO-3-A1": "Replay"}
     js = (STATIC / "app.js").read_text()
     # Same three buttons as a search card; changing a mark here re-renders everything that shows it.
     assert "markButtons(k, null, false)" in js and "renderMarksPanel();" in js
@@ -873,3 +876,23 @@ def test_the_protection_panel_is_compact_but_hides_nothing_it_cannot_name():
     assert 'if (points.length) more.append(el("ul", "item-points"' in body     # points moved behind "More"
     assert '"How a sealed machine keeps this private"' in body
     assert 'head.append(el("ul", "item-points"' not in body                     # no longer shown by default
+
+
+def test_parallel_malformed_requests_fold_into_one_line_whatever_order_they_fail_in():
+    """Henry, 19 Sep: "it only showed this at some point … The assistant's search request was malformed, so
+    nothing was sent. (x10)". Ten parallel requests failed; each became its own line. Drives the page's real
+    recordSlip() (tests/slip_sim.js): ten cards failing out of order end as ONE line with a count, and a later
+    slip after a message starts a new line rather than joining an old one."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "slip_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["lines"] == 1 and out["count"] == " (10 requests)"
+    assert out["afterMessage"] == 2 and out["lateCount"] == ""
+    js = (STATIC / "app.js").read_text()
+    assert "was not returned by (a|any) search" in js and "recordSlip(card);" in js

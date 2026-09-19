@@ -740,8 +740,12 @@ def test_one_next_steps_panel_counts_and_covers_by_action():
     assert r.returncode == 0, r.stderr[-600:]
     R = json.loads(r.stdout.strip().splitlines()[-1])
     deeper = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them"
-    # 1. No answer yet, a mark from an earlier session: steps from all marks, at once.
-    assert R["s1"] == [{"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
+    # 1. A new session on a matter marked in an earlier one, no answer and no search yet: running the survey
+    #    comes first — a new session is its own sitting (Henry, 19 Sep) — then the steps from the marks.
+    assert R["s1"] == [{"title": "", "steps": ["Run a prior-art survey of the disclosure"]},
+                       {"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
+    # 1b. Once this session has searched, the survey is no longer offered on its own account.
+    assert R["s1b"] == [{"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
     # 2. The assistant saw that mark and chose its own list — including DROPPING "look deeper". Respected.
     assert len(R["s2"]) == 1 and R["s2"][0]["title"] == "" and deeper not in R["s2"][0]["steps"]
     # 3. Marks made after it answered are added — and a step that merely DESCRIBES a mark ("…you marked
@@ -822,3 +826,18 @@ def test_when_continuing_fails_too_the_page_offers_a_fresh_session():
     assert "Start a fresh session on this matter" in body and "goHome(`/matter/${matterId}`)" in body
     # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets through.
     assert "if (!ev.stopped && current.text.trim()) failedTries = 0;" in js
+
+
+def test_marked_documents_carry_their_titles_from_every_recorded_search(tmp_path):
+    """The marks panel shows what each marked document is about — including documents marked in an EARLIER
+    session, whose results are not on this page — from every search recorded on the matter."""
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    (rec / "a.searches.jsonl").write_text(json.dumps({"result": {"hits": [{"key": "EP-1-A1", "title": "Sealed ledger"},
+                                                                          {"key": "US-2-B2", "title": "Unmarked"}]}}) + "\n")
+    (rec / "b.searches.jsonl").write_text("not json\n" + json.dumps({"result": {"hits": [{"key": "WO-3-A1", "title": "Replay"}]}}) + "\n")
+    assert W.matter_titles(rec, {"EP-1-A1", "WO-3-A1", "XX-9"}) == {"EP-1-A1": "Sealed ledger", "WO-3-A1": "Replay"}
+    assert W.matter_titles(None, {"EP-1-A1"}) == {} and W.matter_titles(rec, set()) == {}
+    js = (STATIC / "app.js").read_text()
+    # Same three buttons as a search card; changing a mark here re-renders everything that shows it.
+    assert "markButtons(k, null, false)" in js and "renderMarksPanel();" in js

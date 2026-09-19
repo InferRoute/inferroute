@@ -461,7 +461,7 @@ def _run_marks_hook(script_tail):
     consts = ts[ts.index("const STEP_DEEPER"):ts.index("const NEXT_MAX")]
     label = next(ln for ln in ts.splitlines() if "const MARK_LABEL" in ln)
     hook = ts[ts.index("\tlet lastMarksNote"):ts.index("\t});\n", ts.index('pi.on("before_agent_start"')) + 5]
-    harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nlet STATE = {};\n"
+    harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nlet STATE = {};\nlet searchNo = 0;\n"
                "let FAIL = false;\nasync function searchCall(){ if (FAIL) throw new Error('down'); return STATE; }\n"
                "const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n" + hook + "\n"
                "const run = async () => { const r = await handlers.before_agent_start(); return r ? r.message : null; };\n"
@@ -501,6 +501,15 @@ def test_marks_ride_with_the_professionals_message_once_per_change():
     assert out["again"] is None                          # unchanged marks are not sent again: nothing piles up
     assert out["changed"] is True
     assert out["none"] is None and out["down"] is None   # no marks, or the store unreachable: no note, no blocked turn
+    # A new session is its own sitting: until it has searched, running the survey is a candidate too.
+    assert "Run a prior-art survey of the disclosure" in text
+
+
+def test_once_the_session_has_searched_the_survey_is_not_a_candidate():
+    out = _run_marks_hook(
+        "searchNo = 2; STATE = { marks: { 'US-A1': { latest: { value: 'relevant' } } } };\n"
+        "console.log(JSON.stringify({ note: (await run()).content }));")
+    assert "Run a prior-art survey" not in out["note"] and "Find documents like US-A1" in out["note"]
 
 
 def test_the_page_and_the_extension_word_the_mark_steps_identically():
@@ -512,4 +521,5 @@ def test_the_page_and_the_extension_word_the_mark_steps_identically():
     grab = lambda src, name: _re.search(name + r' = "([^"]+)"', src).group(1)
     assert grab(ts, "const STEP_DEEPER") == grab(js, "const DEEPER")
     assert grab(ts, "const STEP_LEAVE_OUT") == grab(js, "const LEAVE_OUT")
+    assert grab(ts, "const STEP_SURVEY") == grab(js, "const SURVEY")
     assert "`Find documents like ${key}`" in ts and "`Find documents like ${k}`" in js

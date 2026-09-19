@@ -350,3 +350,16 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 
 /* a search that is taking longer than it usually does says so, quietly */
 .card-head .sub.slow { color: var(--warn); }
+
+/* Your marks, in the side panel: grouped by mark, each row with the same three buttons as a search card */
+.marks-panel { margin-top: 22px; padding-top: 4px; border-top: 1px solid var(--line); }
+.marks-panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 16px 0 4px; font-weight: 650; }
+.marks-group { margin-top: 10px; }
+.marks-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.mark-row { display: flex; flex-direction: column; gap: 4px; padding: 7px 0; border-top: 1px solid var(--line); }
+.mark-row:first-child { border-top: 0; }
+.mark-doc { min-width: 0; }
+.mark-doc .key { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.mark-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.mark-row .marks { justify-content: flex-start; }

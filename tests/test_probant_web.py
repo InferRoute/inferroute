@@ -106,7 +106,7 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
     assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
-                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/close", "/api/end"}
+                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack", "/api/close", "/api/end"}
 
 
 def test_a_dialog_can_only_be_answered_if_the_agent_opened_it_and_only_once(client):
@@ -932,3 +932,22 @@ def test_a_skip_that_applies_to_every_search_is_said_once_with_its_count():
     g = next(g for g in C.parse(text, 0)["groups"] if g["key"] == "machine")
     assert g["not_checked"] == ["firmware TCB at or above minimum: no minimum pinned for Genoa (in 68 searches)",
                                 "debug disabled: other reason"]
+
+
+def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it_is_sent(client, monkeypatch):
+    """The professional's own AI audits an evidence-only copy (Henry, 19 Sep). The page cannot name a folder:
+    the pack is made from the record this page exported and checked, or not at all."""
+    from inferroute_cli import probant_check, probant_export
+    monkeypatch.setattr(probant_check, "check", lambda d: {"verdict": "passed", "groups": [], "checks": 1})
+    made = []
+    monkeypatch.setattr(probant_export, "write_audit_pack", lambda d: made.append(str(d)) or Path("/tmp/audit-pack-x"))
+    b, c = client
+    assert c.post("/api/audit-pack", json={"path": "/etc"}).status_code == 409     # nothing proved yet
+    proved = c.post("/api/prove", json={}).json()["path"]
+    r = c.post("/api/audit-pack", json={"path": "/etc"}).json()
+    assert made == [proved]
+    # `ir` reads a bare first word as a subcommand, so its command starts with a flag; an enclave-backed model.
+    assert r["ir"].startswith("ir --model kimi-k2.6 ") and r["claude"].startswith("claude ")
+    assert r["ir"].endswith('"Read AUDIT.md in this folder and do what it says."')
+    js = (STATIC / "app.js").read_text()
+    assert 'api("/api/audit-pack", {})' in js and "No Claude subscription?" in js

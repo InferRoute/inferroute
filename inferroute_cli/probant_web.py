@@ -653,6 +653,8 @@ class Bridge:
             return {"ok": True, "path": str(path), "verify_here": f"ir probant verify-export {path}",
                     "verify_anyone": "python3 verify_record.py ."}
 
+        proved: dict = {}                                   # the record this page last exported and checked
+
         @app.post("/api/prove")
         async def prove():
             """Export the record and check it with its OWN verifier — the file a stranger would run — so the
@@ -669,7 +671,25 @@ class Bridge:
                 result = {"verdict": "refused", "headline": "The check could not be run.",
                           "explainer": type(e).__name__, "groups": [], "checks": 0}
             result.pop("output", None)
+            proved["path"] = path
             return {"ok": True, "path": str(path), "check": result, "verify_anyone": "python3 verify_record.py ."}
+
+        @app.post("/api/audit-pack")
+        async def audit_pack():
+            """An evidence-only copy of the record just proven, for the professional's OWN AI to audit: no query,
+            result or document text. The record is the one this page exported, never a path the page sends."""
+            from . import probant_export
+            if not proved.get("path"):
+                return JSONResponse({"error": "export and check the record first"}, status_code=409)
+            try:
+                pack = await asyncio.to_thread(probant_export.write_audit_pack, proved["path"])
+            except Exception as e:                              # noqa: BLE001
+                return JSONResponse({"error": f"the audit pack could not be written: {e}"}, status_code=500)
+            prompt = probant_export.AUDIT_PROMPT
+            return {"ok": True, "path": str(pack), "prompt": prompt,
+                    # `ir` needs a flag first (a bare word is read as a subcommand); an enclave-backed model runs
+                    # on the confidential lane by default, so even this fallback keeps the pack sealed in transit.
+                    "claude": f'claude "{prompt}"', "ir": f'ir --model {probant_export.AUDIT_IR_MODEL} "{prompt}"'}
 
         @app.post("/api/close")
         async def close_page():

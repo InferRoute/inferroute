@@ -288,6 +288,11 @@ button.brand:hover { background: var(--user); }
 .export-result .check-row { grid-template-columns: 40px minmax(0, 1fr); }
 .export-result .check-row .sub { grid-column: 2; }
 .export-where { margin-top: 10px; color: var(--muted); }
+.audit-offer { margin-top: 14px; padding: 12px; border-radius: 10px; border: 1px dashed var(--line); }
+.audit-offer .audit-title { font-weight: 650; margin-bottom: 2px; }
+.audit-offer p { margin: 8px 0 4px; }
+.audit-offer .mono { margin: 4px 0; }
+.audit-offer button.small { margin-bottom: 4px; }
 .export-result .mono { display: block; word-break: break-all; margin: 4px 0 8px; color: var(--ink); font-size: 12px; }
 
 /* statusbar, dialog, toasts */

@@ -841,3 +841,23 @@ def test_marked_documents_carry_their_titles_from_every_recorded_search(tmp_path
     js = (STATIC / "app.js").read_text()
     # Same three buttons as a search card; changing a mark here re-renders everything that shows it.
     assert "markButtons(k, null, false)" in js and "renderMarksPanel();" in js
+
+
+def test_next_steps_sit_in_the_conversation_after_the_latest_answer():
+    """Henry, 19 Sep, with a screenshot of the framed panel above the message box: "maybe we should blend the
+    buttons into the chat". The same panel now follows the latest answer inside the conversation, unframed."""
+    js = (STATIC / "app.js").read_text()
+    body = js[js.index("function renderSteps"):js.index("function renderMarkSteps")]
+    assert "log.append(bar);" in body and "if (log.lastElementChild !== bar)" in body
+    assert 'function clearNext() { assistantSteps = []; $("mark-steps").hidden = true; }' in js
+    css = (STATIC / "app.css").read_text()
+    assert ".mark-steps { margin: -4px 0 0; padding: 0; }" in css          # no frame of its own
+
+
+def test_the_suggestions_tool_closes_the_turn_instead_of_inviting_a_remark():
+    """The model wrote "(The step buttons above are shown on your screen now.)" — against the contract, and
+    wrong: they were below. After a tool call the framework asks it to continue, and "Shown." gave it nothing
+    to end on."""
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "end your turn with no further text, and do not refer to the steps or the buttons" in ts
+    assert 'text: steps.length ? "Shown."' not in ts

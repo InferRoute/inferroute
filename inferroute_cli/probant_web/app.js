@@ -365,6 +365,13 @@
     }
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }
+    // In the conversation, right after the latest answer — part of what the assistant said, not page furniture
+    // (Henry, 19 Sep: "maybe we should blend the buttons into the chat"). Re-appending moves it to the end.
+    if (log.lastElementChild !== bar) {
+      const keep = stick();
+      log.append(bar);
+      keep();
+    }
     for (const g of groups) {
       if (g.title) list.append(el("div", "steps-sub", g.title));
       const row = el("div", "steps-row");
@@ -381,7 +388,9 @@
   // The names the rest of the page already calls.
   function renderMarkSteps() { renderSteps(); }       // declarations, not consts: callable from anywhere
   function renderNext() { renderSteps(); }
-  function clearNext() { assistantSteps = []; renderSteps(); }
+  // On sending: the steps belonged to the previous answer. Hidden at once — re-rendering here would briefly put
+  // them back above the message being sent; the next answer brings its own.
+  function clearNext() { assistantSteps = []; $("mark-steps").hidden = true; }
 
   function markButtons(keyNo, card, register = true) {
     const wrap = el("div", "marks");

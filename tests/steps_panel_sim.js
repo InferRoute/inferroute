@@ -10,6 +10,8 @@ const cut = (from, to) => {
 function el(tag, cls, text) { return { tag, cls, text, kids: [], append(...k) { this.kids.push(...k); }, addEventListener() {} }; }
 const dom = { "mark-steps": { hidden: true }, "mark-steps-list": el("div"), empty: { hidden: true } };
 const $ = (id) => dom[id]; const clear = (n) => { n.kids = []; };
+const log = { lastElementChild: null, append(n) { this.lastElementChild = n; } };
+const stick = () => () => {};
 let busy = false, ended = false; const cards = new Map(); const marks = new Map(); const markOrder = [];
 const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
 const LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";

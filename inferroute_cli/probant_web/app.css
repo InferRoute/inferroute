@@ -179,16 +179,16 @@ button.brand:hover { background: var(--user); }
 .card-actions button { border-radius: 999px; font-size: 13px; }
 /* Next steps: one panel above the message box — the assistant's suggestions and the ones from your marks
    in a single place and a single style. Short steps sit side by side; a long one takes the line. */
-.mark-steps { margin: 6px max(20px, calc((100% - 820px) / 2)) 0; padding: 10px 12px 12px; border: 1px solid var(--line);
-  border-radius: var(--radius); background: var(--panel); }
+/* In the conversation, after the latest answer: no frame, a caption and chips, like the rest of the thread. */
+.mark-steps { margin: -4px 0 0; padding: 0; }
 .next-title { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); font-weight: 650; }
 .mark-steps-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .steps-sub { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--faint); font-weight: 600;
   margin-top: 4px; }
 .steps-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.step-btn { text-align: left; border-radius: 10px; max-width: 100%; font-size: 13.5px; line-height: 1.35;
-  padding: 6px 11px; background: var(--panel); border-color: var(--accent); color: var(--ink); }
-.step-btn:hover { background: var(--accent-soft); }
+.step-btn { text-align: left; border-radius: 16px; max-width: 100%; font-size: 13.5px; line-height: 1.35;
+  padding: 5px 13px; background: var(--accent-soft); border-color: transparent; color: var(--ink); }
+.step-btn:hover { background: var(--panel); border-color: var(--accent); }
 
 /* activity + composer */
 .activity { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 4px max(20px, calc((100% - 820px) / 2)); }

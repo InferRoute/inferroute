@@ -212,34 +212,67 @@ button.brand:hover { background: var(--user); }
 
 /* trust panel */
 .trust h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 20px 0 8px; font-weight: 650; }
-.verdict { padding: 12px 14px; border-radius: var(--radius); font-weight: 600; margin-bottom: 8px; }
-.verdict.private { background: var(--accent-soft); color: var(--accent); }
-.verdict.limited { background: var(--warn-soft); color: var(--warn); }
-.verdict.blocked { background: var(--bad-soft); color: var(--bad); }
+/* The verdict is a seal: badge, one word, the headline, and when the hardware was checked. */
+.verdict { display: flex; gap: 12px; align-items: flex-start; padding: 14px 14px 13px; border-radius: 12px;
+  margin-bottom: 8px; border: 1px solid transparent; }
+.verdict.private { background: linear-gradient(135deg, var(--accent-soft), var(--panel) 140%); border-color: color-mix(in srgb, var(--accent) 22%, transparent); }
+.verdict.limited { background: linear-gradient(135deg, var(--warn-soft), var(--panel) 140%); border-color: color-mix(in srgb, var(--warn) 25%, transparent); }
+.verdict.blocked { background: linear-gradient(135deg, var(--bad-soft), var(--panel) 140%); border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
+.seal { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  color: #fff; font-weight: 800; font-size: 18px; position: relative; }
+.seal::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid currentColor; opacity: .18; }
+.verdict.private .seal { background: var(--accent); color: var(--accent); }
+.verdict.limited .seal { background: var(--warn); color: var(--warn); }
+.verdict.blocked .seal { background: var(--bad); color: var(--bad); }
+.seal-mark { color: var(--panel); line-height: 1; }
+.verdict-text { min-width: 0; }
+.verdict-word { font-size: 18px; font-weight: 750; letter-spacing: -.2px; line-height: 1.2; }
+.verdict.private .verdict-word { color: var(--accent); }
+.verdict.limited .verdict-word { color: var(--warn); }
+.verdict.blocked .verdict-word { color: var(--bad); }
+.verdict-line { font-size: 13.5px; line-height: 1.45; color: var(--ink); margin-top: 3px; }
+.verdict .checked { font-size: 11.5px; color: var(--muted); margin-top: 6px; letter-spacing: .1px; }
 .explainer { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
-.item { padding: 7px 0; border-top: 1px solid var(--line); }
-.item:first-of-type { border-top: 0; }
-.item-head { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 6px; }
+
+/* The protections as one chain: a line joins the state dots, so the four read as a single guarantee. */
+.chain { position: relative; }
+.chain::before { content: ""; position: absolute; left: 10px; top: 16px; bottom: 16px; width: 2px; background: var(--line); }
+.item { position: relative; padding: 6px 6px 6px 0; border-radius: 8px; }
+.item.expandable > .item-head { cursor: pointer; }
+.item.expandable:hover { background: color-mix(in srgb, var(--user) 60%, transparent); }
+.item-head { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; }
 .sym { font-weight: 700; text-align: center; }
+.item-head > .sym { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px;
+  position: relative; z-index: 1; box-sizing: border-box; }
+.item-head > .sym.ok { background: var(--accent); color: var(--panel); }
+.item-head > .sym.warn { background: var(--warn); color: var(--panel); }
+.item-head > .sym.fail { background: var(--bad); color: var(--panel); }
+.item-head > .sym.off, .item-head > .sym.info { background: var(--panel); color: var(--faint); border: 2px solid var(--line); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sym.ok { color: var(--accent); } .sym.warn { color: var(--warn); } .sym.fail { color: var(--bad); } .sym.off, .sym.info { color: var(--faint); }
-.item-title { font-weight: 600; }
-.item-summary { grid-column: 2; font-size: 13.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2;
+.item-title { font-weight: 650; font-size: 14px; }
+.item-summary { grid-column: 2 / 4; font-size: 13px; color: var(--muted); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2;
   -webkit-box-orient: vertical; overflow: hidden; }
 .item-head .more .item-points { margin-top: 6px; }
-.item-points { grid-column: 2; margin: 4px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
-.item-points li { margin: 2px 0; }
-.more-toggle { grid-column: 2; justify-self: start; border: 0; background: none; color: var(--accent); padding: 4px 0 0; font-size: 13px; }
-.more { grid-column: 2; font-size: 13px; color: var(--muted); }
+.item-points { margin: 4px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
+.item-points li { margin: 2px 0; padding-left: 12px; position: relative; }
+.item-points li::before { content: "·"; position: absolute; left: 2px; color: var(--faint); }
+.more-toggle { grid-column: 3; grid-row: 1; border: 0; background: none; color: var(--faint); padding: 0 2px;
+  font-size: 12px; border-radius: 6px; }
+.more-toggle::after { content: " ▾"; font-size: 10px; }
+.item.open .more-toggle::after { content: " ▴"; }
+.more-toggle:hover { color: var(--accent); }
+.more { grid-column: 2 / 4; font-size: 13px; color: var(--muted); padding-top: 2px; }
 .more p { margin: 6px 0; }
-.tech { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 12px; }
+.more .tech-title { font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--faint); margin-top: 10px; }
+.tech { width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 12px; }
 .tech td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: top; }
 .tech td:first-child { width: 16px; }
-.tech .v { color: var(--faint); word-break: break-word; }
+.tech .v { color: var(--faint); word-break: break-word; font-family: var(--mono); font-size: 11px; }
 .limits { margin: 0; padding: 0; list-style: none; }
 .limits li { font-size: 13px; color: var(--muted); padding: 5px 0 5px 18px; position: relative; }
 .limits li::before { content: "○"; position: absolute; left: 0; color: var(--faint); }
 .checked { font-size: 12px; color: var(--faint); margin-top: 10px; }
-/* folded sections of the protection panel: a labelled line that opens in place */
 .trust details.fold { margin: 8px 0 0; }
 .trust details.fold > summary { cursor: pointer; font-size: 13px; color: var(--accent); list-style: none; }
 .trust details.fold > summary::-webkit-details-marker { display: none; }

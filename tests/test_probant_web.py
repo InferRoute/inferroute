@@ -871,11 +871,18 @@ def test_the_protection_panel_is_compact_but_hides_nothing_it_cannot_name():
     is visible without scrolling". One line per protection; points and detail behind "More"; the explanation and
     the limits behind labelled toggles — the limits one saying HOW MANY there are."""
     js = (STATIC / "app.js").read_text()
-    body = js[js.index("function renderTrust"):js.index("function renderTrust") + 3000]
+    body = js[js.index("function renderTrust"):js.index("// ── conversation ──")]
     assert "What this can't prove (${limits.length})" in body
     assert 'if (points.length) more.append(el("ul", "item-points"' in body     # points moved behind "More"
     assert '"How a sealed machine keeps this private"' in body
     assert 'head.append(el("ul", "item-points"' not in body                     # no longer shown by default
+    # Henry, 19 Sep: "maybe it can be made to look more impressive and good looking". The verdict is a seal
+    # (badge, one word, the headline without repeating it, when it was checked) and the protections one chain;
+    # "More" moved onto the title line, so the redesign made the panel shorter, not taller.
+    assert 'el("span", "seal"' in body and 'el("div", "chain")' in body
+    assert "line.startsWith(word)" in body
+    css = (STATIC / "app.css").read_text()
+    assert ".chain::before" in css and ".more-toggle { grid-column: 3; grid-row: 1;" in css
 
 
 def test_parallel_malformed_requests_fold_into_one_line_whatever_order_they_fail_in():

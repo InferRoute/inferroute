@@ -90,22 +90,41 @@
   // view; each protection's points and detail sit behind its own "More", and the explanation and the limits
   // behind labelled toggles. The limits toggle says HOW MANY there are, so folding them does not hide that
   // they exist — it is one click, and the exported record carries them in full.
+  const VERDICT_WORD = { private: "Private", limited: "Partly protected", blocked: "Not opened" };
+  const VERDICT_SEAL = { private: "✓", limited: "!", blocked: "✗" };
+  const DOT = { ok: "✓", warn: "!", fail: "✗", off: "", info: "" };   // inside a filled dot, a plain mark reads best
   function renderTrust(t) {
     const body = $("trust-body");
     clear(body);
     const pill = $("verdict");
     pill.className = `pill pill-${t.verdict}`;
     pill.textContent = VERDICT_PILL[t.verdict] || t.verdict;
-    body.append(el("div", `verdict ${t.verdict}`, t.headline));
+    // The verdict as a seal: one word, then the headline without repeating that word, then when it was proved.
+    const word = VERDICT_WORD[t.verdict] || "";
+    let line = String(t.headline || "");
+    if (word && line.startsWith(word)) line = line.slice(word.length).replace(/^[:.]\s*/, "");
+    if (line) line = line[0].toUpperCase() + line.slice(1);
+    const at = t.checked_at ? new Date(t.checked_at) : null;
+    const when = !at ? "" : at.toDateString() === new Date().toDateString()
+      ? `today at ${at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`
+      : at.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false });
+    body.append(el("div", `verdict ${t.verdict}`,
+      el("span", "seal", el("span", "seal-mark", VERDICT_SEAL[t.verdict] || "·")),
+      el("div", "verdict-text",
+        el("div", "verdict-word", word || t.verdict),
+        line ? el("div", "verdict-line", line) : null,
+        when ? el("div", "checked", `${t.verdict === "private" ? "Hardware checked" : "Checked"} ${when}`) : null)));
     if (t.explainer) body.append(el("details", "fold", el("summary", "", "How a sealed machine keeps this private"), el("p", "explainer", t.explainer)));
     body.append(el("h2", "", "What protects this matter"));
+    const chain = el("div", "chain");
     for (const it of t.items || []) {
       const head = el("div", "item-head",
-        el("span", `sym ${it.state}`, SYM[it.state] || "·"),
+        el("span", `sym ${it.state}`, DOT[it.state] ?? "", el("span", "sr", SYM[it.state] ? ` (${it.state})` : "")),
         el("span", "item-title", it.title),
         el("span", "item-summary", it.summary));
       const points = it.points && it.points.length ? it.points : [];
       const hasMore = points.length || (it.more && it.more.length) || (it.technical && it.technical.length);
+      const item = el("div", `item ${it.state}`, head);
       if (hasMore) {
         const more = el("div", "more");
         more.hidden = true;
@@ -117,26 +136,31 @@
             table.append(el("tr", "", el("td", `sym ${r.ok ? "ok" : "fail"}`, r.ok ? "✓" : "✗"),
               el("td", "", el("div", "", r.label), el("div", "v", r.value))));
           }
-          more.append(el("p", "", `Technical detail (${it.technical.length})`), table);
+          more.append(el("p", "tech-title", `Technical detail (${it.technical.length})`), table);
         }
+        // The whole row opens its detail; the chevron is the visible, focusable handle.
         const toggle = el("button", "more-toggle", "More");
         toggle.type = "button";
         toggle.setAttribute("aria-expanded", "false");
-        toggle.addEventListener("click", () => {
+        const flip = () => {
           more.hidden = !more.hidden;
           toggle.textContent = more.hidden ? "More" : "Less";
           toggle.setAttribute("aria-expanded", String(!more.hidden));
-        });
+          item.classList.toggle("open", !more.hidden);
+        };
+        toggle.addEventListener("click", (e) => { e.stopPropagation(); flip(); });
+        head.addEventListener("click", (e) => { if (!e.target.closest("a, button")) flip(); });
+        item.classList.add("expandable");
         head.append(toggle, more);
       }
-      body.append(el("div", "item", head));
+      chain.append(item);
     }
+    body.append(chain);
     const limits = t.limits || [];
     if (limits.length) {
       body.append(el("details", "fold", el("summary", "", `What this can't prove (${limits.length})`),
         el("ul", "limits", ...limits.map((l) => el("li", "", l)))));
     }
-    body.append(el("div", "checked", `Checked ${new Date(t.checked_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`));
   }
 
 

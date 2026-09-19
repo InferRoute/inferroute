@@ -282,6 +282,7 @@ class Bridge:
         self._watchdog: Any = None
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
+        self.opening = ""                   # a reading session's first instruction; empty for a matter session
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
@@ -387,6 +388,17 @@ class Bridge:
         except OSError:
             pass
 
+    async def open_with(self) -> None:
+        """Send the opening instruction, once, when the agent is ready for one."""
+        text, self.opening = self.opening, ""
+        if not text:
+            return
+        self.publish({"kind": "user", "text": text})
+        try:
+            await self.send({"type": "prompt", "message": text})
+        except RuntimeError:
+            pass
+
     async def send(self, obj: Dict[str, Any]) -> None:
         if self.proc is None or self.proc.stdin is None or self.proc.stdin.is_closing():
             raise RuntimeError("the session has ended")
@@ -398,6 +410,7 @@ class Bridge:
         self.proc = proc
         self.last_agent = time.monotonic()
         self._watchdog = asyncio.ensure_future(self._watch())
+        await self.open_with()                 # a reading session starts itself; a matter session does not
         buf = b""
         try:
             while True:
@@ -747,6 +760,10 @@ class Bridge:
         return app
 
 
+OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it, and propose each invention you find "
+                       "with propose_matter. Then write your short answer for the professional.")
+
+
 class Page:
     """The running page: its bridge and web server. `linger` keeps it up after the agent exits, so the
     record can still be exported from the page, until the person closes it or the time runs out."""
@@ -787,23 +804,32 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     import socket
     import uvicorn
     from . import pi_attested, probant_export, probant_trust
-    from .probant import _split_matter
+    from .probant import ProbantError, _split_matter, records_dir
     matter = probant.get("matter", "")
-    client, name = _split_matter(matter)
+    mode = probant.get("mode", "matter")
+    # A reading session has no matter: its label names the document. Nothing that belongs to a matter —
+    # records, marks, an export — exists for it, so those are absent rather than pointed at a made-up name.
+    client, name = ("", "")
+    if mode != "intake":
+        client, name = _split_matter(matter)
 
     def rebuild() -> Dict[str, Any]:
         found = pi_attested.search_verification(search_endpoint)
         return probant_trust.build(session.receipt, found, pi_attested.confinement_label(), matter=matter,
-                                    date_bound=probant.get("date_bound", ""), surface="browser")
+                                    date_bound=probant.get("date_bound", ""), surface="browser", mode=mode)
 
-    from .probant import records_dir
+    def no_export() -> Path:
+        raise ProbantError("this session is reading a document, not working a matter: open a matter from what "
+                            "it proposes, and export that matter's record.")
+
     kept = (records_dir(client, name) / f"{pi_attested.LAST_SESSION_ID}.conversation.jsonl"
-            if search_endpoint and pi_attested.LAST_SESSION_ID else None)
+            if client and search_endpoint and pi_attested.LAST_SESSION_ID else None)
     bridge = Bridge(matter=matter, date_bound=probant.get("date_bound", ""), workspace=workspace,
                     summary=probant.get("summary") or {}, search_endpoint=search_endpoint,
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
-                    export=lambda: probant_export.write_bundle(client, name, None), conversation_file=kept,
-                    records_dir=records_dir(client, name))
+                    export=(no_export if mode == "intake" else lambda: probant_export.write_bundle(client, name, None)),
+                    conversation_file=kept,
+                    records_dir=records_dir(client, name) if client else None)
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:
@@ -816,6 +842,10 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
         if task.done():
             task.result()
         await asyncio.sleep(0.05)
+    # A reading session opens itself: the professional handed over a document, not a conversation, and an
+    # agent sitting at an empty prompt waiting to be told to read it is a page that looks broken.
+    if mode == "intake":
+        bridge.opening = OPENING_INSTRUCTION
     url = open_url(bridge)
     opened = launch_browser(url)
     console.print(f"\n[bold]Open this session in your browser:[/]  {url}")

@@ -69,7 +69,9 @@ def test_no_route_beyond_what_the_page_needs(home):
                      "/api/disclosure", "/api/sessions", "/api/launch", "/api/session", "/api/export",
                      "/api/check", "/record",
                      # deleting a matter (19 Sep): restorable for 30 days, then erased
-                     "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase"}
+                     "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase",
+                     # reading a document and proposing matters from it (20 Sep)
+                     "/api/intake", "/api/intakes", "/api/intake/create"}
 
 
 # ── matters ──

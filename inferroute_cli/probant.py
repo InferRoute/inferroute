@@ -306,7 +306,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     return confidential_mod.launch([], agent="pi", probant=probant)
 
 
-def cmd_intake(path: str) -> int:
+def cmd_intake(path: str, web: bool = False) -> int:
     """Read a long document in a sealed session and collect the matters it proposes.
 
     No matter is open, so nothing here has a date bound, a state file or a search tool: the session reads the
@@ -314,14 +314,19 @@ def cmd_intake(path: str) -> int:
     proposed, with `ir probant from-proposal`.
     """
     from . import probant_intake as I
+    # Either a document to stage, or one already staged (the home page stages what it was given, then
+    # starts this): both name the same run, so the page and the terminal cannot drift apart.
     src = Path(path).expanduser()
-    try:
-        text = src.read_text(encoding="utf-8", errors="replace")
-    except OSError as e:
-        raise ProbantError(f"could not read {src}: {e.strerror or e}")
-    meta = I.stage(text, src.name)
+    if src.is_dir() and (src / "meta.json").is_file():
+        meta = json.loads((src / "meta.json").read_text())
+    else:
+        try:
+            text = src.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            raise ProbantError(f"could not read {src}: {e.strerror or e}")
+        meta = I.stage(text, src.name)
     d = I.path_of(meta["id"])
-    print(f"staged {src.name} — {meta['chars']:,} characters, {meta['lines']:,} lines")
+    print(f"reading {meta['source_name']} — {meta['chars']:,} characters, {meta['lines']:,} lines")
     print(f"  {d}")
     os.environ["IR_INTAKE_DIR"] = str(d)
     os.environ["IR_ATTESTED_CONFINE"] = "require"
@@ -329,7 +334,10 @@ def cmd_intake(path: str) -> int:
         os.environ.pop(name, None)
     os.chdir(d)
     from . import confidential as confidential_mod
-    rc = confidential_mod.launch([], agent="pi", probant={"matter": f"document · {meta['source_name']}", "mode": "intake"})
+    probant = {"matter": f"document · {meta['source_name']}", "mode": "intake", "intake": meta["id"]}
+    if web:
+        probant["web"] = True
+    rc = confidential_mod.launch([], agent="pi", probant=probant)
     print()
     return cmd_proposals(meta["id"]) if rc == 0 else rc
 
@@ -446,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list")
     ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
     ik.add_argument("document")
+    ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
     pr.add_argument("id")
     fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
@@ -475,7 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "list":
             return cmd_list()
         if a.cmd == "intake":
-            return cmd_intake(a.document)
+            return cmd_intake(a.document, web=a.web)
         if a.cmd == "proposals":
             return cmd_proposals(a.id)
         if a.cmd == "from-proposal":

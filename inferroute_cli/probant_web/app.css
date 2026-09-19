@@ -454,3 +454,11 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 
 /* what the professional controls: a line under the chain, not a fourth check with a hollow dot */
 .control-note { margin: 12px 0 0; padding-left: 22px; font-size: 13px; color: var(--muted); }
+
+/* a proposed matter, read out of a document */
+.proposal .card-head .title { font-weight: 650; }
+.proposal .card-body { padding: 10px 14px; }
+.proposal .card-body p { margin: 0 0 8px; }
+.proposal .quote { margin: 0 0 8px; padding: 6px 0 6px 12px; border-left: 3px solid var(--line); color: var(--muted);
+  font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposal .card-actions { padding: 10px 14px; border-top: 1px solid var(--line); }

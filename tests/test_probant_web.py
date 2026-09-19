@@ -516,3 +516,18 @@ def test_every_class_the_page_uses_has_a_style():
     allowed = {"card-body", "lock", "deeper"}
     missing = sorted(used - styled - allowed)
     assert not missing, f"classes the page uses with no rule in app.css: {missing}"
+
+
+def test_ideas_wait_for_a_conversation_and_never_presume_one():
+    """Henry, 19 Sep, on a fresh session: "I'm seeing both the beginning-of-chat recommendation buttons and
+    the IDEAS ones, but since the conversation is empty the IDEAS one shouldn't show, as they tend to be
+    based on the conversation." The welcome's suggestions ARE the options until the first message."""
+    js = (STATIC / "app.js").read_text()
+    assert 'if (!fromMarks && !started) { bar.hidden = true; return; }' in js
+    # Steps from the professional's marks are about the MATTER, carried across sessions: they show at once.
+    assert "const started = $(\"empty\").hidden;" in js
+    # When the welcome goes, the bar takes over its job — or the box is left empty.
+    hide = js[js.index("function hideWelcome"):js.index("function hideWelcome") + 300]
+    assert "renderMarkSteps()" in hide
+    # Nothing to summarise before a search has happened.
+    assert "IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0)" in js

@@ -109,7 +109,16 @@ def search_is_inferroutes(search: Optional[dict]) -> bool:
     return authentic and matched
 
 
-def search_item(search: Optional[dict], date_bound: str = "") -> Dict[str, Any]:
+def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matter") -> Dict[str, Any]:
+    if search is None and mode == "intake":
+        # Reading a document is not searching, and saying "not set up" here would be false as well as
+        # alarming: no search tool is offered in this mode, so none can be used.
+        return {"key": "search", "state": INFO, "title": "Patent search",
+                "summary": "Not used while reading a document.",
+                "points": ["The assistant has no search tool in this mode, so nothing about the document can "
+                           "leave for a search machine."],
+                "more": ["Open a matter from what it proposes, and the search machine is checked then."],
+                "technical": []}
     if search is None:
         return {"key": "search", "state": OFF, "title": "Patent search",
                 "summary": "Not set up on this computer, so the assistant can't search.",
@@ -178,14 +187,12 @@ def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]
             "technical": technical}
 
 
-def control_item(matter: str) -> Dict[str, Any]:
-    return {"key": "control", "state": INFO, "title": "You decide",
-            "summary": "No search leaves without your OK. Marks and the record are yours.",
-            "points": [],
-            "more": ["The first search to each search machine waits for your approval, and shows you the text.",
-                     "Relevance marks are yours alone: the assistant can't make or change them.",
-                     "When you're done, export a record anyone can check without trusting InferRoute."],
-            "technical": []}
+# What the professional controls. NOT a fourth item in the chain (Henry, 20 Sep: "do we really need this? it
+# doesn't look very positive"): among three verified checks it drew a hollow dot, which reads as something
+# that did not pass, and "no search leaves without your OK" reads as a restriction rather than as control.
+# One positive line under the chain instead — the facts are unchanged, and each is visible where it acts:
+# the approval dialog, the marks panel, the exported record.
+CONTROL_NOTE = "You approve the first search, your marks are yours alone, and the record is yours to export."
 
 
 EXPLAINER = ("A sealed machine encrypts its own memory with a key held by its chip, so even the people who run it "
@@ -209,9 +216,10 @@ def limits(search_state: str, search_is_ours: bool = False, surface: str = "term
 
 
 def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str = "", date_bound: str = "",
-          surface: str = "terminal") -> Dict[str, Any]:
-    """`surface`: "terminal" or "browser" — the browser page adds what it guarantees and what it can't."""
-    items = [ai_item(receipt), search_item(search, date_bound), computer_item(confinement, surface), control_item(matter)]
+          surface: str = "terminal", mode: str = "matter") -> Dict[str, Any]:
+    """`surface`: "terminal" or "browser" — the browser page adds what it guarantees and what it can't.
+    `mode`: "matter" or "intake" (reading a document to propose matters; no search tool is offered)."""
+    items = [ai_item(receipt), search_item(search, date_bound, mode), computer_item(confinement, surface)]
     states = {i["key"]: i["state"] for i in items}
     if states["ai"] == FAIL:
         verdict, headline = "blocked", "Not opened: the AI machine could not be verified, so nothing was sent."
@@ -221,8 +229,8 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
         verdict, headline = "private", ("Private: your client's invention can be read only on this computer and "
                                         "inside two sealed machines, both checked just now.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
-            "items": items,
-            "limits": limits(states["search"], search_is_inferroutes(search), surface), "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}
+            "items": items, "control_note": CONTROL_NOTE,
+            "limits": limits(states["search"], search_is_inferroutes(search), surface), "mode": mode, "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}
 
 
 # ───────────────────────── terminal ─────────────────────────
@@ -253,7 +261,8 @@ def render_card(summary: Dict[str, Any], console: Any = None) -> None:
     for line in summary["limits"]:
         lim.add_row(Text("○", style="grey58"), Text(line))
     title = "🔒 " + (summary.get("matter") or "Probant session").replace("/", " / ")
-    body = Group(Text(summary["headline"], style=f"bold {colour}"), Text(summary["explainer"], style="grey58"), Text(""), t, Text(""),
+    body = Group(Text(summary["headline"], style=f"bold {colour}"), Text(summary["explainer"], style="grey58"), Text(""), t,
+                 Text("  " + summary.get("control_note", ""), style="grey58"), Text(""),
                  Text("What this can't prove", style="bold"), lim, Text(""),
                  Text(f"Full technical proof: ir probant proof {summary.get('matter') or ''}".rstrip(), style="grey58"))
     width = min(console.width, 88)

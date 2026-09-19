@@ -1310,6 +1310,42 @@
     catch (e) { toast(`Couldn't check: ${e.message}`, "error"); }
     finally { b.disabled = false; b.textContent = "Check the machines again"; }
   });
+  // A second opinion that is not ours: the professional's own AI audits an evidence-only copy — the machines,
+  // the signatures and the identity, with none of the invention's words. Their Claude subscription, or the
+  // generic `ir` agent when they have none.
+  function copyButton(text, label) {
+    const b = el("button", "small", label || "Copy");
+    b.type = "button";
+    b.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Copied.", "info")).catch(() => {}));
+    return b;
+  }
+  function auditOffer() {
+    const box = el("div", "audit-offer");
+    const go = el("button", "ghost", "Have your own AI audit it");
+    go.type = "button";
+    box.append(el("div", "audit-title", "A second opinion that isn't ours"),
+      el("p", "sub", "Makes an evidence-only copy: the hardware reports, signatures and identity, with none of your "
+        + "client's words (no queries, results or document text). Your own AI checks it against a brief."), go);
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      go.textContent = "Making the audit pack…";
+      try {
+        const r = await api("/api/audit-pack", {});
+        clear(box);
+        box.append(el("div", "audit-title", "Audit pack ready"),
+          el("span", "mono", r.path),
+          el("p", "", el("b", "", "With your Claude subscription"), ", in that folder run:"),
+          el("span", "mono", r.claude), copyButton(`cd "${r.path}" && ${r.claude}`, "Copy (goes to the folder too)"),
+          el("p", "", el("b", "", "No Claude subscription?"), " Use your InferRoute account instead:"),
+          el("span", "mono", r.ir), copyButton(`cd "${r.path}" && ${r.ir}`, "Copy (goes to the folder too)"),
+          el("p", "sub", "The brief (AUDIT.md) asks for a verdict on each claim and has it redo the key checks with "
+            + "its own tools, not only run ours. Two checks need your client's words, so it will report them as "
+            + "not checked; this computer's check above covered them."));
+      } catch (e) { go.disabled = false; go.textContent = "Have your own AI audit it"; toast(e.message, "error"); }
+    });
+    return box;
+  }
+
   // Proof, not only our word: the record is exported and checked by its own verifier — the same file anyone
   // else would run — and the answer shows here, in the five questions a professional has.
   $("export").addEventListener("click", async () => {
@@ -1330,7 +1366,7 @@
       clear(out);
       out.append(verdict,
         el("div", "export-where", el("b", "", "The record"), " holds the disclosure in plain text: store it like the client file. Open record.html in:"),
-        el("span", "mono", r.path), copy);
+        el("span", "mono", r.path), copy, auditOffer());
     } catch (e) { clear(out); out.hidden = true; toast(e.message, "error"); }
     finally { b.disabled = false; b.textContent = "Export and check the record"; }
   });

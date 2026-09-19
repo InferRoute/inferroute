@@ -233,8 +233,18 @@ def failure_message(tail: List[str]) -> str:
         return "Couldn't reach InferRoute to open the session. Check the connection (or `ir login`) and try again."
     if "workspace is missing" in low:
         return "This matter's folder is missing, so the session was not opened."
-    reasons = [ln for ln in tail if re.search(r"refus|error|could not|cannot|missing|invalid", ln, re.I)]
-    return "The session did not start. " + (reasons[-1] if reasons else "See the terminal where Probant home runs.")
+    if "not found on path" in low and "pi" in low:
+        # Seen 19 Sep: a home page started as a service (or from a desktop shortcut) gets a minimal PATH that
+        # does not reach where the assistant program is installed, and every start fails in a second.
+        return ("The assistant program (Pi) could not be found from where Probant home is running. Start Probant "
+                "home from a terminal where `pi --version` works. Nothing was sent.")
+    reasons = [ln for ln in tail if re.search(r"refus|error|could not|cannot|missing|invalid|not found", ln, re.I)]
+    if reasons:
+        return reasons[-1]
+    # No recognisable reason: show what it DID say. "See the terminal where Probant home runs" pointed at a
+    # terminal that often does not exist (a service, a shortcut) — a message that sends you nowhere.
+    last = [ln for ln in tail if not ln.lower().startswith(("opening ", "traceback"))][-2:]
+    return ("It stopped with: " + " / ".join(last)) if last else "It stopped before printing anything. Nothing was sent."
 
 
 # ───────────────────────── the app ─────────────────────────

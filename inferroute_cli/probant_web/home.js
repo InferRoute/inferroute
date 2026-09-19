@@ -157,6 +157,12 @@
       } else if (l.state === "failed") {
         box.className = "launch failed";
         box.append(el("div", "", el("b", "", "The session didn't start. "), l.message));
+        // It stays until you act on it. It used to refresh the page the moment it failed, and the refreshed
+        // page only knows about sessions that are starting or running — so the reason flashed for a second
+        // and vanished, leaving "nothing happened" as the only feedback.
+        box.append(el("div", "row actions",
+          button("Try again", "primary", () => { clear(box); box.remove(); startSession(matterId, onChange); }),
+          button("Dismiss", "ghost", () => { box.remove(); onChange(); })));
       } else {
         box.className = "launch";
         box.append(el("div", "", l.message || "The session has ended."));
@@ -168,7 +174,11 @@
         try {
           const l = await api(`/api/launch?id=${enc(launch.id)}`);
           paint(l);
-          if (l.state !== "starting") { clearInterval(timer); watching.delete(launch.id); onChange(); }
+          if (l.state !== "starting") {
+            clearInterval(timer);
+            watching.delete(launch.id);
+            if (l.state !== "failed") onChange();            // a failure stays on screen: see above
+          }
         } catch (_) { /* keep trying */ }
       }, 1500);
       watching.set(launch.id, timer);

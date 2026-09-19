@@ -259,3 +259,29 @@ def test_the_help_page_covers_the_whole_path_and_the_limits():
         assert heading in js, heading
     html = (STATIC / "home.html").read_text()
     assert "http://" not in html and "https://" not in html and re.search(r"\son[a-z]+=", html) is None
+
+
+# ── a start that fails says why, and the reason stays on screen ──
+#
+# 19 Sep: Henry clicked "Start a session" and saw "Starting a session…" for two seconds, then nothing. The
+# child had printed "`pi` not found on PATH" (the home page ran as a service with a minimal PATH); the home
+# page turned that into "The session did not start. See the terminal where Probant home runs" — a terminal
+# that did not exist — and then refreshed the page, which dropped even that.
+
+def test_the_agent_program_missing_from_path_is_named_plainly():
+    msg = H.failure_message([" ❌ `pi` not found on PATH.", "    Pi is an open-source agent: `npm install -g …`",
+                              "opening Demo/glucose — date bound 2020-01-01"])
+    assert "could not be found" in msg and "pi --version" in msg and "Nothing was sent" in msg
+
+
+def test_an_unrecognised_failure_shows_what_it_said_instead_of_pointing_at_a_terminal():
+    msg = H.failure_message(["opening Demo/glucose — date bound 2020-01-01", "something unexpected happened here"])
+    assert "something unexpected happened here" in msg
+    assert "See the terminal" not in msg                 # often there is no terminal: a service, a shortcut
+    assert H.failure_message([]) == "It stopped before printing anything. Nothing was sent."
+
+
+def test_a_failed_start_is_not_refreshed_off_the_screen():
+    js = (STATIC / "home.js").read_text()
+    assert 'if (l.state !== "failed") onChange();' in js
+    assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost"' in js

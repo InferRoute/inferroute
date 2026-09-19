@@ -431,3 +431,35 @@ def test_the_evidence_endpoint_comes_from_the_carrier_not_from_this_client(world
     assert prof is not None
     assert prof.evidence_url("F", "N") == "https://op.test/F/evidence?nonce=N"
     assert prof.measurements_url() == "https://op.test/measurements"
+
+
+def test_a_pinned_instance_dropped_at_reverification_is_replaced_by_a_verified_one(world):
+    """19 Sep, Henry's session receipt: two clean switches when instances vanished, then at the 30-minute
+    re-check — "5/11 instances verified", "pinned-failed-reverify 044e7683" — the pin was dropped and never
+    replaced. Every later message failed "503 no pinned instance", four automatic retries each, with five
+    verified instances available. The vanish path re-pinned; the re-check path never reached that code."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
+    pinned_first = s.receipt.instance["id"]
+    other = next(i for i in world["enclaves"] if i != pinned_first)
+    world["verified"][pinned_first] = False                       # the pinned one fails the next re-check…
+    s._verified_at = 0                                            # …which is due now
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "2"}]}))
+    assert st == 200, body
+    assert s.receipt.instance["id"] == other and carrier.calls[-1][0] == other
+    kinds = [e["kind"] for e in s.receipt.events]
+    assert "pinned-failed-reverify" in kinds and kinds[-1] == "pinned"             # dropped, then re-pinned
+    assert "switched" in s.receipt.events[-1]["detail"]
+
+
+def test_when_the_recheck_leaves_no_verified_instance_the_session_says_so_plainly(world):
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    for i in world["verified"]:
+        world["verified"][i] = False
+    s._verified_at = 0
+    st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
+    assert st == 503 and b"refusing to continue unverified" in body               # not the opaque "no pinned instance"

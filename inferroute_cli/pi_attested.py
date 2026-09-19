@@ -41,6 +41,7 @@ LOOPBACK = ("127.0.0.1", "localhost", "::1")
 # changed only deliberately. A drifted on-disk sha is not silently run — the panel and session record
 # say "contract modified" and the launch carries the flag.
 PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
+INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
 PINNED_CONTRACT_SHA = "f667172d09f03febbd4276448d128ea97835d8745310c62904f004ae9893aa42"
@@ -60,6 +61,14 @@ def load_contract() -> dict:
     c_sha = hashlib.sha256(contract.encode()).hexdigest()
     return {"text": preamble + "\n" + contract, "preamble_sha": p_sha, "contract_sha": c_sha,
             "modified": p_sha != PINNED_PREAMBLE_SHA or c_sha != PINNED_CONTRACT_SHA}
+
+
+def load_intake_prompt() -> dict:
+    """The whole system prompt for document intake, in the shape load_contract() returns so the session
+    record pins WHICH prompt ran (its sha), not merely that one did."""
+    text = _strip_comments(INTAKE_FILE.read_text())
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    return {"text": text, "preamble_sha": "", "contract_sha": sha, "modified": False}
 
 
 def config_hash(alias, tools: tuple) -> str:
@@ -224,7 +233,17 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
-    tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
+    # Reading a document to propose matters is its own mode: the file tools and ONE tool that records a
+    # proposal, and no search tool at all — a whole document is in context, and nothing may leave for a
+    # search machine while it is. The proposals file sits in the session's working directory, the one place
+    # the sandbox lets it write.
+    intake = str(env.get("IR_INTAKE_DIR") or "")
+    if intake:
+        tools = TOOLS + (PROPOSE_TOOL,)
+        env["IR_INTAKE_OUT"] = str(Path(intake) / "proposals.jsonl")
+    else:
+        tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
+        env.pop("IR_INTAKE_OUT", None)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
     env["PI_SKIP_VERSION_CHECK"] = "1"
@@ -240,7 +259,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         env[name] = _with_loopback(env.get("no_proxy") if env.get("no_proxy") is not None else env.get("NO_PROXY"))
     # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
     # config dir; its stamps go to the extension for the panel and the session record.
-    contract = load_contract()
+    contract = load_intake_prompt() if intake else load_contract()
     # The documents this matter's searching has returned in EARLIER sessions, so "find documents like X" works for
     # them too. It searched only this session's results, while the marks note and the page offered "like" for
     # marks made in earlier sessions — ten refused requests in a row on 19 Sep. Written after config_dir's scrub,
@@ -295,6 +314,7 @@ LAST_SESSION_ID: str | None = None
 # launch allowlist, or the extension refuses the call.
 MARKS_TOOL = "matter_marks"
 NEXT_TOOL = "suggest_next_steps"
+PROPOSE_TOOL = "propose_matter"          # intake only: reading a document and proposing matters from it
 _SEARCH_PROXIES: list = []
 
 

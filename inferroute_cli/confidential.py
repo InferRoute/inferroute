@@ -245,13 +245,16 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"
                 # Started before anything is shown, so the Probant card reports a search check that RAN for
                 # this launch, not one promised for later.
-                search_endpoint = pi_attested.start_search_proxy()
+                # Reading a document offers no search tool, so no search verifier is started for it: nothing
+                # about a whole document in context can leave for a search machine.
+                search_endpoint = None if os.environ.get("IR_INTAKE_DIR") else pi_attested.start_search_proxy()
             if probant is not None and receipt.is_confidential:
                 from . import pi_attested, probant_trust
                 search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)
                 summary = probant_trust.build(receipt, search_result, pi_attested.confinement_label(),
                                                matter=probant.get("matter", ""), date_bound=probant.get("date_bound", ""),
-                                               surface="browser" if web else "terminal")
+                                               surface="browser" if web else "terminal",
+                                               mode=probant.get("mode", "matter"))
                 probant["summary"] = summary
                 probant_trust.render_card(summary, console)
                 if not web:
@@ -275,6 +278,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
             env["IR_CONFIDENTIAL"] = "1"
+            agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
             if probant is not None:
                 env["IR_PROBANT_SURFACE"] = "browser" if web else "terminal"
             local = f"http://127.0.0.1:{port}"

@@ -251,11 +251,13 @@ def failure_message(tail: List[str]) -> str:
         return "Couldn't reach InferRoute to open the session. Check the connection (or `ir login`) and try again."
     if "workspace is missing" in low:
         return "This matter's folder is missing, so the session was not opened."
-    if "not found on path" in low and "pi" in low:
-        # Seen 19 Sep: a home page started as a service (or from a desktop shortcut) gets a minimal PATH that
-        # does not reach where the assistant program is installed, and every start fails in a second.
-        return ("The assistant program (Pi) could not be found from where Probant home is running. Start Probant "
-                "home from a terminal where `pi --version` works. Nothing was sent.")
+    if ("not found on path" in low or "is not installed on this computer" in low) and "pi" in low:
+        # A page started as a service or from a desktop shortcut has a PATH a terminal does not, and every
+        # start failed in a second (19-20 Sep). The launcher now looks where these programs install, so
+        # reaching this means it really is absent — and the answer is an install, never "use a terminal".
+        return ("The assistant program (Pi) is not installed on this computer, so no session can start. "
+                "Install it with: npm install -g @earendil-works/pi-coding-agent — then try again. "
+                "Nothing was sent.")
     reasons = [ln for ln in tail if re.search(r"refus|error|could not|cannot|missing|invalid|not found", ln, re.I)]
     if reasons:
         return reasons[-1]

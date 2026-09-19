@@ -746,3 +746,23 @@ def test_one_next_steps_panel_counts_and_covers_by_action():
     # 6-7. No marks, no list: ideas once the conversation has started, nothing before it.
     assert R["s6"][0]["title"] == "Ideas" and "Summarise what the searches have surfaced so far" not in R["s6"][0]["steps"]
     assert R["s7"] is None
+
+
+def test_the_unrecognised_events_line_names_only_what_is_new(tmp_path):
+    """The closing line lists event types the page has no word for, to catch something NEW. It counted every
+    event the page chose to ignore — the professional's own messages, turn boundaries, now the marks note — so
+    it would have listed routine noise in every session and buried the one line worth reading."""
+    b = _bridge(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()
+        for ev in ({"type": "message_start", "message": {"role": "user"}}, {"type": "message_end", "message": {"role": "custom"}},
+                   {"type": "turn_start"}, {"type": "turn_end"}, {"type": "agent_end"}, {"type": "some_future_event"}):
+            reader.feed_data((json.dumps(ev) + "\n").encode())
+        reader.feed_eof()
+
+        async def wait():
+            return 0
+        await b.pump(SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=0))
+        return b.ended
+    assert asyncio.run(run())["unrecognised"] == {"some_future_event": 1}

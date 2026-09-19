@@ -57,6 +57,8 @@
   };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const enc = (s) => encodeURIComponent(s);
+  document.getElementById("brand").addEventListener("click", () => { location.hash = "#/"; });
+
   function button(label, cls, onClick) {
     const b = el("button", cls || "", label);
     b.type = "button";

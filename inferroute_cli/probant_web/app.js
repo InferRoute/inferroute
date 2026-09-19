@@ -57,7 +57,7 @@
   // `route`: open the home page straight at a page of it (its own address, with its own key).
   function goHome(route) {
     const url = route ? `${homeUrl}&r=${encodeURIComponent(route)}` : homeUrl;
-    if (!HOME_LINK.test(url)) { toast("This session was started from a terminal, so there is no home page to return to.", "info"); return; }
+    if (!HOME_LINK.test(url)) { toast("This session was started from a terminal, so it has no home page to go back to. To see all your matters, run: ir probant home", "info"); return; }
     window.open(url, "_blank", "noopener,noreferrer");
   }
   // Every way out of a finished session, in one place, so a session is never a dead end: back to the
@@ -910,6 +910,7 @@
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send($("input").value); }
   });
   $("input").addEventListener("input", autosize);
+  $("brand").addEventListener("click", () => goHome(""));
   $("stop").addEventListener("click", async () => {
     const b = $("stop");
     b.disabled = true;

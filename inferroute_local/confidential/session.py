@@ -168,9 +168,12 @@ class ConfidentialSession:
         async with self._lock:
             if time.time() > self._verified_at + REVERIFY_EVERY_S:
                 await self._reverify()
-            if self.pinned is None:
-                raise Refused("no pinned instance")
-            if time.time() >= self._pool_expire or not self.pinned.nonces:
+            # A re-check that drops the pinned instance leaves no pin. Re-pin to another instance THAT RE-CHECK
+            # verified — the same rule, in the same code, as when an instance vanishes between re-checks — or
+            # refuse, saying why. This used to raise "no pinned instance" and stop there: on 19 Sep a session
+            # re-checked, found 5 of 11 instances verified but not its own, and failed every later message with
+            # five verified instances available.
+            if self.pinned is None or time.time() >= self._pool_expire or not self.pinned.nonces:
                 await self._refresh_pool()
             p = self.pinned
             if p is None or not p.nonces:
@@ -191,7 +194,8 @@ class ConfidentialSession:
             self.receipt.note("no-eligible-instance", "pinned instance gone and no verified alternative has nonces")
             self.receipt.save()
             raise Refused("the verified instance is gone and no verified alternative is available — refusing to continue unverified")
-        self._pin(alt, f"pinned instance {str(current)[:8]} unavailable; switched")
+        self._pin(alt, f"pinned instance {current[:8]} unavailable; switched" if current
+                  else "the pinned instance failed re-verification; switched to one the re-check verified")
         self.receipt.counters["instance_switches"] = self.receipt.counters.get("instance_switches", 0) + 1
         self.receipt.save()
 

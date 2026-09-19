@@ -861,3 +861,15 @@ def test_the_suggestions_tool_closes_the_turn_instead_of_inviting_a_remark():
     ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
     assert "end your turn with no further text, and do not refer to the steps or the buttons" in ts
     assert 'text: steps.length ? "Shown."' not in ts
+
+
+def test_the_protection_panel_is_compact_but_hides_nothing_it_cannot_name():
+    """Henry, 19 Sep: "make the private certifications section more compact so that the beginning of your marks
+    is visible without scrolling". One line per protection; points and detail behind "More"; the explanation and
+    the limits behind labelled toggles — the limits one saying HOW MANY there are."""
+    js = (STATIC / "app.js").read_text()
+    body = js[js.index("function renderTrust"):js.index("function renderTrust") + 3000]
+    assert "What this can't prove (${limits.length})" in body
+    assert 'if (points.length) more.append(el("ul", "item-points"' in body     # points moved behind "More"
+    assert '"How a sealed machine keeps this private"' in body
+    assert 'head.append(el("ul", "item-points"' not in body                     # no longer shown by default

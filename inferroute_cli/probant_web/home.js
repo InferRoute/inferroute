@@ -233,7 +233,10 @@
         ev.stopPropagation();
         startSession(m.id, open);
       });
-      const card = el("div", "matter-card clickable",
+      // The button sits in its own strip under a rule (Henry, 2026-09-20: "the start session button should be
+      // separated somehow from the cell button"). Opening the matter is the CARD BODY's click, so the strip
+      // is not part of the target either by eye or by mouse.
+      const body = el("div", "matter-body",
         el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
         el("div", "sub", `date bound ${m.date_bound || "—"}`),
         el("div", "stats",
@@ -242,11 +245,12 @@
           el("span", "", plural(m.marks, "mark", "marks")),
           m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
         el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
-        start);
+        el("div", "matter-open", "Open this matter →"));
+      const card = el("div", "matter-card clickable", body, el("div", "matter-foot", start));
       card.tabIndex = 0;
       card.setAttribute("role", "link");
       card.setAttribute("aria-label", `Open ${m.client} / ${m.matter}`);
-      card.addEventListener("click", open);
+      body.addEventListener("click", open);
       card.addEventListener("keydown", (e) => {
         if (e.target === card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); }
       });

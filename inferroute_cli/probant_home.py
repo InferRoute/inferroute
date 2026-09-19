@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 
 from . import probant as S
-from .probant_web import STATIC, disclosure_info, install_guard, launch_browser, strip_ansi
+from .probant_web import ENDED_MARK, STATIC, disclosure_info, install_guard, launch_browser, strip_ansi
 
 SESSION_URL = re.compile(r"(http://127\.0\.0\.1:\d+/#k=[A-Za-z0-9_-]+)")
 SESSION_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
@@ -215,6 +215,11 @@ class Launches:
             m = SESSION_URL.search(raw)
             if m and it["state"] == "starting":
                 it["url"], it["state"] = m.group(1), "ready"
+            # The session is OVER although its process lives on for a while, keeping the page up for exporting.
+            # Counting it as running offered "Open the session" onto a closed session — and made "Start a session"
+            # on that matter return the ended one until the window closed (19 Sep).
+            if ENDED_MARK in line and it["state"] == "ready":
+                it["state"], it["message"] = "ended", "The session has ended."
         proc.wait()
         if it["state"] == "ready":
             it["state"], it["message"] = "ended", "The session has ended."

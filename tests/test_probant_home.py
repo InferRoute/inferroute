@@ -285,3 +285,43 @@ def test_a_failed_start_is_not_refreshed_off_the_screen():
     js = (STATIC / "home.js").read_text()
     assert 'if (l.state !== "failed") onChange();' in js
     assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost"' in js
+
+
+def test_a_session_that_has_ended_is_not_offered_as_open_and_does_not_block_a_new_one(tmp_path):
+    """19 Sep: the home page listed two sessions with "Open the session"; both opened onto "Session closed".
+    Their assistants had ended; only their pages stayed up, for exporting. The home page counted a session as
+    running while its process lived — and so "Start a session" on those matters returned the ENDED one."""
+    import io
+    from rich.console import Console
+    from inferroute_cli import probant_web as W
+    # What a session really prints when it ends, through the same console, as a pipe sees it (80 columns).
+    buf = io.StringIO()
+    page = W.Page(SimpleNamespace(closed=None), SimpleNamespace(should_exit=False), None)
+    console = Console(file=buf, width=80, force_terminal=True)
+    async def run():
+        import asyncio
+        page.bridge.closed = asyncio.Event()
+        page.bridge.stop_streams = lambda: None
+        page.bridge.closed.set()                              # closes at once
+        async def done():
+            return None
+        page.task = asyncio.ensure_future(done())
+        await page.linger(console, seconds=0.01)
+    import asyncio
+    asyncio.run(run())
+    printed = buf.getvalue()
+    lines = ["opening Demo/glucose — date bound 2020-01-01\n",
+             "Open this session in your browser:  http://127.0.0.1:41234/#k=" + "k" * 30 + "\n", *printed.splitlines(True)]
+    L = H.Launches()
+    it = {"id": "x", "matter": "Demo/glucose", "started": 0, "state": "starting", "url": None, "message": "",
+          "tail": __import__("collections").deque(maxlen=60),
+          "proc": SimpleNamespace(stdout=iter(lines), wait=lambda: None)}
+    L.items["x"] = it
+    # _follow reads to the end; the process "still lives" in reality — what matters is the state it reached
+    # from the output alone, before exit is ever seen.
+    real_wait = it["proc"].wait
+    states = []
+    it["proc"].wait = lambda: states.append(it["state"])
+    L._follow(it)
+    assert states == ["ended"], "the ended line must be recognised from the output, before the process exits"
+    assert L.running_for("Demo/glucose") is None           # so "Start a session" starts a new one

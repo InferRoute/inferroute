@@ -40,6 +40,9 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
 HISTORY_CAP = 5000
+# Printed by a session once its assistant has ended and only its page stays up (for exporting). The home page
+# reads it to stop offering "Open the session" for a session that is over — one line, one definition.
+ENDED_MARK = "The page stays open so you can export the record."
 # Pi event types this page knows: the ones normalize() handles (some deliberately ignored in part — the
 # professional's own messages, the marks note) and routine bookkeeping it has no use for. Only a type OUTSIDE
 # this set is reported at the end of a session as one "the page has no word for": that line exists to catch
@@ -670,7 +673,7 @@ class Page:
         import sys
         seconds = float(os.environ.get("IR_PROBANT_WEB_LINGER", "1800")) if seconds is None else seconds
         mins = max(1, int(seconds // 60))
-        console.print(f"[grey58]The page stays open so you can export the record. Press Enter here to close it "
+        console.print(f"[grey58]{ENDED_MARK} Press Enter here to close it "
                       f"(it closes by itself after {mins} minute{'s' if mins != 1 else ''}).[/]")
         loop = asyncio.get_running_loop()
 

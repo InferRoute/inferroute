@@ -676,10 +676,10 @@ export default function (pi: ExtensionAPI) {
 		// No cutoff parameter: the date bound is the matter's, held by the host verifier, not the model's to set.
 		parameters: Type.Object({
 			text: Type.Optional(Type.String({ description: "REQUIRED unless `like` is given: a self-contained technical description to search for (20 characters or more). `feature` only names the search; it is not searched." })),
-			feature: Type.Optional(Type.String({ maxLength: 80, description: "A short name for the one feature of the disclosure this search covers" })),
+			feature: Type.Optional(Type.String({ description: "A short name — a few words, under 80 characters — for the one feature of the disclosure this search covers; a longer one is shortened" })),
 			like: Type.Optional(Type.String({ description: "A publication number returned earlier in this session: search for documents like it" })),
-			depth: Type.Optional(Type.Union([Type.Literal("quick"), Type.Literal("standard"), Type.Literal("broad")], { description: "How many references: quick 10 (default), standard 25, broad 50" })),
-			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Exact number of references to return; overrides depth" })),
+			depth: Type.Optional(Type.String({ description: "How many references: quick 10 (default), standard 25, broad 50" })),
+			k: Type.Optional(Type.Integer({ description: "Exact number of references to return, 1 to 50; overrides depth" })),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -710,8 +710,15 @@ export default function (pi: ExtensionAPI) {
 			if (text.length < 20) {
 				throw new Error("prior_art_search needs a self-contained description of 20 characters or more, or `like` with a publication number returned in this session; nothing was sent");
 			}
-			const feature = String(params.feature ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-			const k = params.k ?? DEPTH_K[params.depth ?? "quick"] ?? 10;
+			// The hints, normalised rather than refused (see the schema): a long label is cut at a word, an
+			// unknown depth word means the default, and k is held to what the search machine serves (1-50).
+			let feature = String(params.feature ?? "").replace(/\s+/g, " ").trim();
+			if (feature.length > 80) {
+				const cut = feature.slice(0, 79);
+				feature = `${(cut.lastIndexOf(" ") > 40 ? cut.slice(0, cut.lastIndexOf(" ")) : cut).trimEnd()}…`;
+			}
+			const asked = params.k ?? DEPTH_K[String(params.depth ?? "quick").toLowerCase()] ?? 10;
+			const k = Math.min(50, Math.max(1, Math.round(Number(asked) || 10)));
 			let verified: SearchVerdict;
 			phase("verifying");
 			try {

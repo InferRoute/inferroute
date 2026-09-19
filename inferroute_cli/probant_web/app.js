@@ -668,9 +668,9 @@
     // The assistant's own parameter slip (no text, or `like` on a document it never got back): nothing was
     // verified or sent, and it retries. Say so quietly instead of showing a red refusal the professional
     // might read as a problem with the search machine. Any other failure keeps the red card.
-    const slip = /needs a self-contained description|was not returned by a search in this session/.test(String(ev.text || ""));
+    const slip = /needs a self-contained description|was not returned by a search in this session|Validation failed for tool/.test(String(ev.text || ""));
     if (!ev.ok && slip) {
-      card.replaceWith(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant's search request was incomplete, so nothing was sent; it corrected it.")));
+      card.replaceWith(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant's search request was malformed, so nothing was sent.")));
       cards.delete(ev.call);
       outlineDrop(entry);          // the card is gone; an index row pointing at a detached node goes nowhere
       return;

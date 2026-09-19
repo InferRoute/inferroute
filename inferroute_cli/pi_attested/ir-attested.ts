@@ -696,6 +696,7 @@ export default function (pi: ExtensionAPI) {
 				summary: Type.String(),
 				quote: Type.String(),
 				priority_date: Type.Optional(Type.String()),
+				source: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
 				const row = {
@@ -703,6 +704,9 @@ export default function (pi: ExtensionAPI) {
 					summary: String(params.summary ?? "").trim(),
 					quote: String(params.quote ?? "").trim(),
 					priority_date: String(params.priority_date ?? "").trim(),
+					// Which document the quote is from. With several in the directory the host checks each
+					// quote against THIS file, so a passage from another one cannot be attributed here.
+					source: String(params.source ?? "").trim(),
 					at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
 				};
 				if (!row.title || !row.summary || row.quote.length < 20) {
@@ -723,6 +727,60 @@ export default function (pi: ExtensionAPI) {
 				const title = (result.details as { title?: string } | undefined)?.title ?? "";
 				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
 				box.addChild(new Text(theme.bold("Proposed matter") + (title ? `  ${title}` : ""), 0, 0));
+				return box;
+			},
+		});
+	}
+
+	// ── clustering a portfolio, round after round ──
+	// One call per cluster, each naming the candidates it holds. The host checks the partition (every
+	// candidate exactly once), compares it with the previous round's, and decides whether it has converged:
+	// an agent asked "have you converged?" says yes, and a partition compared with its predecessor cannot.
+	const clusterOut = process.env.IR_CLUSTER_OUT ?? "";
+	if (clusterOut) {
+		pi.registerTool({
+			name: "propose_cluster",
+			label: "Propose a cluster",
+			description:
+				"Group the candidates you were given into themes, ONE call per cluster, until every candidate is in " +
+				"exactly one cluster. `label` names the theme in a few words; `thesis` is one sentence saying what the " +
+				"members have in common that matters technically — not a category name, the actual claim; `members` is " +
+				"the list of candidate ids (c1, c2 …) exactly as given; `why` is what made you put these together and " +
+				"leave others out. Do not invent ids, do not leave a candidate out because it fits badly — put it where " +
+				"it fits least badly and say so in `why`, or give it a cluster of its own.",
+			promptSnippet: "Group the candidates into themes (one call per cluster, all candidates covered)",
+			parameters: Type.Object({
+				label: Type.String(),
+				thesis: Type.String(),
+				members: Type.Array(Type.String(), { minItems: 1 }),
+				why: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const row = {
+					label: String(params.label ?? "").trim(),
+					thesis: String(params.thesis ?? "").trim(),
+					members: (params.members ?? []).map((m) => String(m).trim()).filter(Boolean),
+					why: String(params.why ?? "").trim(),
+					at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+				};
+				if (!row.label || !row.members.length) {
+					throw new Error("propose_cluster needs a label and at least one candidate id; nothing was recorded");
+				}
+				try {
+					mkdirSync(clusterOut.replace(/\/[^/]*$/, ""), { recursive: true });
+					writeFileSync(clusterOut, JSON.stringify(row) + "\n", { flag: "a", mode: 0o600 });
+				} catch (e) {
+					throw new Error(`the cluster could not be recorded on this computer: ${(e as Error).message}`);
+				}
+				return {
+					content: [{ type: "text", text: `Recorded "${row.label}" with ${row.members.length} candidate(s). Continue until every candidate is in exactly one cluster.` }],
+					details: { label: row.label, n: row.members.length },
+				};
+			},
+			renderResult(result, _options, theme) {
+				const d = result.details as { label?: string; n?: number } | undefined;
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.bold("Cluster") + `  ${d?.label ?? ""} (${d?.n ?? 0})`, 0, 0));
 				return box;
 			},
 		});

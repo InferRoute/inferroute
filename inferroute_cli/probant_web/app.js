@@ -304,7 +304,8 @@
   //
   // Every button shows exactly the message it sends.
   const SUMMARISE_IDEA = "Summarise what the searches have surfaced so far";
-  const IDEAS = ["Run a prior-art survey of the disclosure",
+  const SURVEY = "Run a prior-art survey of the disclosure";       // worded as the extension words it
+  const IDEAS = [SURVEY,
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
   const STEPS_MAX = 5;
@@ -352,7 +353,12 @@
       if (fresh.length) groups.push({ title: "From marks you made since", steps: fresh.slice(0, room) });
     } else {
       const fromMarks = markCandidates(false);
-      if (fromMarks.length) groups.push({ title: "From your marks", steps: fromMarks.slice(0, 4) });
+      // A new session is its own sitting (Henry, 19 Sep): what earlier marks suggest is worth offering, but
+      // until THIS session has run a search, running one comes first. Before the first message the welcome
+      // already offers it.
+      const survey = started && cards.size === 0 && fromMarks.length ? [SURVEY] : [];
+      if (survey.length) groups.push({ title: "", steps: survey });
+      if (fromMarks.length) groups.push({ title: "From your marks", steps: fromMarks.slice(0, STEPS_MAX - survey.length) });
       // Ideas wait for a conversation: before the first message the welcome's own suggestions are on screen,
       // and nothing presumes what has not happened — no summary before a search.
       else if (started) groups.push({ title: "Ideas", steps: IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0) });
@@ -377,7 +383,7 @@
   function renderNext() { renderSteps(); }
   function clearNext() { assistantSteps = []; renderSteps(); }
 
-  function markButtons(keyNo, card) {
+  function markButtons(keyNo, card, register = true) {
     const wrap = el("div", "marks");
     const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"]];
     const buttons = opts.map(([value, label]) => {
@@ -392,6 +398,7 @@
           noteMarked(keyNo);
           refreshMarks(keyNo);
           renderMarkSteps();
+          renderMarksPanel();
           for (const e of cards.values()) if (e.keys && e.keys.includes(keyNo)) refreshCardSummary(e);
           toast(`Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
           if (value === "relevant") offerDeeper(card);
@@ -400,10 +407,52 @@
       wrap.append(b);
       return [value, b];
     });
-    if (!docRows.has(keyNo)) docRows.set(keyNo, []);
-    docRows.get(keyNo).push(buttons);
+    if (register) {
+      if (!docRows.has(keyNo)) docRows.set(keyNo, []);
+      docRows.get(keyNo).push(buttons);
+    }
     return wrap;
   }
+  // ── Your marks: every mark on this matter, in one place, and editable ─────────────────────────────
+  //
+  // Henry, 19 Sep: "maybe even we should have something to see which are set as relevant, or even the ones set
+  // as not relevant, with a possibility to edit those". Marks belong to the MATTER, across sessions, but could
+  // only be seen on a search card that happened to be on screen. Each row carries the same three buttons as a
+  // card — changing a mark here updates the cards, the folded heads and the next steps, and the other way
+  // round. What a document is about comes from every search recorded on the matter (/api/marks titles).
+  // A mark can be changed, not removed: the matter keeps each mark's history, and the store takes no "none".
+  const markTitles = new Map();          // publication number → title
+  const MARK_GROUPS = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"]];
+  function renderMarksPanel() {
+    const panel = $("marks-panel");
+    const groups = $("marks-groups");
+    clear(groups);
+    const byValue = new Map(MARK_GROUPS.map(([v]) => [v, []]));
+    for (const [k, v] of marks) if (byValue.has(v)) byValue.get(v).push(k);
+    const total = Array.from(byValue.values()).reduce((t, l) => t + l.length, 0);
+    panel.hidden = total === 0;
+    if (!total) return;
+    $("marks-count").textContent = MARK_GROUPS.map(([v, label]) => `${byValue.get(v).length} ${label.toLowerCase()}`)
+      .filter((t) => !t.startsWith("0 ")).join(" · ");
+    for (const [v, label] of MARK_GROUPS) {
+      const keys = byValue.get(v).sort();
+      if (!keys.length) continue;
+      const list = el("ul", "marks-list");
+      for (const k of keys) {
+        const title = markTitles.get(k) || docTitleOnPage(k) || "";
+        const row = el("li", "mark-row", el("div", "mark-doc", el("span", "key", k), title ? el("span", "mark-title", title) : null),
+          markButtons(k, null, false));
+        list.append(row);
+      }
+      groups.append(el("div", "marks-group", el("div", "steps-sub", `${label} (${keys.length})`), list));
+    }
+  }
+  // A title from a search card on this page, for a document marked in this session.
+  function docTitleOnPage(k) {
+    for (const e of cards.values()) if (e.titles && e.titles.has(k)) return e.titles.get(k);
+    return "";
+  }
+
   function refreshMarks(keyNo) {
     for (const group of docRows.get(keyNo) || []) {
       for (const [value, b] of group) b.setAttribute("aria-pressed", String(marks.get(keyNo) === value));
@@ -788,6 +837,7 @@
     body.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty."));
     if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
     entry.keys = docs.map((doc) => String(doc.key || ""));
+    entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));
     entry.n = docs.length;
     refreshCardSummary(entry);
     outlineUpdate(entry, "");            // the description stays; the count lives in the card head
@@ -1160,6 +1210,8 @@
     try {
       const m = await api("/api/marks");
       for (const [k, v] of Object.entries(m.marks || {})) marks.set(k, v);
+      for (const [k, t] of Object.entries(m.titles || {})) markTitles.set(k, t);
+      renderMarksPanel();
       renderMarkSteps();
     } catch (_) { /* no search in this session */ }
     renderMarkSteps();

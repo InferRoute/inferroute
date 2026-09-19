@@ -1,7 +1,11 @@
 // Drives the REAL refreshCardSummary()/shortAbout() from probant_web/app.js: what a folded search card's head
 // says. Run by test_probant_web.py with the repository root as the working directory.
 const src = require("fs").readFileSync("inferroute_cli/probant_web/app.js", "utf8");
-const fn = (name) => { const i = src.indexOf(`  function ${name}(`); return src.slice(i, src.indexOf("\n  }\n", i) + 4); };
+const fn = (name) => {
+  const i = src.indexOf(`  function ${name}(`);
+  if (i < 0) throw new Error(`app.js no longer has function ${name} — update this harness`);
+  return src.slice(i, src.indexOf("\n  }\n", i) + 4);
+};
 const marks = new Map(); const searchesByNo = new Map();
 function outlineUpdate() {}
 eval(fn("shortAbout") + fn("refreshCardSummary"));

@@ -190,6 +190,31 @@ def _search_call(endpoint: Optional[str], path: str, body: Optional[dict] = None
         return json.loads(r.read())
 
 
+def matter_titles(records_dir: Optional[Path], keys: set) -> Dict[str, str]:
+    """Titles for these publication numbers, from the matter's recorded search results (host-side, owner-only).
+    Numbers only in, titles only out; nothing is written."""
+    out: Dict[str, str] = {}
+    if not records_dir or not keys or not records_dir.is_dir():
+        return out
+    for f in sorted(records_dir.glob("*.searches.jsonl")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                hits = ((json.loads(line).get("result") or {}).get("hits") or [])
+            except ValueError:
+                continue
+            for h in hits:
+                k = str(h.get("key") or "")
+                if k in keys and k not in out and h.get("title"):
+                    out[k] = str(h["title"])[:300]
+        if len(out) == len(keys):
+            break
+    return out
+
+
 def disclosure_info(workspace: Path) -> Dict[str, Any]:
     """File names, sizes and the disclosure's word count: enough for the page to say what the folder holds,
     without sending any of the invention's text to the page."""
@@ -215,7 +240,7 @@ class Bridge:
     def __init__(self, *, matter: str, date_bound: str, workspace: Path, summary: Dict[str, Any],
                  search_endpoint: Optional[str], receipt: Callable[[], Any],
                  rebuild_summary: Callable[[], Dict[str, Any]], export: Callable[[], Path],
-                 conversation_file: Optional[Path] = None):
+                 conversation_file: Optional[Path] = None, records_dir: Optional[Path] = None):
         self.matter, self.date_bound, self.workspace = matter, date_bound, workspace
         self.summary = summary
         self.search_endpoint = search_endpoint
@@ -250,6 +275,7 @@ class Bridge:
         # The conversation, kept with the matter's records (under confidential/, outside the agent's reach,
         # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
         self.conversation_file = conversation_file
+        self.records_dir = records_dir                      # the matter's search records, for mark titles
 
     # ── events ──
     def publish(self, event: Dict[str, Any], *, agent: bool = False) -> None:
@@ -617,7 +643,11 @@ class Bridge:
                 state = await asyncio.to_thread(_search_call, bridge.search_endpoint, "/matter/state")
             except Exception:                                   # noqa: BLE001
                 return {"marks": {}}
-            return {"marks": {k: (v.get("latest") or {}).get("value") for k, v in (state.get("marks") or {}).items()}}
+            marks_now = {k: (v.get("latest") or {}).get("value") for k, v in (state.get("marks") or {}).items()}
+            # What each marked document is about, from every search recorded on this matter — so a mark made in
+            # an EARLIER session still says what it marks, although its results are not on this page.
+            titles = await asyncio.to_thread(matter_titles, bridge.records_dir, set(marks_now))
+            return {"marks": marks_now, "titles": titles}
 
         @app.post("/api/mark")
         async def mark(request: Request):
@@ -716,7 +746,8 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     bridge = Bridge(matter=matter, date_bound=probant.get("date_bound", ""), workspace=workspace,
                     summary=probant.get("summary") or {}, search_endpoint=search_endpoint,
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
-                    export=lambda: probant_export.write_bundle(client, name, None), conversation_file=kept)
+                    export=lambda: probant_export.write_bundle(client, name, None), conversation_file=kept,
+                    records_dir=records_dir(client, name))
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:

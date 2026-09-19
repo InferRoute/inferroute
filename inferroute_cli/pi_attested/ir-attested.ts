@@ -401,6 +401,7 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 // so the page can tell which of them the assistant already offered. A test holds the two files together.
 const STEP_DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
 const STEP_LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+const STEP_SURVEY = "Run a prior-art survey of the disclosure";
 const stepLike = (key: string) => `Find documents like ${key}`;
 const NEXT_MAX = 4;
 // A button sends EXACTLY its text, so a suggestion is never cut: a cut one sends a broken half-instruction
@@ -965,7 +966,9 @@ export default function (pi: ExtensionAPI) {
 		};
 		const group = (v: string) => entries.filter(([, x]) => x === v).map(([k]) => `${k}${about(k)}`).join("; ");
 		const relevant = entries.filter(([, v]) => v === "relevant").map(([k]) => k);
+		// A new session is its own sitting: until it has run a search, running one is a candidate too.
 		const candidates = [
+			...(searchNo === 0 ? [STEP_SURVEY] : []),
 			...(relevant.length ? [STEP_DEEPER] : []),
 			...relevant.slice(0, 2).map(stepLike),
 			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),
@@ -1023,7 +1026,9 @@ export default function (pi: ExtensionAPI) {
 		label: "Next steps",
 		description:
 			"Offer the professional two to four next research actions they can send with one click, exactly as written. " +
-			"Call it last in an answer that reports or discusses search results, and write nothing after it. Write each step in " +
+			"Call it last in an answer that reports or discusses search results — and also after any other answer from which a " +
+			"research action naturally follows (after summarising the disclosure: running the survey) — and write nothing " +
+			"after it. Write each step in " +
 			"the professional's own words, as they would ask you (\"Find documents like US-5795305-A\", \"Use my marks to steer " +
 			"the next searches\"), with no tool or parameter names: a follow-up research action within your tools, never a " +
 			"judgment and never a command. Keep each to one sentence, ideally under 160 characters: it is shown and sent " +

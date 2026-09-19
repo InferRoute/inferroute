@@ -48,7 +48,11 @@ def _item(summary, key):
 def test_everything_verified_reads_private():
     s = T.build(_receipt(), _search(reference={"ok": True}), ADDRESS, matter="Acme/cooling", date_bound="2020-01-01")
     assert s["verdict"] == "private"
-    assert [i["state"] for i in s["items"]] == [T.OK, T.OK, T.OK, T.INFO]
+    # Three checks, each one a check that PASSED or did not. What the professional controls is not a fourth
+    # item with a hollow dot beside them (20 Sep) — it is one line, and it is still said.
+    assert [i["state"] for i in s["items"]] == [T.OK, T.OK, T.OK]
+    assert [i["key"] for i in s["items"]] == ["ai", "search", "computer"]
+    assert "your marks are yours alone" in s["control_note"]
 
 
 def test_search_is_never_called_inferroutes_without_the_signed_reference():

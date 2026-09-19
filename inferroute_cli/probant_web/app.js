@@ -155,6 +155,7 @@
       chain.append(item);
     }
     body.append(chain);
+    if (t.control_note) body.append(el("p", "control-note", t.control_note));
     // The limits are not repeated here (Henry, 19 Sep: "not needed or even relevant here"). They are said
     // where they matter, in the exported record the professional hands on, and in the terminal card.
   }

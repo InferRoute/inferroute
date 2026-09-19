@@ -450,3 +450,6 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .danger-zone > button { flex: 0 0 auto; white-space: nowrap; }
 .deleted-list .record-row { color: var(--muted); }
 .update-note { background: var(--warn-soft); color: var(--ink); border-radius: var(--radius); padding: 10px 14px; margin: 0 0 16px; font-size: 14px; }
+
+/* what the professional controls: a line under the chain, not a fourth check with a hollow dot */
+.control-note { margin: 12px 0 0; padding-left: 22px; font-size: 13px; color: var(--muted); }

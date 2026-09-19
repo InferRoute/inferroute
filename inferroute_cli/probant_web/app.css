@@ -217,13 +217,15 @@ button.brand:hover { background: var(--user); }
 .verdict.limited { background: var(--warn-soft); color: var(--warn); }
 .verdict.blocked { background: var(--bad-soft); color: var(--bad); }
 .explainer { color: var(--muted); font-size: 13px; margin: 0 0 6px; }
-.item { padding: 10px 0; border-top: 1px solid var(--line); }
+.item { padding: 7px 0; border-top: 1px solid var(--line); }
 .item:first-of-type { border-top: 0; }
 .item-head { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 6px; }
 .sym { font-weight: 700; text-align: center; }
 .sym.ok { color: var(--accent); } .sym.warn { color: var(--warn); } .sym.fail { color: var(--bad); } .sym.off, .sym.info { color: var(--faint); }
 .item-title { font-weight: 600; }
-.item-summary { grid-column: 2; font-size: 14px; }
+.item-summary { grid-column: 2; font-size: 13.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.item-head .more .item-points { margin-top: 6px; }
 .item-points { grid-column: 2; margin: 4px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: 13px; }
 .item-points li { margin: 2px 0; }
 .more-toggle { grid-column: 2; justify-self: start; border: 0; background: none; color: var(--accent); padding: 4px 0 0; font-size: 13px; }
@@ -236,7 +238,14 @@ button.brand:hover { background: var(--user); }
 .limits { margin: 0; padding: 0; list-style: none; }
 .limits li { font-size: 13px; color: var(--muted); padding: 5px 0 5px 18px; position: relative; }
 .limits li::before { content: "○"; position: absolute; left: 0; color: var(--faint); }
-.checked { font-size: 12px; color: var(--faint); margin-top: 14px; }
+.checked { font-size: 12px; color: var(--faint); margin-top: 10px; }
+/* folded sections of the protection panel: a labelled line that opens in place */
+.trust details.fold { margin: 8px 0 0; }
+.trust details.fold > summary { cursor: pointer; font-size: 13px; color: var(--accent); list-style: none; }
+.trust details.fold > summary::-webkit-details-marker { display: none; }
+.trust details.fold > summary::before { content: "▸ "; color: var(--faint); }
+.trust details.fold[open] > summary::before { content: "▾ "; }
+.trust details.fold > .explainer, .trust details.fold > .limits { margin-top: 6px; }
 .trust-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .export-result { margin-top: 12px; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; }
 .export-result .mono { display: block; word-break: break-all; margin: 4px 0 8px; color: var(--ink); }

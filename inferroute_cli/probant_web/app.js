@@ -85,6 +85,11 @@
   const SYM = { ok: "✓", warn: "◐", fail: "✗", off: "○", info: "●" };
   const VERDICT_PILL = { private: "🔒 Private", limited: "◐ Partly protected", blocked: "⛔ Not opened" };
 
+  // Compact by default (Henry, 19 Sep: "make the private certifications section more compact so that the
+  // beginning of your marks is visible without scrolling"). The verdict and one line per protection stay in
+  // view; each protection's points and detail sit behind its own "More", and the explanation and the limits
+  // behind labelled toggles. The limits toggle says HOW MANY there are, so folding them does not hide that
+  // they exist — it is one click, and the exported record carries them in full.
   function renderTrust(t) {
     const body = $("trust-body");
     clear(body);
@@ -92,18 +97,19 @@
     pill.className = `pill pill-${t.verdict}`;
     pill.textContent = VERDICT_PILL[t.verdict] || t.verdict;
     body.append(el("div", `verdict ${t.verdict}`, t.headline));
-    body.append(el("p", "explainer", t.explainer || ""));
+    if (t.explainer) body.append(el("details", "fold", el("summary", "", "How a sealed machine keeps this private"), el("p", "explainer", t.explainer)));
     body.append(el("h2", "", "What protects this matter"));
     for (const it of t.items || []) {
       const head = el("div", "item-head",
         el("span", `sym ${it.state}`, SYM[it.state] || "·"),
         el("span", "item-title", it.title),
         el("span", "item-summary", it.summary));
-      if (it.points && it.points.length) head.append(el("ul", "item-points", ...it.points.map((p) => el("li", "", p))));
-      const hasMore = (it.more && it.more.length) || (it.technical && it.technical.length);
+      const points = it.points && it.points.length ? it.points : [];
+      const hasMore = points.length || (it.more && it.more.length) || (it.technical && it.technical.length);
       if (hasMore) {
         const more = el("div", "more");
         more.hidden = true;
+        if (points.length) more.append(el("ul", "item-points", ...points.map((p) => el("li", "", p))));
         for (const p of it.more || []) more.append(el("p", "", p));
         if (it.technical && it.technical.length) {
           const table = el("table", "tech");
@@ -125,10 +131,14 @@
       }
       body.append(el("div", "item", head));
     }
-    body.append(el("h2", "", "What this can't prove"));
-    body.append(el("ul", "limits", ...(t.limits || []).map((l) => el("li", "", l))));
+    const limits = t.limits || [];
+    if (limits.length) {
+      body.append(el("details", "fold", el("summary", "", `What this can't prove (${limits.length})`),
+        el("ul", "limits", ...limits.map((l) => el("li", "", l)))));
+    }
     body.append(el("div", "checked", `Checked ${new Date(t.checked_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false })}`));
   }
+
 
   // ── conversation ──
   const log = $("log");

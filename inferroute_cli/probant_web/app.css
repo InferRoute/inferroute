@@ -372,3 +372,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .mark-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
 .mark-row .marks { justify-content: flex-start; }
+
+/* repeated slips collapse into one line; the count says how many requests */
+.step.slip { color: var(--muted); }
+.step .slip-count { color: var(--faint); }

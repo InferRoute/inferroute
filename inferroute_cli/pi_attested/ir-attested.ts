@@ -14,7 +14,7 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
@@ -543,6 +543,15 @@ export default function (pi: ExtensionAPI) {
 	const approvals = new Map<string, Promise<boolean>>();
 	const firstSeen = new Map<string, number>();
 	const docText = new Map<string, string>();
+	// Documents this matter's searches returned in EARLIER sessions (the launcher writes them; numbers and public
+	// titles only), so "like" and the marks note work for them too — not only for this session's results.
+	const priorDocs = new Map<string, string>();
+	try {
+		const f = process.env.IR_MATTER_DOCS;
+		if (f) for (const [k, t] of Object.entries(JSON.parse(readFileSync(f, "utf8")) as Record<string, string>)) priorDocs.set(k, String(t));
+	} catch {
+		/* no earlier documents is a normal state, never a failure */
+	}
 	let lastSteps: string[] = [];
 
 	pi.registerEntryRenderer<Verdict>(PROOF_ENTRY, (entry, { expanded }, theme) => renderModelProof(entry.data, expanded, theme));
@@ -685,7 +694,7 @@ export default function (pi: ExtensionAPI) {
 		parameters: Type.Object({
 			text: Type.Optional(Type.String({ description: "REQUIRED unless `like` is given: a self-contained technical description to search for (20 characters or more). `feature` only names the search; it is not searched." })),
 			feature: Type.Optional(Type.String({ description: "A short name — a few words, under 80 characters — for the one feature of the disclosure this search covers; a longer one is shortened" })),
-			like: Type.Optional(Type.String({ description: "A publication number returned earlier in this session: search for documents like it" })),
+			like: Type.Optional(Type.String({ description: "A publication number returned by a search on this matter, in this session or an earlier one: search for documents like it" })),
 			depth: Type.Optional(Type.String({ description: "How many references: quick 10 (default), standard 25, broad 50" })),
 			k: Type.Optional(Type.Integer({ description: "Exact number of references to return, 1 to 50; overrides depth" })),
 		}),
@@ -709,14 +718,14 @@ export default function (pi: ExtensionAPI) {
 			const like = String(params.like ?? "").trim().toUpperCase();
 			let text = String(params.text ?? "").trim();
 			if (like) {
-				const known = docText.get(like);
+				const known = docText.get(like) ?? priorDocs.get(like);
 				if (!known) {
-					throw new Error(`${like} was not returned by a search in this session, so there is nothing to search like; nothing was sent`);
+					throw new Error(`${like} was not returned by any search on this matter, so there is nothing to search like; nothing was sent`);
 				}
 				text = known;
 			}
 			if (text.length < 20) {
-				throw new Error("prior_art_search needs a self-contained description of 20 characters or more, or `like` with a publication number returned in this session; nothing was sent");
+				throw new Error("prior_art_search needs a self-contained description of 20 characters or more, or `like` with a publication number a search on this matter returned; nothing was sent");
 			}
 			// The hints, normalised rather than refused (see the schema): a long label is cut at a word, an
 			// unknown depth word means the default, and k is held to what the search machine serves (1-50).
@@ -961,7 +970,7 @@ export default function (pi: ExtensionAPI) {
 		if (signature === lastMarksNote) return;
 		lastMarksNote = signature;
 		const about = (key: string) => {
-			const t = (docText.get(key) ?? "").replace(/\s+/g, " ").trim();
+			const t = (docText.get(key) ?? priorDocs.get(key) ?? "").replace(/\s+/g, " ").trim();
 			return t ? ` "${t.length > 70 ? `${t.slice(0, 69)}…` : t}"` : "";
 		};
 		const group = (v: string) => entries.filter(([, x]) => x === v).map(([k]) => `${k}${about(k)}`).join("; ");

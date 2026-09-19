@@ -193,6 +193,32 @@ def check_workspace(cwd: str) -> str:
     return str(real)
 
 
+def matter_titles(records_dir, keys=None) -> dict:
+    """{publication number: title} for documents the matter's recorded searches returned — all of them, or only
+    `keys`. Host-side and read-only: numbers and public titles out, nothing written."""
+    out: dict = {}
+    rd = Path(records_dir) if records_dir else None
+    if not rd or not rd.is_dir() or (keys is not None and not keys):
+        return out
+    for f in sorted(rd.glob("*.searches.jsonl")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                hits = ((json.loads(line).get("result") or {}).get("hits") or [])
+            except (ValueError, AttributeError):
+                continue
+            for h in hits:
+                k = str(h.get("key") or "")
+                if k and (keys is None or k in keys) and k not in out and h.get("title"):
+                    out[k] = str(h["title"])[:300]
+        if keys is not None and len(out) == len(keys):
+            break
+    return out
+
+
 def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
              headers: dict | None = None, search_endpoint: str | None = None) -> list[str]:
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
@@ -215,6 +241,18 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
     # config dir; its stamps go to the extension for the panel and the session record.
     contract = load_contract()
+    # The documents this matter's searching has returned in EARLIER sessions, so "find documents like X" works for
+    # them too. It searched only this session's results, while the marks note and the page offered "like" for
+    # marks made in earlier sessions — ten refused requests in a row on 19 Sep. Written after config_dir's scrub,
+    # into the one directory the sandbox can read; numbers and public titles only.
+    docs = matter_titles(env.get("IR_MATTER_RECORD_DIR"))
+    if docs:
+        md = cfg / "matter-docs.json"
+        md.write_text(json.dumps(docs, ensure_ascii=False))
+        os.chmod(md, 0o600)
+        env["IR_MATTER_DOCS"] = str(md)
+    else:
+        env.pop("IR_MATTER_DOCS", None)
     sp = cfg / "system-prompt.txt"
     sp.write_text(contract["text"])
     env["IR_CONTRACT_SHA"] = contract["contract_sha"]

@@ -213,6 +213,7 @@
         el("h2", "", "No matters yet"),
         el("p", "", "Create a matter, paste the invention's disclosure, then start a session. The assistant surveys published patents for related art, in sealed machines this computer checks first."),
         el("div", "row", button("Create your first matter", "primary", newMatterDialog), button("How it works", "ghost", () => { location.hash = "#/help"; }))));
+      await renderDeleted(p);
       return;
     }
     const grid = el("div", "matters");
@@ -236,6 +237,7 @@
       p.append(el("h2", "section", "Recent sessions"));
       p.append(sessionTable(data.recent, true));
     }
+    await renderDeleted(p);
   }
 
   function sessionTable(sessions, withMatter) {
@@ -312,6 +314,64 @@
       p.append(list);
     }
     p.append(el("p", "sub folder-line", `Matter folder: ${m.disclosure.folder}`));
+    p.append(el("div", "danger-zone",
+      el("div", "", el("b", "", "Delete this matter"),
+        el("p", "sub", "Its disclosure, sessions, marks and exported records go to Recently deleted. You can restore "
+          + "it from there for 30 days; after that it is erased from this computer.")),
+      button("Delete matter…", "danger small", () => deleteMatterDialog(m))));
+  }
+
+  // Deleting asks for the matter's name to be TYPED: a matter holds signed search records that cannot be made
+  // again, and one click on the wrong button must not be enough to lose them.
+  function deleteMatterDialog(m) {
+    const typed = input("text", m.matter);
+    const err = el("p", "form-error");
+    const go = button("Delete matter", "danger", async () => {
+      err.textContent = "";
+      go.disabled = true;
+      try {
+        const r = await api("/api/matter/delete", { id: m.id, confirm: typed.value });
+        closeDialog();
+        toast(`${m.client} / ${m.matter} deleted. Restore it from Recently deleted within ${r.days} days.`, "info");
+        for (const left of r.left_in_place || []) toast(`Left in place, outside the Probant folder: ${left}`, "info");
+        location.hash = "#/";
+      } catch (e) { err.textContent = e.message; } finally { go.disabled = false; }
+    });
+    go.disabled = true;
+    typed.addEventListener("input", () => { go.disabled = typed.value.trim() !== m.matter; });
+    dialog(`Delete ${m.client} / ${m.matter}?`, [
+      el("p", "", "This moves the matter's disclosure, sessions, marks and exported records out of Probant. "
+        + "They stay in Recently deleted for 30 days, where you can restore them, then they are erased."),
+      field("Type the matter's name to confirm", typed),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), go]);
+    setTimeout(() => typed.focus(), 0);
+  }
+
+  async function renderDeleted(p) {
+    let d;
+    try { d = await api("/api/deleted"); } catch (e) { return; }
+    if (!d.deleted.length) return;
+    const list = el("div", "sessions deleted-list");
+    for (const x of d.deleted) {
+      const row = el("div", "record-row",
+        el("span", "", x.matter),
+        el("span", "sub", `deleted ${localTime(x.deleted_at)} · erased ${localTime(x.erase_after)}`),
+        button("Restore", "ghost small", async (ev) => {
+          const b = ev.currentTarget;                 // currentTarget is null again once this awaits
+          b.disabled = true;
+          try { const r = await api("/api/deleted/restore", { id: x.id }); toast(`${r.id} restored.`, "info"); renderMatters(); }
+          catch (e) { toast(e.message, "error"); b.disabled = false; }
+        }),
+        button("Erase now", "danger small", async (ev) => {
+          if (!window.confirm(`Erase ${x.matter} for good? This cannot be undone.`)) return;
+          try { await api("/api/deleted/erase", { id: x.id }); toast(`${x.matter} erased.`, "info"); renderMatters(); }
+          catch (e) { toast(e.message, "error"); }
+        }));
+      list.append(row);
+    }
+    p.append(el("h2", "section", "Recently deleted"),
+      el("p", "sub", `Kept for ${d.days} days after deletion, then erased from this computer.`), list);
   }
 
   // ── checking an exported record, here, without a terminal (the words are common.js renderCheck) ──

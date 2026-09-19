@@ -387,6 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
     rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
+    dl = sub.add_parser("delete", help="delete a matter: restorable from Probant home for 30 days, then erased")
+    dl.add_argument("matter"); dl.add_argument("--yes", action="store_true", help="do not ask to type the matter name")
     hm = sub.add_parser("home", help="the home page in your browser: every matter, past sessions, new matters and sessions, help")
     hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
@@ -408,6 +410,9 @@ def main(argv: list[str] | None = None) -> int:
             return reference_mod.main(a.args)
         if a.cmd == "list":
             return cmd_list()
+        if a.cmd == "delete":
+            from . import probant_delete
+            return probant_delete.cmd_delete(a.matter, yes=a.yes)
         if a.cmd == "proof":
             return cmd_proof(a.matter)
         if a.cmd == "home":

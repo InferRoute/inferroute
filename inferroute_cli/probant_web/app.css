@@ -427,3 +427,12 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 /* repeated slips collapse into one line; the count says how many requests */
 .step.slip { color: var(--muted); }
 .step .slip-count { color: var(--faint); }
+
+/* deleting a matter: a quiet area at the foot of the matter page, and a red that is only ever for this */
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.danger:disabled { opacity: .45; cursor: not-allowed; }
+.danger-zone { display: flex; gap: 16px; align-items: center; justify-content: space-between; margin-top: 34px;
+  padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--bad) 30%, var(--line)); border-radius: var(--radius); }
+.danger-zone p { margin: 4px 0 0; }
+.danger-zone > button { flex: 0 0 auto; white-space: nowrap; }
+.deleted-list .record-row { color: var(--muted); }

@@ -67,7 +67,9 @@ def test_no_route_beyond_what_the_page_needs(home):
     paths = {r.path for r in h.app().routes}
     assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
                      "/api/disclosure", "/api/sessions", "/api/launch", "/api/session", "/api/export",
-                     "/api/check", "/record"}
+                     "/api/check", "/record",
+                     # deleting a matter (19 Sep): restorable for 30 days, then erased
+                     "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase"}
 
 
 # ── matters ──

@@ -187,6 +187,19 @@ class Launches:
                     return it
         return None
 
+    def stop_ended(self, matter_id: str) -> None:
+        """End the lingering process of a FINISHED session on this matter (its page stays up for exporting).
+        Deleting the matter is the person saying they are done with it."""
+        with self.lock:
+            done = [it for it in self.items.values() if it["matter"] == matter_id and it["proc"].poll() is None
+                    and it["state"] in ("ended", "failed")]
+        for it in done:
+            it["proc"].terminate()
+            try:
+                it["proc"].wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                it["proc"].kill()
+
     def start(self, matter_id: str) -> Dict[str, Any]:
         existing = self.running_for(matter_id)
         if existing:
@@ -453,6 +466,53 @@ class Home:
             out["folder"] = match["folder"]
             return out
 
+        # ── deleting a matter: restorable for probant_delete.RETENTION_DAYS, then erased ──
+        @app.post("/api/matter/delete")
+        async def delete_matter(request: Request):
+            """The page must send the matter's name typed by the person, not only its id: one misplaced click
+            on the wrong matter must not be enough."""
+            from . import probant_delete as D
+            d = await body(request)
+            mid = str(d.get("id") or "")
+            try:
+                client, matter, _ = matter_of(mid)
+            except S.ProbantError as e:
+                return problem(str(e), 404)
+            if str(d.get("confirm") or "").strip() != matter:
+                return problem("type the matter's name exactly to delete it", 400)
+            if home.launches.running_for(mid):
+                return problem("a session is still open on this matter. End it first.", 409)
+            home.launches.stop_ended(mid)          # a finished session whose page is still up
+            try:
+                out = D.delete(client, matter)
+            except S.ProbantError as e:
+                return problem(str(e), 409)
+            return {"ok": True, "id": out["id"], "left_in_place": out["left_in_place"], "days": D.RETENTION_DAYS}
+
+        @app.get("/api/deleted")
+        async def deleted():
+            from . import probant_delete as D
+            return {"deleted": D.list_deleted(), "days": D.RETENTION_DAYS}
+
+        @app.post("/api/deleted/restore")
+        async def restore_deleted(request: Request):
+            from . import probant_delete as D
+            d = await body(request)
+            try:
+                return {"ok": True, "id": D.restore(str(d.get("id") or ""))}
+            except S.ProbantError as e:
+                return problem(str(e), 409)
+
+        @app.post("/api/deleted/erase")
+        async def erase_deleted(request: Request):
+            from . import probant_delete as D
+            d = await body(request)
+            try:
+                D.erase(str(d.get("id") or ""))
+            except S.ProbantError as e:
+                return problem(str(e), 404)
+            return {"ok": True}
+
         @app.get("/record")
         async def record(id: str = "", name: str = "", v: str = ""):
             # A capability link for ONE exported record (a new tab cannot send the key header). The record is
@@ -477,6 +537,9 @@ def run(open_browser: bool = True) -> int:
     import socket
     import uvicorn
     home = Home()
+    from . import probant_delete
+    for gone in probant_delete.erase_expired():           # deleted more than RETENTION_DAYS ago: erased now
+        print(f"  Erased a matter deleted more than {probant_delete.RETENTION_DAYS} days ago ({gone}).", flush=True)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         home.port = sock.getsockname()[1]

@@ -169,3 +169,18 @@ def test_the_proposal_tool_records_what_it_says_it_recorded(home, tmp_path):
     rows = [json.loads(line) for line in out.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["title"] == "Cooling jacket" and rows[0]["at"].endswith("Z")
     assert stat.S_IMODE(out.stat().st_mode) == 0o600
+
+
+def test_the_proposal_tool_is_registered_before_the_search_only_guard():
+    """A reading session has NO search endpoint, and the extension returns early when there is none. The
+    proposal tool was registered after that line, so for the one mode it exists for it did not exist: the
+    assistant wrote "**propose_matter** - title: …" into the transcript as prose and nothing was recorded
+    (seen 20 Sep, on the first real reading). Anything a searchless mode needs goes above the guard.
+    """
+    from inferroute_cli import pi_attested as PA
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    guard = ts.index("\tif (!SEARCH) return;")
+    assert ts.index('name: "propose_matter"') < guard
+    # And the search tools stay below it, where a session without a search machine cannot see them.
+    for search_only in ('name: "prior_art_search"', 'name: "matter_marks"', 'name: "suggest_next_steps"'):
+        assert ts.index(search_only) > guard, search_only

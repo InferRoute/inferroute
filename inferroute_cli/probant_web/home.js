@@ -516,6 +516,122 @@
           "ir probant export <client>/<matter>, and ir probant proof <client>/<matter> for the technical detail")));
   }
 
+  // ── reading a document: the professional gives it, a sealed session reads it, they open what it proposes ──
+  //
+  // The file is read HERE, by the browser, and posted as text: the page is served by this computer, so the
+  // document never leaves it either way — but reading it locally means no upload of a file we then have to
+  // say we deleted.
+  function readDocumentDialog() {
+    const file = input("file");
+    file.accept = ".txt,.md,.text,text/plain,text/markdown";
+    const text = input("textarea", "…or paste the document here.");
+    text.rows = 8;
+    const err = el("p", "form-error");
+    const chosen = el("p", "sub");
+    let picked = "";
+    file.addEventListener("change", async () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      picked = f.name;
+      try {
+        text.value = await f.text();
+        chosen.textContent = `${f.name} · ${text.value.length.toLocaleString()} characters`;
+      } catch (e) { err.textContent = `That file could not be read here: ${e.message}`; }
+    });
+    const go = button("Read it", "primary", async () => {
+      err.textContent = "";
+      const body = text.value.trim();
+      if (!body) { err.textContent = "Choose a text file, or paste the document."; return; }
+      go.disabled = true;
+      go.textContent = "Staging…";
+      try {
+        const r = await api("/api/intake", { text: text.value, name: picked || "pasted document" });
+        closeDialog();
+        location.hash = `#/document/${enc(r.id)}`;
+      } catch (e) { err.textContent = e.message; go.disabled = false; go.textContent = "Read it"; }
+    });
+    dialog("Read a document", [
+      el("p", "", "A sealed session reads the whole document and proposes the inventions it finds as matters "
+        + "you can open. It has no search tool while it reads, so nothing about the document goes to a search machine."),
+      field("Document", file, "A text file (.txt or .md). It is read on this computer and never uploaded anywhere."),
+      chosen,
+      field("Or paste it", text),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), go]);
+  }
+
+  // Proposals arrive WHILE the session reads, so this view refreshes itself until the reading ends. Keyed in
+  // the same map the launch poller uses, so leaving the page stops it (route() clears them all).
+  function watchDocument(id) {
+    const key = `doc:${id}`;
+    if (watching.has(key)) return;
+    watching.set(key, setInterval(() => {
+      if (location.hash.startsWith(`#/document/${enc(id)}`)) renderDocument(id);
+      else { clearInterval(watching.get(key)); watching.delete(key); }
+    }, 4000));
+  }
+
+  async function renderDocument(id) {
+    const p = page();
+    let d;
+    try { d = await api(`/api/intake?id=${enc(id)}`); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
+    clear(p);
+    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
+    p.append(el("div", "page-head", el("h1", "", d.meta.source_name),
+      el("p", "sub", `${d.meta.chars.toLocaleString()} characters · staged ${localTime(d.meta.staged_at)}`)));
+    if (d.running) {
+      p.append(launchBox(`document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
+      p.append(el("p", "sub", "It proposes matters as it reads; they appear here. A long document takes a few minutes."));
+      watchDocument(id);
+    }
+    p.append(el("h2", "section", "Proposed matters"));
+    if (!d.proposals.length) {
+      p.append(el("p", "sub", d.running ? "Nothing proposed yet." : "This reading proposed no matters."));
+    }
+    for (const [i, pr] of d.proposals.entries()) {
+      const card = el("div", "card proposal",
+        el("div", "card-head", el("span", "title", pr.title),
+          pr.priority_date ? el("span", "sub", `priority date ${pr.priority_date}`) : el("span", "sub", "")),
+        el("div", "card-body", el("p", "", pr.summary),
+          el("blockquote", "quote", pr.quote),
+          el("p", "sub", "The passage above is quoted from the document; a proposal whose quote is not in the "
+            + "document is discarded before it reaches this page.")),
+        el("div", "card-actions", button("Open this as a matter", "primary small", () => openProposalDialog(id, i, pr))));
+      p.append(card);
+    }
+    if (d.dropped) {
+      p.append(el("p", "sub", `${plural(d.dropped, "proposal was", "proposals were")} discarded: the quote was not in the document.`));
+    }
+  }
+
+  function openProposalDialog(id, index, proposal) {
+    const client = input("text", "e.g. Acme");
+    const matter = input("text", proposal.suggested_matter);
+    matter.value = proposal.suggested_matter;
+    const date = input("date");
+    if (proposal.priority_date) date.value = proposal.priority_date;
+    const err = el("p", "form-error");
+    const go = button("Open the matter", "primary", async () => {
+      err.textContent = "";
+      go.disabled = true;
+      try {
+        const r = await api("/api/intake/create", { id, index, client: client.value, matter: matter.value,
+                                                    priority_date: date.value });
+        closeDialog();
+        toast(`Matter ${r.id} opened.`, "info");
+        location.hash = `#/matter/${enc(r.id)}`;
+      } catch (e) { err.textContent = e.message; go.disabled = false; }
+    });
+    dialog(`Open "${proposal.title}" as a matter`, [
+      el("p", "", "The proposal becomes the matter's disclosure, with the passage it came from and the document it was read from."),
+      field("Client", client),
+      field("Matter", matter, "You name it; the suggestion comes from the title."),
+      field("Priority date", date, "Only documents published before this date are searched. Empty means today, until you know it."),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), go]);
+    setTimeout(() => client.focus(), 0);
+  }
+
   // ── routing ──
   async function route() {
     stopWatching();
@@ -526,6 +642,7 @@
     // A matter id ("client/matter") travels encoded as ONE segment: #/matter/Acme%2Fcooling.
     if (parts[0] === "matter" && parts[1]) return renderMatter(parts[1]);
     if (parts[0] === "session" && parts[1] && parts[2]) return renderSession(parts[1], parts[2]);
+    if (parts[0] === "document" && parts[1]) return renderDocument(parts[1]);
     if (parts[0] === "help") return renderHelp();
     return renderMatters();
   }
@@ -535,6 +652,7 @@
     $("page").hidden = true;
     $("nav").hidden = true;
     $("new-matter").hidden = true;
+    $("read-document").hidden = true;
   }
 
   if (!key) { showNoKey(); return; }
@@ -542,6 +660,8 @@
   $("nav").hidden = false;
   $("new-matter").hidden = false;
   $("new-matter").addEventListener("click", newMatterDialog);
+  $("read-document").hidden = false;
+  $("read-document").addEventListener("click", readDocumentDialog);
   for (const b of document.querySelectorAll("#nav button")) b.addEventListener("click", () => { location.hash = b.dataset.route; });
   window.addEventListener("hashchange", route);
   route();

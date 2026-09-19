@@ -672,6 +672,62 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// ── reading a document and proposing matters (intake) ──
+	// Registered only when the launcher staged a document. The agent PROPOSES; the professional creates the
+	// matter from the page. Each proposal must quote the document, and the host drops any quote it cannot
+	// find there — the one error a reader of a summary cannot catch is an invented passage.
+	const intakeOut = process.env.IR_INTAKE_OUT ?? "";
+	if (intakeOut) {
+		pi.registerTool({
+			name: "propose_matter",
+			label: "Propose a matter",
+			description:
+				"Propose ONE invention found in the document as a matter the professional may open. Call it once per " +
+				"distinct invention, as you find them, and keep reading afterwards — do not wait until the end. `title` " +
+				"names the invention in the professional's language; `summary` is a self-contained technical description " +
+				"a prior-art search could be run from, in your own words, not a table of contents entry; `quote` is a " +
+				"VERBATIM passage from the document that shows the invention (copy it exactly, 20 characters or more — a " +
+				"quote that is not in the document is discarded and your proposal with it); `priority_date` only when the " +
+				"document states one, as YYYY-MM-DD. Proposing a matter does not create anything: the professional " +
+				"decides, names it, and opens it.",
+			promptSnippet: "Propose one invention from the document as a matter (quote the document)",
+			parameters: Type.Object({
+				title: Type.String(),
+				summary: Type.String(),
+				quote: Type.String(),
+				priority_date: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const row = {
+					title: String(params.title ?? "").trim(),
+					summary: String(params.summary ?? "").trim(),
+					quote: String(params.quote ?? "").trim(),
+					priority_date: String(params.priority_date ?? "").trim(),
+					at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+				};
+				if (!row.title || !row.summary || row.quote.length < 20) {
+					throw new Error("propose_matter needs a title, a self-contained summary, and a verbatim quote of 20 characters or more from the document; nothing was recorded");
+				}
+				try {
+					mkdirSync(intakeOut.replace(/\/[^/]*$/, ""), { recursive: true });
+					writeFileSync(intakeOut, JSON.stringify(row) + "\n", { flag: "a", mode: 0o600 });
+				} catch (e) {
+					throw new Error(`the proposal could not be recorded on this computer: ${(e as Error).message}`);
+				}
+				return {
+					content: [{ type: "text", text: `Recorded: "${row.title}". The professional will see it with your quote and decide. Keep reading the document.` }],
+					details: { title: row.title },
+				};
+			},
+			renderResult(result, _options, theme) {
+				const title = (result.details as { title?: string } | undefined)?.title ?? "";
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.bold("Proposed matter") + (title ? `  ${title}` : ""), 0, 0));
+				return box;
+			},
+		});
+	}
+
 	if (!SEARCH) return;
 
 	pi.registerTool({
@@ -1068,62 +1124,6 @@ export default function (pi: ExtensionAPI) {
 			return box;
 		},
 	});
-
-	// ── reading a document and proposing matters (intake) ──
-	// Registered only when the launcher staged a document. The agent PROPOSES; the professional creates the
-	// matter from the page. Each proposal must quote the document, and the host drops any quote it cannot
-	// find there — the one error a reader of a summary cannot catch is an invented passage.
-	const intakeOut = process.env.IR_INTAKE_OUT ?? "";
-	if (intakeOut) {
-		pi.registerTool({
-			name: "propose_matter",
-			label: "Propose a matter",
-			description:
-				"Propose ONE invention found in the document as a matter the professional may open. Call it once per " +
-				"distinct invention, as you find them, and keep reading afterwards — do not wait until the end. `title` " +
-				"names the invention in the professional's language; `summary` is a self-contained technical description " +
-				"a prior-art search could be run from, in your own words, not a table of contents entry; `quote` is a " +
-				"VERBATIM passage from the document that shows the invention (copy it exactly, 20 characters or more — a " +
-				"quote that is not in the document is discarded and your proposal with it); `priority_date` only when the " +
-				"document states one, as YYYY-MM-DD. Proposing a matter does not create anything: the professional " +
-				"decides, names it, and opens it.",
-			promptSnippet: "Propose one invention from the document as a matter (quote the document)",
-			parameters: Type.Object({
-				title: Type.String(),
-				summary: Type.String(),
-				quote: Type.String(),
-				priority_date: Type.Optional(Type.String()),
-			}),
-			async execute(_toolCallId, params) {
-				const row = {
-					title: String(params.title ?? "").trim(),
-					summary: String(params.summary ?? "").trim(),
-					quote: String(params.quote ?? "").trim(),
-					priority_date: String(params.priority_date ?? "").trim(),
-					at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-				};
-				if (!row.title || !row.summary || row.quote.length < 20) {
-					throw new Error("propose_matter needs a title, a self-contained summary, and a verbatim quote of 20 characters or more from the document; nothing was recorded");
-				}
-				try {
-					mkdirSync(intakeOut.replace(/\/[^/]*$/, ""), { recursive: true });
-					writeFileSync(intakeOut, JSON.stringify(row) + "\n", { flag: "a", mode: 0o600 });
-				} catch (e) {
-					throw new Error(`the proposal could not be recorded on this computer: ${(e as Error).message}`);
-				}
-				return {
-					content: [{ type: "text", text: `Recorded: "${row.title}". The professional will see it with your quote and decide. Keep reading the document.` }],
-					details: { title: row.title },
-				};
-			},
-			renderResult(result, _options, theme) {
-				const title = (result.details as { title?: string } | undefined)?.title ?? "";
-				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
-				box.addChild(new Text(theme.bold("Proposed matter") + (title ? `  ${title}` : ""), 0, 0));
-				return box;
-			},
-		});
-	}
 
 	pi.registerCommand("next", {
 		description: "Send one of the suggested next steps as your message: /next 1",

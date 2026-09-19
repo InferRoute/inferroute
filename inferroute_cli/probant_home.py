@@ -200,14 +200,18 @@ class Launches:
             except subprocess.TimeoutExpired:
                 it["proc"].kill()
 
-    def start(self, matter_id: str) -> Dict[str, Any]:
+    def start(self, matter_id: str, *, intake_dir: str = "") -> Dict[str, Any]:
+        """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
+        proposes matters from it. Both are the same child, the same page and the same sealed lane; only
+        the command differs, so a reading session cannot drift into a second kind of session."""
         existing = self.running_for(matter_id)
         if existing:
             return existing
         from . import pi_attested
         # The child's page shows a way back here, so a finished session is not a dead end.
         env = dict(os.environ, IR_PROBANT_NO_BROWSER="1", IR_PROBANT_HOME_URL=self.home_url)
-        argv = [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"]
+        argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web"] if intake_dir
+                else [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
         proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -512,6 +516,61 @@ class Home:
             except S.ProbantError as e:
                 return problem(str(e), 404)
             return {"ok": True}
+
+        # ── reading a document: staged here, read by a sealed session, proposals created by the professional ──
+        @app.post("/api/intake")
+        async def intake(request: Request):
+            """Stage a document the person gave the page, and start a session that reads it."""
+            import asyncio
+            from . import probant_intake as I
+            d = await body(request)
+            try:
+                meta = await asyncio.to_thread(I.stage, str(d.get("text") or ""), str(d.get("name") or ""))
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])))
+            return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
+
+        @app.get("/api/intake")
+        async def intake_view(id: str = ""):
+            from . import probant_intake as I
+            try:
+                meta = I.meta_of(id)
+                proposals = I.read_proposals(id)
+            except S.ProbantError as e:
+                return problem(str(e), 404)
+            running = home.launches.running_for(f"document · {meta['source_name']}")
+            return {"meta": meta, "proposals": proposals, "dropped": I.dropped_count(id),
+                    "running": home.launches.view(running) if running else None}
+
+        @app.get("/api/intakes")
+        async def intakes():
+            """Documents read on this computer, newest first — so a reading is not lost when the page moves."""
+            from . import probant_intake as I
+            out = []
+            root = I.intake_root()
+            for d in (sorted(root.iterdir(), reverse=True) if root.is_dir() else [])[:20]:
+                try:
+                    meta = json.loads((d / "meta.json").read_text())
+                    out.append({**meta, "proposals": len(I.read_proposals(meta["id"]))})
+                except (OSError, ValueError, S.ProbantError):
+                    continue
+            return {"documents": out}
+
+        @app.post("/api/intake/create")
+        async def intake_create(request: Request):
+            import asyncio
+            from . import probant_intake as I
+            d = await body(request)
+            try:
+                made = await asyncio.to_thread(I.create_matter, str(d.get("id") or ""), str(d.get("client") or ""),
+                                               str(d.get("matter") or ""), int(d.get("index") or 0),
+                                               str(d.get("priority_date") or "") or None)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            except (TypeError, ValueError):
+                return problem("that proposal is not one this document has", 400)
+            return {"ok": True, "id": made}
 
         @app.get("/record")
         async def record(id: str = "", name: str = "", v: str = ""):

@@ -306,6 +306,63 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     return confidential_mod.launch([], agent="pi", probant=probant)
 
 
+def cmd_intake(path: str) -> int:
+    """Read a long document in a sealed session and collect the matters it proposes.
+
+    No matter is open, so nothing here has a date bound, a state file or a search tool: the session reads the
+    staged document and calls `propose_matter`. The professional creates matters afterwards, from what it
+    proposed, with `ir probant from-proposal`.
+    """
+    from . import probant_intake as I
+    src = Path(path).expanduser()
+    try:
+        text = src.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        raise ProbantError(f"could not read {src}: {e.strerror or e}")
+    meta = I.stage(text, src.name)
+    d = I.path_of(meta["id"])
+    print(f"staged {src.name} — {meta['chars']:,} characters, {meta['lines']:,} lines")
+    print(f"  {d}")
+    os.environ["IR_INTAKE_DIR"] = str(d)
+    os.environ["IR_ATTESTED_CONFINE"] = "require"
+    for name in ("IR_MATTER_CUTOFF", "IR_MATTER_STATE_FILE", "IR_MATTER_RECORD_DIR", "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
+        os.environ.pop(name, None)
+    os.chdir(d)
+    from . import confidential as confidential_mod
+    rc = confidential_mod.launch([], agent="pi", probant={"matter": f"document · {meta['source_name']}", "mode": "intake"})
+    print()
+    return cmd_proposals(meta["id"]) if rc == 0 else rc
+
+
+def cmd_proposals(ident: str) -> int:
+    """What a reading session proposed, and how to turn one into a matter."""
+    from . import probant_intake as I
+    rows = I.read_proposals(ident)
+    dropped = I.dropped_count(ident)
+    if not rows:
+        print(f"no matters proposed from this document ({ident})")
+        if dropped:
+            print(f"  {dropped} proposal(s) were discarded: their quote was not in the document")
+        return 0
+    print(f"{len(rows)} matter(s) proposed from {I.meta_of(ident)['source_name']}:\n")
+    for i, r in enumerate(rows):
+        print(f"  [{i}] {r['title']}" + (f"   (priority date {r['priority_date']})" if r["priority_date"] else ""))
+        print(f"      {r['summary'][:300]}{'…' if len(r['summary']) > 300 else ''}")
+        print(f"      from the document: “{r['quote'][:160]}{'…' if len(r['quote']) > 160 else ''}”\n")
+    if dropped:
+        print(f"  ({dropped} further proposal(s) discarded: the quote was not in the document)\n")
+    print(f"  open one:  ir probant from-proposal {ident} 0 <client> <matter>")
+    return 0
+
+
+def cmd_from_proposal(ident: str, index: int, client: str, matter: str, date: str | None = None) -> int:
+    from . import probant_intake as I
+    made = I.create_matter(ident, client, matter, index, date)
+    print(f"  opened {made} from proposal {index}; its disclosure is the proposal, with the passage it came from.")
+    print(f"  open it:    ir probant open {made}")
+    return 0
+
+
 def latest_session_record(client: str, matter: str) -> dict | None:
     """The newest host-written session record for this matter (never an agent-writable file)."""
     files = sorted(p for p in records_dir(client, matter).glob("*.json") if not p.name.endswith(".searches.json"))
@@ -387,6 +444,13 @@ def main(argv: list[str] | None = None) -> int:
     rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
     rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
+    ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
+    ik.add_argument("document")
+    pr = sub.add_parser("proposals", help="what a reading session proposed")
+    pr.add_argument("id")
+    fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
+    fp.add_argument("id"); fp.add_argument("index", type=int); fp.add_argument("client"); fp.add_argument("matter")
+    fp.add_argument("--priority-date", default=None)
     dl = sub.add_parser("delete", help="delete a matter: restorable from Probant home for 30 days, then erased")
     dl.add_argument("matter"); dl.add_argument("--yes", action="store_true", help="do not ask to type the matter name")
     hm = sub.add_parser("home", help="the home page in your browser: every matter, past sessions, new matters and sessions, help")
@@ -410,6 +474,12 @@ def main(argv: list[str] | None = None) -> int:
             return reference_mod.main(a.args)
         if a.cmd == "list":
             return cmd_list()
+        if a.cmd == "intake":
+            return cmd_intake(a.document)
+        if a.cmd == "proposals":
+            return cmd_proposals(a.id)
+        if a.cmd == "from-proposal":
+            return cmd_from_proposal(a.id, a.index, a.client, a.matter, a.priority_date)
         if a.cmd == "delete":
             from . import probant_delete
             return probant_delete.cmd_delete(a.matter, yes=a.yes)

@@ -170,6 +170,8 @@ button.brand:hover { background: var(--user); }
 .card-head { flex-wrap: wrap; }
 .card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }
 .doc .seen { font-size: 11px; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 7px; margin-left: 8px; }
+/* It now names the earlier search, so it can be long: one line, cut to the room there is, full text on hover. */
+.doc .seen { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .card-actions { padding: 8px 14px 12px; }
 .card-actions button { border-radius: 999px; font-size: 13px; }
 .mark-steps { padding: 8px max(20px, calc((100% - 820px) / 2)) 0; }
@@ -183,6 +185,8 @@ button.brand:hover { background: var(--user); }
 
 /* activity + composer */
 .activity { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; padding: 4px max(20px, calc((100% - 820px) / 2)); }
+/* digits of equal width, so a ticking clock does not make the line shiver */
+.activity-time { color: var(--faint); font-size: 13px; font-variant-numeric: tabular-nums; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
 @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 .composer { display: flex; gap: 10px; align-items: flex-end; padding: 12px max(20px, calc((100% - 820px) / 2)) 16px; border-top: 1px solid var(--line); background: var(--bg); }

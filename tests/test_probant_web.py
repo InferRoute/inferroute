@@ -680,3 +680,27 @@ def test_assistant_prompts_wait_in_line_instead_of_replacing_each_other():
     # And at the source: searches issued at once share ONE approval question per machine.
     assert "const approvals = new Map<string, Promise<boolean>>();" in ts
     assert "let pending = approvals.get(measurement);" in ts
+
+
+def test_the_activity_bar_has_a_step_clock_and_a_since_you_asked_clock():
+    """Henry, 19 Sep: "it would be good if 'The assistant is working…' also had a timer so we know when it
+    started processing something new". The step clock restarts whenever the words on the bar change (a new
+    step); the turn clock runs from when the assistant took up the message. Both come from the server's
+    stamps, so — like the search clock — a reload does not start them again at zero."""
+    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text()
+    assert 'id="activity-time"' in html
+    assert "if (ev.at) lastEventAt = ev.at;" in js
+    assert "if (text !== stepText) { stepText = text; stepAt = lastEventAt || serverNow(); }" in js
+    assert "turnAt = busy ? (ev.at || serverNow()) : null;" in js
+    assert "since you asked" in js and "performance.now()" not in js
+
+
+def test_a_document_seen_before_names_the_search_by_what_it_was_about():
+    """Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'"."""
+    js = (STATIC / "app.js").read_text()
+    assert "doc.alsoIn ? seenIn(doc.alsoIn) : null" in js
+    body = js[js.index("function seenIn"):js.index("function seenIn") + 600]
+    assert "also in ‘${short}’" in body
+    assert "also in search ${no}" in body          # only when the earlier search is not on this page
+    assert "tag.title = " in body                   # the full wording on hover, since the pill is cut short

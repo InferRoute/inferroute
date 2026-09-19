@@ -204,6 +204,13 @@
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Matters"),
       el("p", "sub", "Each matter is one invention: its disclosure, its sessions with the assistant, and the records you keep.")));
+    // This page is the version the server started with. When a newer one is installed, say so rather than let
+    // the difference show up as a button that fails.
+    if (data.update_waiting) {
+      p.append(el("div", "update-note", el("b", "", "A newer version of Probant is installed. "),
+        "To use it, restart Probant home: press Ctrl+C in the terminal it runs in, then run ir probant home again. "
+        + "Sessions started from this page end with it, so finish them first."));
+    }
     for (const l of data.running || []) {
       p.append(el("div", "running-row", el("span", "", `Session for ${l.matter}: `),
         l.state === "ready" ? button("Open the session", "primary small", () => openLocal(l.url)) : el("span", "sub", "starting…")));

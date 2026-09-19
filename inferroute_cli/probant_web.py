@@ -92,6 +92,44 @@ SECURITY_HEADERS = {
 }
 
 
+class PageFiles:
+    """The page's files as they were when this server started, and whether the installed code has changed since.
+
+    A server that read its page fresh from disk on every request showed a page NEWER than the code answering it:
+    on 19 Sep the home page offered "Delete matter" to a server started before the delete route existed, and
+    the button failed with a bare 404. Serving the snapshot keeps page and server the same version; `stale()`
+    lets the page say that a newer version is installed and a restart will bring it in."""
+
+    def __init__(self, names) -> None:
+        self.files = {n: (STATIC / n).read_bytes() for n in names}
+        self.stamp = self._stamp()
+
+    @staticmethod
+    def _stamp() -> tuple:
+        # Size and modification time of every file of the package that a running server would be missing:
+        # cheap enough for every overview request, and changed by any install, checkout or edit.
+        root = Path(__file__).resolve().parent
+        out = []
+        for p in sorted([*root.glob("*.py"), *STATIC.iterdir()]):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append((p.name, st.st_size, st.st_mtime_ns))
+        return tuple(out)
+
+    def stale(self) -> bool:
+        return self._stamp() != self.stamp
+
+    def handler(self, name: str, media: str):
+        from fastapi.responses import Response
+        data = self.files[name]
+
+        async def serve():
+            return Response(data, media_type=media)
+        return serve
+
+
 def install_guard(app: Any, port: Callable[[], int], token: Callable[[], str]) -> None:
     """The rules every local Probant page lives by, installed once per app so the session page and the home
     page cannot drift: answer only our own Host (a name rebound to 127.0.0.1 still sends its own Host), refuse
@@ -479,11 +517,8 @@ class Bridge:
         bridge = self
 
         install_guard(app, lambda: bridge.port, lambda: bridge.token)
-
-        def static(name: str, media: str):
-            async def handler():
-                return Response((STATIC / name).read_bytes(), media_type=media)
-            return handler
+        files = PageFiles(("index.html", "common.js", "app.js", "app.css"))
+        static = files.handler
 
         app.get("/")(static("index.html", "text/html; charset=utf-8"))
         app.get("/common.js")(static("common.js", "text/javascript; charset=utf-8"))

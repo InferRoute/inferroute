@@ -419,3 +419,32 @@ def test_the_extension_parses():
     if "SYNTAX" not in r.stdout and "PARSED" not in r.stdout and "LOADED" not in r.stdout:
         pytest.skip(f"this node cannot load TypeScript: {r.stderr.strip()[:120]}")
     assert "SYNTAX" not in r.stdout, r.stdout
+
+
+def test_a_next_step_is_sent_whole_or_not_at_all():
+    """19 Sep: next-step buttons read "…to deepen the weakly matched endorsemen…". Each button SENDS exactly its
+    text, so the cut was not cosmetic — the assistant would have received a broken half-instruction. A step is
+    now shown and sent in full; one too long to be a button is dropped whole, never cut. Runs the extension's
+    own cleanSteps() in node."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index("const NEXT_MAX")
+    fn = ts[start:ts.index("\n}\n", ts.index("function cleanSteps")) + 3]
+    long_ok = "Run a broad search on 'ledger endorsement structure inside a trusted execution environment that gates secret resealing' to deepen the weakly matched endorsement family"
+    runaway = "x " * 300
+    js = fn + f"\nconsole.log(JSON.stringify(cleanSteps({json.dumps([long_ok, runaway, '/next do it', 'a', 'b1', 'c2', 'd3', 'e4'])})));"
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out[0] == long_ok and len(long_ok) > 160                    # whole, although longer than the old cut
+    assert all("…" not in s for s in out)                               # nothing is ever shortened
+    assert not any(s.startswith("x ") for s in out)                     # the runaway is dropped, not cut
+    assert "do it" in out[1] and len(out) <= 4
+    schema = ts[ts.index('"Offer the professional two to four'):ts.index("async execute(_toolCallId, params) {", ts.index('"Offer the professional two to four'))]
+    assert "maxLength" not in schema and "maxItems" not in schema     # one long step must not reject them all

@@ -398,13 +398,15 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 // A suggested next step is sent as the professional's own message when they choose it. It must never be a
 // command or a shell line: "/relevant X" would record a mark as the professional's, and "!…" runs a shell.
 const NEXT_MAX = 4;
-const NEXT_LEN = 160;
+// A button sends EXACTLY its text, so a suggestion is never cut: a cut one sends a broken half-instruction
+// ("…to deepen the weakly matched endorsemen…", Henry, 19 Sep). One too long to be a button is dropped whole.
+const NEXT_LEN = 400;
 function cleanSteps(raw: unknown): string[] {
 	const out: string[] = [];
 	for (const item of Array.isArray(raw) ? raw : []) {
 		let t = String(item ?? "").replace(/\s+/g, " ").trim().replace(/^[\/!\s]+/, "").trim();
 		if (t.length < 4) continue;
-		if (t.length > NEXT_LEN) t = `${t.slice(0, NEXT_LEN - 1)}…`;
+		if (t.length > NEXT_LEN) continue;
 		if (!out.includes(t)) out.push(t);
 		if (out.length >= NEXT_MAX) break;
 	}
@@ -972,10 +974,11 @@ export default function (pi: ExtensionAPI) {
 			"Call it last in an answer that reports or discusses search results, and write nothing after it. Write each step in " +
 			"the professional's own words, as they would ask you (\"Find documents like US-5795305-A\", \"Use my marks to steer " +
 			"the next searches\"), with no tool or parameter names: a follow-up research action within your tools, never a " +
-			"judgment and never a command. Never mention this tool or the steps in your written answer.",
+			"judgment and never a command. Keep each to one sentence, ideally under 160 characters: it is shown and sent " +
+			"in full. Never mention this tool or the steps in your written answer.",
 		promptSnippet: "Offer the professional one-click next research steps (call last)",
 		parameters: Type.Object({
-			steps: Type.Array(Type.String({ maxLength: 200 }), { minItems: 1, maxItems: NEXT_MAX }),
+			steps: Type.Array(Type.String(), { minItems: 1 }),
 		}),
 		async execute(_toolCallId, params) {
 			const steps = cleanSteps(params.steps);

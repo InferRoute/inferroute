@@ -448,3 +448,68 @@ def test_a_next_step_is_sent_whole_or_not_at_all():
     assert "do it" in out[1] and len(out) <= 4
     schema = ts[ts.index('"Offer the professional two to four'):ts.index("async execute(_toolCallId, params) {", ts.index('"Offer the professional two to four'))]
     assert "maxLength" not in schema and "maxItems" not in schema     # one long step must not reject them all
+
+
+def _run_marks_hook(script_tail):
+    """Run the extension's own before_agent_start hook in node, with the marks store stubbed."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    consts = ts[ts.index("const STEP_DEEPER"):ts.index("const NEXT_MAX")]
+    label = next(ln for ln in ts.splitlines() if "const MARK_LABEL" in ln)
+    hook = ts[ts.index("\tlet lastMarksNote"):ts.index("\t});\n", ts.index('pi.on("before_agent_start"')) + 5]
+    harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nlet STATE = {};\n"
+               "let FAIL = false;\nasync function searchCall(){ if (FAIL) throw new Error('down'); return STATE; }\n"
+               "const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n" + hook + "\n"
+               "const run = async () => { const r = await handlers.before_agent_start(); return r ? r.message : null; };\n"
+               + script_tail)
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", harness],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-800:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_marks_ride_with_the_professionals_message_once_per_change():
+    """Henry, 19 Sep: "could we leverage our agent harness to improve, select and/or augment [the next steps]
+    naturally through the LLM without extra requests?" The contract already asks the assistant to read the marks
+    before follow-up research; through the matter_marks tool that is a SECOND model request each time. Handed over
+    with the professional's own message instead — Pi's before_agent_start — it costs no request at all."""
+    out = _run_marks_hook(
+        "docText.set('US-A1', 'Replaying recorded agent traces to improve a sealed model');\n"
+        "STATE = { marks: { 'US-A1': { latest: { value: 'relevant' } }, 'US-C3': { latest: { value: 'known' } } } };\n"
+        "const first = await run();\n"
+        "const again = await run();                                   // nothing changed\n"
+        "STATE = { marks: { ...STATE.marks, 'US-B2': { latest: { value: 'not-relevant' } } } };\n"
+        "const changed = await run();\n"
+        "STATE = {}; const none = await run();\n"
+        "FAIL = true; STATE = { marks: { 'US-Z9': { latest: { value: 'relevant' } } } }; const down = await run();\n"
+        "console.log(JSON.stringify({ first, again, changed: !!changed, none, down }));")
+    first = out["first"]
+    assert first["customType"] == "probant-marks" and first["display"] is False
+    text = first["content"]
+    assert 'Marked relevant: US-A1 "Replaying recorded agent traces to improve a sealed model"' in text
+    assert "Marked known art: US-C3" in text
+    # The same candidates the page would offer, so the assistant can keep, reword, merge or drop them.
+    for c in ("Look deeper at the ones I marked relevant", "Find documents like US-A1", "Continue the survey, leaving out"):
+        assert c in text, c
+    assert "keep, reword" in text and "do not reply to it or mention it" in text
+    assert out["again"] is None                          # unchanged marks are not sent again: nothing piles up
+    assert out["changed"] is True
+    assert out["none"] is None and out["down"] is None   # no marks, or the store unreachable: no note, no blocked turn
+
+
+def test_the_page_and_the_extension_word_the_mark_steps_identically():
+    """The page recognises which mark steps the assistant already offered by their exact wording (and by the
+    publication number). Two copies of a string drift; this holds them together."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    js = (Path(PA.__file__).resolve().parent / "probant_web" / "app.js").read_text()
+    import re as _re
+    grab = lambda src, name: _re.search(name + r' = "([^"]+)"', src).group(1)
+    assert grab(ts, "const STEP_DEEPER") == grab(js, "const DEEPER")
+    assert grab(ts, "const STEP_LEAVE_OUT") == grab(js, "const LEAVE_OUT")
+    assert "`Find documents like ${key}`" in ts and "`Find documents like ${k}`" in js

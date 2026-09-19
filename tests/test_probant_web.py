@@ -704,3 +704,21 @@ def test_a_document_seen_before_names_the_search_by_what_it_was_about():
     assert "also in ‘${short}’" in body
     assert "also in search ${no}" in body          # only when the earlier search is not on this page
     assert "tag.title = " in body                   # the full wording on hover, since the pill is cut short
+
+
+def test_a_slip_in_an_optional_hint_costs_the_hint_never_the_search():
+    """19 Sep: the assistant named a search with an 86-character label; the schema capped it at 80, so Pi
+    rejected the WHOLE call — "Validation failed for tool prior_art_search: feature: must not have more than
+    80 characters" — and the page showed that raw, with the full request dumped in, in red. The code already
+    shortened labels; the schema limit only turned a cosmetic slip into a lost search."""
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    schema = ts[ts.index('name: "prior_art_search"'):ts.index("async execute(_toolCallId, params, signal, onUpdate, ctx)")]
+    for limit in ("maxLength", "minimum", "maximum", "Type.Literal("):
+        assert limit not in schema, f"an optional hint carries a hard schema limit again: {limit}"
+    assert "const k = Math.min(50, Math.max(1, Math.round(Number(asked) || 10)));" in ts
+    assert "if (feature.length > 80) {" in ts
+    from inferroute_cli import probant_timing as T
+    assert T.k_of({"k": 100}) == 50 and T.k_of({"depth": "Medium"}) == 10 and T.k_of({"depth": "BROAD"}) == 50
+    js = (STATIC / "app.js").read_text()
+    assert "Validation failed for tool" in js                     # shown as the assistant's slip, quietly
+    assert "it corrected it" not in js                            # the page cannot know that

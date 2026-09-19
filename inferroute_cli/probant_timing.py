@@ -30,12 +30,17 @@ KEEP = 400                                              # recent waits used; the
 
 
 def k_of(args: Dict[str, Any]) -> int:
+    """The number of results the search will actually ask for — the extension's own rule: `k` if given, else
+    the depth word, unknown words meaning the default, always held to 1-50 (what the search machine serves)."""
+    k = None
     try:
         if args.get("k") is not None:
-            return int(args["k"])
+            k = round(float(args["k"]))
     except (TypeError, ValueError):
-        pass
-    return DEPTH_K.get(str(args.get("depth") or "quick"), 10)
+        k = None
+    if k is None:
+        k = DEPTH_K.get(str(args.get("depth") or "quick").lower(), 10)
+    return min(50, max(1, k))
 
 
 def bucket(k: Optional[int]) -> str:

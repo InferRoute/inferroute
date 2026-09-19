@@ -283,6 +283,7 @@ class Bridge:
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
         self.opening = ""                   # a reading session's first instruction; empty for a matter session
+        self.oneshot = False                # a round of a portfolio run: end the session when its turn ends
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
@@ -306,7 +307,11 @@ class Bridge:
         # restarted from zero and a finished search claimed "0.0 s". Durations come from these stamps now.
         event = {"seq": self._seq, "at": round(time.time() * 1000), **event}
         if event["kind"] == "busy":
-            self.busy = bool(event["value"])
+            was, self.busy = self.busy, bool(event["value"])
+            # One round, one turn: when a portfolio round's turn ends, end the session rather than leaving it
+            # open with nobody at the keyboard and the next round waiting behind it.
+            if self.oneshot and was and not self.busy and not self.dialogs:
+                asyncio.ensure_future(self._end_round())
         if event["kind"] == "dialog":
             self.dialogs[str(event["id"])] = event
         # A tool call the agent started and never finished. The page shows "checking the search machine…"
@@ -387,6 +392,16 @@ class Bridge:
                 fh.write(json.dumps({"at": at, **row}, ensure_ascii=False) + "\n")
         except OSError:
             pass
+
+    async def _end_round(self) -> None:
+        """Close a one-shot round: let the last events flush, then stop the agent and the page."""
+        await asyncio.sleep(1.0)
+        if self.busy:                        # a follow-up turn began: not the end of the round after all
+            return
+        try:
+            await self.stop_agent()
+        finally:
+            self.closed.set()
 
     async def open_with(self) -> None:
         """Send the opening instruction, once, when the agent is ready for one."""
@@ -845,7 +860,10 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     # A reading session opens itself: the professional handed over a document, not a conversation, and an
     # agent sitting at an empty prompt waiting to be told to read it is a page that looks broken.
     if mode == "intake":
-        bridge.opening = OPENING_INSTRUCTION
+        bridge.opening = str(probant.get("instruction") or OPENING_INSTRUCTION)
+        # A round of a portfolio run has nobody at the keyboard: when its turn ends, the round is over, and
+        # a session left open would hold the next round behind it.
+        bridge.oneshot = bool(probant.get("oneshot"))
     url = open_url(bridge)
     opened = launch_browser(url)
     console.print(f"\n[bold]Open this session in your browser:[/]  {url}")

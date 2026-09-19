@@ -238,9 +238,11 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # search machine while it is. The proposals file sits in the session's working directory, the one place
     # the sandbox lets it write.
     intake = str(env.get("IR_INTAKE_DIR") or "")
-    if intake:
-        tools = TOOLS + (PROPOSE_TOOL,)
-        env["IR_INTAKE_OUT"] = str(Path(intake) / "proposals.jsonl")
+    portfolio_out = str(env.get("IR_CLUSTER_OUT") or "")
+    if intake or portfolio_out:
+        tools = TOOLS + ((PROPOSE_TOOL,) if intake else ()) + ((CLUSTER_TOOL,) if portfolio_out else ())
+        if intake:
+            env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
         tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
         env.pop("IR_INTAKE_OUT", None)
@@ -315,6 +317,7 @@ LAST_SESSION_ID: str | None = None
 MARKS_TOOL = "matter_marks"
 NEXT_TOOL = "suggest_next_steps"
 PROPOSE_TOOL = "propose_matter"          # intake only: reading a document and proposing matters from it
+CLUSTER_TOOL = "propose_cluster"         # portfolio only: grouping candidates, round after round
 _SEARCH_PROXIES: list = []
 
 

@@ -158,7 +158,11 @@
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 160;
     return () => { if (nearBottom) log.scrollTop = log.scrollHeight; };
   }
-  function hideWelcome() { $("empty").hidden = true; }
+  function hideWelcome() {
+    if ($("empty").hidden) return;
+    $("empty").hidden = true;
+    renderMarkSteps();            // the welcome's offers are gone: the bar takes over, or the box is empty
+  }
 
   function addUser(text) {
     hideWelcome();
@@ -259,9 +263,10 @@
   // When nothing is marked yet the welcome's suggestions are gone as soon as the first message is sent, and
   // the professional is left with an empty box and no idea what this thing takes. The bar always offers
   // something: their marks when they have any, plain ideas when they do not.
+  const SUMMARISE_IDEA = "Summarise what the searches have surfaced so far";
   const IDEAS = ["Run a prior-art survey of the disclosure",
                  "Search one feature of the disclosure on its own",
-                 "Summarise what the searches have surfaced so far"];
+                 SUMMARISE_IDEA];
   function renderMarkSteps() {
     const bar = $("mark-steps");
     const list = $("mark-steps-list");
@@ -274,7 +279,15 @@
     for (const k of relevant.slice(0, 2)) steps.push(`Find documents like ${k}`);
     if (excluded) steps.push(LEAVE_OUT);
     const fromMarks = steps.length > 0;
-    for (const step of (fromMarks ? steps : IDEAS)) {
+    // Ideas are about the conversation, so they wait for one. Before the first message the welcome's own
+    // suggestions are on screen, and a second row of the same offers only made the page look doubled
+    // (Henry, 19 Sep). Steps from your MARKS still show at once: they carry the matter over from an
+    // earlier session, which is exactly what a fresh session is for.
+    const started = $("empty").hidden;
+    if (!fromMarks && !started) { bar.hidden = true; return; }
+    // And no idea that presumes something that has not happened: nothing to summarise before a search.
+    const ideas = IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0);
+    for (const step of (fromMarks ? steps : ideas)) {
       const b = el("button", "", step);
       b.type = "button";
       b.addEventListener("click", () => send(step));
@@ -590,6 +603,7 @@
     entry.n = docs.length;
     refreshCardSummary(entry);
     outlineUpdate(entry, "");            // the description stays; the count lives in the card head
+    renderMarkSteps();                   // a search now exists, so "summarise what they surfaced" makes sense
     s();
   }
 

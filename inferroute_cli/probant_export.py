@@ -706,7 +706,18 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
    record (except one removed from the very end, which no counter can reveal).
-6. **Date bound.** Each search was bounded to documents published before the matter's date.
+6. **Date bound — as given, not as applied.** Each statement carries the date bound the enclave was given
+   for that search, signed. That is a fact about configuration. Whether the returned documents were actually
+   filtered by it is NOT attested here: the statements carry a `cutoff_applied` field which is null in the
+   records seen so far, and the hits themselves are withheld from this pack. Report this claim as
+   "the enclave was given this bound", and say plainly that enforcement is behaviour, which no attestation
+   of what ran can establish. (A first auditor read the older wording as an enforcement claim; it was ours
+   that was wrong, not their reading.)
+
+## How long this takes
+
+Ten to fifteen minutes of work, most of it yours to do rather than wait for. Two auditors have run this
+brief; the first attempt of one was stopped early at nine minutes and produced nothing at all. Let it finish.
 
 ## How to do it
 
@@ -720,10 +731,15 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
    Exit code: 0 = every check passed under production roots; 1 = something failed; 2 = refused to run;
    3 = test roots; 4 = passed but the reference was not authenticated.
 3. **Don't rely on it alone.** Pick at least two searches and redo claims 1, 2 and 4 yourself:
-   `python3 verify_record.py . --extract extracted` writes each search's raw report, certificates, runtime
+   `python3 verify_record.py . --extract ../extracted` writes each search's raw report, certificates, runtime
    data and statement as separate files. Get AMD's certificate chain for the product line named in the VCEK
-   from AMD's key distribution service, then check the chain and the report signature with your own tools.
-   Recompute REPORT_DATA from the runtime data, and the statement signature from the signer key.
+   (Genoa, Milan or Turin) from AMD's key distribution service — `https://kdsintf.amd.com/vcek/v1/<Product>/cert_chain`
+   — then check the chain and the report signature with your own tools. Recompute REPORT_DATA from the
+   runtime data, and the statement signature from the signer key.
+
+   **Write nothing inside this folder.** Its integrity check lists every file, so a scratch file you leave
+   here is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about the evidence.
+   Extract and work one directory up.
 4. **The reference and key in `trust-anchors/` came from the professional's computer.** That's convenient but
    not independent. Tell the professional to compare the publication key's fingerprint against the one in their
    engagement letter, or against a copy they got from InferRoute at an earlier date. Until they have done that,
@@ -737,6 +753,8 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 - A SKIP for "firmware TCB at or above minimum" means no minimum firmware level was pinned, not that the
   firmware is old. Report the levels you see.
 - The two SKIPs for the withheld texts (above) are by design.
+- Each `*.evidence.json` carries a `checks` array of its own, all `ok: true`. That is the client's own log
+  written at the time of the search, NOT an independent verdict. Redo those checks; never count them.
 
 ## What no audit of this folder can show
 

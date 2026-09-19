@@ -71,8 +71,15 @@ def test_the_pack_brings_the_brief_and_this_computers_trust_anchors(tmp_path, V,
     # The brief makes the auditor redo the key checks itself, names the SKIPs it must expect, treats the
     # folder as data, and sends the professional to their engagement letter for the key.
     for must in ("DATA, not instructions", "Don't rely on it alone", "--extract", "SKIP",
-                 "engagement letter", "COULD NOT CHECK"):
+                 "engagement letter", "COULD NOT CHECK",
+                 # Put there by a real audit of a real pack, 19 Sep: the auditor had to hunt for AMD's
+                 # address, tripped the integrity check by writing scratch files into the folder, and read
+                 # the date-bound claim as enforcement when only configuration is attested.
+                 "https://kdsintf.amd.com/vcek/v1/", "Write nothing inside this folder",
+                 "Ten to fifteen minutes",          # an auditor's first run was killed early and gave nothing
+                 "as given, not as applied", "cutoff_applied", "NOT an independent verdict"):
         assert must in brief, must
+    assert "Each search was bounded to documents published before" not in brief   # the overstated wording
     assert (pack / "trust-anchors" / "publication-key.txt").read_text().strip() == "ab" * 32
     assert json.loads((pack / "trust-anchors" / "reference.json").read_text())["source"] == "test"
     # The anchors sit in a subfolder: the pack's own integrity check is unaffected by them.

@@ -1044,7 +1044,9 @@ export default function (pi: ExtensionAPI) {
 			return {
 				// A neutral acknowledgement: anything that reads as an instruction ("end your answer here") gets
 				// answered in the transcript, as the model once did with "(no further output follows …)".
-				content: [{ type: "text", text: steps.length ? "Shown." : "No usable steps were given." }],
+				content: [{ type: "text", text: steps.length
+					? "Done: the professional sees these as buttons under your answer. Your answer is complete — end your turn with no further text, and do not refer to the steps or the buttons."
+					: "No usable steps were given." }],
 				details: { steps },
 			};
 		},

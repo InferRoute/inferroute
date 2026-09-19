@@ -799,3 +799,14 @@ def test_search_cards_start_folded_and_the_head_carries_the_counts_and_overlap()
     # Folded from the start — every search, including the one running — with a refusal still opening itself.
     assert "      cards.set(ev.call, entry);\n      setCollapsed(entry, true);" in js
     assert "setCollapsed(entry, false);                 // a refusal is short and worth reading" in js
+
+
+def test_a_failed_answer_offers_a_way_on_that_sends_exactly_its_words():
+    """Henry, 19 Sep: "The AI machine couldn't be reached … (4 times)" — "and I don't even have a button to
+    retry". The button asks the assistant to continue rather than resending the question, so a failure after
+    searches had run does not redo them; and it sends exactly what it says."""
+    js = (STATIC / "app.js").read_text()
+    body = js[js.index("function showError"):js.index("function showError") + 1400]
+    assert 'const again = el("button", "ghost small", RETRY_TEXT);' in body
+    assert "send(RETRY_TEXT)" in body
+    assert 'const RETRY_TEXT = "Continue where you left off";' in js

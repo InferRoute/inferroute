@@ -240,7 +240,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     intake = str(env.get("IR_INTAKE_DIR") or "")
     portfolio_out = str(env.get("IR_CLUSTER_OUT") or "")
     if intake or portfolio_out:
-        tools = TOOLS + ((PROPOSE_TOOL,) if intake else ()) + ((CLUSTER_TOOL,) if portfolio_out else ())
+        tools = TOOLS + ((PROPOSE_TOOL, BATCH_TOOL) if intake else ()) + ((CLUSTER_TOOL,) if portfolio_out else ())
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
@@ -318,6 +318,7 @@ MARKS_TOOL = "matter_marks"
 NEXT_TOOL = "suggest_next_steps"
 PROPOSE_TOOL = "propose_matter"          # intake only: reading a document and proposing matters from it
 CLUSTER_TOOL = "propose_cluster"         # portfolio only: grouping candidates, round after round
+BATCH_TOOL = "record_findings"           # many findings in one call: a round trip per finding is the cost
 _SEARCH_PROXIES: list = []
 
 

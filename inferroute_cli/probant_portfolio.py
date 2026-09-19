@@ -9,14 +9,14 @@ The shape, and which side does what:
 
 * **Extract** — one sealed session per document proposes candidate units, each with a verbatim quote. The
   HOST checks every quote against that document and drops the rest, counting the drops.
-* **Cluster** — a sealed session sees only the candidates' titles and summaries (its own compact words, not
-  the filings) and partitions them into named clusters.
-* **Converge** — each round re-partitions the previous round's clusters, so ideas may merge or split as the
-  abstraction rises. **The host decides when it has converged**, by comparing partitions between rounds. An
-  agent asked whether it has converged will say yes; a partition compared with its predecessor cannot.
-* **Rank** — the host computes the signals that are arithmetic (how many candidates, how many distinct
-  documents, how many unfiled), the session argues a ranking against them, and both are kept. The computed
-  numbers are never replaced by the argument.
+* **Evidence** — the host checks each quote verbatim against the document it NAMES (not the portfolio: "this
+  sentence exists somewhere in three megabytes" is not evidence that this filing says it), records where it
+  sits, and reports the largest span of a document no quote evidences.
+
+What is NOT here, deliberately: a loop that re-groups its own groupings until the grouping stops moving. A
+partition that agrees with itself measures the model's stability, not the corpus. See
+docs/portfolio-analysis-proposal.md; `movement()` survives as a diagnostic for comparing two groupings, not
+as a stopping rule.
 
 Nothing here creates a matter, and no session in this pipeline is given a search tool: a whole portfolio is
 in context, and none of it may leave for a search machine.
@@ -37,9 +37,7 @@ from . import probant as S
 
 MAX_FILES = 400
 MAX_BYTES = 40_000_000
-MAX_ROUNDS = 6                 # a cap, not a target: rounds cost money and a partition that will not settle
 CANDIDATES = "candidates.jsonl"
-CLUSTERS = "clusters-round-%d.jsonl"
 DOCS = "documents"
 
 
@@ -49,6 +47,18 @@ def portfolio_root() -> Path:
 
 def _clean(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+# Markdown markers, removed from BOTH sides before a quote is checked. Measured 20 Sep: of 31 findings from
+# one filing, 17 failed verbatim matching and every one of them failed on formatting — the model quotes the
+# sentence, not the `**` and `#` around it. Unicode punctuation and case accounted for none of them, so
+# neither is touched: this stays an EXACT match on a form both sides agree about, not a fuzzy one. A
+# paraphrase still fails, which is the whole point of the check.
+_MARKUP = re.compile(r"[*_`#>]+")
+
+
+def canonical(text: str) -> str:
+    return re.sub(r"\s+", " ", _MARKUP.sub("", str(text or ""))).strip()
 
 
 def stage(paths: Sequence[Path], name: str = "") -> Dict[str, Any]:
@@ -129,7 +139,7 @@ def candidates(ident: str) -> List[Dict[str, Any]]:
     d = path_of(ident)
     flat: Dict[str, str] = {}
     for doc in meta_of(ident)["documents"]:
-        flat[doc["name"]] = re.sub(r"\s+", " ", (d / DOCS / doc["name"]).read_text(encoding="utf-8", errors="replace"))
+        flat[doc["name"]] = canonical((d / DOCS / doc["name"]).read_text(encoding="utf-8", errors="replace"))
     out: List[Dict[str, Any]] = []
     seen = set()
     for row in _rows(d / CANDIDATES):
@@ -138,50 +148,20 @@ def candidates(ident: str) -> List[Dict[str, Any]]:
         if not title or not summary or len(quote) < 20:
             continue
         body = flat.get(source)
-        if body is None or quote not in body:          # not in the document it names: dropped, never shown
+        needle = canonical(quote)
+        if body is None or needle not in body:         # not in the document it names: dropped, never shown
             continue
         key = (source, title.lower())
         if key in seen:
             continue
         seen.add(key)
-        out.append({"id": f"c{len(out) + 1}", "title": title, "summary": summary, "quote": quote, "source": source})
+        out.append({"id": f"c{len(out) + 1}", "title": title, "summary": summary, "quote": quote,
+                    "source": source, "where": body.find(needle), "of": len(body)})
     return out
 
 
 def dropped(ident: str) -> int:
     return max(0, len(_rows(path_of(ident) / CANDIDATES)) - len(candidates(ident)))
-
-
-def clusters(ident: str, round_no: int, valid_ids: Optional[Sequence[str]] = None) -> Dict[str, Any]:
-    """One round's clustering, and what it did with every candidate.
-
-    Returns the clusters AND the accounting: which ids were left out, which were claimed twice, which do not
-    exist. A round that silently loses a third of the portfolio is the failure this reports rather than hides.
-    """
-    ids = list(valid_ids if valid_ids is not None else [c["id"] for c in candidates(ident)])
-    known = set(ids)
-    out, assigned, twice, unknown = [], set(), [], []
-    for row in _rows(path_of(ident) / (CLUSTERS % round_no)):
-        label, thesis = _clean(row.get("label"), 90), _clean(row.get("thesis"), 600)
-        named = [_clean(m, 24) for m in (row.get("members") or []) if isinstance(m, str)]
-        unknown.extend(m for m in named if m not in known)
-        kept = []
-        for m in (m for m in named if m in known):
-            if m in assigned:
-                twice.append(m)
-                continue
-            assigned.add(m)
-            kept.append(m)
-        if not label or not kept:
-            continue
-        out.append({"label": label, "thesis": thesis, "members": kept, "why": _clean(row.get("why"), 600)})
-    return {"clusters": out, "missing": [i for i in ids if i not in assigned], "twice": sorted(set(twice)),
-            "unknown": sorted(set(unknown)), "round": round_no}
-
-
-def partition(clustered: Dict[str, Any]) -> List[frozenset]:
-    """A clustering as the only thing worth comparing between rounds: its member sets, labels ignored."""
-    return sorted((frozenset(c["members"]) for c in clustered["clusters"]), key=lambda s: (-len(s), sorted(s)))
 
 
 def movement(before: List[frozenset], after: List[frozenset]) -> float:
@@ -223,62 +203,81 @@ def converged(history: List[List[frozenset]], threshold: float = 0.02) -> Tuple[
     return False, f"the clustering moved {moved:.1%}"
 
 
-def signals(ident: str, clustered: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """What can be counted rather than argued: how big a cluster is, and how much of the portfolio it spans.
 
-    A theme one document repeats ten times is not the same as one six documents arrive at independently, and
-    the difference is arithmetic. The ranking session sees these; it does not get to change them.
+
+# ───────────────────────────── the reading jobs, and what they evidenced ─────────────────────────────
+
+JOB_CHARS = 60_000             # one session's reading: a few dozen pages, well inside the model's context
+OVERLAP = 2_000                # a range boundary must not cut an idea in half: ranges overlap by this much
+
+# The session works in the portfolio directory and the documents sit in documents/. Naming the path wrongly
+# here is not a typo: the first run said "in this directory", the read failed with ENOENT, and the session
+# ended its turn cleanly having recorded nothing — a silent empty result (20 Sep).
+EXTRACT_ONE = ("Read documents/{name}, all of it, and record every distinct technical assertion it makes "
+               "with record_findings — all of them in one call per part you read, not one call each: source "
+               "\"{name}\", a verbatim quote for each. Work through the document "
+               "from start to end — the last part matters as much as the first. Then stop with one line "
+               "saying how many you recorded. Nothing else.")
+
+EXTRACT_RANGE = ("Read documents/{name} from character {start} to character {end} — that range only, "
+                 "and all of it — and record every distinct technical assertion it makes with record_findings, "
+                 "all of them in one call per part you read, not one call each: source \"{name}\", a verbatim "
+                 "quote for each, each quote taken from within that range. Work "
+                 "through it from start to end. Then stop with one line saying how many you recorded. Nothing "
+                 "else.")
+
+
+def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
+    """Split the portfolio into reading jobs: one per document, and a long document into overlapping ranges.
+
+    Deterministic and host-side — no model decides what gets read. A range is not a chunk the session may
+    skip: the instruction names its bounds, and `coverage()` afterwards says which parts of the document any
+    quote actually evidences.
     """
-    by_id = {c["id"]: c for c in candidates(ident)}
+    jobs: List[Dict[str, Any]] = []
+    for doc in meta_of(ident)["documents"]:
+        size = doc["bytes"]
+        if size <= budget:
+            jobs.append({"document": doc["name"], "start": 0, "end": size, "whole": True})
+            continue
+        start = 0
+        while start < size:
+            end = min(size, start + budget)
+            jobs.append({"document": doc["name"], "start": start, "end": end, "whole": False})
+            if end >= size:
+                break
+            start = end - OVERLAP
+    return jobs
+
+
+def instruction_for(job: Dict[str, Any]) -> str:
+    if job.get("whole"):
+        return EXTRACT_ONE.format(name=job["document"])
+    return EXTRACT_RANGE.format(name=job["document"], start=job["start"], end=job["end"])
+
+
+def coverage(ident: str) -> List[Dict[str, Any]]:
+    """What the reading actually evidenced, per document.
+
+    The measure is the LARGEST SPAN no quote falls in, not how far the last quote reached. A session that
+    jumps to something at 95% and skips the middle reaches 95% and evidences almost nothing; the largest gap
+    catches that, and the first version of this measure did not. (Corrected in review, 20 Sep.)
+
+    It is reported as evidenced span, never as "read": nothing can show a model read a passage it chose not
+    to quote, and the number must not pretend otherwise.
+    """
+    by_doc: Dict[str, List[int]] = {}
+    for c in candidates(ident):
+        by_doc.setdefault(c["source"], []).append(int(c["where"]))
     out = []
-    for c in clustered["clusters"]:
-        members = [by_id[m] for m in c["members"] if m in by_id]
-        sources = sorted({m["source"] for m in members})
-        out.append({"label": c["label"], "thesis": c["thesis"], "members": c["members"],
-                    "candidates": len(members), "documents": len(sources), "sources": sources})
-    return sorted(out, key=lambda s: (-s["documents"], -s["candidates"], s["label"]))
-
-
-# ───────────────────────────── the run: extract, cluster, converge ─────────────────────────────
-
-EXTRACT = ("Read {name} in the documents directory, all of it, and propose every distinct invention in it "
-           "with propose_matter — one call each, source \"{name}\", quoting the document verbatim. Then stop: "
-           "one line saying how many you proposed and what the document is. Nothing else.")
-
-CLUSTER = ("Read candidates.json in this directory: {n} candidate inventions drawn from {docs} documents of "
-           "one patent portfolio. Group them into themes with propose_cluster — one call per theme, every "
-           "candidate in exactly one theme, ids exactly as given. Prefer the grouping a patent attorney would "
-           "use to decide what to file next: shared technical mechanism, not shared vocabulary. Then stop: "
-           "one line on what the portfolio turns out to be about. Nothing else.")
-
-RECLUSTER = ("Read clusters.json in this directory: the themes you drew last round over the same {n} "
-             "candidates, which are in candidates.json. Reconsider the grouping from the top — merge themes "
-             "that share a mechanism, split one that holds two, move a candidate that sits in the wrong "
-             "place. Call propose_cluster once per theme, every candidate in exactly one theme. If the "
-             "grouping is already right, propose it again unchanged; that is a real answer and it ends the "
-             "work. Then stop: one line on what changed and why. Nothing else.")
-
-
-def round_dir(ident: str, round_no: int) -> Path:
-    return path_of(ident) / f"round-{round_no}"
-
-
-def write_round_inputs(ident: str, round_no: int) -> Dict[str, Any]:
-    """The session's own, compact view of the portfolio: the candidates' titles and summaries — ITS words
-    from the extract pass, never the filings again — and, from the second round, last round's grouping."""
-    d = round_dir(ident, round_no)
-    d.mkdir(parents=True, exist_ok=True)
-    os.chmod(d, 0o700)
-    cands = candidates(ident)
-    slim = [{"id": c["id"], "title": c["title"], "summary": c["summary"], "source": c["source"]} for c in cands]
-    (d / "candidates.json").write_text(json.dumps(slim, indent=1, ensure_ascii=False))
-    os.chmod(d / "candidates.json", 0o400)
-    previous = clusters(ident, round_no - 1) if round_no > 1 else None
-    if previous:
-        by_id = {c["id"]: c["title"] for c in cands}
-        view = [{"label": c["label"], "thesis": c["thesis"],
-                 "members": [{"id": m, "title": by_id.get(m, "")} for m in c["members"]]}
-                for c in previous["clusters"]]
-        (d / "clusters.json").write_text(json.dumps(view, indent=1, ensure_ascii=False))
-        os.chmod(d / "clusters.json", 0o400)
-    return {"candidates": len(cands), "documents": len({c["source"] for c in cands}), "previous": bool(previous)}
+    for doc in meta_of(ident)["documents"]:
+        size = max(1, doc["bytes"])
+        spots = sorted(by_doc.get(doc["name"], []))
+        # Gaps from the start of the document, between consecutive quotes, and to the end.
+        edges = [0, *spots, size]
+        gaps = [b - a for a, b in zip(edges, edges[1:])]
+        biggest = max(gaps) if gaps else size
+        out.append({"document": doc["name"], "bytes": doc["bytes"], "items": len(spots),
+                    "largest_unevidenced": biggest, "largest_unevidenced_share": round(biggest / size, 3),
+                    "first_at": spots[0] if spots else None, "last_at": spots[-1] if spots else None})
+    return sorted(out, key=lambda r: -r["largest_unevidenced_share"])

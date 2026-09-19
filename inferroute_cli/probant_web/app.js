@@ -559,7 +559,23 @@
     paintProgress(entry);
   }
   // One clock for every running search, rather than a timer each that could outlive its card.
-  setInterval(() => { for (const e of cards.values()) if (!e.done && e.startedAt) paintProgress(e); }, 500);
+  setInterval(() => {
+    for (const e of cards.values()) if (!e.done && e.startedAt) paintProgress(e);
+    paintActivityTime();
+  }, 500);
+
+  // "Also in" names the earlier search by what it was about, not by a number you would have to go and look up.
+  // A number is what is left only when the earlier search is not on this page.
+  const searchesByNo = new Map();       // search number → its card entry
+  function seenIn(no) {
+    const e = searchesByNo.get(no);
+    const about = e && e.about ? e.about : "";
+    if (!about) return el("span", "seen", `also in search ${no}`);
+    const short = about.length > 42 ? `${about.slice(0, 41).trimEnd()}…` : about;
+    const tag = el("span", "seen", `also in ‘${short}’`);
+    tag.title = `Also returned by search ${no}: ${about}`;
+    return tag;
+  }
 
   function toolStart(ev) {
     hideWelcome();
@@ -605,6 +621,9 @@
       autoCollapse();
       log.append(card);
       cards.set(ev.call, entry);
+      // What this search was ABOUT, in the words it was run with — how it is named everywhere else on the
+      // page (Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'").
+      entry.about = a.feature ? String(a.feature) : a.like ? `documents like ${String(a.like).toUpperCase()}` : q.replace(/\s+/g, " ").trim();
       outlineAdd({ kind: "search", el: card, label: "Search", detail: a.feature ? `feature: ${a.feature}` : a.like ? `like ${String(a.like).toUpperCase()}` : q.slice(0, 60), entry });
       toolRunning = "Searching the patent database in its sealed machine…";
     } else {
@@ -642,6 +661,7 @@
     if (ev.details && ev.details.searchNo) {
       title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
       entry.searchNo = ev.details.searchNo;
+      searchesByNo.set(entry.searchNo, entry);
     }
     const d = ev.details || {};
     const s = stick();
@@ -676,7 +696,7 @@
       const row = el("li", "doc",
         el("span", "rank", String(idx + 1)),
         el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
-          doc.alsoIn ? el("span", "seen", `also in search ${doc.alsoIn}`) : null, title),
+          doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
         markButtons(keyNo, card));
       title.addEventListener("click", () => row.classList.toggle("open"));
       list.append(row);
@@ -692,10 +712,32 @@
     s();
   }
 
+  // Two clocks on the activity bar (Henry, 19 Sep: "a timer, so we know when it started processing something
+  // new"): how long the CURRENT step has run — it restarts whenever the assistant moves on to something new,
+  // thinking, a search, a prompt for you — and, once that differs, how long since you asked. Both from the
+  // server's stamps on the events, so a reload shows the true times instead of starting again at zero.
+  let turnAt = null;                    // when the assistant took up your message
+  let stepAt = null;                    // when the step now on the bar began
+  let stepText = "";
+  let lastEventAt = null;               // the stamp of the event being handled
+  function fmtWhole(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+  }
+  function paintActivityTime() {
+    const t = $("activity-time");
+    if ($("activity").hidden || stepAt === null) { t.textContent = ""; return; }
+    const now = serverNow();
+    const whole = turnAt !== null && stepAt - turnAt > 1000 ? ` · ${fmtWhole(now - turnAt)} since you asked` : "";
+    t.textContent = `${fmtWhole(now - stepAt)}${whole}`;
+  }
   function updateActivity() {
     const a = $("activity");
     a.hidden = !(busy || toolRunning) || ended || stalled;
-    $("activity-text").textContent = toolRunning || "The assistant is working…";
+    const text = toolRunning || "The assistant is working…";
+    if (text !== stepText) { stepText = text; stepAt = lastEventAt || serverNow(); }
+    $("activity-text").textContent = text;
+    paintActivityTime();
     $("input").placeholder = stalled ? "Stop the current attempt before sending anything else."
       : busy ? "The assistant is working. Anything you send now is delivered when it finishes."
       : "Ask the assistant about this matter…";
@@ -903,9 +945,16 @@
   }
 
   function handle(ev) {
+    if (ev.at) lastEventAt = ev.at;
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
-      case "busy": busy = ev.value; updateActivity(); if (!busy) renderNext(); break;
+      case "busy":
+        busy = ev.value;
+        turnAt = busy ? (ev.at || serverNow()) : null;
+        if (busy) stepText = "";          // a new turn is new work, even if the bar's words are the same
+        updateActivity();
+        if (!busy) renderNext();
+        break;
       case "stall": showStalled(ev.value === true, ev.seconds); break;
       case "conversation_kept": $("kept-note").hidden = false; break;
       case "assistant_start": assistantStart(); break;

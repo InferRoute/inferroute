@@ -87,9 +87,8 @@
 
   // Compact by default (Henry, 19 Sep: "make the private certifications section more compact so that the
   // beginning of your marks is visible without scrolling"). The verdict and one line per protection stay in
-  // view; each protection's points and detail sit behind its own "More", and the explanation and the limits
-  // behind labelled toggles. The limits toggle says HOW MANY there are, so folding them does not hide that
-  // they exist — it is one click, and the exported record carries them in full.
+  // view; each protection's points and detail sit behind its own "More", and the explanation behind a
+  // labelled toggle.
   const VERDICT_WORD = { private: "Private", limited: "Partly protected", blocked: "Not opened" };
   const VERDICT_SEAL = { private: "✓", limited: "!", blocked: "✗" };
   const DOT = { ok: "✓", warn: "!", fail: "✗", off: "", info: "" };   // inside a filled dot, a plain mark reads best
@@ -156,11 +155,8 @@
       chain.append(item);
     }
     body.append(chain);
-    const limits = t.limits || [];
-    if (limits.length) {
-      body.append(el("details", "fold", el("summary", "", `What this can't prove (${limits.length})`),
-        el("ul", "limits", ...limits.map((l) => el("li", "", l)))));
-    }
+    // The limits are not repeated here (Henry, 19 Sep: "not needed or even relevant here"). They are said
+    // where they matter, in the exported record the professional hands on, and in the terminal card.
   }
 
 

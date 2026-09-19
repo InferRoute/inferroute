@@ -872,7 +872,7 @@ def test_the_protection_panel_is_compact_but_hides_nothing_it_cannot_name():
     the limits behind labelled toggles — the limits one saying HOW MANY there are."""
     js = (STATIC / "app.js").read_text()
     body = js[js.index("function renderTrust"):js.index("// ── conversation ──")]
-    assert "What this can't prove (${limits.length})" in body
+    assert "What this can't prove" not in body       # Henry, 19 Sep: not relevant in the panel
     assert 'if (points.length) more.append(el("ul", "item-points"' in body     # points moved behind "More"
     assert '"How a sealed machine keeps this private"' in body
     assert 'head.append(el("ul", "item-points"' not in body                     # no longer shown by default

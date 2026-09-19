@@ -732,6 +732,66 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
+	// ── recording many findings at once ──
+	// One call per finding costs a model turn per finding: measured 20 Sep, 31 findings from 60 KB took
+	// thirteen minutes, ~25 s each, while the reading itself was three calls. Over a 3 MB portfolio that is
+	// eleven hours of round trips for work the model has already done. This takes them in one call.
+	const batchOut = process.env.IR_INTAKE_OUT ?? "";
+	if (batchOut) {
+		pi.registerTool({
+			name: "record_findings",
+			label: "Record findings",
+			description:
+				"Record EVERY finding you have for the part you just read, in ONE call: `findings` is an array of " +
+				"{title, summary, quote, source, priority_date?}. Same rules as one at a time — the quote must be " +
+				"VERBATIM from the document named in `source`, twenty characters or more, and a finding whose quote " +
+				"is not in that document is discarded. Prefer this over calling propose_matter repeatedly: it is the " +
+				"same work in one round trip. Call it as you finish each part of the document rather than saving " +
+				"everything for the end.",
+			promptSnippet: "Record all findings for this part in one call",
+			parameters: Type.Object({
+				findings: Type.Array(Type.Object({
+					title: Type.String(),
+					summary: Type.String(),
+					quote: Type.String(),
+					source: Type.Optional(Type.String()),
+					priority_date: Type.Optional(Type.String()),
+				}), { minItems: 1 }),
+			}),
+			async execute(_toolCallId, params) {
+				const at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+				const rows = (params.findings ?? []).map((f) => ({
+					title: String(f.title ?? "").trim(),
+					summary: String(f.summary ?? "").trim(),
+					quote: String(f.quote ?? "").trim(),
+					source: String(f.source ?? "").trim(),
+					priority_date: String(f.priority_date ?? "").trim(),
+					at,
+				})).filter((r) => r.title && r.summary && r.quote.length >= 20);
+				if (!rows.length) {
+					throw new Error("record_findings needs at least one finding with a title, a summary and a verbatim quote of 20 characters or more; nothing was recorded");
+				}
+				try {
+					mkdirSync(batchOut.replace(/\/[^/]*$/, ""), { recursive: true });
+					writeFileSync(batchOut, rows.map((r) => JSON.stringify(r)).join("\n") + "\n", { flag: "a", mode: 0o600 });
+				} catch (e) {
+					throw new Error(`the findings could not be recorded on this computer: ${(e as Error).message}`);
+				}
+				const dropped = (params.findings ?? []).length - rows.length;
+				return {
+					content: [{ type: "text", text: `Recorded ${rows.length} finding(s)${dropped ? `, ${dropped} incomplete and skipped` : ""}. Carry on reading; call this again for the next part.` }],
+					details: { n: rows.length },
+				};
+			},
+			renderResult(result, _options, theme) {
+				const n = (result.details as { n?: number } | undefined)?.n ?? 0;
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.bold("Findings recorded") + `  ${n}`, 0, 0));
+				return box;
+			},
+		});
+	}
+
 	// ── clustering a portfolio, round after round ──
 	// One call per cluster, each naming the candidates it holds. The host checks the partition (every
 	// candidate exactly once), compares it with the previous round's, and decides whether it has converged:

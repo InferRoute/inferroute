@@ -110,7 +110,8 @@ def read_proposals(ident: str) -> List[Dict[str, Any]]:
     if hashlib.sha256(body.encode("utf-8")).hexdigest() != meta.get("sha256"):
         raise S.ProbantError("the staged document changed after it was staged; refusing to read proposals "
                               "against it. Stage it again.")
-    flat = re.sub(r"\s+", " ", body)
+    from .probant_portfolio import canonical      # markdown markers off both sides; see there for why
+    flat = canonical(body)
     out: List[Dict[str, Any]] = []
     seen = set()
     for line in (d / PROPOSALS).read_text(encoding="utf-8").splitlines() if (d / PROPOSALS).exists() else []:
@@ -125,7 +126,7 @@ def read_proposals(ident: str) -> List[Dict[str, Any]]:
         quote = _clean(row.get("quote"), 600)
         if not title or not summary or len(quote) < 20:
             continue
-        at = flat.find(quote)
+        at = flat.find(canonical(quote))
         if at < 0:                                  # not in the document: dropped, never shown
             continue
         key = title.lower()

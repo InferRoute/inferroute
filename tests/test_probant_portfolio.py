@@ -1,9 +1,9 @@
-"""A portfolio clustered round after round (Henry, 20 Sep: "recursive analysis ... by clustering mentality
-until convergence").
+"""Reading a portfolio: what the host checks, and what it refuses to claim.
 
-The agent does the reading and the grouping. Everything a reader could not check by eye is checked here: that
-a quote is really in the document it names, that a round accounts for every candidate, and that convergence
-is measured from the partitions rather than taken from the agent's word.
+The clustering loop this started as is gone (docs/portfolio-analysis-proposal.md): a partition that agrees
+with itself measures the model, not the corpus. What survives is what a reader cannot check by eye — that a
+quote is really in the document it NAMES, and how much of a document any quote evidences at all. The
+movement metric stays as a diagnostic for comparing two groupings, never as a stopping rule.
 """
 import json
 import stat
@@ -34,12 +34,6 @@ def _stage(src):
 
 def _propose(ident, rows):
     with (P.path_of(ident) / P.CANDIDATES).open("a") as fh:
-        for r in rows:
-            fh.write(json.dumps(r) + "\n")
-
-
-def _cluster(ident, round_no, rows):
-    with (P.path_of(ident) / (P.CLUSTERS % round_no)).open("a") as fh:
         for r in rows:
             fh.write(json.dumps(r) + "\n")
 
@@ -75,24 +69,6 @@ def test_a_quote_counts_only_against_the_document_it_names(home):
     assert P.dropped(ident) == 3
 
 
-def test_a_round_accounts_for_every_candidate_and_says_what_it_did_not(home):
-    _, src = home
-    ident = _stage(src)["id"]
-    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
-    _propose(ident, [
-        {"title": "Cooling jacket", "summary": "s", "quote": "COOLANT-MARKER channels moulded between", "source": first},
-        {"title": "Swelling", "summary": "s", "quote": "SWELL-MARKER impedance drift over fifty", "source": second},
-    ])
-    _cluster(ident, 1, [
-        {"label": "Thermal", "thesis": "heat out of the pack", "members": ["c1", "c1", "c99"], "why": "w"},
-        {"label": "Empty after checking", "thesis": "t", "members": ["c99"], "why": "w"},
-    ])
-    r = P.clusters(ident, 1)
-    assert [c["label"] for c in r["clusters"]] == ["Thermal"]     # a cluster of only unknown ids is not one
-    assert r["clusters"][0]["members"] == ["c1"]                  # claimed twice, counted once
-    assert r["twice"] == ["c1"] and r["missing"] == ["c2"] and r["unknown"] == ["c99"]
-
-
 def test_convergence_is_measured_from_the_partitions_not_asserted(home):
     p1 = [frozenset({"c1", "c2"}), frozenset({"c3"})]
     p2 = [frozenset({"c1", "c2"}), frozenset({"c3"})]            # same membership, different labels upstream
@@ -111,20 +87,25 @@ def test_convergence_is_measured_from_the_partitions_not_asserted(home):
     assert P.converged([ten, nine])[0] is False
 
 
-def test_the_signals_are_counted_and_a_theme_spanning_documents_outranks_a_repeated_one(home):
+
+
+def test_a_quote_stripped_of_markdown_still_verifies_but_a_paraphrase_does_not(home):
+    """Measured 20 Sep on a real filing: 17 of 31 findings failed verbatim matching, and EVERY one failed on
+    markdown — the model quotes the sentence, not the `**` and `#` around it. Unicode punctuation and case
+    accounted for none, so neither is touched. This stays an exact match on a form both sides agree about."""
     _, src = home
-    ident = _stage(src)["id"]
-    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    (src / "formatted.md").write_text(
+        "## A heading\n\n**The jacket** has `COOLANT-MARKER` channels moulded *between* the cells.\n")
+    ident = P.stage([src / "formatted.md"], "formatted")["id"]
+    name = P.meta_of(ident)["documents"][0]["name"]
     _propose(ident, [
-        {"title": "Cooling jacket", "summary": "s", "quote": "COOLANT-MARKER channels moulded between", "source": first},
-        {"title": "Jacket, again", "summary": "s", "quote": "channels moulded between the cells of a pack", "source": first},
-        {"title": "Swelling", "summary": "s", "quote": "SWELL-MARKER impedance drift over fifty", "source": second},
+        # As the model writes it: the sentence, without the formatting.
+        {"title": "Jacket", "summary": "s", "source": name,
+         "quote": "The jacket has COOLANT-MARKER channels moulded between the cells."},
+        # A paraphrase of the same sentence: still dropped, which is the point of the check.
+        {"title": "Paraphrase", "summary": "s", "source": name,
+         "quote": "The jacket contains marked coolant channels formed between the cells."},
     ])
-    _cluster(ident, 2, [
-        {"label": "Thermal", "thesis": "t", "members": ["c1", "c2"], "why": "w"},
-        {"label": "Across the portfolio", "thesis": "t", "members": ["c3"], "why": "w"},
-    ])
-    sig = P.signals(ident, P.clusters(ident, 2))
-    assert [s["label"] for s in sig] == ["Thermal", "Across the portfolio"]
-    assert sig[0]["candidates"] == 2 and sig[0]["documents"] == 1
-    assert sig[1]["candidates"] == 1 and sig[1]["documents"] == 1
+    assert [c["title"] for c in P.candidates(ident)] == ["Jacket"]
+    assert P.dropped(ident) == 1
+    assert P.canonical("**bold** and `code` and # head") == "bold and code and head"

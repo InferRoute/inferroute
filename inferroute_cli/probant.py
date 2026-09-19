@@ -457,8 +457,9 @@ def main(argv: list[str] | None = None) -> int:
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
     pf = sub.add_parser("portfolio", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
-    pf.add_argument("--rounds", type=int, default=0, help="stop after this many clustering rounds")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
+    pf.add_argument("--budget", type=int, default=0, help="characters per reading job (default 60000)")
+    pf.add_argument("--only", default="", help="only documents whose name contains this")
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
     pr2.add_argument("id")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
@@ -492,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
-            return cmd_portfolio(a.folder, rounds=a.rounds, max_docs=a.max_docs)
+            return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "proposals":
@@ -513,50 +514,67 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def cmd_portfolio(path: str, rounds: int = 0, max_docs: int = 0) -> int:
-    """Read a portfolio of documents and cluster what it contains, round after round, until it settles.
+def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "") -> int:
+    """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
 
-    Every round is one sealed session with one turn: extract (one per document), then cluster, then
-    re-cluster over the previous round's grouping. The host decides when it has converged by comparing the
-    partitions — not by asking the session whether it is done.
+    One sealed session per reading job, planned host-side. No clustering, no rounds: see
+    docs/portfolio-analysis-proposal.md for why the loop was dropped.
     """
+    import time
     from . import probant_portfolio as PF
     src = Path(path).expanduser()
     files = sorted(p for p in (src.rglob("*") if src.is_dir() else [src])
                    if p.is_file() and p.suffix.lower() in (".md", ".txt", ".json", ".text"))
+    if only:
+        files = [p for p in files if only.lower() in p.name.lower()]
     if max_docs:
         files = files[:max_docs]
     meta = PF.stage(files, src.name)
     d = PF.path_of(meta["id"])
-    print(f"portfolio {meta['id']}: {len(meta['documents'])} document(s), {meta['bytes'] / 1e6:.1f} MB")
-    for doc in meta["documents"]:
-        print(f"  reading {doc['name']} ({doc['bytes'] / 1000:.0f} KB)…", flush=True)
-        rc = _portfolio_round(d, PF.EXTRACT.format(name=doc["name"]), out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)},
-                              cwd=d / PF.DOCS)
-        if rc != 0:
-            print(f"    that document's session ended with {rc}; going on with the rest")
-    print(f"  {len(PF.candidates(meta['id']))} candidate(s) kept, {PF.dropped(meta['id'])} dropped "
-          f"(a quote that is not in the document it names is dropped)")
-    history: list = []
-    limit = rounds or PF.MAX_ROUNDS
-    for n in range(1, limit + 1):
-        shape = PF.write_round_inputs(meta["id"], n)
-        text = (PF.CLUSTER if n == 1 else PF.RECLUSTER).format(n=shape["candidates"], docs=shape["documents"])
-        print(f"  round {n}: grouping {shape['candidates']} candidates…", flush=True)
-        rc = _portfolio_round(d, text, out={"IR_CLUSTER_OUT": str(d / (PF.CLUSTERS % n))}, cwd=PF.round_dir(meta["id"], n))
-        got = PF.clusters(meta["id"], n)
-        history.append(PF.partition(got))
-        print(f"    {len(got['clusters'])} cluster(s); {len(got['missing'])} candidate(s) left out")
-        done, why = PF.converged(history)
-        print(f"    {why}")
-        if done:
-            break
+    jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
+    print(f"portfolio {meta['id']}: {len(meta['documents'])} document(s), {meta['bytes'] / 1e6:.2f} MB, "
+          f"{len(jobs)} reading job(s)")
+    started = time.time()
+    for i, job in enumerate(jobs, 1):
+        span = job["end"] - job["start"]
+        t0 = time.time()
+        before = len(PF.candidates(meta["id"]))
+        rc = _portfolio_round(d, PF.instruction_for(job), out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d)
+        got = len(PF.candidates(meta["id"])) - before
+        print(f"  [{i}/{len(jobs)}] {job['document']} {job['start']}-{job['end']} "
+              f"({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s" + (f" (exit {rc})" if rc else ""),
+              flush=True)
+    kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
+    print(f"\n  {len(kept)} item(s) kept, {drop} dropped (a quote not in the document it names), "
+          f"{time.time() - started:.0f}s total")
     return cmd_portfolio_report(meta["id"])
 
 
+def cmd_portfolio_report(ident: str) -> int:
+    from . import probant_portfolio as PF
+    kept = PF.candidates(ident)
+    cov = PF.coverage(ident)
+    print(f"\n  what each document actually evidenced (largest span no quote falls in):\n")
+    for row in cov:
+        bar = "·" * 0 if row["items"] else ""
+        print(f"  {row['largest_unevidenced_share'] * 100:5.1f}% unevidenced  {row['items']:3d} item(s)  "
+              f"{row['bytes'] / 1000:6.0f} KB  {row['document']}{bar}")
+    thin = [r for r in cov if r["largest_unevidenced_share"] > 0.4]
+    if thin:
+        print(f"\n  {len(thin)} document(s) have a span over 40% of their length with nothing quoted from it: "
+              f"read them again with a smaller budget, or treat their items as partial.")
+    print(f"\n  {len(kept)} item(s): {PF.path_of(ident) / PF.CANDIDATES}")
+    return 0
+
+
 def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path) -> int:
-    """One sealed session, one turn, no search tool, and it ends itself."""
-    os.environ["IR_INTAKE_DIR"] = str(portfolio_dir)          # the mode: file tools and the proposal tools
+    """One sealed session, one turn, no search tool, ending itself when its turn ends.
+
+    It works in the PORTFOLIO directory, not in documents/: the sandbox lets a session write where it works,
+    and the file its tool appends to lives here. Pointing the tool at a parent directory is a write the
+    sandbox denies — which is how the first run produced nothing at all, with no error anywhere.
+    """
+    os.environ["IR_INTAKE_DIR"] = str(portfolio_dir)
     os.environ["IR_ATTESTED_CONFINE"] = "require"
     for k in ("IR_INTAKE_OUT", "IR_CLUSTER_OUT"):
         os.environ.pop(k, None)
@@ -566,22 +584,3 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     return confidential_mod.launch([], agent="pi", probant={
         "matter": f"portfolio · {portfolio_dir.name}", "mode": "intake", "web": True,
         "oneshot": True, "instruction": instruction})
-
-
-def cmd_portfolio_report(ident: str) -> int:
-    from . import probant_portfolio as PF
-    rounds = [n for n in range(1, PF.MAX_ROUNDS + 1) if (PF.path_of(ident) / (PF.CLUSTERS % n)).exists()]
-    if not rounds:
-        print(f"portfolio {ident}: nothing clustered yet")
-        return 1
-    last = PF.clusters(ident, rounds[-1])
-    sig = PF.signals(ident, last)
-    print(f"\n  {len(sig)} theme(s) after {len(rounds)} round(s), most of the portfolio first:\n")
-    for s in sig:
-        print(f"  ■ {s['label']}  — {s['candidates']} candidate(s) across {s['documents']} document(s)")
-        print(f"      {s['thesis'][:220]}")
-        print(f"      from: {', '.join(s['sources'][:6])}{' …' if len(s['sources']) > 6 else ''}\n")
-    if last["missing"]:
-        print(f"  {len(last['missing'])} candidate(s) were left out of the last grouping.")
-    print(f"  the whole run: {PF.path_of(ident)}")
-    return 0

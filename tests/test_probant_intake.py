@@ -6,7 +6,9 @@ created by anything other than the professional, and a document left readable by
 """
 import hashlib
 import json
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -184,3 +186,42 @@ def test_the_proposal_tool_is_registered_before_the_search_only_guard():
     # And the search tools stay below it, where a session without a search machine cannot see them.
     for search_only in ('name: "prior_art_search"', 'name: "matter_marks"', 'name: "suggest_next_steps"'):
         assert ts.index(search_only) > guard, search_only
+
+
+def test_findings_are_recorded_in_one_call_because_a_round_trip_each_is_the_cost():
+    """Measured 20 Sep on a real 114 KB filing: reading the range took three calls, recording what it found
+    took THIRTY-ONE, one model turn each, ~25 s apiece — thirteen minutes for 60 KB, and about eleven hours
+    extrapolated over a 3.2 MB portfolio. The reading was never the cost; the round trips were."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    from inferroute_cli import pi_attested as PA
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    # Registered for the same sessions as propose_matter, and above the search-only guard.
+    assert ts.index('name: "record_findings"') < ts.index("\tif (!SEARCH) return;")
+    assert PA.BATCH_TOOL == "record_findings"
+    body = ts[ts.index("\t\t\tasync execute(_toolCallId, params) {", ts.index('name: "record_findings"')):]
+    body = body[:body.index("\n\t\t\t},")]
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "candidates.jsonl"
+        js = ("import { mkdirSync, writeFileSync } from 'node:fs';\n"
+              f"const batchOut = {json.dumps(str(out))};\n"
+              "const run = async (params) => { " + body[body.index("{") + 1:] + " };\n"
+              "const ok = await run({ findings: ["
+              "  { title: 'One', summary: 'first thing', quote: 'a verbatim sentence of some length', source: 'a.md' },"
+              "  { title: 'Two', summary: 'second thing', quote: 'another verbatim sentence here', source: 'a.md' },"
+              "  { title: 'Short', summary: 'dropped', quote: 'too short', source: 'a.md' } ] });\n"
+              "let refused = ''; try { await run({ findings: [{ title: '', summary: '', quote: '' }] }); }"
+              " catch (e) { refused = e.message; }\n"
+              "console.log(JSON.stringify({ n: ok.details.n, text: ok.content[0].text, refused }));")
+        r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0 and "input-type" in r.stderr:
+            pytest.skip("this node cannot run TypeScript from -e")
+        assert r.returncode == 0, r.stderr[-800:]
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        assert got["n"] == 2 and "1 incomplete and skipped" in got["text"]
+        assert got["refused"].startswith("record_findings needs at least one finding")
+        rows = [json.loads(line) for line in out.read_text().splitlines()]
+        assert [x["title"] for x in rows] == ["One", "Two"]      # one call, one write, both findings

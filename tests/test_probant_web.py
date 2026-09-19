@@ -495,3 +495,24 @@ def test_the_index_hangs_each_search_under_the_question_that_caused_it():
         assert cls in css, cls
     # Children must read as smaller and quieter than their heading, or the nesting carries no signal.
     assert ".o-children .o-text { font-size: 12px; color: var(--muted)" in css
+
+
+def test_every_class_the_page_uses_has_a_style():
+    """18 Sep: rewriting the index's styles sliced app.css between two section markers — and the whole chat
+    (messages, search cards, composer, the stall panel, the column layout) sat between them. 41 classes lost
+    every rule; every test passed, because each checked only that SOME selector it cared about existed.
+    Henry saw it at once: "a chat that seems to have lost its css". Check the page against its stylesheet."""
+    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text()
+    css = (STATIC / "app.css").read_text()
+    used = set()
+    for m in re.finditer(r'\bel\("[a-z0-9]+",\s*"([^"]+)"', js):
+        used |= set(m.group(1).split())
+    for m in re.finditer(r'class="([^"]+)"', html):
+        used |= set(m.group(1).split())
+    used = {c for c in used if not c.endswith("-")}                    # `m-${value}`: a prefix, not a class
+    styled = set(re.findall(r"\.([a-zA-Z][a-zA-Z0-9_-]*)", css))
+    # Deliberately unstyled: a bare container, the lock glyph, and a button that inherits the global style.
+    allowed = {"card-body", "lock", "deeper"}
+    missing = sorted(used - styled - allowed)
+    assert not missing, f"classes the page uses with no rule in app.css: {missing}"

@@ -714,8 +714,14 @@ class Bridge:
             """An evidence-only copy of the record just proven, for the professional's OWN AI to audit: no query,
             result or document text. The record is the one this page exported, never a path the page sends."""
             from . import probant_export
+            # Offered in the panel from the start, so it exports and checks the record first when nothing has
+            # been exported yet: a second opinion should be one click, not a sequence the professional has to
+            # know. The record is always the one THIS page wrote — never a path the page sends.
             if not proved.get("path"):
-                return JSONResponse({"error": "export and check the record first"}, status_code=409)
+                try:
+                    proved["path"] = await asyncio.to_thread(bridge._export)
+                except Exception as e:                          # noqa: BLE001
+                    return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
             try:
                 pack = await asyncio.to_thread(probant_export.write_audit_pack, proved["path"])
             except Exception as e:                              # noqa: BLE001

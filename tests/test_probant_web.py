@@ -942,12 +942,18 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     made = []
     monkeypatch.setattr(probant_export, "write_audit_pack", lambda d: made.append(str(d)) or Path("/tmp/audit-pack-x"))
     b, c = client
-    assert c.post("/api/audit-pack", json={"path": "/etc"}).status_code == 409     # nothing proved yet
+    # Offered from the start (Henry, 20 Sep: "integrate this audit thing in the chat page"), so with nothing
+    # exported yet it writes the record first — one click, not a sequence the professional must know.
+    first = c.post("/api/audit-pack", json={"path": "/etc"})
+    assert first.status_code == 200 and len(made) == 1
     proved = c.post("/api/prove", json={}).json()["path"]
+    assert proved == made[0]                     # the same record, not a second export
     r = c.post("/api/audit-pack", json={"path": "/etc"}).json()
-    assert made == [proved]
+    assert made == [proved, proved]
     # `ir` reads a bare first word as a subcommand, so its command starts with a flag; an enclave-backed model.
     assert r["ir"].startswith("ir --model kimi-k2.6 ") and r["claude"].startswith("claude ")
     assert r["ir"].endswith('"Read AUDIT.md in this folder and do what it says."')
     js = (STATIC / "app.js").read_text()
     assert 'api("/api/audit-pack", {})' in js and "No Claude subscription?" in js
+    assert 'auditOffer($("audit"))' in js                     # in the panel, not inside the export result
+    assert "ten to fifteen minutes" in js                     # a tester who interrupts it gets nothing

@@ -483,6 +483,56 @@
     rec.note.hidden = !note;
   }
 
+  // ── how long a search is taking, and which step it is on ──────────────────────────────────────
+  //
+  // Henry, 19 Sep: "where we have 'checking the search machine…', could we have some sort of progress
+  // indicator, or at least a timer, maybe the expected wait?" Measured on 18 Sep: a sealed search, including
+  // the full re-check of the machine, takes 0.7–0.9 s. So normally this flashes by; it earns its place when
+  // something is slow or stuck, and then the step matters more than the seconds. The clock counts only the
+  // MACHINE's time: seconds you spend reading the approval prompt are yours, and counting them would turn
+  // "slower than usual" into "you were reading".
+  const SLOW_SECONDS = 10;
+  let lastSearchMs = null;             // this session's last completed search, machine time only
+  const PHASE_TEXT = { verifying: "checking the search machine", approval: "waiting for your approval",
+                       searching: "searching the sealed index" };
+
+  function machineMs(entry) {
+    const now = performance.now();
+    const pending = entry.phase === "approval" ? now - entry.phaseAt : 0;
+    return now - entry.startedAt - entry.approvalMs - pending;
+  }
+  function fmtSeconds(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+  }
+  function paintProgress(entry) {
+    if (!entry || entry.done) return;
+    if (entry.phase === "approval") {
+      entry.sub.textContent = "waiting for your approval";
+      entry.sub.classList.remove("slow");
+      return;
+    }
+    const ms = machineMs(entry);
+    const slow = ms >= SLOW_SECONDS * 1000;
+    const expect = slow ? "slower than usual"
+      : lastSearchMs !== null ? `last one took ${(lastSearchMs / 1000).toFixed(1)} s`
+      : "usually a second or two";
+    entry.sub.textContent = `${PHASE_TEXT[entry.phase] || PHASE_TEXT.verifying}… ${fmtSeconds(ms)} · ${expect}`;
+    entry.sub.classList.toggle("slow", slow);
+  }
+  function setPhase(entry, phase) {
+    if (!entry || entry.done || !PHASE_TEXT[phase]) return;
+    const now = performance.now();
+    if (entry.phase === "approval") entry.approvalMs += now - entry.phaseAt;
+    entry.phase = phase;
+    entry.phaseAt = now;
+    toolRunning = phase === "approval" ? "Waiting for your approval…" : `${PHASE_TEXT[phase][0].toUpperCase()}${PHASE_TEXT[phase].slice(1)}…`;
+    updateActivity();
+    paintProgress(entry);
+  }
+  // One clock for every running search, rather than a timer each that could outlive its card.
+  setInterval(() => { for (const e of cards.values()) if (!e.done && e.startedAt) paintProgress(e); }, 500);
+
   function toolStart(ev) {
     hideWelcome();
     const s = stick();
@@ -507,7 +557,9 @@
       const q = String(a.text || "");
       if (q) body.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
       card.append(body);
-      const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false };
+      const now = performance.now();
+      const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false,
+                      startedAt: now, phase: "verifying", phaseAt: now, approvalMs: 0, done: false };
       const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
       toggle.addEventListener("click", flip);
       // Clicking the head also folds — but NOT when you were selecting its text. Dragging across the
@@ -554,6 +606,12 @@
     const entry = cards.get(ev.call);
     if (!entry) return;
     const { card, sub, title, body } = entry;
+    // The clock stops here. Only a search that completed counts toward "last one took": a refusal or a
+    // withdrawn request measured nothing about the machine.
+    const took = machineMs(entry);
+    entry.done = true;
+    sub.classList.remove("slow");
+    if (ev.ok && (ev.details || {}).ok) lastSearchMs = took;
     if (ev.details && ev.details.searchNo) {
       title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
       entry.searchNo = ev.details.searchNo;
@@ -800,6 +858,7 @@
       case "assistant_end": assistantEnd(ev); break;
       case "tool_start": toolStart(ev); break;
       case "tool_end": toolEnd(ev); break;
+      case "tool_progress": setPhase(cards.get(ev.call), ev.phase); break;
       case "dialog": showDialog(ev); break;
       case "dialog_closed":
         if (openDialog && openDialog.id === ev.id) { $("dialog").hidden = true; openDialog = null; }
@@ -880,11 +939,9 @@
     homeUrl = String(s.home || "");
     matterId = String(s.matter || "");
     if (HOME_LINK.test(homeUrl)) {
-      const b = el("button", "ghost", "Probant home");
-      b.type = "button";
-      b.addEventListener("click", () => goHome(""));
-      $("top-home").replaceWith(b);
-      b.id = "top-home";
+      const back = $("back");
+      back.hidden = false;
+      back.addEventListener("click", () => goHome(`/matter/${matterId}`));
     }
     const d = s.disclosure || {};
     $("welcome-title").textContent = `Ready to work on ${String(s.matter || "").replace("/", " / ")}`;

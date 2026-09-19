@@ -40,6 +40,9 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
 HISTORY_CAP = 5000
+# The steps a sealed search reports, in order (ir-attested.ts). Anything else is dropped.
+TOOL_PHASES = ("verifying", "approval", "searching")
+
 
 def env(name: str, default: str = "") -> str:
     """A Probant setting, under its own name or the name it had while the product was called Surveyor.
@@ -128,6 +131,14 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [out]
     if t == "tool_execution_start":
         return [{"kind": "tool_start", "call": ev.get("toolCallId"), "tool": ev.get("toolName"), "args": ev.get("args") or {}}]
+    if t == "tool_execution_update":
+        # Which step a search is on. Only a name from a fixed list crosses to the page — never the partial
+        # result itself, which for another tool could carry anything.
+        details = (ev.get("partialResult") or {}).get("details") if isinstance(ev.get("partialResult"), dict) else None
+        phase = (details or {}).get("phase") if isinstance(details, dict) else None
+        if phase in TOOL_PHASES:
+            return [{"kind": "tool_progress", "call": ev.get("toolCallId"), "phase": phase}]
+        return []
     if t == "tool_execution_end":
         res = ev.get("result") or {}
         text = "".join(str(c.get("text", "")) for c in res.get("content") or [] if isinstance(c, dict) and c.get("type") == "text")
@@ -336,7 +347,11 @@ class Bridge:
                 await asyncio.sleep(min(2.0, max(0.02, STALL_SECONDS / 4)))
                 quiet = time.monotonic() - self.last_agent
                 working = self.busy or bool(self.running_tools)
-                if working and not self.stalled and quiet >= STALL_SECONDS:
+                # Waiting for the PERSON is not a stall. With an approval prompt open the assistant is silent
+                # by design, and "the assistant has stopped answering" would be telling someone reading the
+                # prompt that we broke.
+                waiting_on_you = bool(self.dialogs)
+                if working and not waiting_on_you and not self.stalled and quiet >= STALL_SECONDS:
                     self.stalled = True
                     self.publish({"kind": "stall", "value": True, "seconds": int(quiet)})
         except asyncio.CancelledError:

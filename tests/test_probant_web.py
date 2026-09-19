@@ -531,3 +531,54 @@ def test_ideas_wait_for_a_conversation_and_never_presume_one():
     assert "renderMarkSteps()" in hide
     # Nothing to summarise before a search has happened.
     assert "IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0)" in js
+
+
+def test_a_search_reports_its_step_and_only_a_step_name_reaches_the_page():
+    """Henry, 19 Sep: "where we have 'checking the search machine…' could we have a progress indicator or
+    at least a timer? maybe the expected wait?" The tool reports which step it is on; the bridge forwards
+    the NAME only, from a fixed list, never the partial result itself."""
+    ev = W.normalize({"type": "tool_execution_update", "toolCallId": "c1", "toolName": "prior_art_search",
+                      "partialResult": {"content": [{"type": "text", "text": "secret query"}], "details": {"phase": "searching"}}})
+    assert ev == [{"kind": "tool_progress", "call": "c1", "phase": "searching"}]
+    assert "secret" not in json.dumps(ev)
+    assert W.normalize({"type": "tool_execution_update", "toolCallId": "c1",
+                        "partialResult": {"details": {"phase": "<img src=x>"}}}) == []
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    for p in W.TOOL_PHASES:
+        assert f'phase("{p}")' in ts, p
+    js = (STATIC / "app.js").read_text()
+    # The clock counts the machine's time, not the seconds spent reading the approval prompt.
+    assert 'entry.phase === "approval" ? now - entry.phaseAt : 0' in js and "entry.approvalMs" in js
+    assert '"usually a second or two"' in js and '"slower than usual"' in js
+
+
+def test_an_open_approval_prompt_is_never_reported_as_a_stall(tmp_path, monkeypatch):
+    monkeypatch.setattr(W, "STALL_SECONDS", 0.05)
+    b = _bridge(tmp_path)
+
+    async def run():
+        reader = asyncio.StreamReader()
+        reader.feed_data(b'{"type": "agent_start"}\n')
+        reader.feed_data(b'{"type": "extension_ui_request", "id": "d1", "method": "confirm", "title": "Allow?", "message": "m"}\n')
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=None)
+        pump = asyncio.ensure_future(b.pump(proc))
+        await asyncio.sleep(0.3)                 # far past STALL_SECONDS, with the person reading the prompt
+        stalled = b.stalled
+        reader.feed_eof()
+        proc.returncode = 0
+        await pump
+        return stalled
+    assert asyncio.run(run()) is False
+
+
+def test_the_back_arrow_replaces_the_home_button():
+    """Henry, 19 Sep: "now that we have the left button too, let's just replace it with an arrow going left
+    before this text" (the matter's name)."""
+    html = (STATIC / "index.html").read_text()
+    js = (STATIC / "app.js").read_text()
+    assert 'id="back"' in html and 'id="top-home"' not in html
+    assert '$("top-home")' not in js, "the labelled top-bar home button must be gone"
+    assert 'back.addEventListener("click", () => goHome(`/matter/${matterId}`))' in js

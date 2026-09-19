@@ -218,7 +218,15 @@
     }
     const grid = el("div", "matters");
     for (const m of data.matters) {
-      const card = el("div", "matter-card",
+      // The whole card opens the matter (Henry, 2026-09-19: "instead of open matter button we should just
+      // click on the matter to open it"). Start a session is the one button, full width and primary; its
+      // click must not ALSO open the matter, so it stops the event before the card sees it.
+      const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
+      const start = button("Start a session", "primary start-session", (ev) => {
+        ev.stopPropagation();
+        startSession(m.id, open);
+      });
+      const card = el("div", "matter-card clickable",
         el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
         el("div", "sub", `date bound ${m.date_bound || "—"}`),
         el("div", "stats",
@@ -227,9 +235,14 @@
           el("span", "", plural(m.marks, "mark", "marks")),
           m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
         el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
-        el("div", "row",
-          button("Start a session", "primary small", () => startSession(m.id, () => { location.hash = `#/matter/${enc(m.id)}`; })),
-          button("Open matter", "ghost small", () => { location.hash = `#/matter/${enc(m.id)}`; })));
+        start);
+      card.tabIndex = 0;
+      card.setAttribute("role", "link");
+      card.setAttribute("aria-label", `Open ${m.client} / ${m.matter}`);
+      card.addEventListener("click", open);
+      card.addEventListener("keydown", (e) => {
+        if (e.target === card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); }
+      });
       grid.append(card);
     }
     p.append(grid);
@@ -318,7 +331,7 @@
       el("div", "", el("b", "", "Delete this matter"),
         el("p", "sub", "Its disclosure, sessions, marks and exported records go to Recently deleted. You can restore "
           + "it from there for 30 days; after that it is erased from this computer.")),
-      button("Delete matter…", "danger small", () => deleteMatterDialog(m))));
+      button("Delete matter", "danger small", () => deleteMatterDialog(m))));
   }
 
   // Deleting asks for the matter's name to be TYPED: a matter holds signed search records that cannot be made

@@ -45,8 +45,10 @@ button.brand { border: 0; background: none; padding: 2px 4px; margin-left: -4px;
   font-weight: 650; cursor: pointer; border-radius: 6px; }
 button.brand:hover { background: var(--user); }
 /* back to this matter: a plain arrow before its name, not another labelled button */
-.back { border: 0; background: none; padding: 0 6px; margin-right: -6px; color: var(--muted); font-size: 17px;
-  line-height: 1.2; border-radius: 6px; align-self: center; }
+.back { border: 0; background: none; width: 26px; height: 26px; padding: 0; margin-right: -8px; color: var(--muted);
+  border-radius: 6px; align-self: center; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.back::before { content: ""; width: 7px; height: 7px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: translateX(2px) rotate(45deg); }
 .back:hover { color: var(--ink); background: var(--user); }
 .matter { display: flex; align-items: baseline; gap: 14px; flex: 1; min-width: 0; }
 .matter-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

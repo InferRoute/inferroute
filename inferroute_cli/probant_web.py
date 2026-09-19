@@ -227,6 +227,8 @@ class Bridge:
         self._watchdog: Any = None
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
+        self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
+        self._search_stats: Optional[Dict[str, Any]] = None
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
         # so that a turn that ends in an event we don't understand leaves a trail instead of a mystery.
         self.dropped: Dict[str, int] = {}
@@ -242,7 +244,10 @@ class Bridge:
                 self.stalled = False
                 self.publish({"kind": "stall", "value": False})
         self._seq += 1
-        event = {"seq": self._seq, **event}
+        # Every event carries the moment the SERVER saw it. The page used to time searches with its own clock at
+        # the moment it received each event — and a reload replays the whole session at once, so every timer
+        # restarted from zero and a finished search claimed "0.0 s". Durations come from these stamps now.
+        event = {"seq": self._seq, "at": round(time.time() * 1000), **event}
         if event["kind"] == "busy":
             self.busy = bool(event["value"])
         if event["kind"] == "dialog":
@@ -261,6 +266,40 @@ class Bridge:
             del self.history[: len(self.history) - HISTORY_CAP]
         for q in list(self.subscribers):
             q.put_nowait(event)
+        # AFTER the event is delivered: timing a finished search publishes the new statistics, and that event
+        # must be numbered after the result it follows. Numbered before it, the page — which skips anything at
+        # or below the last number it saw — would drop the search result itself.
+        self._time_search(event)
+
+    def _time_search(self, event: Dict[str, Any]) -> None:
+        """Record how long each step of a completed search took, from this bridge's own clock, for the
+        progress view's expectations (probant_timing). The approval prompt's time is the person's, not the
+        machine's, and is left out."""
+        from . import probant_timing as T
+        kind, call, at = event.get("kind"), str(event.get("call")), event["at"]
+        if kind == "tool_start" and event.get("tool") == "prior_art_search":
+            self._timings[call] = {"k": T.k_of(event.get("args") or {}), "phase": "verifying", "since": at, "ms": {}}
+            return
+        t = self._timings.get(call)
+        if t is None:
+            return
+        if kind == "tool_progress":
+            t["ms"][t["phase"]] = t["ms"].get(t["phase"], 0) + (at - t["since"])
+            t["phase"], t["since"] = event.get("phase"), at
+        elif kind == "tool_end":
+            self._timings.pop(call, None)
+            t["ms"][t["phase"]] = t["ms"].get(t["phase"], 0) + (at - t["since"])
+            # Only a search that completed says anything about the machine; a refusal measured nothing.
+            if event.get("ok") and (event.get("details") or {}).get("ok"):
+                T.record_wait(k=t["k"], verifying_ms=t["ms"].get("verifying"), searching_ms=t["ms"].get("searching"))
+                self._search_stats = None                   # recompute on next read
+                self.publish({"kind": "search_timing", "stats": self.search_stats()})
+
+    def search_stats(self) -> Dict[str, Any]:
+        if self._search_stats is None:
+            from . import probant_timing as T
+            self._search_stats = T.stats()
+        return self._search_stats
 
     def _keep(self, event: Dict[str, Any]) -> None:
         """What the home page needs to show a past conversation: the professional's messages, the assistant's
@@ -438,6 +477,7 @@ class Bridge:
             return {"matter": bridge.matter, "date_bound": bridge.date_bound, "trust": bridge.summary,
                     "disclosure": disclosure_info(bridge.workspace), "busy": bridge.busy, "ended": bridge.ended,
                     "stalled": bridge.stalled, "search": bool(bridge.search_endpoint),
+                    "search_timing": bridge.search_stats(), "now": round(time.time() * 1000),
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
                     "home": os.environ.get("IR_PROBANT_HOME_URL", "")}

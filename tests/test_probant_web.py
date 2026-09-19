@@ -549,7 +549,7 @@ def test_a_search_reports_its_step_and_only_a_step_name_reaches_the_page():
     js = (STATIC / "app.js").read_text()
     # The clock counts the machine's time, not the seconds spent reading the approval prompt.
     assert 'entry.phase === "approval" ? now - entry.phaseAt : 0' in js and "entry.approvalMs" in js
-    assert '"usually a second or two"' in js and '"slower than usual"' in js
+    assert "slower than usual (" in js and "no timings on this computer yet" in js
 
 
 def test_an_open_approval_prompt_is_never_reported_as_a_stall(tmp_path, monkeypatch):
@@ -582,3 +582,86 @@ def test_the_back_arrow_replaces_the_home_button():
     assert 'id="back"' in html and 'id="top-home"' not in html
     assert '$("top-home")' not in js, "the labelled top-bar home button must be gone"
     assert 'back.addEventListener("click", () => goHome(`/matter/${matterId}`))' in js
+
+
+# ── statistics for the progress view ──
+#
+# Henry, 19 Sep: "we need better statistics for informing the progress view", then "when I reload, the time
+# counters in the progress views also reset — that's not right". Both were real.
+
+def _search_events(b, *, k=10, approval=False, ok=True):
+    b.publish({"kind": "tool_start", "call": "c1", "tool": "prior_art_search", "args": {"text": "x" * 30, "k": k}}, agent=True)
+    b.publish({"kind": "tool_progress", "call": "c1", "phase": "verifying"}, agent=True)
+    if approval:
+        b.publish({"kind": "tool_progress", "call": "c1", "phase": "approval"}, agent=True)
+    b.publish({"kind": "tool_progress", "call": "c1", "phase": "searching"}, agent=True)
+    b.publish({"kind": "tool_end", "call": "c1", "tool": "prior_art_search", "ok": ok,
+               "details": {"ok": ok, "docs": []}}, agent=True)
+
+
+def test_every_event_carries_the_servers_time_so_a_reload_does_not_reset_the_clocks(tmp_path):
+    b = _bridge(tmp_path)
+    b.publish({"kind": "user", "text": "hi"})
+    assert isinstance(b.history[-1]["at"], int) and b.history[-1]["at"] > 1_700_000_000_000
+    js = (STATIC / "app.js").read_text()
+    # Durations are computed from the stamps, never from when the page happened to receive an event.
+    assert "performance.now()" not in js
+
+
+def test_a_completed_search_records_its_wait_per_step_and_its_result_is_not_skipped(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    b = _bridge(tmp_path)
+    _search_events(b, k=50)
+    kinds = [e["kind"] for e in b.history]
+    # The statistics follow the result, numbered after it: numbered before, the page would skip the result.
+    assert kinds.index("search_timing") == kinds.index("tool_end") + 1
+    seqs = [e["seq"] for e in b.history]
+    assert seqs == sorted(seqs)
+    from inferroute_cli import probant_timing as T
+    rows = [json.loads(l) for l in T.waits_path().read_text().splitlines()]
+    assert rows[0]["bucket"] == "broad" and rows[0]["k"] == 50
+    assert set(rows[0]) == {"at", "bucket", "k", "verifying_ms", "searching_ms"}      # numbers only
+    assert oct(T.waits_path().stat().st_mode & 0o777) == "0o600"
+
+
+def test_a_refused_search_measures_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    b = _bridge(tmp_path)
+    _search_events(b, ok=False)
+    from inferroute_cli import probant_timing as T
+    assert not T.waits_path().exists()
+
+
+def test_the_approval_prompt_is_the_persons_time_not_the_machines(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    b = _bridge(tmp_path)
+    clock = iter([1000, 1000, 1400, 61400, 61900, 61900, 70000, 70000])     # 60 s spent reading the prompt
+    monkeypatch.setattr(W.time, "time", lambda: next(clock) / 1000)
+    _search_events(b, approval=True)
+    from inferroute_cli import probant_timing as T
+    row = json.loads(T.waits_path().read_text().splitlines()[0])
+    assert row["verifying_ms"] == 400 and row["searching_ms"] == 500        # not 60 900
+
+
+def test_expectations_are_per_depth_and_say_where_they_come_from(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    from inferroute_cli import probant_timing as T
+    # With no waits recorded, the searching step is seeded from the machine's own signed times — per depth,
+    # and labelled "machine", because that is part of the wait, not all of it.
+    rec = tmp_path / "ir" / "confidential" / "attested-records" / "A" / "m"
+    rec.mkdir(parents=True)
+    rows = [{"statement": {"sig": "s", "k": 10, "search_seconds": 0.4}}] * 6 + \
+           [{"statement": {"sig": "s", "k": 50, "search_seconds": 1.7}}] * 6 + \
+           [{"statement": {"k": 10, "search_seconds": 99}}] * 6                 # unsigned: not evidence
+    (rec / "s.searches.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    s = T.stats()
+    assert s["verifying"] is None                                           # nothing measured: say nothing
+    assert s["searching"]["quick"] == {"n": 6, "median_ms": 400.0, "p90_ms": 400.0, "source": "machine"}
+    assert s["searching"]["broad"]["median_ms"] == 1700.0
+    # Once enough real waits exist for a depth, they replace the seed for that depth only.
+    for _ in range(5):
+        T.record_wait(k=10, verifying_ms=300, searching_ms=900)
+    s = T.stats()
+    assert s["searching"]["quick"]["source"] == "wait" and s["searching"]["quick"]["median_ms"] == 900.0
+    assert s["searching"]["broad"]["source"] == "machine"
+    assert s["verifying"]["median_ms"] == 300.0

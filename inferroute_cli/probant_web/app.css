@@ -280,8 +280,15 @@ button.brand:hover { background: var(--user); }
 .trust details.fold[open] > summary::before { content: "▾ "; }
 .trust details.fold > .explainer, .trust details.fold > .limits { margin-top: 6px; }
 .trust-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-.export-result { margin-top: 12px; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; }
-.export-result .mono { display: block; word-break: break-all; margin: 4px 0 8px; color: var(--ink); }
+.prove { margin-top: 18px; padding-top: 2px; border-top: 1px solid var(--line); }
+.prove > .sub { font-size: 13px; color: var(--muted); margin: 0 0 4px; }
+.trust .prove .trust-actions { margin-top: 10px; }
+.export-result { margin-top: 12px; font-size: 13px; }
+.export-result .check-result { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.export-result .check-row { grid-template-columns: 40px minmax(0, 1fr); }
+.export-result .check-row .sub { grid-column: 2; }
+.export-where { margin-top: 10px; color: var(--muted); }
+.export-result .mono { display: block; word-break: break-all; margin: 4px 0 8px; color: var(--ink); font-size: 12px; }
 
 /* statusbar, dialog, toasts */
 .statusbar { display: flex; gap: 18px; flex-wrap: wrap; padding: 6px 20px; font-size: 12px; color: var(--muted); background: var(--panel); border-top: 1px solid var(--line); }
@@ -370,6 +377,12 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .check-result p { margin: 4px 0; }
 .check-group { border-top: 1px solid var(--line); padding: 10px 0 8px; }
 .check-group .check-q { font-weight: 600; }
+.check-group.compact { padding: 5px 0; }
+.check-group.compact > summary { cursor: pointer; list-style: none; font-size: 13px; }
+.check-group.compact > summary::-webkit-details-marker { display: none; }
+.check-group.compact > summary::after { content: " ▾"; color: var(--faint); font-size: 10px; font-weight: 400; }
+.check-group.compact[open] > summary::after { content: " ▴"; }
+.check-group.compact > p, .check-group.compact > button { margin-left: 18px; }
 .check-group.pass .check-q::before { content: "\2713\00a0"; color: var(--accent); }
 .check-group.fail .check-q::before { content: "\2717\00a0"; color: var(--bad); }
 .check-group.skip .check-q::before { content: "\25cb\00a0"; color: var(--faint); }

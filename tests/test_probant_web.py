@@ -106,7 +106,7 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
     assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
-                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/close", "/api/end"}
+                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/close", "/api/end"}
 
 
 def test_a_dialog_can_only_be_answered_if_the_agent_opened_it_and_only_once(client):
@@ -903,3 +903,32 @@ def test_parallel_malformed_requests_fold_into_one_line_whatever_order_they_fail
     assert out["afterMessage"] == 2 and out["lateCount"] == ""
     js = (STATIC / "app.js").read_text()
     assert "was not returned by (a|any) search" in js and "recordSlip(card);" in js
+
+
+def test_the_panel_proves_what_it_claims_with_the_records_own_verifier(client, monkeypatch):
+    """Henry, 19 Sep: the panel was "missing the proof". Export and check are one act; the verdict comes from
+    probant_check (the bundle's own verifier, its exit code), never from the page."""
+    from inferroute_cli import probant_check
+    seen = []
+    monkeypatch.setattr(probant_check, "check", lambda d: seen.append(str(d)) or
+                        {"verdict": "passed", "headline": "Everything checked out.", "groups": [], "checks": 7, "output": "raw"})
+    b, c = client
+    r = c.post("/api/prove", json={}).json()
+    assert r["ok"] and r["check"]["verdict"] == "passed" and r["check"]["checks"] == 7
+    assert seen == [r["path"]]                      # the check ran on the record that was just exported
+    assert "output" not in r["check"]               # raw verifier output stays on this computer's side
+    js = (STATIC / "app.js").read_text()
+    assert 'api("/api/prove", {})' in js and "renderCheck(verdict, r.check || {}, true);" in js
+    common = (STATIC / "common.js").read_text()
+    assert "function renderCheck(box, r, compact)" in common and 'if (compact && g.status !== "pass") item.open = true;' in common
+
+
+def test_a_skip_that_applies_to_every_search_is_said_once_with_its_count():
+    """A 68-search record printed the same "firmware minimum not pinned" sentence 68 times and buried the answer."""
+    from inferroute_cli import probant_check as C
+    text = "\n".join(["  PASS hardware report: SNP report version 3, signed"]
+                     + ["  SKIP firmware TCB at or above minimum: no minimum pinned for Genoa"] * 68
+                     + ["  SKIP debug disabled: other reason"])
+    g = next(g for g in C.parse(text, 0)["groups"] if g["key"] == "machine")
+    assert g["not_checked"] == ["firmware TCB at or above minimum: no minimum pinned for Genoa (in 68 searches)",
+                                "debug disabled: other reason"]

@@ -653,6 +653,24 @@ class Bridge:
             return {"ok": True, "path": str(path), "verify_here": f"ir probant verify-export {path}",
                     "verify_anyone": "python3 verify_record.py ."}
 
+        @app.post("/api/prove")
+        async def prove():
+            """Export the record and check it with its OWN verifier — the file a stranger would run — so the
+            panel's claims come with proof the professional can see, not only our word. The verdict is the
+            verifier's exit code (probant_check); this adds nothing to it."""
+            from . import probant_check
+            try:
+                path = await asyncio.to_thread(bridge._export)
+            except Exception as e:                              # noqa: BLE001
+                return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
+            try:
+                result = await asyncio.to_thread(probant_check.check, path)
+            except Exception as e:                              # noqa: BLE001
+                result = {"verdict": "refused", "headline": "The check could not be run.",
+                          "explainer": type(e).__name__, "groups": [], "checks": 0}
+            result.pop("output", None)
+            return {"ok": True, "path": str(path), "check": result, "verify_anyone": "python3 verify_record.py ."}
+
         @app.post("/api/close")
         async def close_page():
             bridge.closed.set()

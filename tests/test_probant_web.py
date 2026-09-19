@@ -519,19 +519,14 @@ def test_every_class_the_page_uses_has_a_style():
 
 
 def test_ideas_wait_for_a_conversation_and_never_presume_one():
-    """Henry, 19 Sep, on a fresh session: "I'm seeing both the beginning-of-chat recommendation buttons and
-    the IDEAS ones, but since the conversation is empty the IDEAS one shouldn't show, as they tend to be
-    based on the conversation." The welcome's suggestions ARE the options until the first message."""
+    """Henry, 19 Sep: "I'm seeing both the beginning-of-chat recommendation buttons and the IDEAS ones, but since
+    the conversation is empty the IDEAS one shouldn't show." The behaviour — ideas only once the conversation
+    has started, mark steps at once, nothing to summarise before a search — is now DRIVEN through the page's
+    real code in test_one_next_steps_panel_counts_and_covers_by_action (cases s1, s6, s7). What remains here is
+    the hand-over: when the welcome goes, the panel must take its place, or the box is left empty."""
     js = (STATIC / "app.js").read_text()
-    assert 'if (!fromMarks && !started) { bar.hidden = true; return; }' in js
-    # Steps from the professional's marks are about the MATTER, carried across sessions: they show at once.
-    assert "const started = $(\"empty\").hidden;" in js
-    # When the welcome goes, the bar takes over its job — or the box is left empty.
     hide = js[js.index("function hideWelcome"):js.index("function hideWelcome") + 300]
     assert "renderMarkSteps()" in hide
-    # Nothing to summarise before a search has happened.
-    assert "IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0)" in js
-
 
 def test_a_search_reports_its_step_and_only_a_step_name_reaches_the_page():
     """Henry, 19 Sep: "where we have 'checking the search machine…' could we have a progress indicator or
@@ -722,3 +717,32 @@ def test_a_slip_in_an_optional_hint_costs_the_hint_never_the_search():
     js = (STATIC / "app.js").read_text()
     assert "Validation failed for tool" in js                     # shown as the assistant's slip, quietly
     assert "it corrected it" not in js                            # the page cannot know that
+
+
+def test_one_next_steps_panel_counts_and_covers_by_action():
+    """Henry, 19 Sep: "we have NEXT STEPS and FROM YOUR MARKS … polish the double to look more together and
+    adapt counts in a smart way". Drives the page's real code (tests/steps_panel_sim.js) through the cases."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "steps_panel_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    R = json.loads(r.stdout.strip().splitlines()[-1])
+    deeper = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them"
+    # 1. No answer yet, a mark from an earlier session: steps from all marks, at once.
+    assert R["s1"] == [{"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
+    # 2. The assistant saw that mark and chose its own list — including DROPPING "look deeper". Respected.
+    assert len(R["s2"]) == 1 and R["s2"][0]["title"] == "" and deeper not in R["s2"][0]["steps"]
+    # 3. Marks made after it answered are added — and a step that merely DESCRIBES a mark ("…you marked
+    #    relevant") does not count as offering "look deeper".
+    assert R["s3"][1] == {"title": "From marks you made since", "steps": ["Find documents like US-B2", deeper]}
+    # 4. Five at most, but marks made since always keep a place.
+    assert len(R["s4"][0]["steps"]) == 4 and R["s4"][1]["steps"] == ["Find documents like US-B2"]
+    # 5. While the assistant works on a new message, the previous answer's steps are stale: nothing shown.
+    assert R["s5"] is None
+    # 6-7. No marks, no list: ideas once the conversation has started, nothing before it.
+    assert R["s6"][0]["title"] == "Ideas" and "Summarise what the searches have surfaced so far" not in R["s6"][0]["steps"]
+    assert R["s7"] is None

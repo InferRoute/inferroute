@@ -397,6 +397,11 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 
 // A suggested next step is sent as the professional's own message when they choose it. It must never be a
 // command or a shell line: "/relevant X" would record a mark as the professional's, and "!…" runs a shell.
+// Next steps built from the professional's marks — worded EXACTLY as the page words them (probant_web/app.js),
+// so the page can tell which of them the assistant already offered. A test holds the two files together.
+const STEP_DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
+const STEP_LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+const stepLike = (key: string) => `Find documents like ${key}`;
 const NEXT_MAX = 4;
 // A button sends EXACTLY its text, so a suggestion is never cut: a cut one sends a broken half-instruction
 // ("…to deepen the weakly matched endorsemen…", Henry, 19 Sep). One too long to be a button is dropped whole.
@@ -929,6 +934,53 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
+	// The marks, handed over WITH the professional's message instead of fetched by a tool call. The contract asks
+	// the assistant to read the marks before follow-up research; through `matter_marks` that is a tool round-trip,
+	// so a second model request, every turn that uses them. Attached here, they ride in the request the
+	// professional's own message already makes (Pi's before_agent_start: a context message in the same turn; the
+	// pinned system prompt is untouched). Sent only when the marks changed since the last note — nothing repeats
+	// or piles up — and with the candidate next steps, so the assistant can keep, reword, merge or drop them in
+	// the suggestions it already makes at the end of its answer (Henry, 19 Sep: "improve, select or augment it
+	// through the LLM without extra requests"). Never blocks a turn: any failure means no note.
+	let lastMarksNote = "";
+	pi.on("before_agent_start", async () => {
+		if (!SEARCH) return;
+		let state: MatterMarks;
+		try {
+			state = (await searchCall("/matter/state", undefined, AbortSignal.timeout(3000))) as unknown as MatterMarks;
+		} catch {
+			return;
+		}
+		const entries = Object.entries(state.marks ?? {})
+			.map(([key, m]) => [key, String(m.latest?.value ?? "")] as const)
+			.filter(([, v]) => v in MARK_LABEL)
+			.sort(([a], [b]) => a.localeCompare(b));
+		if (!entries.length) return;
+		const signature = JSON.stringify(entries);
+		if (signature === lastMarksNote) return;
+		lastMarksNote = signature;
+		const about = (key: string) => {
+			const t = (docText.get(key) ?? "").replace(/\s+/g, " ").trim();
+			return t ? ` "${t.length > 70 ? `${t.slice(0, 69)}…` : t}"` : "";
+		};
+		const group = (v: string) => entries.filter(([, x]) => x === v).map(([k]) => `${k}${about(k)}`).join("; ");
+		const relevant = entries.filter(([, v]) => v === "relevant").map(([k]) => k);
+		const candidates = [
+			...(relevant.length ? [STEP_DEEPER] : []),
+			...relevant.slice(0, 2).map(stepLike),
+			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),
+		];
+		const text = [
+			"[Probant note: the professional's relevance marks as of this message — their judgment, not yours. " +
+				"Context for you, not a request: do not reply to it or mention it. It replaces any earlier marks note.]",
+			...["relevant", "not-relevant", "known"].map((v) => (group(v) ? `Marked ${MARK_LABEL[v]}: ${group(v)}` : "")).filter(Boolean),
+			`Next-step candidates from these marks: ${candidates.map((c) => `"${c}"`).join(" · ")}`,
+			"When you call suggest_next_steps, treat these candidates as material: keep, reword (say what a document is " +
+				"about), merge or drop them, and add your own — four at most in all.",
+		].join("\n");
+		return { message: { customType: "probant-marks", content: text, display: false } };
+	});
+
 	// The professional's marks, readable by the assistant so they can steer its research. Read-only: no tool or
 	// endpoint the assistant can reach makes or changes a mark (those are typed or clicked by the professional).
 	pi.registerTool({
@@ -975,7 +1027,8 @@ export default function (pi: ExtensionAPI) {
 			"the professional's own words, as they would ask you (\"Find documents like US-5795305-A\", \"Use my marks to steer " +
 			"the next searches\"), with no tool or parameter names: a follow-up research action within your tools, never a " +
 			"judgment and never a command. Keep each to one sentence, ideally under 160 characters: it is shown and sent " +
-			"in full. Never mention this tool or the steps in your written answer.",
+			"in full. When a Probant note lists next-step candidates from the professional's marks, use them as material: " +
+			"keep, reword, merge or drop them, and add your own. Never mention this tool or the steps in your written answer.",
 		promptSnippet: "Offer the professional one-click next research steps (call last)",
 		parameters: Type.Object({
 			steps: Type.Array(Type.String(), { minItems: 1 }),

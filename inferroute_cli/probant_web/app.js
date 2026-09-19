@@ -260,64 +260,96 @@
     if (i >= 0) markOrder.splice(i, 1);
     markOrder.unshift(keyNo);
   }
-  // When nothing is marked yet the welcome's suggestions are gone as soon as the first message is sent, and
-  // the professional is left with an empty box and no idea what this thing takes. The bar always offers
-  // something: their marks when they have any, plain ideas when they do not.
+  // ── Next steps: ONE panel above the message box ────────────────────────────────────────────────
+  //
+  // Henry, 19 Sep: "we have NEXT STEPS and FROM YOUR MARKS … polish the double to look more together and adapt
+  // counts in a smart way", and "leverage our agent harness to improve, select and/or augment it through the
+  // LLM without extra requests". So:
+  //
+  // - The ASSISTANT's list comes first. It has already seen your marks: the extension hands them over with
+  //   your message (no extra model request) together with these same candidate steps, and the assistant
+  //   keeps, rewords, merges or drops them. A deliberate drop is respected — the page does not add back what
+  //   the assistant chose to leave out.
+  // - The page adds steps only for marks you made AFTER the assistant took up your message — it could not
+  //   have seen those — and only when its list does not already cover them.
+  // - With no list from the assistant (before its first answer, or when it offered none) the steps come from
+  //   all your marks; with no marks either, and once the conversation has started, plain ideas.
+  // - Five buttons at most in all; marks made since the answer always keep at least one place.
+  //
+  // Every button shows exactly the message it sends.
   const SUMMARISE_IDEA = "Summarise what the searches have surfaced so far";
   const IDEAS = ["Run a prior-art survey of the disclosure",
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
-  function renderMarkSteps() {
+  const STEPS_MAX = 5;
+  let assistantSteps = [];             // the suggestions that came with the latest answer
+  let marksAtTurn = null;              // your marks when the assistant took up the current message
+
+  function relevantOrdered() {
+    const out = markOrder.filter((k) => marks.get(k) === "relevant");
+    for (const k of Array.from(marks.keys())) if (marks.get(k) === "relevant" && !out.includes(k)) out.push(k);
+    return out;                        // most recently marked first
+  }
+  // Candidate steps from marks — worded exactly as the extension words them (ir-attested.ts; a test checks).
+  // `onlyNew`: from marks changed since the assistant took up the message, newest and most specific first.
+  function markCandidates(onlyNew) {
+    const isNew = (k) => !onlyNew || !marksAtTurn || marksAtTurn.get(k) !== marks.get(k);
+    const relevant = relevantOrdered().filter(isNew);
+    const excluded = Array.from(marks.keys()).some((k) => isNew(k) && (marks.get(k) === "known" || marks.get(k) === "not-relevant"));
+    const like = relevant.slice(0, 2).map((k) => `Find documents like ${k}`);
+    if (onlyNew) return [...like.slice(0, 1), ...(relevant.length ? [DEEPER] : []), ...like.slice(1), ...(excluded ? [LEAVE_OUT] : [])];
+    return [...(relevant.length ? [DEEPER] : []), ...like, ...(excluded ? [LEAVE_OUT] : [])];
+  }
+  // Does the assistant's list already offer this, perhaps in its own words? A publication number named anywhere
+  // in it covers "find documents like" that document.
+  function covered(step, list) {
+    if (list.includes(step)) return true;
+    const low = list.map((t) => t.toLowerCase());
+    const like = /^Find documents like (\S+)$/.exec(step);
+    if (like) return low.some((t) => t.includes(like[1].toLowerCase()));
+    if (step === DEEPER) return low.some((t) => /\b(look|dig|go) deeper\b|\buse my marks\b|\bsteer\b/.test(t));
+    if (step === LEAVE_OUT) return low.some((t) => /\bleav(e|ing) out\b|\bexclud|\bset(ting)? aside\b/.test(t));
+    return false;
+  }
+
+  function renderSteps() {
     const bar = $("mark-steps");
     const list = $("mark-steps-list");
     clear(list);
-    const relevant = markOrder.filter((k) => marks.get(k) === "relevant");
-    for (const k of Array.from(marks.keys())) if (marks.get(k) === "relevant" && !relevant.includes(k)) relevant.push(k);
-    const excluded = Array.from(marks.values()).some((v) => v === "known" || v === "not-relevant");
-    const steps = [];
-    if (relevant.length) steps.push(DEEPER);
-    for (const k of relevant.slice(0, 2)) steps.push(`Find documents like ${k}`);
-    if (excluded) steps.push(LEAVE_OUT);
-    const fromMarks = steps.length > 0;
-    // Ideas are about the conversation, so they wait for one. Before the first message the welcome's own
-    // suggestions are on screen, and a second row of the same offers only made the page look doubled
-    // (Henry, 19 Sep). Steps from your MARKS still show at once: they carry the matter over from an
-    // earlier session, which is exactly what a fresh session is for.
     const started = $("empty").hidden;
-    if (!fromMarks && !started) { bar.hidden = true; return; }
-    // And no idea that presumes something that has not happened: nothing to summarise before a search.
-    const ideas = IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0);
-    for (const step of (fromMarks ? steps : ideas)) {
-      const b = el("button", "", step);
-      b.type = "button";
-      b.addEventListener("click", () => send(step));
-      list.append(b);
+    const groups = [];
+    const mine = assistantSteps.slice(0, 4);
+    if (mine.length) {
+      groups.push({ title: "", steps: mine });
+      const fresh = markCandidates(true).filter((st) => !covered(st, mine));
+      const room = Math.max(1, STEPS_MAX - mine.length);
+      if (fresh.length) groups.push({ title: "From marks you made since", steps: fresh.slice(0, room) });
+    } else {
+      const fromMarks = markCandidates(false);
+      if (fromMarks.length) groups.push({ title: "From your marks", steps: fromMarks.slice(0, 4) });
+      // Ideas wait for a conversation: before the first message the welcome's own suggestions are on screen,
+      // and nothing presumes what has not happened — no summary before a search.
+      else if (started) groups.push({ title: "Ideas", steps: IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0) });
     }
-    bar.querySelector(".next-title").textContent = fromMarks ? "From your marks" : "Ideas";
-    bar.hidden = ended;
-  }
-
-  // Next steps offered by the assistant: each button shows exactly the message it sends. Shown when the
-  // assistant has finished, cleared when a new message goes out.
-  let pendingNext = [];
-  function clearNext() {
-    for (const n of Array.from(document.querySelectorAll(".next"))) n.remove();
-  }
-  function renderNext() {
-    if (!pendingNext.length || ended) return;
-    clearNext();
-    const row = el("div", "next", el("div", "next-title", "Next steps"));
-    for (const step of pendingNext) {
-      const b = el("button", "", step);
-      b.type = "button";
-      b.addEventListener("click", () => { clearNext(); send(step); });
-      row.append(b);
+    // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
+    if (!groups.length || busy || ended) { bar.hidden = true; return; }
+    for (const g of groups) {
+      if (g.title) list.append(el("div", "steps-sub", g.title));
+      const row = el("div", "steps-row");
+      for (const step of g.steps) {
+        const b = el("button", "step-btn", step);
+        b.type = "button";
+        b.addEventListener("click", () => send(step));
+        row.append(b);
+      }
+      list.append(row);
     }
-    pendingNext = [];
-    const s = stick();
-    log.append(row);
-    s();
+    bar.hidden = false;
   }
+  // The names the rest of the page already calls.
+  function renderMarkSteps() { renderSteps(); }       // declarations, not consts: callable from anywhere
+  function renderNext() { renderSteps(); }
+  function clearNext() { assistantSteps = []; renderSteps(); }
 
   function markButtons(keyNo, card) {
     const wrap = el("div", "marks");
@@ -648,8 +680,8 @@
     updateActivity();
     if (ev.tool === "suggest_next_steps") {
       const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];
-      pendingNext = steps.map(String).filter((t) => t && !/^[\/!]/.test(t)).slice(0, 4);
-      if (!busy) renderNext();
+      assistantSteps = steps.map(String).filter((t) => t && !/^[\/!]/.test(t)).slice(0, 4);
+      renderSteps();
       return;
     }
     if (ev.tool !== "prior_art_search") return;
@@ -952,8 +984,11 @@
         busy = ev.value;
         turnAt = busy ? (ev.at || serverNow()) : null;
         if (busy) stepText = "";          // a new turn is new work, even if the bar's words are the same
+        // What the assistant is shown of your marks is fixed when it takes up your message; marks after that
+        // are ones it has not seen.
+        if (busy) marksAtTurn = new Map(marks);
         updateActivity();
-        if (!busy) renderNext();
+        renderSteps();
         break;
       case "stall": showStalled(ev.value === true, ev.seconds); break;
       case "conversation_kept": $("kept-note").hidden = false; break;

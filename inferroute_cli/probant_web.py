@@ -40,6 +40,18 @@ ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 MARKS = ("relevant", "not-relevant", "known")
 HISTORY_CAP = 5000
+# Pi event types this page knows: the ones normalize() handles (some deliberately ignored in part — the
+# professional's own messages, the marks note) and routine bookkeeping it has no use for. Only a type OUTSIDE
+# this set is reported at the end of a session as one "the page has no word for": that line exists to catch
+# something new — a Pi upgrade, an event that might explain a hang — and listing routine events every time
+# would bury it (it did, from 18 Sep until this list: every session's own messages were "unrecognised").
+KNOWN_EVENTS = frozenset({
+    "agent_start", "agent_settled", "message_start", "message_update", "message_end",
+    "tool_execution_start", "tool_execution_update", "tool_execution_end",
+    "extension_ui_request", "extension_error", "auto_retry_start", "response",
+    "agent_end", "turn_start", "turn_end", "auto_retry_end", "queue_update",
+    "session_info", "session_info_changed", "compaction_start", "compaction_end", "extension_ui_response",
+})
 # The steps a sealed search reports, in order (ir-attested.ts). Anything else is dropped.
 TOOL_PHASES = ("verifying", "approval", "searching")
 
@@ -359,8 +371,8 @@ class Bridge:
                     except ValueError:
                         continue
                     outs = normalize(ev)
-                    if not outs:
-                        name = str(ev.get("type") or "?")[:60]
+                    name = str(ev.get("type") or "?")[:60]
+                    if not outs and name not in KNOWN_EVENTS:
                         self.dropped[name] = self.dropped.get(name, 0) + 1
                     # Anything Pi says is a sign of life, including an event the page does not render:
                     # a turn is stalled when NOTHING arrives, not when nothing is shown.

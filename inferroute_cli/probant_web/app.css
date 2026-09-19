@@ -138,6 +138,7 @@ button.brand:hover { background: var(--user); }
 .msg-assistant td, .msg-assistant th { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
 .msg-error { color: var(--bad); font-size: 14px; background: var(--bad-soft); border-radius: 8px; padding: 8px 12px; }
 .msg-error .count { color: var(--muted); }
+.err-actions { margin-top: 6px; }
 .err-detail { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .err-detail summary { cursor: pointer; }
 .err-detail .mono { word-break: break-all; margin-top: 4px; }

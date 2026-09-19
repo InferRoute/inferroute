@@ -215,6 +215,7 @@
     if (d.includes("not verified") || d.includes("refus")) return "The AI machine could not be verified, so nothing was sent to it.";
     return "The AI machine didn't answer this request.";
   }
+  const RETRY_TEXT = "Continue where you left off";
   function showError(detail) {
     const plain = plainModelError(detail);
     if (lastError && lastError.plain === plain && lastError.node.isConnected && log.lastElementChild === lastError.node) {
@@ -224,7 +225,13 @@
     }
     const counter = el("span", "count", "");
     const more = el("details", "err-detail", el("summary", "", "Technical detail"), el("div", "mono", detail));
-    const node = el("div", "msg-error", el("div", "", plain, counter), detail ? more : null);
+    // A way on, not just a report (Henry, 19 Sep: "I don't even have a button to retry"). It asks the assistant
+    // to CONTINUE rather than resending the question: a failure after searches had already run would otherwise
+    // redo them. Like every button here, it sends exactly its words.
+    const again = el("button", "ghost small", RETRY_TEXT);
+    again.type = "button";
+    again.addEventListener("click", () => { again.disabled = true; send(RETRY_TEXT); });
+    const node = el("div", "msg-error", el("div", "", plain, counter), detail ? more : null, el("div", "row err-actions", again));
     log.append(node);
     lastError = { plain, node, counter, count: 1 };
   }

@@ -442,3 +442,4 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .danger-zone p { margin: 4px 0 0; }
 .danger-zone > button { flex: 0 0 auto; white-space: nowrap; }
 .deleted-list .record-row { color: var(--muted); }
+.update-note { background: var(--warn-soft); color: var(--ink); border-radius: var(--radius); padding: 10px 14px; margin: 0 0 16px; font-size: 14px; }

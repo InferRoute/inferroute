@@ -327,3 +327,26 @@ def test_a_session_that_has_ended_is_not_offered_as_open_and_does_not_block_a_ne
     L._follow(it)
     assert states == ["ended"], "the ended line must be recognised from the output, before the process exits"
     assert L.running_for("Demo/glucose") is None           # so "Start a session" starts a new one
+
+
+def test_the_page_is_the_version_the_server_started_with_and_says_when_a_newer_one_waits(home, monkeypatch, tmp_path):
+    """19 Sep: the home page read its JS fresh from disk, so after an update it showed "Delete matter" to a server
+    started before that route existed, and the button failed with a bare 404. The page is now the snapshot taken
+    when the server started, and the overview says when the installed code has changed since."""
+    import shutil
+    from fastapi.testclient import TestClient
+    import inferroute_cli.probant_web as W
+    static = tmp_path / "static"
+    shutil.copytree(W.STATIC, static)
+    monkeypatch.setattr(W, "STATIC", static)
+    monkeypatch.setattr(H, "STATIC", static)                  # imported by name there too
+    h = H.Home()
+    h.port = 45678
+    c = TestClient(h.app(), base_url="http://127.0.0.1:45678")
+    c.headers.update({"authorization": f"Bearer {h.token}"})
+    before = c.get("/home.js").content
+    assert c.get("/api/overview").json()["update_waiting"] is False
+    (static / "home.js").write_text("// a newer page, with a button this server has no route for\n")
+    assert c.get("/home.js").content == before                    # still the page the server started with
+    assert c.get("/api/overview").json()["update_waiting"] is True
+    assert b"A newer version of Probant is installed." in before

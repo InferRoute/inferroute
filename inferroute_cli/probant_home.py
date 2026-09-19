@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Request
 
 from . import probant as S
-from .probant_web import ENDED_MARK, STATIC, disclosure_info, install_guard, launch_browser, strip_ansi
+from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
 SESSION_URL = re.compile(r"(http://127\.0\.0\.1:\d+/#k=[A-Za-z0-9_-]+)")
 SESSION_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
@@ -291,10 +291,8 @@ class Home:
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         install_guard(app, lambda: home.port, lambda: home.token)
 
-        def static(name: str, media: str):
-            async def handler():
-                return Response((STATIC / name).read_bytes(), media_type=media)
-            return handler
+        files = PageFiles(("home.html", "home.js", "common.js", "app.css"))
+        static = files.handler
 
         app.get("/")(static("home.html", "text/html; charset=utf-8"))
         app.get("/home.js")(static("home.js", "text/javascript; charset=utf-8"))
@@ -324,7 +322,7 @@ class Home:
                     recent.append({**s, "matter": m["id"]})
             recent.sort(key=lambda s: s["id"], reverse=True)
             running = [home.launches.view(it) for it in home.launches.items.values() if it["state"] in ("starting", "ready")]
-            return {"matters": matters, "recent": recent[:12], "running": running}
+            return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale()}
 
         @app.post("/api/matters")
         async def create(request: Request):

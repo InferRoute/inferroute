@@ -491,19 +491,40 @@
   // something is slow or stuck, and then the step matters more than the seconds. The clock counts only the
   // MACHINE's time: seconds you spend reading the approval prompt are yours, and counting them would turn
   // "slower than usual" into "you were reading".
-  const SLOW_SECONDS = 10;
-  let lastSearchMs = null;             // this session's last completed search, machine time only
+  // Expectations come from what this computer has measured (probant_timing): per step, per depth — a broad
+  // search takes about four times as long as a quick one — and each number says what it measures. Before
+  // there is enough data for a step, the view says so rather than inventing a figure.
+  let searchTiming = null;
+  let clockSkew = 0;                    // server clock minus this page's; the stamps are the server's
+  const serverNow = () => Date.now() + clockSkew;
   const PHASE_TEXT = { verifying: "checking the search machine", approval: "waiting for your approval",
                        searching: "searching the sealed index" };
+  const DEPTH_K = { quick: 10, standard: 25, broad: 50 };
+  const bucketOf = (args) => {
+    const k = Number(args && args.k) || DEPTH_K[(args && args.depth) || "quick"] || 10;
+    return k > 25 ? "broad" : "quick";
+  };
 
-  function machineMs(entry) {
-    const now = performance.now();
+  function machineMs(entry, now) {
     const pending = entry.phase === "approval" ? now - entry.phaseAt : 0;
     return now - entry.startedAt - entry.approvalMs - pending;
   }
   function fmtSeconds(ms) {
-    const s = Math.max(0, Math.round(ms / 1000));
-    return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+    const s = ms / 1000;
+    if (s < 10) return `${s.toFixed(1)} s`;
+    const r = Math.round(s);
+    return r < 60 ? `${r} s` : `${Math.floor(r / 60)} min ${r % 60} s`;
+  }
+  // What to expect for the step in progress. `null` when nothing measured yet.
+  function expectation(entry) {
+    const t = searchTiming || {};
+    if (entry.phase === "verifying") return t.verifying ? { ...t.verifying, what: "usually" } : null;
+    if (entry.phase === "searching") {
+      const s = (t.searching || {})[entry.bucket];
+      if (!s) return null;
+      return { ...s, what: s.source === "machine" ? "the machine itself usually takes" : "usually" };
+    }
+    return null;
   }
   function paintProgress(entry) {
     if (!entry || entry.done) return;
@@ -512,20 +533,27 @@
       entry.sub.classList.remove("slow");
       return;
     }
-    const ms = machineMs(entry);
-    const slow = ms >= SLOW_SECONDS * 1000;
-    const expect = slow ? "slower than usual"
-      : lastSearchMs !== null ? `last one took ${(lastSearchMs / 1000).toFixed(1)} s`
-      : "usually a second or two";
-    entry.sub.textContent = `${PHASE_TEXT[entry.phase] || PHASE_TEXT.verifying}… ${fmtSeconds(ms)} · ${expect}`;
+    const now = serverNow();
+    const inStep = now - entry.phaseAt;
+    const x = expectation(entry);
+    const depth = entry.phase === "searching" ? ` for a ${entry.bucket} search` : "";
+    // Slower than usual: past twice the 90th percentile of this step, never under three seconds. With no data,
+    // only a generous fixed line — a stall notice is the watchdog's job, not a guess made here.
+    const limit = x ? Math.max(3000, 2 * x.p90_ms) : 15000;
+    const slow = inStep >= limit;
+    let hint;
+    if (slow) hint = x ? `slower than usual (${x.what} ${fmtSeconds(x.median_ms)}${depth})` : "taking a while";
+    else if (x) hint = `${x.what} ${fmtSeconds(x.median_ms)}${depth} · ${x.n} searches`;
+    else hint = "no timings on this computer yet";
+    entry.sub.textContent = `${PHASE_TEXT[entry.phase] || PHASE_TEXT.verifying}… ${fmtSeconds(machineMs(entry, now))} · ${hint}`;
     entry.sub.classList.toggle("slow", slow);
   }
-  function setPhase(entry, phase) {
+  function setPhase(entry, phase, at) {
     if (!entry || entry.done || !PHASE_TEXT[phase]) return;
-    const now = performance.now();
-    if (entry.phase === "approval") entry.approvalMs += now - entry.phaseAt;
+    const when = at || serverNow();
+    if (entry.phase === "approval") entry.approvalMs += when - entry.phaseAt;
     entry.phase = phase;
-    entry.phaseAt = now;
+    entry.phaseAt = when;
     toolRunning = phase === "approval" ? "Waiting for your approval…" : `${PHASE_TEXT[phase][0].toUpperCase()}${PHASE_TEXT[phase].slice(1)}…`;
     updateActivity();
     paintProgress(entry);
@@ -557,9 +585,12 @@
       const q = String(a.text || "");
       if (q) body.append(el("div", "card-query", q.length > 320 ? `${q.slice(0, 320)}…` : q));
       card.append(body);
-      const now = performance.now();
+      // Timed from the SERVER's stamp on the event: a reload replays history, and a clock started on receipt
+      // would restart every running search at zero.
+      const t0 = ev.at || serverNow();
       const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false,
-                      startedAt: now, phase: "verifying", phaseAt: now, approvalMs: 0, done: false };
+                      startedAt: t0, phase: "verifying", phaseAt: t0, approvalMs: 0, done: false,
+                      bucket: bucketOf(a) };
       const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
       toggle.addEventListener("click", flip);
       // Clicking the head also folds — but NOT when you were selecting its text. Dragging across the
@@ -606,12 +637,8 @@
     const entry = cards.get(ev.call);
     if (!entry) return;
     const { card, sub, title, body } = entry;
-    // The clock stops here. Only a search that completed counts toward "last one took": a refusal or a
-    // withdrawn request measured nothing about the machine.
-    const took = machineMs(entry);
-    entry.done = true;
+    entry.done = true;                  // the clock stops; the bridge records the wait for the statistics
     sub.classList.remove("slow");
-    if (ev.ok && (ev.details || {}).ok) lastSearchMs = took;
     if (ev.details && ev.details.searchNo) {
       title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
       entry.searchNo = ev.details.searchNo;
@@ -858,7 +885,8 @@
       case "assistant_end": assistantEnd(ev); break;
       case "tool_start": toolStart(ev); break;
       case "tool_end": toolEnd(ev); break;
-      case "tool_progress": setPhase(cards.get(ev.call), ev.phase); break;
+      case "tool_progress": setPhase(cards.get(ev.call), ev.phase, ev.at); break;
+      case "search_timing": searchTiming = ev.stats || null; break;
       case "dialog": showDialog(ev); break;
       case "dialog_closed":
         if (openDialog && openDialog.id === ev.id) { $("dialog").hidden = true; openDialog = null; }
@@ -931,6 +959,8 @@
     if (!key) { showNoKey(); return; }
     let s;
     try { s = await api("/api/session"); } catch (e) { showNoKey(); return; }
+    clockSkew = (Number(s.now) || Date.now()) - Date.now();
+    searchTiming = s.search_timing || null;
     $("layout").hidden = false;
     document.title = `Probant · ${s.matter}`;
     $("matter").textContent = String(s.matter || "").replace("/", " / ");

@@ -185,6 +185,8 @@
     }
   }
 
+  auditOffer($("audit"));            // standing offer in the panel, not a step hidden behind the export
+
   function stick() {
     const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 160;
     return () => { if (nearBottom) log.scrollTop = log.scrollHeight; };
@@ -1316,19 +1318,22 @@
     b.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Copied.", "info")).catch(() => {}));
     return b;
   }
-  function auditOffer() {
-    const box = el("div", "audit-offer");
+  function auditOffer(box) {
+    clear(box);
+    box.className = "audit-offer";        // its own block: the panel's container carries no styling of its own
     const go = el("button", "ghost", "Have your own AI audit it");
     go.type = "button";
     box.append(el("div", "audit-title", "A second opinion that isn't ours"),
-      el("p", "sub", "Makes an evidence-only copy: the hardware reports, signatures and identity, with none of your "
-        + "client's words (no queries, results or document text). Your own AI checks it against a brief."), go);
+      el("p", "sub", "Your own AI checks this proof against a brief, on an evidence-only copy: the hardware "
+        + "reports, signatures and identity, with none of your client's words (no queries, results or document "
+        + "text). It takes ten to fifteen minutes and needs no account with us."), go);
     go.addEventListener("click", async () => {
       go.disabled = true;
-      go.textContent = "Making the audit pack…";
+      go.textContent = "Preparing the audit pack…";
       try {
         const r = await api("/api/audit-pack", {});
         clear(box);
+        box.className = "audit-offer ready";
         box.append(el("div", "audit-title", "Audit pack ready"),
           el("span", "mono", r.path),
           el("p", "", el("b", "", "With your Claude subscription"), ", in that folder run:"),
@@ -1336,8 +1341,8 @@
           el("p", "", el("b", "", "No Claude subscription?"), " Use your InferRoute account instead:"),
           el("span", "mono", r.ir), copyButton(`cd "${r.path}" && ${r.ir}`, "Copy (goes to the folder too)"),
           el("p", "sub", "The brief (AUDIT.md) asks for a verdict on each claim and has it redo the key checks with "
-            + "its own tools, not only run ours. Two checks need your client's words, so it will report them as "
-            + "not checked; this computer's check above covered them."));
+            + "its own tools, not only run ours. It takes ten to fifteen minutes — let it finish. Two checks need "
+            + "your client's words, so it will report those as not checked; the check on this computer covers them."));
       } catch (e) { go.disabled = false; go.textContent = "Have your own AI audit it"; toast(e.message, "error"); }
     });
     return box;
@@ -1363,7 +1368,7 @@
       clear(out);
       out.append(verdict,
         el("div", "export-where", el("b", "", "The record"), " holds the disclosure in plain text: store it like the client file. Open record.html in:"),
-        el("span", "mono", r.path), copy, auditOffer());
+        el("span", "mono", r.path), copy);
     } catch (e) { clear(out); out.hidden = true; toast(e.message, "error"); }
     finally { b.disabled = false; b.textContent = "Export and check the record"; }
   });

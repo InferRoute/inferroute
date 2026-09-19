@@ -273,7 +273,9 @@ def test_the_help_page_covers_the_whole_path_and_the_limits():
 def test_the_agent_program_missing_from_path_is_named_plainly():
     msg = H.failure_message([" ❌ `pi` not found on PATH.", "    Pi is an open-source agent: `npm install -g …`",
                               "opening Demo/glucose — date bound 2020-01-01"])
-    assert "could not be found" in msg and "pi --version" in msg and "Nothing was sent" in msg
+    # Still names the program, but the answer is an install, never "open a terminal" (20 Sep).
+    assert "is not installed on this computer" in msg and "Nothing was sent" in msg
+    assert "npm install -g" in msg and "pi --version" not in msg
 
 
 def test_an_unrecognised_failure_shows_what_it_said_instead_of_pointing_at_a_terminal():
@@ -350,3 +352,52 @@ def test_the_page_is_the_version_the_server_started_with_and_says_when_a_newer_o
     assert c.get("/home.js").content == before                    # still the page the server started with
     assert c.get("/api/overview").json()["update_waiting"] is True
     assert b"A newer version of Probant is installed." in before
+
+
+def test_a_session_starts_from_a_page_whose_PATH_never_saw_node(monkeypatch, tmp_path):
+    """Henry, 20 Sep: "I don't want the user to have to do anything in the terminal". A home page started as
+    a service has a PATH that a terminal does not, and every session refused with advice to go and use a
+    terminal. The launcher looks where these programs install instead."""
+    from inferroute_cli import agents
+    fake_nvm = tmp_path / ".nvm" / "versions" / "node"
+    for version in ("v18.1.0", "v22.22.3"):
+        b = fake_nvm / version / "bin"
+        b.mkdir(parents=True)
+        (b / "pi").write_text("#!/bin/sh\n")
+        (b / "pi").chmod(0o755)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setenv("NVM_DIR", str(tmp_path / ".nvm"))
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    found = agents.find_agent("pi")
+    assert found == str(fake_nvm / "v22.22.3" / "bin" / "pi")     # the newest install, not the first found
+    assert agents.find_agent("definitely-not-installed") is None
+    # An explicit override wins, for a machine that keeps it somewhere else entirely.
+    other = tmp_path / "elsewhere" / "pi"
+    other.parent.mkdir()
+    other.write_text("#!/bin/sh\n")
+    other.chmod(0o755)
+    monkeypatch.setenv("IR_PI_BIN", str(other))
+    assert agents.find_agent("pi") == str(other)
+
+
+def test_when_pi_really_is_absent_the_page_says_install_it_not_use_a_terminal():
+    msg = H.failure_message(["`pi` is not installed on this computer (PATH and the usual install directories were checked)."])
+    assert "npm install -g @earendil-works/pi-coding-agent" in msg
+    assert "terminal" not in msg.lower()
+
+
+def test_the_child_gets_the_node_that_sits_beside_its_agent(tmp_path):
+    """`pi` is a node script; started with a service's PATH it found node 18 and died with a syntax error.
+    The directory the command was FOUND in holds the right node — following the symlink does not."""
+    from inferroute_cli import agents
+    binary = tmp_path / "nvm" / "bin" / "pi"
+    real = tmp_path / "nvm" / "lib" / "node_modules" / "pi" / "cli.js"
+    real.parent.mkdir(parents=True)
+    real.write_text("#!/usr/bin/env node\n")
+    binary.parent.mkdir(parents=True)
+    (binary.parent / "node").write_text("")
+    binary.symlink_to(real)
+    env = agents.put_agent_on_path(str(binary), {"PATH": "/usr/bin:/bin"})
+    assert env["PATH"].split(":")[0] == str(binary.parent)          # where node is, not where the link goes
+    assert str(real.parent) not in env["PATH"]
+    assert agents.put_agent_on_path(str(binary), dict(env))["PATH"] == env["PATH"]   # not added twice

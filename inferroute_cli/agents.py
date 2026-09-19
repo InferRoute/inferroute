@@ -110,14 +110,59 @@ def fix_clipboard() -> int:
     return rc
 
 
+def find_agent(agent: str) -> str | None:
+    """Where the agent's program is, whether or not the PATH we inherited mentions it.
+
+    A page started from a desktop icon, a systemd unit, or a login shell that never sourced nvm has a PATH
+    that a terminal does not: on 20 Sep Probant home refused every session with "Pi could not be found",
+    and the advice it could honestly give was "start it from a terminal where `pi --version` works" — which
+    is precisely what a person using a browser page should never have to do. So look where these programs
+    actually install, not only where this process happens to be able to see.
+    """
+    override = os.environ.get(f"IR_{agent.upper()}_BIN")
+    if override and os.access(override, os.X_OK):
+        return override
+    found = shutil.which(agent)
+    if found:
+        return found
+    home = Path.home()
+    roots = [home / ".local" / "bin", Path("/usr/local/bin"), Path("/opt/homebrew/bin"),
+             home / ".bun" / "bin", home / ".npm-global" / "bin", home / "node_modules" / ".bin"]
+    nvm = Path(os.environ.get("NVM_DIR") or (home / ".nvm")) / "versions" / "node"
+    if nvm.is_dir():
+        # Newest node first, so a stale old install does not win over the one the person uses.
+        roots = sorted((d / "bin" for d in nvm.iterdir() if d.is_dir()), reverse=True) + roots
+    for d in roots:
+        candidate = d / agent
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
+def put_agent_on_path(binary: str, env: dict) -> dict:
+    """Ensure the child can run the agent it was given.
+
+    These agents are node scripts whose shebang is `/usr/bin/env node`. Found by absolute path but started
+    with a service's PATH, `pi` picks up whatever old node sits in /usr/bin and dies with a syntax error
+    nobody can act on (measured 20 Sep: node 18 against a build needing 22). The node it was installed with
+    sits beside it — in the directory the command was FOUND in, never where its symlink points: these bins
+    are symlinks into lib/node_modules, and following them lands somewhere with no node at all.
+    """
+    d = os.path.dirname(os.path.abspath(binary))
+    if d and d not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = d + os.pathsep + env.get("PATH", "")
+    return env
+
+
 def binary_for(agent: str) -> str:
     warn_clipboard_once()
     if agent == "claude":
         from .launch import _require_claude_binary
         return _require_claude_binary()
-    b = shutil.which(agent)
+    b = find_agent(agent)
     if not b:
-        sys.stderr.write(f"\n ❌ `{agent}` not found on PATH.\n    {INSTALL_HINT.get(agent, '')}\n\n")
+        sys.stderr.write(f"\n ❌ `{agent}` is not installed on this computer (PATH and the usual install "
+                         f"directories were checked).\n    {INSTALL_HINT.get(agent, '')}\n\n")
         sys.exit(127)
     return b
 

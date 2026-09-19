@@ -64,11 +64,16 @@
 
   <aside class="trust" id="trust" aria-label="What protects this matter">
     <div id="trust-body"></div>
-    <div class="trust-actions">
-      <button id="recheck" class="ghost" type="button">Check again</button>
-      <button id="export" class="primary" type="button">Export the record</button>
-    </div>
-    <div id="export-result" class="export-result" hidden></div>
+    <section class="prove" aria-label="Proof you can check">
+      <h2>Proof you can check</h2>
+      <p class="sub">Don't take this panel's word for it. Export the signed record and run its own verifier, the same
+        file anyone you show it to would run.</p>
+      <div class="trust-actions">
+        <button id="export" class="primary" type="button">Export and check the record</button>
+        <button id="recheck" class="ghost" type="button">Check the machines again</button>
+      </div>
+      <div id="export-result" class="export-result" hidden></div>
+    </section>
     <section id="marks-panel" class="marks-panel" hidden aria-label="Your marks on this matter">
       <h2>Your marks</h2>
       <p id="marks-count" class="sub"></p>

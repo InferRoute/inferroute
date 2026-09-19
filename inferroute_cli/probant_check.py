@@ -131,7 +131,13 @@ def parse(text: str, code: int) -> Dict[str, Any]:
             entry["todo"] = todo
             entry["failed"] = [r["name"] for r in failed]
         elif skipped:
-            entry["not_checked"] = [f"{r['name']}: {r['detail']}" for r in skipped]
+            # One line per distinct skip, not one per search: a 68-search record said the same sentence 68
+            # times and buried the answer (19 Sep). The count keeps how often it applied.
+            seen: Dict[str, int] = {}
+            for r in skipped:
+                line = f"{r['name']}: {r['detail']}"
+                seen[line] = seen.get(line, 0) + 1
+            entry["not_checked"] = [line if n == 1 else f"{line} (in {n} searches)" for line, n in seen.items()]
         groups.append(entry)
     return {"code": code, "verdict": verdict, "headline": headline, "explainer": explainer,
             "result_line": result, "groups": groups, "checks": len(rows),

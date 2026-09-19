@@ -91,5 +91,46 @@ window.ProbantUI = (() => {
     return out;
   }
 
-  return { el, clear, inline, markdown };
+  // ── an exported record's check, in the words a professional needs ──
+  // Shared by the home page and the session page so the two can never say different things about the same
+  // record. The verdict is the verifier's own exit code (probant_check.py); these are only its words. Every
+  // failure says what it costs the person holding the record and what to do.
+  const CHECK_PILL = { passed: "✓ Checked out", failed: "✗ Did not check out", refused: "○ Could not run",
+    test: "◐ Test run", unauthenticated: "◐ Reference unauthenticated" };
+  // `compact` (the session panel, which must leave the marks in view): each question is one line, and its
+  // answer opens on click — except a question that did NOT pass, which opens by itself.
+  function renderCheck(box, r, compact) {
+    clear(box);
+    box.append(el("div", `check-verdict ${r.verdict}`, CHECK_PILL[r.verdict] || r.verdict));
+    box.append(el("div", "check-headline", r.headline));
+    if (!compact || r.verdict !== "passed") box.append(el("p", "", r.explainer || ""));
+    if (r.note) box.append(el("p", "warn-text", r.note));
+    for (const g of r.groups || []) {
+      const item = el(compact ? "details" : "div", `check-group ${g.status}${compact ? " compact" : ""}`);
+      if (compact && g.status !== "pass") item.open = true;
+      item.append(el(compact ? "summary" : "div", "check-q", g.question));
+      item.append(el("p", "", g.answer || ""));
+      if (g.todo) item.append(el("p", "check-todo", el("b", "", "What to do: "), g.todo));
+      if (g.not_checked) item.append(el("p", "sub", `Not checked — ${g.not_checked.join("; ")}`));
+      const detail = el("div", "check-rows");
+      detail.hidden = true;
+      for (const row of g.rows || []) {
+        detail.append(el("div", `check-row r-${row.status.toLowerCase()}`,
+          el("span", "check-status", row.status), el("span", "check-name", row.name),
+          el("span", "sub", row.detail)));
+      }
+      const toggle = el("button", "link small", "Show the technical lines");
+      toggle.type = "button";
+      toggle.addEventListener("click", () => {
+        detail.hidden = !detail.hidden;
+        toggle.textContent = detail.hidden ? "Show the technical lines" : "Hide the technical lines";
+      });
+      item.append(toggle, detail);
+      box.append(item);
+    }
+    box.append(el("p", "sub", `${r.checks} checks ran. Anyone can repeat this without InferRoute's software: `
+      + `run verify_record.py inside the record's folder.`));
+  }
+
+  return { el, clear, inline, markdown, renderCheck };
 })();

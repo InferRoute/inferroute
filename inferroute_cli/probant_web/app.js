@@ -21,7 +21,7 @@
     try { key = sessionStorage.getItem(KEY_STORE) || ""; } catch (_) { key = ""; }
   }
 
-  const { el, clear, markdown } = window.ProbantUI;
+  const { el, clear, markdown, renderCheck } = window.ProbantUI;
 
   // ── talking to the bridge ──
   async function api(path, body) {
@@ -1308,28 +1308,31 @@
     b.textContent = "Checking…";
     try { const r = await api("/api/recheck", {}); renderTrust(r.trust); toast("Checked again just now.", "info"); }
     catch (e) { toast(`Couldn't check: ${e.message}`, "error"); }
-    finally { b.disabled = false; b.textContent = "Check again"; }
+    finally { b.disabled = false; b.textContent = "Check the machines again"; }
   });
+  // Proof, not only our word: the record is exported and checked by its own verifier — the same file anyone
+  // else would run — and the answer shows here, in the five questions a professional has.
   $("export").addEventListener("click", async () => {
     const b = $("export");
     b.disabled = true;
-    b.textContent = "Exporting…";
+    b.textContent = "Exporting and checking…";
     const out = $("export-result");
+    clear(out);
+    out.hidden = false;
+    out.append(el("p", "sub", "Writing the signed record, then running its own verifier. This takes a few seconds."));
     try {
-      const r = await api("/api/export", {});
-      clear(out);
+      const r = await api("/api/prove", {});
       const copy = el("button", "small", "Copy folder path");
       copy.type = "button";
       copy.addEventListener("click", () => navigator.clipboard.writeText(r.path).then(() => toast("Copied.", "info")).catch(() => {}));
-      out.append(el("div", "", el("b", "", "Record exported."), " It holds the disclosure in plain text: store it like the client file."),
-        el("span", "mono", r.path),
-        el("div", "", "Open record.html in that folder to read it. Check it on this computer with:"),
-        el("span", "mono", r.verify_here),
-        el("div", "", "Anyone else can check it without InferRoute's software, from inside that folder (needs Python's cryptography library, version 42 or newer):"),
-        el("span", "mono", r.verify_anyone), copy);
-      out.hidden = false;
-    } catch (e) { toast(e.message, "error"); }
-    finally { b.disabled = false; b.textContent = "Export the record"; }
+      const verdict = el("div", "check-result");
+      renderCheck(verdict, r.check || {}, true);
+      clear(out);
+      out.append(verdict,
+        el("div", "export-where", el("b", "", "The record"), " holds the disclosure in plain text: store it like the client file. Open record.html in:"),
+        el("span", "mono", r.path), copy);
+    } catch (e) { clear(out); out.hidden = true; toast(e.message, "error"); }
+    finally { b.disabled = false; b.textContent = "Export and check the record"; }
   });
   $("end").addEventListener("click", () => {
     if (!window.confirm("End this session? The assistant stops; your marks and records stay with the matter.")) return;

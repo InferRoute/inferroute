@@ -692,14 +692,22 @@ def test_the_activity_bar_has_a_step_clock_and_a_since_you_asked_clock():
 
 
 def test_a_document_seen_before_names_the_search_by_what_it_was_about():
-    """Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'"."""
+    """Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'". Runs the
+    page's real shortAbout(), which both the per-document pill and the folded head use."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "card_head_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    naming = json.loads(r.stdout.strip().splitlines()[-1])["naming"]
+    assert naming["known"] == "‘Routing by permission’"
+    assert naming["long"].endswith("…’") and len(naming["long"]) <= 44          # cut to one line
+    assert naming["unknown"] == "search 9"                                     # only when not on this page
     js = (STATIC / "app.js").read_text()
     assert "doc.alsoIn ? seenIn(doc.alsoIn) : null" in js
-    body = js[js.index("function seenIn"):js.index("function seenIn") + 600]
-    assert "also in ‘${short}’" in body
-    assert "also in search ${no}" in body          # only when the earlier search is not on this page
-    assert "tag.title = " in body                   # the full wording on hover, since the pill is cut short
-
+    assert "tag.title = `Also returned by search ${no}: ${e.about}`" in js     # the full wording on hover
 
 def test_a_slip_in_an_optional_hint_costs_the_hint_never_the_search():
     """19 Sep: the assistant named a search with an 86-character label; the schema capped it at 80, so Pi
@@ -766,3 +774,28 @@ def test_the_unrecognised_events_line_names_only_what_is_new(tmp_path):
         await b.pump(SimpleNamespace(stdout=reader, stdin=FakeStdin(), wait=wait, returncode=0))
         return b.ended
     assert asyncio.run(run())["unrecognised"] == {"some_future_event": 1}
+
+
+def test_search_cards_start_folded_and_the_head_carries_the_counts_and_overlap():
+    """Henry, 19 Sep: "by default, could you not even expand the search results frames, just update within the
+    compacted view what needs to be, and perhaps add notes describing how many appeared in what other search".
+    Drives the page's real refreshCardSummary()/shortAbout() (tests/card_head_sim.js)."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "card_head_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["withMarks"]["sub"] == "9 documents · 2 new"
+    notes = out["withMarks"]["notes"]
+    # Largest overlaps first, named by what those searches were about; the rest counted; then your marking.
+    assert notes.startswith("3 also in ‘Routing by permission’ · 2 also in ‘Ledger of what has been drawn")
+    assert "2 in 2 other searches" in notes and notes.endswith("3 marked, 2 relevant")
+    assert out["lone"] == {"sub": "10 documents", "hidden": True}      # nothing to say: no empty line
+    js = (STATIC / "app.js").read_text()
+    # Folded from the start — every search, including the one running — with a refusal still opening itself.
+    assert "      cards.set(ev.call, entry);\n      setCollapsed(entry, true);" in js
+    assert "setCollapsed(entry, false);                 // a refusal is short and worth reading" in js

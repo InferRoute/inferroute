@@ -169,6 +169,8 @@ button.brand:hover { background: var(--user); }
 .card-foot { padding: 8px 14px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--line); }
 .card-head { flex-wrap: wrap; }
 .card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }
+/* the head's third line: how the results overlap earlier searches, and your marking */
+.card-head .notes { order: 4; flex-basis: 100%; color: var(--muted); font-size: 12.5px; }
 .doc .seen { font-size: 11px; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 7px; margin-left: 8px; }
 /* It now names the earlier search, so it can be long: one line, cut to the room there is, full text on hover. */
 .doc .seen { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }

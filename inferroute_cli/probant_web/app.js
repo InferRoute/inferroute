@@ -418,10 +418,20 @@
     if (!entry || entry.n === undefined) return;
     const marked = entry.keys.filter((k) => marks.get(k)).length;
     const relevant = entry.keys.filter((k) => marks.get(k) === "relevant").length;
-    const bits = [`${entry.n} document${entry.n === 1 ? "" : "s"}`];
-    if (marked) bits.push(`${marked} marked${relevant ? `, ${relevant} relevant` : ""}`);
-    bits.push(entry.collapsed ? "click to open" : "opened on this computer only");
-    entry.sub.textContent = bits.join(" · ");
+    const n = entry.n;
+    const fresh = entry.fresh === undefined ? n : entry.fresh;
+    entry.sub.textContent = `${n} document${n === 1 ? "" : "s"}${fresh < n ? ` · ${fresh} new` : ""}`;
+    // How these results overlap the earlier searches, named by what those searches were about; the two
+    // largest overlaps in words, the rest counted. Then your marking, which a fold must never hide.
+    const notes = [];
+    const overlap = Array.from((entry.overlap || new Map()).entries()).sort((x, y) => y[1] - x[1]);
+    for (const [no, c] of overlap.slice(0, 2)) notes.push(`${c} also in ${shortAbout(no)}`);
+    if (overlap.length > 2) {
+      const more = overlap.slice(2).reduce((t, [, c]) => t + c, 0);
+      notes.push(`${more} in ${overlap.length - 2} other search${overlap.length - 2 === 1 ? "" : "es"}`);
+    }
+    if (marked) notes.push(`${marked} marked${relevant ? `, ${relevant} relevant` : ""}`);
+    if (entry.notes) { entry.notes.textContent = notes.join(" · "); entry.notes.hidden = !notes.length; }
     if (entry.outline) outlineUpdate(entry, relevant ? `${relevant} relevant` : marked ? `${marked} marked` : "");
   }
 
@@ -599,13 +609,16 @@
   // "Also in" names the earlier search by what it was about, not by a number you would have to go and look up.
   // A number is what is left only when the earlier search is not on this page.
   const searchesByNo = new Map();       // search number → its card entry
-  function seenIn(no) {
+  function shortAbout(no, max = 42) {
     const e = searchesByNo.get(no);
     const about = e && e.about ? e.about : "";
-    if (!about) return el("span", "seen", `also in search ${no}`);
-    const short = about.length > 42 ? `${about.slice(0, 41).trimEnd()}…` : about;
-    const tag = el("span", "seen", `also in ‘${short}’`);
-    tag.title = `Also returned by search ${no}: ${about}`;
+    if (!about) return `search ${no}`;
+    return `‘${about.length > max ? `${about.slice(0, max - 1).trimEnd()}…` : about}’`;
+  }
+  function seenIn(no) {
+    const e = searchesByNo.get(no);
+    const tag = el("span", "seen", `also in ${shortAbout(no)}`);
+    if (e && e.about) tag.title = `Also returned by search ${no}: ${e.about}`;
     return tag;
   }
 
@@ -620,14 +633,21 @@
       const card = el("div", "card");
       const sub = el("span", "sub", "checking the search machine…");
       const title = el("span", "title", "🔍 Sealed patent search");
-      const what = a.feature ? el("span", "what", `feature: ${a.feature}`) : a.like ? el("span", "what", `documents like ${String(a.like).toUpperCase()}`) : null;
+      // The head is what you read, since a card now starts folded: it always says what was searched — a search
+      // with no feature name used to show nothing here — and has a line of notes for the results.
+      const qline = String(a.text || "").replace(/\s+/g, " ").trim();
+      const what = el("span", "what", a.feature ? `feature: ${a.feature}`
+        : a.like ? `documents like ${String(a.like).toUpperCase()}`
+        : `“${qline.length > 110 ? `${qline.slice(0, 109).trimEnd()}…` : qline}”`);
+      const notes = el("span", "notes", "");
+      notes.hidden = true;
       // A real button carries the state for a screen reader and the keyboard; the whole head is also a
       // click target, because a 12px chevron is not one.
       const toggle = el("button", "card-toggle", "▾");
       toggle.type = "button";
       toggle.setAttribute("aria-expanded", "true");
       toggle.setAttribute("aria-label", "Collapse this search");
-      const head = el("div", "card-head", toggle, title, what, sub);
+      const head = el("div", "card-head", toggle, title, what, sub, notes);
       card.append(head);
       const body = el("div", "card-body");
       const q = String(a.text || "");
@@ -636,7 +656,7 @@
       // Timed from the SERVER's stamp on the event: a reload replays history, and a clock started on receipt
       // would restart every running search at zero.
       const t0 = ev.at || serverNow();
-      const entry = { card, sub, title, body, toggle, head, keys: [], collapsed: false, byUser: false,
+      const entry = { card, sub, title, body, toggle, head, notes, keys: [], collapsed: false, byUser: false,
                       startedAt: t0, phase: "verifying", phaseAt: t0, approvalMs: 0, done: false,
                       bucket: bucketOf(a) };
       const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
@@ -648,11 +668,14 @@
         if (sel && !sel.isCollapsed && head.contains(sel.anchorNode)) return;
         flip(e);
       });
-      // Earlier searches fold away as soon as a new one starts: by the third search the feed is unreadable,
-      // and what you want on screen is the one running now.
+      // Folded from the start (Henry, 19 Sep: "by default, could you not even expand the search results frames,
+      // just update within the compacted view what needs to be"). The head carries the progress, what was
+      // searched, the counts and how the results overlap earlier searches; you open a card to read or mark its
+      // documents. Two exceptions stand: a refusal opens itself, and a card you opened stays open.
       autoCollapse();
       log.append(card);
       cards.set(ev.call, entry);
+      setCollapsed(entry, true);
       // What this search was ABOUT, in the words it was run with — how it is named everywhere else on the
       // page (Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'").
       entry.about = a.feature ? String(a.feature) : a.like ? `documents like ${String(a.like).toUpperCase()}` : q.replace(/\s+/g, " ").trim();
@@ -718,7 +741,9 @@
     }
     const docs = Array.isArray(d.docs) ? d.docs : [];
     const again = docs.filter((d) => d.alsoIn).length;
-    sub.textContent = `${docs.length} documents${again ? ` (${again} already seen)` : ""} · opened on this computer only`;
+    entry.fresh = docs.length - again;
+    entry.overlap = new Map();                       // earlier search number → how many of these it returned too
+    for (const doc of docs) if (doc.alsoIn) entry.overlap.set(doc.alsoIn, (entry.overlap.get(doc.alsoIn) || 0) + 1);
     if (d.testRoots) body.append(el("div", "card-note warn", "TEST machine: checked against test keys, not a real verification."));
     else body.append(el("div", "card-note", `🔒 ${d.ours ? "InferRoute's sealed search machine" : "Sealed search machine"}, checked just before the search. Only that machine could read the query.`));
     const list = el("ol", "docs");

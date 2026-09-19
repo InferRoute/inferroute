@@ -665,3 +665,18 @@ def test_expectations_are_per_depth_and_say_where_they_come_from(tmp_path, monke
     assert s["searching"]["quick"]["source"] == "wait" and s["searching"]["quick"]["median_ms"] == 900.0
     assert s["searching"]["broad"]["source"] == "machine"
     assert s["verifying"]["median_ms"] == 300.0
+
+
+def test_assistant_prompts_wait_in_line_instead_of_replacing_each_other():
+    """19 Sep, caught by the event recorder: five parallel searches raised five approval prompts within 10 ms.
+    The page has one dialog; each prompt replaced the last on screen, the last was answered, and the other four
+    searches hung at "waiting for your approval" with nothing left to click — the stall of 18 Sep, explained."""
+    js = (STATIC / "app.js").read_text()
+    assert 'case "dialog": queueDialog(ev); break;' in js
+    assert 'case "dialog_closed": dropDialog(ev.id); break;' in js
+    body = js[js.index("function showNextDialog"):js.index("function showNextDialog") + 400]
+    assert "if (openDialog || !$(\"dialog\").hidden || ended) return;" in body   # one at a time, never on top
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    # And at the source: searches issued at once share ONE approval question per machine.
+    assert "const approvals = new Map<string, Promise<boolean>>();" in ts
+    assert "let pending = approvals.get(measurement);" in ts

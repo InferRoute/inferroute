@@ -750,11 +750,12 @@
     const save = el("button", "primary", "Save");
     const cancel = el("button", "ghost", "Cancel");
     save.type = cancel.type = "button";
-    cancel.addEventListener("click", () => { $("dialog").hidden = true; });
+    cancel.addEventListener("click", () => { $("dialog").hidden = true; showNextDialog(); });
     save.addEventListener("click", async () => {
       try {
         const r = await api("/api/disclosure", { text: box.value });
         $("dialog").hidden = true;
+        showNextDialog();
         toast(`Disclosure saved (${r.words} words). Ask for a prior-art survey when you are ready.`, "info");
         const line = $("disclosure-line");
         line.classList.remove("warn");
@@ -775,6 +776,28 @@
 
   // ── dialogs (the approval before a search) ──
   let openDialog = null;
+  // Prompts from the assistant wait in line. The page has ONE dialog, and a second prompt used to REPLACE the
+  // first on screen — and a prompt nobody can see is a search that waits for ever. 19 Sep, caught by the
+  // event recorder: five parallel searches raised five approval prompts within 10 ms; the last was answered
+  // and ran at once; the other four hung at "waiting for your approval" with nothing left to click. The same
+  // shape was the unexplained stall of 18 Sep.
+  const dialogQueue = [];
+  function queueDialog(ev) {
+    if ((openDialog && openDialog.id === ev.id) || dialogQueue.some((d) => d.id === ev.id)) return;
+    dialogQueue.push(ev);
+    showNextDialog();
+  }
+  function showNextDialog() {
+    // One at a time — and not over the disclosure editor, which borrows the same dialog.
+    if (openDialog || !$("dialog").hidden || ended) return;
+    const next = dialogQueue.shift();
+    if (next) showDialog(next);
+  }
+  function dropDialog(id) {
+    const i = dialogQueue.findIndex((d) => d.id === id);
+    if (i >= 0) dialogQueue.splice(i, 1);
+    if (openDialog && openDialog.id === id) { $("dialog").hidden = true; openDialog = null; showNextDialog(); }
+  }
   function showDialog(ev) {
     openDialog = ev;
     $("dialog-title").textContent = ev.title || "The assistant needs your answer";
@@ -795,10 +818,14 @@
     flush();
     const actions = $("dialog-actions");
     clear(actions);
+    if (dialogQueue.length) {
+      body.append(el("p", "sub", `${dialogQueue.length} more ${dialogQueue.length === 1 ? "question" : "questions"} from the assistant after this one.`));
+    }
     const answer = async (payload) => {
       $("dialog").hidden = true;
       openDialog = null;
       try { await api("/api/dialog", Object.assign({ id: ev.id }, payload)); } catch (e) { toast(e.message, "error"); }
+      showNextDialog();
     };
     if (ev.method === "confirm") {
       const no = el("button", "ghost", "Don't allow");
@@ -838,6 +865,7 @@
       $("dialog").hidden = true;
       openDialog = null;
       api("/api/dialog", ev.method === "confirm" ? { id: ev.id, confirmed: false } : { id: ev.id, cancelled: true }).catch(() => {});
+      showNextDialog();
     }
   });
 
@@ -887,10 +915,8 @@
       case "tool_end": toolEnd(ev); break;
       case "tool_progress": setPhase(cards.get(ev.call), ev.phase, ev.at); break;
       case "search_timing": searchTiming = ev.stats || null; break;
-      case "dialog": showDialog(ev); break;
-      case "dialog_closed":
-        if (openDialog && openDialog.id === ev.id) { $("dialog").hidden = true; openDialog = null; }
-        break;
+      case "dialog": queueDialog(ev); break;
+      case "dialog_closed": dropDialog(ev.id); break;
       case "notify": toast(ev.message, ev.level); break;
       case "status": statuses.set(ev.key, ev.text); renderStatus(); break;
       case "trust": renderTrust(ev.trust); break;

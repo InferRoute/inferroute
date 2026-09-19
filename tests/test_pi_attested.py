@@ -400,3 +400,22 @@ def test_the_contract_says_how_marks_and_next_steps_may_be_used():
     assert "matter_marks" in text and "suggest_next_steps" in text
     assert "never adopt it as your own conclusion" in text and "never a judgment" in text
     assert P.load_contract()["modified"] is False
+
+
+def test_the_extension_parses():
+    """Pi loads ir-attested.ts at session start; a syntax error there breaks EVERY session, and nothing in the
+    Python suite would notice. `node --check` does not parse TypeScript at all — measured 19 Sep: it passed a
+    file with `const = ;` in it — so this loads the module for real and tells a syntax error apart from the
+    expected failure to find Pi's own packages, which only happens after parsing succeeded."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts"
+    probe = ("import(process.argv[1]).then(()=>console.log('LOADED'),e=>console.log("
+             "e instanceof SyntaxError||e.name==='SyntaxError'?'SYNTAX '+e.message:'PARSED '+(e.code||e.name)))")
+    r = subprocess.run([node, "--experimental-strip-types", "-e", probe, str(ts)], capture_output=True, text=True, timeout=60)
+    if "SYNTAX" not in r.stdout and "PARSED" not in r.stdout and "LOADED" not in r.stdout:
+        pytest.skip(f"this node cannot load TypeScript: {r.stderr.strip()[:120]}")
+    assert "SYNTAX" not in r.stdout, r.stdout

@@ -531,6 +531,8 @@ export default function (pi: ExtensionAPI) {
 	// In-session memory of searches: which search first returned each document, each document's returned text
 	// (for `like`), and the last next steps offered (for /next).
 	let searchNo = 0;
+	// Approval questions in flight, by machine measurement — shared by searches issued at the same instant.
+	const approvals = new Map<string, Promise<boolean>>();
 	const firstSeen = new Map<string, number>();
 	const docText = new Map<string, string>();
 	let lastSteps: string[] = [];
@@ -734,34 +736,52 @@ export default function (pi: ExtensionAPI) {
 			}
 			const measurement = String(e.measurement ?? "");
 			if (!(matter.approved ?? []).includes(measurement)) {
-				const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
-				const identity = isInferRoutes(verified)
-					? "running exactly the software InferRoute published (signed reference checked)"
-					: "running exactly the software this computer expects";
-				const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+				// ONE question per machine per matter, however many searches ask at once. The assistant
+				// issues several searches in the same instant; each used to find the matter not yet
+				// approved and raise its own prompt — five at once on 19 Sep, of which the page could
+				// show one. The first to arrive asks; the rest wait for that same answer. "You won't be
+				// asked again for it" is then true, and a decline stops all of them.
 				phase("approval");
-				const ok = await ctx.ui.confirm(
-					"Allow a sealed patent search?",
-					[
-						vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
-						"The assistant wants to search for:\n",
-						`  "${preview}"\n\n`,
-						`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
-						"This text is encrypted here and only that machine can open it. ",
-						`Only documents ${bound} come back.\n\n`,
-						"Allow searches to this machine for this matter? You won't be asked again for it.\n",
-						`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
-					].join(""),
-				);
+				let pending = approvals.get(measurement);
+				if (!pending) {
+					const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
+					const identity = isInferRoutes(verified)
+						? "running exactly the software InferRoute published (signed reference checked)"
+						: "running exactly the software this computer expects";
+					const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+					pending = (async () => {
+						const ok = await ctx.ui.confirm(
+							"Allow a sealed patent search?",
+							[
+								vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
+								"The assistant wants to search for:\n",
+								`  "${preview}"\n\n`,
+								`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
+								"This text is encrypted here and only that machine can open it. ",
+								`Only documents ${bound} come back.\n\n`,
+								"Allow searches to this machine for this matter? You won't be asked again for it.\n",
+								`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
+							].join(""),
+						);
+						if (ok) {
+							// Recorded host-side (survives the session, per matter per measurement) BEFORE the
+							// waiting searches are released, so none of them can race past an unrecorded yes.
+							try {
+								await searchCall("/matter/approve", { measurement }, signal);
+							} catch {
+								/* approval recording is best-effort; the confirm above is the gate */
+							}
+						}
+						return ok;
+					})();
+					approvals.set(measurement, pending);
+					// Forgotten once answered: a "no" must be asked again next time, and a "yes" is on the host.
+					pending.finally(() => approvals.delete(measurement)).catch(() => {});
+				}
+				const ok = await pending;
 				if (!ok) {
 					pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, searchProofOf(verified, "declined"));
 					throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
-				}
-				// Record the approval host-side (survives the session, per matter per measurement).
-				try {
-					await searchCall("/matter/approve", { measurement }, signal);
-				} catch {
-					/* approval recording is best-effort; the confirm above is the gate */
 				}
 			}
 			let out: SearchVerdict;

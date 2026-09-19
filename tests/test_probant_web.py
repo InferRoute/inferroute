@@ -810,3 +810,15 @@ def test_a_failed_answer_offers_a_way_on_that_sends_exactly_its_words():
     assert 'const again = el("button", "ghost small", RETRY_TEXT);' in body
     assert "send(RETRY_TEXT)" in body
     assert 'const RETRY_TEXT = "Continue where you left off";' in js
+
+
+def test_when_continuing_fails_too_the_page_offers_a_fresh_session():
+    """19 Sep: Henry pressed "Continue where you left off" in a session started before the re-pin fix; it failed
+    again, and again — a session's AI-machine side runs the code it started with. When the next try fails too,
+    the session is stuck: the page says so and offers the way out, a fresh session, which re-checks from scratch."""
+    js = (STATIC / "app.js").read_text()
+    body = js[js.index("function showError"):js.index("function showError") + 2600]
+    assert "failedTries += 1;" in body and "if (failedTries >= 2) {" in body
+    assert "Start a fresh session on this matter" in body and "goHome(`/matter/${matterId}`)" in body
+    # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets through.
+    assert "if (!ev.stopped && current.text.trim()) failedTries = 0;" in js

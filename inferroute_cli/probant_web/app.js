@@ -197,6 +197,7 @@
   function assistantEnd(ev) {
     if (!current) assistantStart();
     current.text = ev.text || "";
+    if (!ev.stopped && current.text.trim()) failedTries = 0;
     renderCurrent();
     if (!current.text.trim()) current.node.remove();
     if (ev.stopped === "error") showError(ev.error || "");
@@ -216,6 +217,7 @@
     return "The AI machine didn't answer this request.";
   }
   const RETRY_TEXT = "Continue where you left off";
+  let failedTries = 0;                  // failed answers in a row; an answer that gets through resets it
   function showError(detail) {
     const plain = plainModelError(detail);
     if (lastError && lastError.plain === plain && lastError.node.isConnected && log.lastElementChild === lastError.node) {
@@ -231,7 +233,24 @@
     const again = el("button", "ghost small", RETRY_TEXT);
     again.type = "button";
     again.addEventListener("click", () => { again.disabled = true; send(RETRY_TEXT); });
-    const node = el("div", "msg-error", el("div", "", plain, counter), detail ? more : null, el("div", "row err-actions", again));
+    const actions = el("div", "row err-actions", again);
+    // The same failure on the NEXT try too means this session is stuck, and continuing only repeats it.
+    // A fresh session re-checks the AI machine from scratch — the way out of stale state, and the only way
+    // out of a session started on older code (19 Sep: two sessions from before a fix kept failing while every
+    // new one would have worked). Nothing is lost: searches, marks and the conversation stay with the matter.
+    failedTries += 1;
+    let hint = null;
+    if (failedTries >= 2) {
+      hint = el("p", "sub", "This session keeps failing to reach the AI machine. A fresh session checks it again "
+        + "from scratch; your searches, marks and this conversation stay with the matter.");
+      if (HOME_LINK.test(homeUrl)) {
+        const fresh = el("button", "primary small", "Start a fresh session on this matter");
+        fresh.type = "button";
+        fresh.addEventListener("click", () => goHome(`/matter/${matterId}`));
+        actions.prepend(fresh);
+      }
+    }
+    const node = el("div", "msg-error", el("div", "", plain, counter), detail ? more : null, hint, actions);
     log.append(node);
     lastError = { plain, node, counter, count: 1 };
   }

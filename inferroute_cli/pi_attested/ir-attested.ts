@@ -680,10 +680,21 @@ export default function (pi: ExtensionAPI) {
 			k: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Exact number of references to return; overrides depth" })),
 		}),
 
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			if (!ctx.hasUI) {
 				throw new Error("prior_art_search needs the user at this machine to approve sealed queries; refused without sending anything");
 			}
+			// Which step the search is on, for the screen. A search normally takes about a second, so these
+			// flash by; they earn their place when one step is slow or stuck — the page can then say WHICH step,
+			// instead of "checking the search machine…" standing still while the real wait is elsewhere
+			// (the approval prompt, or the reply). Phase names only: never the query, never a result.
+			const phase = (name: string) => {
+				try {
+					onUpdate?.({ content: [], details: { phase: name } });
+				} catch {
+					/* progress is decoration; it must never break a search */
+				}
+			};
 			// What to send, settled before anything is verified or sent.
 			const like = String(params.like ?? "").trim().toUpperCase();
 			let text = String(params.text ?? "").trim();
@@ -700,6 +711,7 @@ export default function (pi: ExtensionAPI) {
 			const feature = String(params.feature ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 			const k = params.k ?? DEPTH_K[params.depth ?? "quick"] ?? 10;
 			let verified: SearchVerdict;
+			phase("verifying");
 			try {
 				verified = await searchCall("/enclave", undefined, signal);
 			} catch {
@@ -727,6 +739,7 @@ export default function (pi: ExtensionAPI) {
 					? "running exactly the software InferRoute published (signed reference checked)"
 					: "running exactly the software this computer expects";
 				const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+				phase("approval");
 				const ok = await ctx.ui.confirm(
 					"Allow a sealed patent search?",
 					[
@@ -752,6 +765,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 			let out: SearchVerdict;
+			phase("searching");
 			try {
 				// No cutoff here: the host verifier applies the matter's date bound.
 				out = await searchCall("/search", { text, k, expect_lifetime_id: e.lifetime_id }, signal);

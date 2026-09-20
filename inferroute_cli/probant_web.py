@@ -283,7 +283,9 @@ class Bridge:
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
         self.opening = ""                   # a reading session's first instruction; empty for a matter session
-        self.oneshot = False                # a round of a portfolio run: end the session when its turn ends
+        self.oneshot = False                # a round of a portfolio run: end the session when its work is done
+        self.recorded = 0                   # findings this session has actually written
+        self.nudged = False                 # a round gets ONE reminder, never a loop
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
@@ -308,10 +310,10 @@ class Bridge:
         event = {"seq": self._seq, "at": round(time.time() * 1000), **event}
         if event["kind"] == "busy":
             was, self.busy = self.busy, bool(event["value"])
-            # One round, one turn: when a portfolio round's turn ends, end the session rather than leaving it
-            # open with nobody at the keyboard and the next round waiting behind it.
             if self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
+        if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_")):
+            self.recorded += 1
         if event["kind"] == "dialog":
             self.dialogs[str(event["id"])] = event
         # A tool call the agent started and never finished. The page shows "checking the search machine…"
@@ -394,9 +396,25 @@ class Bridge:
             pass
 
     async def _end_round(self) -> None:
-        """Close a one-shot round: let the last events flush, then stop the agent and the page."""
+        """Close a one-shot round — but a turn ending is NOT the work being done.
+
+        Measured 20 Sep: reading three documents takes several turns, and the model ends a turn to say "now
+        the next one". Ending the session there killed two jobs of seven mid-read, and both reported zero
+        findings, which is indistinguishable from documents that assert nothing. So: if nothing has been
+        recorded yet, say so once and let it finish; end on the next turn's end either way.
+        """
         await asyncio.sleep(1.0)
         if self.busy:                        # a follow-up turn began: not the end of the round after all
+            return
+        if not self.recorded and not self.nudged:
+            self.nudged = True
+            try:
+                await self.send({"type": "prompt", "message":
+                                 "You have recorded nothing yet. If you have finished reading, record your "
+                                 "findings now with record_findings. If there is genuinely nothing to record "
+                                 "in what you read, say so in one line and stop."})
+            except RuntimeError:
+                pass
             return
         try:
             await self.stop_agent()

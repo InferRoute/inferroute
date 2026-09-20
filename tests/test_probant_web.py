@@ -957,3 +957,20 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     assert 'api("/api/audit-pack", {})' in js and "No Claude subscription?" in js
     assert 'auditOffer($("audit"))' in js                     # in the panel, not inside the export result
     assert "ten to fifteen minutes" in js                     # a tester who interrupts it gets nothing
+
+
+def test_a_reading_round_ends_when_its_work_is_done_not_when_a_turn_ends(client):
+    """Measured 20 Sep: reading three documents takes several turns, and the model ends one to say "now the
+    next". Closing the session there killed two jobs of seven mid-read, and each reported zero findings —
+    indistinguishable from documents that assert nothing. A round with nothing recorded gets ONE reminder."""
+    js = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web.py").read_text()
+    body = js[js.index("    async def _end_round"):js.index("    async def open_with")]
+    assert "if not self.recorded and not self.nudged:" in body
+    assert "self.nudged = True" in body                      # one reminder, never a loop
+    assert "record_findings" in body and "stop" in body
+    # The counter only moves on a tool that actually records something.
+    b, c = client
+    assert b.recorded == 0
+    for tool, expect in (("read", 0), ("record_findings", 1), ("propose_matter", 2), ("ls", 2)):
+        b.publish({"kind": "tool_end", "call": f"x:{tool}", "tool": tool, "ok": True, "text": ""})
+        assert b.recorded == expect, tool

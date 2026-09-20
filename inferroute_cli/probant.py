@@ -667,6 +667,10 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     """
     import time
     from . import probant_portfolio as PF
+    # Before anything is staged or any session is launched: a host already near the wall cannot run this,
+    # and on a machine without ECC an out-of-memory kill is a reset rather than a failed job. A worker
+    # checks too — it is the one that actually launches sessions.
+    PF.refuse_if_memory_is_short(workers)
     src = Path(path).expanduser()
     files = sorted(p for p in (src.rglob("*") if src.is_dir() else [src])
                    if p.is_file() and p.suffix.lower() in PF.READABLE)

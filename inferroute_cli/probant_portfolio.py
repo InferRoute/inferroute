@@ -581,6 +581,48 @@ SYNTHESIS = ("Read findings.json in this directory: every distinct assertion rec
              "resting on one document, or a claim asserted everywhere and evidenced nowhere. Nothing else.")
 
 
+MEMORY_FLOOR_GB = 6.0          # below this much available, a reading run refuses to start
+
+
+def memory_available_gb() -> Optional[float]:
+    """Available memory in GiB, or None where this cannot be read (not Linux, /proc unavailable).
+
+    AVAILABLE, not free: free counts only unused pages, so a machine with a large page cache reads as
+    nearly full and a guard on it would refuse every time. MemAvailable is the kernel's own estimate of
+    what a new workload can actually have.
+    """
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / (1024 * 1024)
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def refuse_if_memory_is_short(workers: int, floor_gb: float = MEMORY_FLOOR_GB) -> None:
+    """Refuse to start a reading run on a machine that is already near the wall.
+
+    20 Sep: three sealed sessions were launched onto a host sitting at 48 GB used with 13 available, on the
+    afternoon it had already hit swap 8.0/8.0 GiB with 1.9 MiB free and was thrashing. That host has no ECC,
+    and on it a contained out-of-memory kill becomes a machine reset — so "discover the wall" is not a
+    recoverable outcome, and the job must refuse rather than find out.
+
+    A floor, not a reservation: this cannot know what a session will grow to. It only refuses the case that
+    is already lost. Where memory cannot be read it does not refuse — a guard that fires on the unknown
+    would block every non-Linux host for a fact it never established.
+    """
+    have = memory_available_gb()
+    if have is None:
+        return
+    need = floor_gb + max(0, workers - 1) * 1.5
+    if have < need:
+        raise S.ProbantError(
+            f"refusing to start: {have:.1f} GB of memory available, and {workers} reading session(s) want "
+            f"at least {need:.1f} GB. Wait for the machine to come back, or run with fewer --workers. "
+            "One heavy job at a time on this host.")
+
+
 MATTERS = (
     "Read findings.json in this directory: every distinct assertion recorded from the {docs} documents of "
     "this portfolio, {n} of them, each with the document it came from. Read register.json too — it is this "

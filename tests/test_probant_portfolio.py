@@ -540,3 +540,34 @@ def test_an_aborted_round_is_recognised_from_its_error(home):
         fh.write(json.dumps({"ended": "nothing recorded after a reminder",
                              "error": "aborted: Request aborted", "worked": False}) + "\n")
     assert P.last_round_aborted(ident) is True
+
+
+def test_the_unevidenced_stretches_of_a_read_document_can_be_read_again(home):
+    """21 Sep, on the real bundle: P1 had 18 findings across 99 KB with NOTHING from 0-53 KB, and its
+    0-60000 job had run 526 seconds, exited cleanly and recorded nothing. A document with findings is
+    neither unread nor barren, so nothing would ever re-plan it — read and covered are different things and
+    only the second is checkable. This plans jobs at the holes, aimed by where the quotes actually fall."""
+    _, src = home
+    (src / "long.md").write_text("A" * 40000 + "\nCOOLANT-MARKER channels moulded between the cells.\n" + "B" * 40000)
+    ident = P.stage([src / "long.md"], "one long document")["id"]
+    name = P.meta_of(ident)["documents"][0]["name"]
+    assert P.plan_holes(ident) == []                     # no findings at all: that is unread(), not a hole
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": name,
+                      "quote": "COOLANT-MARKER channels moulded between the cells"}])
+    _job(ident, name)
+    assert P.unread(ident) == [] and P.barren(ident) == []      # read, and it produced something
+    jobs = P.plan_holes(ident, budget=30000)
+    assert jobs, "a document evidenced only in its middle must still be re-plannable"
+    assert all(j["document"] == name for j in jobs)
+    where = int(P.candidates(ident)[0]["where"])
+    # Both sides of the single quote are holes, and the ranges cover them.
+    assert any(j["start"] == 0 for j in jobs), jobs
+    assert max(j["end"] for j in jobs) >= P.meta_of(ident)["documents"][0]["bytes"] - 1
+    # The hole AFTER the quote is opened by a job that begins a little BEFORE it, not exactly at it: a range
+    # starting mid-sentence cannot yield a verbatim quote. (Later chunks of the same hole start after it —
+    # that is the budget walking forward, not a missed boundary.)
+    opens = [j["start"] for j in jobs if j["start"] <= where <= j["end"]]
+    assert opens and min(opens) <= where, jobs
+    assert where - P.OVERLAP in [j["start"] for j in jobs], jobs
+    # A stretch smaller than the floor is not worth a session of its own.
+    assert P.plan_holes(ident, budget=30000, min_hole=10 ** 9) == []

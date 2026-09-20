@@ -477,6 +477,8 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--reader", default="", help="model for reading (its mistakes are checked: quotes, coverage, recall)")
     pf.add_argument("--thinker", default="", help="model for the synthesis (nothing can check its judgement)")
     pf.add_argument("--resume", default="", help="a portfolio id: read only the documents that produced nothing")
+    pf.add_argument("--holes", action="store_true",
+                    help="with --resume: read again the stretches no quote evidences, not whole documents")
     pf.add_argument("--workers", type=int, default=1, help="reading sessions to run at once")
     pf.add_argument("--slice", dest="slice_of", default="", help=argparse.SUPPRESS)
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
@@ -524,7 +526,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "portfolio":
             return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
                                  reader=a.reader, thinker=a.thinker, resume=a.resume,
-                                 workers=a.workers, slice_of=a.slice_of)
+                                 workers=a.workers, slice_of=a.slice_of, holes=a.holes)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "portfolio-matters":
@@ -659,7 +661,8 @@ def cmd_open_share(path: str, client: str) -> int:
 
 
 def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "", reader: str = "",
-                  thinker: str = "", resume: str = "", workers: int = 1, slice_of: str = "") -> int:
+                  thinker: str = "", resume: str = "", workers: int = 1, slice_of: str = "",
+                  holes: bool = False) -> int:
     """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
 
     One sealed session per reading job, planned host-side. No clustering, no rounds: see
@@ -688,7 +691,10 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         # staged is fixed at staging, so resuming judges recall against the same denominator as the original.
         meta = PF.meta_of(resume)
         d = PF.path_of(resume)
-        jobs = PF.plan_unread(resume, budget or PF.JOB_CHARS)
+        jobs = (PF.plan_holes(resume, budget or PF.JOB_CHARS) if holes
+                else PF.plan_unread(resume, budget or PF.JOB_CHARS))
+        if holes:
+            print(f"resuming {resume}: re-reading {len(jobs)} unevidenced stretch(es) of documents already read")
         never, gave_nothing = PF.unread(resume), PF.barren(resume)
         print(f"resuming {resume}: {len(never)} document(s) never read, "
               f"{sum(1 for r in gave_nothing if not r['give_up'])} read but empty and worth another go, "

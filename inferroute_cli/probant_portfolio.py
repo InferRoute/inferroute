@@ -366,3 +366,80 @@ def themes(ident: str) -> Dict[str, Any]:
     return {"themes": sorted(out, key=lambda x: (-x["documents"], -x["findings"])),
             "uncited": [i for i in ids if i not in cited], "unknown": sorted(set(unknown)),
             "findings": len(ids)}
+
+
+# ───────────────────────── did it find what we already know is there? ─────────────────────────
+
+def register_rows(register: Path) -> List[Dict[str, str]]:
+    """The known items a reading of this portfolio OUGHT to surface: the register's own filings, their lead
+    concepts, and its candidates. Shape-tolerant on purpose — a register is a document, not an API."""
+    try:
+        data = json.loads(Path(register).read_text())
+    except (OSError, ValueError):
+        return []
+    rows: List[Dict[str, str]] = []
+
+    def take(obj: Any, kind: str) -> None:
+        if isinstance(obj, dict):
+            ident = str(obj.get("id") or obj.get("code") or obj.get("key") or "")
+            title = _clean(obj.get("title") or obj.get("name") or obj.get("label") or obj.get("mechanism"), 120)
+            if ident and title:
+                rows.append({"id": ident, "title": title, "kind": kind})
+            for key in ("concepts", "lead_concepts", "claims", "items"):
+                for child in (obj.get(key) or []):
+                    # A concept may be a pair — ["C4", "what it is"] — as this register writes them, or an
+                    # object, or a bare string. All three are the same thing to an answer key.
+                    if isinstance(child, list) and len(child) >= 2 and all(isinstance(x, str) for x in child[:2]):
+                        rows.append({"id": f"{ident}:{child[0]}" if ident else child[0],
+                                     "title": _clean(child[1], 120), "kind": f"{kind}.{key}"})
+                    elif isinstance(child, str) and len(child) > 8:
+                        rows.append({"id": f"{ident}:{child[:12]}", "title": _clean(child, 120),
+                                     "kind": f"{kind}.{key}"})
+                    else:
+                        take(child, f"{kind}.{key}")
+        elif isinstance(obj, list):
+            for child in obj:
+                take(child, kind)
+
+    for key in ("filed", "surplus", "records", "candidates"):
+        take(data.get(key), key)
+    return rows
+
+
+def recall_against_register(ident: str, register: Path, floor: float = 0.6) -> Dict[str, Any]:
+    """How much of what we ALREADY KNOW is in the portfolio did this run's findings surface?
+
+    Precision is checkable by construction — every finding carries a quote verified against its document.
+    Recall is not: nothing in a reading pass can say what the model chose not to record. But this portfolio
+    keeps a register of its own filings and candidates, and that is an answer key. A run that misses a third
+    of the register did not read the portfolio, whatever its totals say, and this is the number that says so
+    before anyone trusts the output.
+
+    Matching is deliberately generous (the register's words against the findings' words, both canonical): a
+    generous match that still misses an item makes the miss worth believing.
+    """
+    rows = register_rows(register)
+    found = candidates(ident)
+    hay = [(canonical(c["title"]).lower(), canonical(c["summary"]).lower(), c) for c in found]
+    hits, misses = [], []
+    for row in rows:
+        words = [w for w in re.split(r"\W+", canonical(row["title"]).lower()) if len(w) > 4]
+        if not words:
+            continue
+        best, score = None, 0.0
+        for title, summary, c in hay:
+            text = f"{title} {summary}"
+            share = sum(1 for w in words if w in text) / len(words)
+            if share > score:
+                best, score = c, share
+        if score >= 0.5:
+            hits.append({"register": row["id"], "title": row["title"], "matched": best["title"], "score": round(score, 2)})
+        else:
+            misses.append({"register": row["id"], "title": row["title"], "best": round(score, 2)})
+    total = len(hits) + len(misses)
+    rate = (len(hits) / total) if total else 0.0
+    return {"known": total, "found": len(hits), "missed": len(misses), "recall": round(rate, 3),
+            "accepted": bool(total) and rate >= floor, "floor": floor,
+            "misses": misses[:30],
+            "note": ("Recall against the register, not against the portfolio: it says how much of what we "
+                     "already knew was surfaced. It cannot speak for anything the register does not list.")}

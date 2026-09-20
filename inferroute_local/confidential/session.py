@@ -257,11 +257,17 @@ class ConfidentialSession:
             return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}")
         if status != 200:
             c["errors"] += 1
+            readable = True
             try:
                 detail = (await _drain(raw))[:400].decode("utf-8", "replace")
             except Exception as e:                       # the error body itself may be cut short
-                detail = f"(body unreadable: {type(e).__name__})"
-            return self._error(streaming, status, f"upstream {status}: {detail}")
+                detail, readable = f"(body unreadable: {type(e).__name__})", False
+            logger.warning("upstream %s (body kept out of the client's response): %s", status, detail)
+            # An UNREADABLE body is still worth telling the user about — it leaks nothing by
+            # construction and a cut-off upstream is a different experience from a refusal
+            # (pinned since 2026-09-12). A READABLE body never reaches them.
+            return self._error(streaming, status,
+                               upstream_public(status) + ("" if readable else " — body unreadable"))
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed, t0)
         return 200, {"content-type": "application/json"}, self._open_json(raw, sealed, t0)
@@ -296,11 +302,15 @@ class ConfidentialSession:
             return self._error(streaming, 502, f"the relay is unreachable: {public_reason(e)}", openai=True)
         if status != 200:
             c["errors"] += 1
+            readable = True
             try:
                 detail = (await _drain(raw))[:400].decode("utf-8", "replace")
             except Exception as e:
-                detail = f"(body unreadable: {type(e).__name__})"
-            return self._error(streaming, status, f"upstream {status}: {detail}", openai=True)
+                detail, readable = f"(body unreadable: {type(e).__name__})", False
+            logger.warning("upstream %s (body kept out of the client's response): %s", status, detail)
+            return self._error(streaming, status,
+                               upstream_public(status) + ("" if readable else " — body unreadable"),
+                               openai=True)
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed, t0)
         return 200, {"content-type": "application/json"}, self._open_json_native(raw, sealed, t0)
@@ -475,6 +485,38 @@ class ConfidentialSession:
             self.receipt.ended_at = _now()
             self.receipt.save()
         return self.receipt
+
+
+UPSTREAM_PUBLIC = {
+    400: "the request was rejected as malformed",
+    401: "our credentials were refused",
+    402: "this lane is temporarily out of capacity",
+    403: "our credentials were refused",
+    404: "the model or route was not found",
+    429: "rate-limited — try again in a minute",
+    500: "the provider failed",
+    502: "the provider failed",
+    503: "the provider is temporarily unavailable",
+    504: "the provider timed out",
+}
+
+
+def upstream_public(status: int) -> str:
+    """What a user is told about an upstream non-200: the STATUS is ours to pass on, the BODY never is.
+
+    2026-09-20, seen on Henry's screen: a 402 reached a user carrying
+    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to 5EsHt7Ju…`.
+    Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust
+    us — phishing-shaped whatever its origin. The same body also carried provider quota and balance,
+    against the standing rule that user surfaces show OUTCOMES and plain dollars, never provider
+    internals. So no upstream body text reaches a client, and a scrubber for addresses alone would not
+    have been enough: it would still have leaked the balance.
+
+    cc-proxy-prod learned this on 2026-07-04 after 2.4k tester 402s in 12h and made 402 retryable
+    "instead of surfacing raw to the client"; this lane never got that change. Mapping the status is
+    the floor — whether a 402 should instead trigger failover is the relay lane's call, not this one's.
+    """
+    return f"the provider answered {status} ({UPSTREAM_PUBLIC.get(status, 'no further detail')})"
 
 
 def public_reason(e: BaseException) -> str:

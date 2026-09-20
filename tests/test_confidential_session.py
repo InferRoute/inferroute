@@ -463,3 +463,45 @@ def test_when_the_recheck_leaves_no_verified_instance_the_session_says_so_plainl
     s._verified_at = 0
     st, _, body = asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
     assert st == 503 and b"refusing to continue unverified" in body               # not the opaque "no pinned instance"
+
+class _PaymentSolicitationCarrier(FakeCarrier):
+    """Upstream answers 402 with the body Henry saw on screen 2026-09-20."""
+
+    BODY = (b'{"error": {"message": "upstream 402: {\'detail\': {\'message\': \'Quota exceeded and account '
+            b"balance is $0.0, please pay with fiat or send tao to 5EsHt7JuAbCdEfGhIjKlMnOpQrStUv'}}\"}}")
+
+    async def invoke(self, **kw):
+        self.calls.append((kw.get("instance_id"), kw.get("nonce"), kw.get("stream")))
+
+        async def one():
+            yield self.BODY
+        return 402, {"content-type": "application/json"}, one()
+
+
+@pytest.mark.parametrize("openai_path", [False, True])
+def test_an_upstream_payment_solicitation_never_reaches_the_client(world, caplog, openai_path):
+    """2026-09-20: a 402 reached a user carrying "please pay with fiat or send tao to 5EsHt7Ju…".
+
+    Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust us.
+    The same body carried the provider's quota and balance. The upstream STATUS may pass through; the
+    upstream BODY may not — and note a scrubber for addresses alone would still have leaked the balance,
+    which is why this asserts on five separate fragments and on the absence of pass-through, not on one.
+    Both dialects, because the defect was duplicated in the Anthropic and OpenAI paths.
+    """
+    import logging as _lg
+    carrier = _PaymentSolicitationCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    body = {"messages": [{"role": "user", "content": "1"}], "stream": False}
+    with caplog.at_level(_lg.WARNING, logger="inferroute_local.confidential"):
+        if openai_path:
+            st, _, it = asyncio.run(s.chat_completions(body))
+        else:
+            st, _, it = asyncio.run(s.messages(body))
+        text = asyncio.run(_drain(it)).decode()
+    assert st == 402, text
+    for leak in ("5EsHt7Ju", "send tao", "balance", "Quota exceeded", "pay with fiat"):
+        assert leak not in text, f"the client was told {leak!r}: {text}"
+    assert "the provider answered 402" in text and "out of capacity" in text
+    # …and the raw body is NOT destroyed: it stays where it is diagnostic.
+    assert "5EsHt7Ju" in caplog.text, "the upstream body must still reach the log"

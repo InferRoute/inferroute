@@ -7,6 +7,7 @@ movement metric stays as a diagnostic for comparing two groupings, never as a st
 """
 import json
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -175,3 +176,18 @@ def test_recall_is_measured_against_the_register_because_nothing_else_can_measur
     assert got["recall"] == 0.667 and got["accepted"] is False          # two of three: below an 0.8 floor
     assert P.recall_against_register(ident, register, floor=0.6)["accepted"] is True
     assert "cannot speak for anything the register does not list" in got["note"]
+
+
+def test_every_module_function_the_runner_calls_exists():
+    """It did not. brief(), record_job(), provenance() and unchanged_since() were wiped by a later edit to
+    a neighbouring block, the full suite stayed green because no test drives the orchestration, and the run
+    died on an AttributeError after staging — 20 Sep. A missing function must not need a live run to find."""
+    import ast
+    import inspect
+    from inferroute_cli import probant as S_mod
+    tree = ast.parse(Path(inspect.getfile(S_mod)).read_text())
+    called = {node.attr for node in ast.walk(tree)
+              if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "PF"}
+    missing = sorted(name for name in called if not hasattr(P, name))
+    assert not missing, f"probant.py calls probant_portfolio.{missing}, which does not exist"
+    assert {"brief", "record_job", "provenance", "candidates", "plan"} <= called   # the runner really uses them

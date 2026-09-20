@@ -76,7 +76,7 @@ def canonical(text: str) -> str:
     return re.sub(r"\s+", " ", _MARKUP.sub("", str(text or ""))).strip()
 
 
-def stage(paths: Sequence[Path], name: str = "") -> Dict[str, Any]:
+def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[str, Any]:
     """Copy the portfolio's documents where a sealed session can read them, and nowhere else.
 
     Copies rather than links: the session reads inside a sandbox, and a link out of it is either broken or a
@@ -123,6 +123,7 @@ def stage(paths: Sequence[Path], name: str = "") -> Dict[str, Any]:
         documents.append({"name": base, "from": str(p), "bytes": len(body),
                           "sha256": hashlib.sha256(body).hexdigest()})
     meta = {"schema": "inferroute.probant-portfolio/1", "id": ident, "name": _clean(name, 80) or "portfolio",
+            "selection": selection or "whole corpus",
             "staged_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "documents": documents, "bytes": sum(x["bytes"] for x in documents),
             "given": len(files), "bytes_given": total, "duplicates": duplicates}
@@ -156,6 +157,15 @@ def _rows(path: Path) -> List[Dict[str, Any]]:
     return out
 
 
+def _all_rows(d: Path) -> List[Dict[str, Any]]:
+    """Every worker's findings, in a stable order. Parallel jobs each append to their OWN file: one file
+    shared by several sessions is a write race, and a lost line is a finding nobody knows was found."""
+    rows: List[Dict[str, Any]] = []
+    for path in [d / CANDIDATES] + sorted(d.glob("candidates-*.jsonl")):
+        rows.extend(_rows(path))
+    return rows
+
+
 def candidates(ident: str) -> List[Dict[str, Any]]:
     """The proposed units whose quote is really in the document they name.
 
@@ -168,7 +178,7 @@ def candidates(ident: str) -> List[Dict[str, Any]]:
         flat[doc["name"]] = canonical((d / DOCS / doc["name"]).read_text(encoding="utf-8", errors="replace"))
     out: List[Dict[str, Any]] = []
     seen = set()
-    for row in _rows(d / CANDIDATES):
+    for row in _all_rows(d):
         title, summary = _clean(row.get("title"), 90), _clean(row.get("summary"), 1200)
         quote, source = _clean(row.get("quote"), 600), _clean(row.get("source"), 120)
         if not title or not summary or len(quote) < 20:
@@ -187,7 +197,7 @@ def candidates(ident: str) -> List[Dict[str, Any]]:
 
 
 def dropped(ident: str) -> int:
-    return max(0, len(_rows(path_of(ident) / CANDIDATES)) - len(candidates(ident)))
+    return max(0, len(_all_rows(path_of(ident))) - len(candidates(ident)))
 
 
 def movement(before: List[frozenset], after: List[frozenset]) -> float:

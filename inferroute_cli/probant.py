@@ -463,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--reader", default="", help="model for reading (its mistakes are checked: quotes, coverage, recall)")
     pf.add_argument("--thinker", default="", help="model for the synthesis (nothing can check its judgement)")
     pf.add_argument("--resume", default="", help="a portfolio id: read only the documents that produced nothing")
+    pf.add_argument("--workers", type=int, default=1, help="reading sessions to run at once")
+    pf.add_argument("--slice", dest="slice_of", default="", help=argparse.SUPPRESS)
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
     pr2.add_argument("id")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
@@ -497,7 +499,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
             return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
-                                 reader=a.reader, thinker=a.thinker, resume=a.resume)
+                                 reader=a.reader, thinker=a.thinker, resume=a.resume,
+                                 workers=a.workers, slice_of=a.slice_of)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "proposals":
@@ -518,8 +521,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
-                  reader: str = "", thinker: str = "", resume: str = "") -> int:
+def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "", reader: str = "",
+                  thinker: str = "", resume: str = "", workers: int = 1, slice_of: str = "") -> int:
     """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
 
     One sealed session per reading job, planned host-side. No clustering, no rounds: see
@@ -546,7 +549,12 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             print("  every document has at least one finding; nothing to resume")
             return cmd_portfolio_report(resume)
     else:
-        meta = PF.stage(files, src.name)
+        # What was staged, recorded with the run: the register's verdict is only meaningful over a corpus
+        # that could contain the register's material. A 15-document subset of prior art and specs cannot
+        # surface P2-P4, which live in the filings folder it never staged — and the gate said 20% as if it
+        # could (20 Sep).
+        picked = ", ".join(x for x in ([f"first {max_docs}"] if max_docs else []) + ([f"only {only}"] if only else []))
+        meta = PF.stage(files, src.name, selection=picked or "whole corpus")
         d = PF.path_of(meta["id"])
         jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
     dup = len(meta.get("duplicates") or []) if not resume else 0
@@ -565,6 +573,16 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     for top, n in by_top.most_common():
         print(f"      {top[:40]:40s} {n:4d} file(s)  {size_top[top] / 1000:7.0f} KB")
     started = time.time()
+    # Several sessions at once, each taking every Nth job and appending to its OWN findings file. One file
+    # shared by parallel sessions is a write race, and a lost line is a finding nobody knows was found.
+    # Sequential, the corpus measures 24 s/KB on the reader that actually reads it — 55 hours for 8.3 MB.
+    if workers > 1 and not slice_of:
+        return _portfolio_workers(meta["id"], src, workers, reader, thinker, budget, len(jobs))
+    if slice_of:
+        i, n = (int(x) for x in slice_of.split("/"))
+        jobs = jobs[i::n]
+        print(f"  worker {i + 1}/{n}: {len(jobs)} job(s)", flush=True)
+    out_file = d / (f"candidates-{slice_of.replace('/', '-')}.jsonl" if slice_of else PF.CANDIDATES)
     register = src / "portfolio" / "corpus.json" if (src / "portfolio" / "corpus.json").is_file() else None
     if register:
         # Kept with the run: the answer key this run is judged against must be the one it was judged against,
@@ -581,7 +599,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
         text = PF.instruction_for(job)
-        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d, model=reader)
+        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
         after = len(PF.candidates(meta["id"]))
         got = after - before
         PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
@@ -597,6 +615,9 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         print(f"\n  ⚠ {len(empty_jobs)} job(s) recorded NOTHING — treat as failed, not as empty documents:")
         for w in empty_jobs[:10]:
             print(f"      {w}")
+    if slice_of:                      # a worker stops here; the parent synthesises over everyone's findings
+        print(f"  worker {slice_of} done", flush=True)
+        return 0
     # The step that sees the WHOLE portfolio: not its 9.8 MB of text, which no context on this lane holds,
     # but every finding drawn from it, in one session.
     shape = PF.write_findings(meta["id"])
@@ -647,10 +668,12 @@ def cmd_portfolio_report(ident: str) -> int:
     if reg.is_file():
         # The verdict is for a run that read everything it staged; otherwise the register is the wrong
         # denominator and the number is informational.
-        complete = not PF.unread(ident)
+        complete = not PF.unread(ident) and PF.meta_of(ident).get("selection", "whole corpus") == "whole corpus"
         r = PF.recall_against_register(ident, reg, complete=complete)
-        verdict = ("ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again") if complete else \
-                  f"no verdict: {len(PF.unread(ident))} document(s) unread"
+        unread_n = len(PF.unread(ident))
+        verdict = ("ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again") if complete else (
+            f"no verdict: {unread_n} document(s) unread" if unread_n else
+            f"no verdict: this run staged {PF.meta_of(ident).get('selection')}, not the whole corpus")
         print(f"\n  recall against the register: {r['found']}/{r['known']} known items surfaced "
               f"({r['recall'] * 100:.0f}%, floor {r['floor'] * 100:.0f}%) — {verdict}")
         for m in r["misses"][:8]:
@@ -661,6 +684,29 @@ def cmd_portfolio_report(ident: str) -> int:
           f"{prov['seconds']}s, model(s) {', '.join(prov['models'])}")
     print(f"  {len(kept)} item(s): {PF.path_of(ident) / PF.CANDIDATES}")
     return 0
+
+
+def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker: str, budget: int,
+                       total_jobs: int) -> int:
+    """Run the reading jobs in N sessions at once, then synthesise once over what they all found."""
+    import subprocess
+    import time
+    n = max(1, min(workers, total_jobs))
+    print(f"  {n} worker(s) over {total_jobs} job(s)", flush=True)
+    started = time.time()
+    procs = []
+    for i in range(n):
+        argv = [sys.executable, "-m", "inferroute_cli", "probant", "portfolio", str(src), "--resume", ident,
+                "--slice", f"{i}/{n}", "--reader", reader or "", "--thinker", thinker or ""]
+        argv += ["--budget", str(budget)] if budget else []
+        procs.append(subprocess.Popen([a for a in argv if a != ""], env=dict(os.environ, IR_PROBANT_NO_BROWSER="1"),
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT))
+    for p in procs:
+        p.wait()
+    from . import probant_portfolio as PF
+    print(f"  workers finished in {time.time() - started:.0f}s; {len(PF.candidates(ident))} finding(s) kept, "
+          f"{len(PF.unread(ident))} document(s) still unread", flush=True)
+    return cmd_portfolio(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
 
 
 def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "") -> int:

@@ -109,3 +109,40 @@ def test_a_quote_stripped_of_markdown_still_verifies_but_a_paraphrase_does_not(h
     assert [c["title"] for c in P.candidates(ident)] == ["Jacket"]
     assert P.dropped(ident) == 1
     assert P.canonical("**bold** and `code` and # head") == "bold and code and head"
+
+
+def test_the_synthesis_sees_every_finding_and_its_themes_are_checked_back_to_them(home):
+    """The corpus does not fit any context on this lane (2.46 M tokens against a 1 M ceiling); what it
+    ASSERTS does. So the synthesis step reads every finding at once, and every theme it draws must name the
+    findings it rests on — ids assigned here, so a theme traces back to a quote in a named document."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [
+        {"title": "Cooling jacket", "summary": "s", "quote": "COOLANT-MARKER channels moulded between", "source": first},
+        {"title": "Swelling", "summary": "s", "quote": "SWELL-MARKER impedance drift over fifty", "source": second},
+    ])
+    shape = P.write_findings(ident)
+    assert shape == {"n": 2, "documents": 2, "tokens_roughly": shape["tokens_roughly"]}
+    rows = json.loads((P.path_of(ident) / "findings.json").read_text())
+    assert [r["id"] for r in rows] == ["f1", "f2"]
+    with (P.path_of(ident) / P.THEMES).open("a") as fh:
+        fh.write(json.dumps({"label": "Thermal", "thesis": "heat leaves through the jacket",
+                             "members": ["f1", "f404"], "why": "w"}) + "\n")
+        fh.write(json.dumps({"label": "Nothing real", "members": ["f404"]}) + "\n")
+    got = P.themes(ident)
+    assert [t["label"] for t in got["themes"]] == ["Thermal"]          # a theme of only invented ids is none
+    assert got["themes"][0]["members"] == ["f1"] and got["themes"][0]["documents"] == 1
+    assert got["uncited"] == ["f2"]                                    # said out loud, not quietly dropped
+    assert got["unknown"] == ["f404"]
+
+
+def test_the_same_document_filed_twice_is_read_once(home):
+    """Measured on the real portfolio: 459 files, 385 distinct — 74 exact copies (bundle-preview beside
+    audit-trail). A copy costs a session AND invents a "two documents agree" signal, which is worse."""
+    _, src = home
+    (src / "copy.md").write_text((src / "one.md").read_text())        # byte-identical to one.md
+    meta = P.stage(sorted(src.rglob("*.md")), "with a duplicate")
+    assert meta["given"] == 3 and len(meta["documents"]) == 2
+    assert len(meta["duplicates"]) == 1 and meta["duplicates"][0]["same_as"] in [d["name"] for d in meta["documents"]]
+    assert meta["bytes"] < meta["bytes_given"]                        # what is read, and what was handed over

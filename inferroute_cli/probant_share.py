@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from . import probant as S
 
-SCHEMA = "inferroute.probant-share/1"
+SCHEMA = "inferroute.probant-share/2"
 SUFFIX = ".probant-share"
 
 
@@ -143,23 +143,35 @@ def _canonical(payload: Dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
-def seal_to(card: Dict[str, str], payload: Dict[str, Any], me: Dict[str, Any]) -> bytes:
-    """Sign the payload with our Ed25519 key, then seal it to their ML-KEM key.
+def seal_to(cards: Any, payload: Dict[str, Any], me: Dict[str, Any]) -> bytes:
+    """Sign the payload with our Ed25519 key, then seal it to one or more recipients.
 
     Signed THEN sealed, so the signature covers what they read: a signature over the ciphertext would prove
     only who sent an opaque blob.
+
+    The claims are encrypted ONCE under a content key, and that key is wrapped separately for each
+    recipient. So a share can be addressed to the lawyer AND to yourself without the file growing by the
+    size of the claims — and keeping a copy you can reopen is what makes "what exactly did I send him?"
+    answerable months later, which for a patent file is not a small thing.
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from inferroute_local.confidential import e2ee
+    if isinstance(cards, dict):
+        cards = [cards]
     signed = {**payload, "from_fingerprint": me["fingerprint"], "from_ed_pub": me["ed_pub"]}
     sk = Ed25519PrivateKey.from_private_bytes(_unb64(me["ed_sk"]))
     signed["sig"] = sk.sign(_canonical(signed)).hex()
-    shared, ct = e2ee.backend().encaps(_unb64(card["mlkem_pub"]))
-    key = e2ee.derive_key(shared, ct, b"probant-share-v1")
-    nonce = os.urandom(12)
-    body = e2ee._seal(key, nonce, json.dumps(signed, ensure_ascii=False).encode())
-    return json.dumps({"schema": SCHEMA, "mlkem_ct": _b64(ct), "nonce": _b64(nonce), "body": _b64(body),
-                       "to_fingerprint": card["fingerprint"]}, indent=1).encode()
+    content_key, nonce = os.urandom(32), os.urandom(12)
+    body = e2ee._seal(content_key, nonce, json.dumps(signed, ensure_ascii=False).encode())
+    recipients = []
+    for card in cards:
+        shared, ct = e2ee.backend().encaps(_unb64(card["mlkem_pub"]))
+        wrap_nonce = os.urandom(12)
+        wrapped = e2ee._seal(e2ee.derive_key(shared, ct, b"probant-share-wrap-v1"), wrap_nonce, content_key)
+        recipients.append({"fingerprint": card["fingerprint"], "mlkem_ct": _b64(ct),
+                           "nonce": _b64(wrap_nonce), "wrapped": _b64(wrapped)})
+    return json.dumps({"schema": SCHEMA, "nonce": _b64(nonce), "body": _b64(body),
+                       "recipients": recipients}, indent=1).encode()
 
 
 def open_sealed(blob: bytes, me: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -175,16 +187,21 @@ def open_sealed(blob: bytes, me: Optional[Dict[str, Any]] = None) -> Dict[str, A
     me = me or identity(create=False)
     try:
         outer = json.loads(blob)
-        ct, nonce, body = _unb64(outer["mlkem_ct"]), _unb64(outer["nonce"]), _unb64(outer["body"])
+        nonce, body = _unb64(outer["nonce"]), _unb64(outer["body"])
+        recipients = outer.get("recipients") or []
     except (ValueError, KeyError, TypeError):
         raise S.ProbantError("that file is not a Probant share")
-    if outer.get("to_fingerprint") and outer["to_fingerprint"] != me["fingerprint"]:
-        raise S.ProbantError(f"this share is addressed to {outer['to_fingerprint']}, not to this "
-                              f"installation ({me['fingerprint']})")
-    backend = e2ee.backend()
+    mine = next((r for r in recipients if r.get("fingerprint") == me["fingerprint"]), None)
+    if mine is None:
+        addressed = ", ".join(str(r.get("fingerprint")) for r in recipients) or "nobody"
+        raise S.ProbantError(f"this share is addressed to {addressed}, not to this installation "
+                              f"({me['fingerprint']})")
+    from inferroute_local.confidential import e2ee
     try:
-        secret = backend.decaps(_secret_key(me), ct)
-        payload = json.loads(e2ee._open(e2ee.derive_key(secret, ct, b"probant-share-v1"), nonce, body))
+        secret = e2ee.backend().decaps(_secret_key(me), _unb64(mine["mlkem_ct"]))
+        content_key = e2ee._open(e2ee.derive_key(secret, _unb64(mine["mlkem_ct"]), b"probant-share-wrap-v1"),
+                                 _unb64(mine["nonce"]), _unb64(mine["wrapped"]))
+        payload = json.loads(e2ee._open(content_key, nonce, body))
     except Exception as exc:                                   # noqa: BLE001
         raise S.ProbantError(f"this share could not be opened with this installation's key ({type(exc).__name__})")
     signed = {k: v for k, v in payload.items() if k != "sig"}
@@ -193,7 +210,10 @@ def open_sealed(blob: bytes, me: Optional[Dict[str, Any]] = None) -> Dict[str, A
             bytes.fromhex(payload["sig"]), _canonical(signed))
     except (InvalidSignature, KeyError, ValueError):
         raise S.ProbantError("this share's signature does not check out; it was altered or is not what it claims")
+    # Your own fingerprint is one you always know: reopening the copy sealed to yourself should not read
+    # "an UNKNOWN sender", which is what it said the first time it was tried (20 Sep).
     known = {c["fingerprint"]: name for name, c in contacts().items()}
+    known[me["fingerprint"]] = "you (this installation)"
     payload["from_name"] = known.get(payload.get("from_fingerprint", ""), "")
     payload["from_known"] = bool(payload["from_name"])
     return payload
@@ -225,47 +245,108 @@ def claims_from_portfolio(ident: str, limit: int = 2000) -> List[Dict[str, Any]]
     return out
 
 
-def build_share(claims: List[Dict[str, Any]], *, matter: str, date_bound: str, note: str = "",
-                origin: str = "") -> Dict[str, Any]:
-    return {"schema": SCHEMA, "matter": matter, "date_bound": date_bound, "note": note[:2000],
-            "origin": origin, "claims": claims,
+def matter_payload(client: str, matter: str) -> Dict[str, Any]:
+    """One matter as it travels: its disclosure, its date bound, and what the sender marked.
+
+    The sender's marks travel as the SENDER'S view, recorded as theirs. They do not become the recipient's
+    marks — "your marks are yours alone" has to survive a matter changing hands, or the words stop meaning
+    anything the moment two people work the same claims.
+    """
+    rec = S.load_record(client, matter)
+    doc = S.workspace_path(client, matter) / "disclosure.md"
+    marks: Dict[str, str] = {}
+    try:
+        state = json.loads(S.state_path(client, matter).read_text())
+        marks = {k: str((v.get("latest") or {}).get("value", "")) for k, v in (state.get("marks") or {}).items()}
+    except (OSError, ValueError, AttributeError):
+        marks = {}
+    return {"matter": f"{client}/{matter}", "date_bound": rec.get("date_bound", ""),
+            "disclosure": doc.read_text(encoding="utf-8")[:200_000] if doc.is_file() else "",
+            "marks": marks, "claims": [], "origin": f"matter:{client}/{matter}"}
+
+
+def portfolio_payload(ident: str, limit: int = 2000) -> Dict[str, Any]:
+    from . import probant_portfolio as PF
+    return {"matter": f"portfolio {ident}", "date_bound": "", "disclosure": "",
+            "marks": {}, "claims": claims_from_portfolio(ident, limit), "origin": f"portfolio:{ident}"}
+
+
+def build_share(matters: List[Dict[str, Any]], note: str = "") -> Dict[str, Any]:
+    """A corpus of matters in one share: several matters, one file, one signature, one key exchange.
+
+    One matter at a time was the first shape, and it is the wrong unit for the job — handing a portfolio to
+    counsel means handing over everything at once, not fifteen files and fifteen confirmations.
+    """
+    if not matters:
+        raise S.ProbantError("there is nothing to share")
+    return {"schema": SCHEMA, "matters": matters, "note": note[:2000],
             "made_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "evidence": ("Each claim carries a verbatim quote and the sha256 of the document it came from. "
                          "Those documents are NOT in this share, so the Probant that opens it cannot "
                          "re-check a quote against its source; the sender's signature covers the claims as "
-                         "written, and nothing here proves the quote is in the document it names.")}
+                         "written, and nothing here proves a quote is in the document it names.")}
 
 
-def create_matter_from_share(payload: Dict[str, Any], client: str, matter: str) -> str:
-    """Open a share as a real matter: the recipient's own, with the sender's date bound and a note saying
-    where it came from. From here it is an ordinary matter — their sessions, their searches, their records."""
-    date = payload.get("date_bound") or None
-    rc = S.cmd_new(client, matter, date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(date or "")) else None)
-    if rc != 0:
-        raise S.ProbantError("the matter could not be created")
-    client, matter = S.sanitize(client, "client"), S.sanitize(matter, "matter")
-    who = payload.get("from_name") or payload.get("from_fingerprint", "an unknown sender")
-    lines = [f"# {payload.get('matter') or matter}", "",
+def _matter_document(entry: Dict[str, Any], payload: Dict[str, Any], who: str) -> str:
+    lines = [f"# {entry.get('matter') or 'Shared matter'}", "",
              f"Shared by {who} on {payload.get('made_at', '')}, opened as this matter.", ""]
     if payload.get("note"):
         lines += [payload["note"], ""]
-    lines += ["## Claims", ""]
-    for i, c in enumerate(payload.get("claims") or [], 1):
-        lines += [f"### {i}. {c.get('title', '')}", "", str(c.get("summary", "")), "",
-                  f"> {c.get('quote', '')}", "",
-                  f"From {c.get('source', 'an unnamed document')}"
-                  + (f" (sha256 {c.get('source_sha256', '')[:16]}…)" if c.get("source_sha256") else ""), ""]
+    if entry.get("disclosure"):
+        lines += ["## Disclosure, as shared", "", entry["disclosure"], ""]
+    if entry.get("claims"):
+        lines += ["## Claims", ""]
+        for i, c in enumerate(entry["claims"], 1):
+            lines += [f"### {i}. {c.get('title', '')}", "", str(c.get("summary", "")), "",
+                      f"> {c.get('quote', '')}", "",
+                      f"From {c.get('source', 'an unnamed document')}"
+                      + (f" (sha256 {c.get('source_sha256', '')[:16]}…)" if c.get("source_sha256") else ""), ""]
+    if entry.get("marks"):
+        lines += ["## What the sender marked", "",
+                  f"These are {who}'s judgements, travelling as theirs. Your own marks are separate.", ""]
+        for key, value in sorted(entry["marks"].items()):
+            lines += [f"- {key}: {str(value).replace('-', ' ')}"]
+        lines += [""]
     lines += ["## About this evidence", "", payload.get("evidence", ""), ""]
-    doc = S.workspace_path(client, matter) / "disclosure.md"
-    doc.write_text("\n".join(lines), encoding="utf-8")
-    os.chmod(doc, 0o600)
-    provenance = {"schema": "inferroute.probant-share-origin/1", "from": payload.get("from_fingerprint"),
-                  "from_name": payload.get("from_name"), "known_contact": payload.get("from_known"),
-                  "made_at": payload.get("made_at"), "date_bound": payload.get("date_bound"),
-                  "claims": len(payload.get("claims") or []), "opened_at": dt.datetime.now(dt.timezone.utc)
-                  .strftime("%Y-%m-%dT%H:%M:%SZ")}
-    p = S.records_dir(client, matter)
-    p.mkdir(parents=True, exist_ok=True)
-    (p / "shared-origin.json").write_text(json.dumps(provenance, indent=1))
-    os.chmod(p / "shared-origin.json", 0o600)
-    return f"{client}/{matter}"
+    return "\n".join(lines)
+
+
+def create_matters_from_share(payload: Dict[str, Any], client: str,
+                              rename: Optional[Dict[str, str]] = None) -> List[str]:
+    """Open every matter in a share, under one client of the recipient's choosing.
+
+    Each keeps the name it was shared under (as a safe path component) and its own date bound, because the
+    bound decides what any search of it may return. A name already taken is reported, not overwritten.
+    """
+    who = payload.get("from_name") or payload.get("from_fingerprint", "an unknown sender")
+    made: List[str] = []
+    taken: List[str] = []
+    for entry in payload.get("matters") or []:
+        raw = (rename or {}).get(entry.get("matter", ""), "") or str(entry.get("matter") or "shared")
+        name = re.sub(r"[^A-Za-z0-9 ._-]+", "-", raw.split("/")[-1]).strip(" -.")[:60] or "shared-matter"
+        if S.record_path(S.sanitize(client, "client"), name).exists():
+            taken.append(name)
+            continue
+        date = entry.get("date_bound") or ""
+        if S.cmd_new(client, name, date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) else None) != 0:
+            taken.append(name)
+            continue
+        c, m = S.sanitize(client, "client"), S.sanitize(name, "matter")
+        doc = S.workspace_path(c, m) / "disclosure.md"
+        doc.write_text(_matter_document(entry, payload, who), encoding="utf-8")
+        os.chmod(doc, 0o600)
+        provenance = {"schema": "inferroute.probant-share-origin/1", "from": payload.get("from_fingerprint"),
+                      "from_name": payload.get("from_name"), "known_contact": payload.get("from_known"),
+                      "made_at": payload.get("made_at"), "shared_as": entry.get("matter"),
+                      "date_bound": entry.get("date_bound"), "claims": len(entry.get("claims") or []),
+                      "marks_shared": len(entry.get("marks") or {}),
+                      "opened_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+        rd = S.records_dir(c, m)
+        rd.mkdir(parents=True, exist_ok=True)
+        (rd / "shared-origin.json").write_text(json.dumps(provenance, indent=1))
+        os.chmod(rd / "shared-origin.json", 0o600)
+        made.append(f"{c}/{m}")
+    if taken:
+        raise S.ProbantError(f"opened {len(made)}; these names are already taken in {client}: "
+                              f"{', '.join(taken)} — rename or delete them and open the share again")
+    return made

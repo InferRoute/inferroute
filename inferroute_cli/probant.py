@@ -22,6 +22,7 @@ import datetime as dt
 import json
 import os
 import re
+from typing import List, Optional
 import sys
 from pathlib import Path
 
@@ -456,10 +457,15 @@ def main(argv: list[str] | None = None) -> int:
     idy.add_argument("--add", default="", help="record a contact under this name")
     idy.add_argument("--card", dest="card_file", default="", help="their contact card file")
     sh = sub.add_parser("share", help="seal a corpus of claims to another Probant user")
-    sh.add_argument("to"); sh.add_argument("--matter", default=""); sh.add_argument("--portfolio", default="")
+    sh.add_argument("to")
+    sh.add_argument("--matter", action="append", default=[], help="a matter to include (repeatable)")
+    sh.add_argument("--portfolio", action="append", default=[], help="a portfolio run's claims (repeatable)")
+    sh.add_argument("--all", dest="every", action="store_true", help="every matter on this installation")
+    sh.add_argument("--no-copy", dest="keep_copy", action="store_false",
+                    help="do not seal a copy to yourself (you then cannot reopen what you sent)")
     sh.add_argument("--note", default=""); sh.add_argument("-o", "--out", default="")
-    osh = sub.add_parser("open-share", help="open a share someone sealed to you, as a matter of your own")
-    osh.add_argument("file"); osh.add_argument("client"); osh.add_argument("matter")
+    osh = sub.add_parser("open-share", help="open a share sealed to you: every matter in it, as your own")
+    osh.add_argument("file"); osh.add_argument("client")
     ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
     ik.add_argument("document")
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
@@ -506,9 +512,10 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "identity":
             return cmd_identity(add=a.add, card_file=a.card_file)
         if a.cmd == "share":
-            return cmd_share(a.to, out=a.out, matter=a.matter, portfolio=a.portfolio, note=a.note)
+            return cmd_share(a.to, out=a.out, matters=a.matter, portfolios=a.portfolio,
+                             every=a.every, note=a.note, keep_copy=a.keep_copy)
         if a.cmd == "open-share":
-            return cmd_open_share(a.file, a.client, a.matter)
+            return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
@@ -565,46 +572,64 @@ def cmd_identity(add: str = "", card_file: str = "") -> int:
     return 0
 
 
-def cmd_share(to: str, out: str = "", matter: str = "", portfolio: str = "", note: str = "") -> int:
-    """Seal a corpus of claims to another Probant user, signed so they know it is yours."""
+def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portfolios: Optional[List[str]] = None,
+              every: bool = False, note: str = "", keep_copy: bool = True) -> int:
+    """Seal a corpus of matters to another Probant user, signed so they know it is yours."""
     from . import probant_share as SH
     known = SH.contacts()
     if to not in known:
         raise ProbantError(f"no contact called {to!r}. Add them: ir probant identity --add {to} --card <file>")
     me = SH.identity()
-    if portfolio:
-        claims = SH.claims_from_portfolio(portfolio)
-        name, bound, origin = f"portfolio {portfolio}", "", f"portfolio:{portfolio}"
-    elif matter:
-        client, m = _split_matter(matter)
-        rec = load_record(client, m)
-        from . import probant_intake  # noqa: F401  (kept for symmetry with the intake path)
-        claims = []
-        doc = workspace_path(client, m) / "disclosure.md"
-        if doc.is_file():
-            claims = [{"title": f"{client}/{m} disclosure", "summary": doc.read_text(encoding="utf-8")[:4000],
-                       "quote": "", "source": "disclosure.md", "source_sha256": ""}]
-        name, bound, origin = f"{client}/{m}", rec.get("date_bound", ""), f"matter:{client}/{m}"
-    else:
-        raise ProbantError("say what to share: --matter <client>/<matter> or --portfolio <id>")
-    if not claims:
-        raise ProbantError("there is nothing to share: no claims were found")
-    payload = SH.build_share(claims, matter=name, date_bound=bound, note=note, origin=origin)
-    blob = SH.seal_to(known[to], payload, me)
-    dest = Path(out).expanduser() if out else Path.home() / f"{S_safe(name)}-for-{to}{SH.SUFFIX}"
+    entries = []
+    for spec in (matters or []):
+        client, m = _split_matter(spec)
+        entries.append(SH.matter_payload(client, m))
+    for ident in (portfolios or []):
+        entries.append(SH.portfolio_payload(ident))
+    if every:
+        seen = {e["matter"] for e in entries}
+        for row in _every_matter():
+            if row not in seen:
+                client, m = _split_matter(row)
+                entries.append(SH.matter_payload(client, m))
+    if not entries:
+        raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --portfolio <id>, or --all")
+    payload = SH.build_share(entries, note=note)
+    cards = [known[to]] + ([SH.public_card(me)] if keep_copy else [])
+    blob = SH.seal_to(cards, payload, me)
+    dest = Path(out).expanduser() if out else Path.home() / f"probant-corpus-for-{to}-{_stamp()}{SH.SUFFIX}"
     dest.write_bytes(blob)
     os.chmod(dest, 0o600)
-    print(f"  {len(claims)} claim(s) sealed to {to} ({known[to]['fingerprint']}), signed as {me['fingerprint']}")
+    claims = sum(len(e.get("claims") or []) for e in entries)
+    print(f"  {len(entries)} matter(s), {claims} claim(s) sealed to {to} ({known[to]['fingerprint']}), "
+          f"signed as {me['fingerprint']}")
+    for e in entries:
+        print(f"      {e['matter']}" + (f"  date bound {e['date_bound']}" if e.get("date_bound") else ""))
     print(f"  {dest}")
-    print("  Only that fingerprint can open it. Send it by any channel you like; the channel cannot read it.")
+    print("  Only that fingerprint can open it" + (" — and you, since a copy is sealed to you as well."
+                                                   if keep_copy else "."))
     return 0
+
+
+def _every_matter() -> List[str]:
+    out = []
+    root = matters_dir()
+    for cdir in (sorted(root.iterdir()) if root.is_dir() else []):
+        if cdir.is_dir():
+            out += [f"{cdir.name}/{f.stem}" for f in sorted(cdir.glob("*.json"))
+                    if not f.name.endswith(".state.json")]
+    return out
+
+
+def _stamp() -> str:
+    return dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def S_safe(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "share"
 
 
-def cmd_open_share(path: str, client: str, matter: str) -> int:
+def cmd_open_share(path: str, client: str) -> int:
     from . import probant_share as SH
     try:
         blob = Path(path).expanduser().read_bytes()
@@ -612,14 +637,19 @@ def cmd_open_share(path: str, client: str, matter: str) -> int:
         raise ProbantError(f"could not read that share: {e}")
     payload = SH.open_sealed(blob)
     who = payload.get("from_name") or "an UNKNOWN sender"
+    entries = payload.get("matters") or []
     print(f"\n  Signed by {who} — fingerprint {payload.get('from_fingerprint')}")
     if not payload.get("from_known"):
-        print("  This fingerprint is not in your contacts. The signature proves the claims are as that key")
+        print("  This fingerprint is not in your contacts. The signature proves the matters are as that key")
         print("  wrote them; it does not say whose key it is. Confirm it by voice before relying on this.")
-    print(f"  {len(payload.get('claims') or [])} claim(s), date bound {payload.get('date_bound') or '(none)'}")
-    made = SH.create_matter_from_share(payload, client, matter)
-    print(f"\n  opened as {made}")
-    print(f"  open it:    ir probant open {made}")
+    print(f"  {len(entries)} matter(s):")
+    for e in entries:
+        print(f"      {e.get('matter')}  ·  {len(e.get('claims') or [])} claim(s)"
+              f"{'  ·  date bound ' + e['date_bound'] if e.get('date_bound') else ''}")
+    made = SH.create_matters_from_share(payload, client)
+    print(f"\n  opened {len(made)} matter(s) under {client}:")
+    for m in made:
+        print(f"      ir probant open {m}")
     return 0
 
 

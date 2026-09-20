@@ -481,6 +481,9 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--slice", dest="slice_of", default="", help=argparse.SUPPRESS)
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
     pr2.add_argument("id")
+    pm = sub.add_parser("portfolio-matters", help="the matter list a portfolio run produced, as plain text")
+    pm.add_argument("id")
+    pm.add_argument("-o", "--out", default="", help="where to write it (default: MATTERS.txt in the run)")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
     pr.add_argument("id")
     fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
@@ -524,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
                                  workers=a.workers, slice_of=a.slice_of)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
+        if a.cmd == "portfolio-matters":
+            return cmd_portfolio_matters(a.id, a.out)
         if a.cmd == "proposals":
             return cmd_proposals(a.id)
         if a.cmd == "from-proposal":
@@ -664,7 +669,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     from . import probant_portfolio as PF
     src = Path(path).expanduser()
     files = sorted(p for p in (src.rglob("*") if src.is_dir() else [src])
-                   if p.is_file() and p.suffix.lower() in (".md", ".txt", ".json", ".text"))
+                   if p.is_file() and p.suffix.lower() in PF.READABLE)
     if only:
         wanted = [w.strip().lower() for w in only.split(",") if w.strip()]
         files = [p for p in files if any(w in p.name.lower() for w in wanted)]
@@ -719,7 +724,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         jobs = jobs[i::n]
         print(f"  worker {i + 1}/{n}: {len(jobs)} job(s)", flush=True)
     out_file = d / (f"candidates-{slice_of.replace('/', '-')}.jsonl" if slice_of else PF.CANDIDATES)
-    register = src / "portfolio" / "corpus.json" if (src / "portfolio" / "corpus.json").is_file() else None
+    register = next((c for c in (src / "portfolio" / "corpus.json", src / "corpus.json") if c.is_file()), None)
     if register:
         # Kept with the run: the answer key this run is judged against must be the one it was judged against,
         # not whatever the register says months later.
@@ -791,13 +796,48 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         print(f"\n  synthesis: {shape['n']} finding(s) from {shape['documents']} document(s), "
               f"~{shape['tokens_roughly'] / 1000:.0f}k tokens — one session, all of them", flush=True)
         t0 = time.time()
-        _portfolio_round(d, PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"]), label="synthesis",
+        # With a register, the synthesis produces the MATTER LIST — the inventions, mapped onto the filings
+        # and candidates the portfolio already indexes, which gives the host a denominator to check it
+        # against. Without one there is nothing to map to, so it draws themes as before.
+        reg = d / "register.json"
+        if reg.is_file():
+            known = PF.matter_list(meta["id"])["register"]
+            instruction = PF.MATTERS.format(
+                n=shape["n"], docs=shape["documents"],
+                filed=sum(1 for k in known if k["kind"] == "filed"),
+                surplus=sum(1 for k in known if k["kind"] == "surplus"))
+        else:
+            instruction = PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"])
+        _portfolio_round(d, instruction, label="synthesis",
                          out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d, model=thinker)
         print(f"    done in {time.time() - t0:.0f}s")
     kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
     print(f"\n  {len(kept)} item(s) kept, {drop} dropped (a quote not in the document it names), "
           f"{time.time() - started:.0f}s total")
     return cmd_portfolio_report(meta["id"])
+
+
+def cmd_portfolio_matters(ident: str, out: str = "") -> int:
+    """The matter list as plain text, to a file by default.
+
+    To a FILE, not a console: this is the client's material and whoever runs this may be an agent whose
+    transcript leaves the machine — the same rule the rest of this pipeline keeps.
+    """
+    from . import probant_portfolio as PF
+    text = PF.render_matters(ident)
+    dest = Path(out).expanduser() if out else PF.path_of(ident) / "MATTERS.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        os.chmod(dest, 0o600)
+    dest.write_text(text, encoding="utf-8")
+    os.chmod(dest, 0o600)
+    m = PF.matter_list(ident)
+    print(f"{len(m['matters'])} matter(s), {m['covered']}/{m['known']} register entries accounted for, "
+          f"{len(m['uncited'])} of {m['findings']} findings in no matter")
+    if m["missing"]:
+        print(f"  NOT covered: {', '.join(k['id'] for k in m['missing'])}")
+    print(f"  written to {dest}")
+    return 0
 
 
 def cmd_portfolio_report(ident: str) -> int:

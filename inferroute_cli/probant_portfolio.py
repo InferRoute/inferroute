@@ -76,6 +76,60 @@ def canonical(text: str) -> str:
     return re.sub(r"\s+", " ", _MARKUP.sub("", str(text or ""))).strip()
 
 
+WORD_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def docx_text(data: bytes) -> str:
+    """The visible text of a .docx, with the standard library only.
+
+    A filing as DEPOSITED is a .docx — a zip of XML — and a sealed session handed those bytes reads markup,
+    not an invention. The text extracted here is what gets staged, so the session and the host's verbatim
+    quote check see exactly the same characters: fidelity to Word's rendering does not matter, agreement
+    between the two sides does.
+
+    Paragraphs (including those inside tables) become lines; tabs and breaks are kept because a claim set
+    is numbered and indented and runs together without them. Deleted text is `w:delText`, never `w:t`, so
+    tracked-change deletions are dropped by construction — the filing as it stands, not as it was drafted.
+    """
+    import io
+    import zipfile
+    import xml.etree.ElementTree as ET
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml")
+    except (zipfile.BadZipFile, KeyError) as e:
+        raise S.ProbantError(f"that .docx could not be opened as a Word document ({type(e).__name__})") from e
+    root = ET.fromstring(xml)
+    lines = []
+    for para in root.iter(f"{WORD_NS}p"):
+        out = []
+        for node in para.iter():
+            tag = node.tag
+            if tag == f"{WORD_NS}t":
+                out.append(node.text or "")
+            elif tag == f"{WORD_NS}tab":
+                out.append("\t")
+            elif tag in (f"{WORD_NS}br", f"{WORD_NS}cr"):
+                out.append("\n")
+        lines.append("".join(out))
+    return "\n".join(lines).strip() + "\n"
+
+
+READABLE = (".md", ".txt", ".json", ".text", ".docx")
+
+
+def readable_text(path: Path) -> Tuple[bytes, str]:
+    """The bytes to stage for a document, and what was done to get them ("" = used as they are).
+
+    Returned as bytes so stage() hashes and writes one thing; the conversion is named so the staged copy can
+    say it is not a byte-for-byte copy of the original.
+    """
+    raw = path.read_bytes()
+    if path.suffix.lower() == ".docx":
+        return docx_text(raw).encode("utf-8"), "docx"
+    return raw, ""
+
+
 def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[str, Any]:
     """Copy the portfolio's documents where a sealed session can read them, and nowhere else.
 
@@ -103,13 +157,14 @@ def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[st
     for p in sorted(files):
         # A flat, unique name per document: the session works in one directory, and two "README.md" from
         # different folders must not become one file.
-        base = re.sub(r"[^A-Za-z0-9._-]+", "-", p.name)[:80] or "document"
+        name_on_disk = p.name if p.suffix.lower() != ".docx" else p.with_suffix(".txt").name
+        base = re.sub(r"[^A-Za-z0-9._-]+", "-", name_on_disk)[:80] or "document"
         if base in seen:
             seen[base] += 1
             base = f"{Path(base).stem}-{seen[base]}{Path(base).suffix}"
         else:
             seen[base] = 1
-        body = p.read_bytes()
+        body, converted = readable_text(p)
         # The same document filed in two places is one document. Measured here: 459 files, 385 distinct —
         # 74 exact copies, 1.6 MB. Reading a copy costs a session AND invents a "two documents agree"
         # signal, which is worse than the waste.
@@ -120,8 +175,17 @@ def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[st
         by_content[digest] = base
         (d / DOCS / base).write_bytes(body)
         os.chmod(d / DOCS / base, 0o400)
-        documents.append({"name": base, "from": str(p), "bytes": len(body),
-                          "sha256": hashlib.sha256(body).hexdigest()})
+        row = {"name": base, "from": str(p), "bytes": len(body), "sha256": digest}
+        if converted:
+            # TWO hashes, because they answer different questions. `sha256` is of the staged text, which is
+            # what a session reads and what a quote is checked against. `original_sha256` is of the file as
+            # deposited — the one that appears in the bundle's manifest — so a finding can be traced back to
+            # the document of record, not merely to our rendering of it.
+            row["converted_from"] = converted
+            row["original_name"] = p.name
+            row["original_bytes"] = p.stat().st_size
+            row["original_sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
+        documents.append(row)
     meta = {"schema": "inferroute.probant-portfolio/1", "id": ident, "name": _clean(name, 80) or "portfolio",
             "selection": selection or "whole corpus",
             "staged_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -517,6 +581,116 @@ SYNTHESIS = ("Read findings.json in this directory: every distinct assertion rec
              "resting on one document, or a claim asserted everywhere and evidenced nowhere. Nothing else.")
 
 
+MATTERS = (
+    "Read findings.json in this directory: every distinct assertion recorded from the {docs} documents of "
+    "this portfolio, {n} of them, each with the document it came from. Read register.json too — it is this "
+    "portfolio's own index: `filed` are the {filed} filings already deposited (ids P1…, with their concepts) "
+    "and `surplus` are the {surplus} candidates not yet filed (ids like TA-L3, with mechanism, status, risk "
+    "and whether they are EP-urgent).\n\n"
+    "Produce the MATTER LIST: the inventions this portfolio actually contains, one call to propose_cluster "
+    "per matter. A matter is one invention a patent attorney would prosecute as a unit — not a topic, and "
+    "not one per document: a filing may hold several, and several documents may describe one.\n\n"
+    "For each: `label` names the invention; `thesis` is one sentence giving its technical mechanism — what "
+    "it does and how, specific enough to tell it apart from a neighbour; `members` are the finding ids it "
+    "rests on; `register` lists the register ids it covers (P1…P9, or surplus ids), empty only if it covers "
+    "none; `aspects` are the features that would matter to a claim, one short line each, most important "
+    "first; `detail` is what a reader needs beside them, compact — variants, what it depends on, what it "
+    "does NOT cover, and for unfiled matters the status and risk the register gives.\n\n"
+    "Cover every register id at least once across your matters. If one has nothing in the findings to rest "
+    "on, still give it a matter, say so in `detail`, and leave `members` as the closest ids you have.\n\n"
+    "Then stop with a short answer: how many matters, and which of them you are least sure about. Nothing "
+    "else.")
+
+
+def matter_list(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
+    """The matter list, with the one check the host can make on it: did it account for the register?
+
+    A synthesis is the step nothing can verify — no computation says a matter is the right matter. What IS
+    computable is coverage of an index the portfolio already keeps: 9 filings and 27 candidates are a
+    denominator, so "every one of them appears in some matter" is arithmetic, and a list that quietly drops
+    eleven of them cannot read as complete. Measured today on the themes run this replaces: 10 themes citing
+    285 of 4,420 findings, which looked like an answer and was a sixteenth of one.
+    """
+    drawn = themes(ident)
+    reg = register or (path_of(ident) / "register.json")
+    known: List[Dict[str, str]] = []
+    if Path(reg).is_file():
+        try:
+            data = json.loads(Path(reg).read_text())
+            for kind in ("filed", "surplus"):
+                for row in (data.get(kind) or []):
+                    if isinstance(row, dict) and row.get("id"):
+                        known.append({"id": str(row["id"]), "kind": kind,
+                                      "title": _clean(row.get("title") or row.get("mechanism"), 140),
+                                      "ep_urgent": bool(row.get("ep_urgent")),
+                                      "status": _clean(row.get("status"), 40),
+                                      "risk": _clean(row.get("risk"), 40)})
+        except ValueError:
+            pass
+    claimed: Dict[str, List[str]] = {}
+    for m in drawn["themes"]:
+        for rid in m["register"]:
+            claimed.setdefault(rid, []).append(m["label"])
+    ids = {k["id"] for k in known}
+    missing = [k for k in known if k["id"] not in claimed]
+    invented = sorted(r for r in claimed if r not in ids)
+    return {"matters": drawn["themes"], "findings": drawn["findings"], "uncited": drawn["uncited"],
+            "unknown": drawn["unknown"], "register": known, "claimed": claimed,
+            "missing": missing, "invented": invented,
+            "covered": len(ids) - len(missing), "known": len(ids)}
+
+
+def render_matters(ident: str, register: Optional[Path] = None) -> str:
+    """The matter list as plain text: one list, each matter with its aspects and its detail, and the
+    accounting underneath. Written to a file rather than a console — it is the client's material."""
+    m = matter_list(ident, register)
+    reg_by_id = {k["id"]: k for k in m["register"]}
+    lines = [f"MATTERS — {meta_of(ident)['name']}", "=" * 72, ""]
+    lines.append(f"{len(m['matters'])} matter(s) over {m['findings']} evidenced findings; "
+                 f"{m['covered']}/{m['known']} register entries accounted for.")
+    lines.append("Every finding cited below is a verbatim quote checked against the document it names.")
+    lines.append("")
+    for i, x in enumerate(m["matters"], 1):
+        marks = [reg_by_id[r] for r in x["register"] if r in reg_by_id]
+        filed = [r["id"] for r in marks if r["kind"] == "filed"]
+        unfiled = [r["id"] for r in marks if r["kind"] == "surplus"]
+        urgent = " ** EP-URGENT **" if any(r["ep_urgent"] for r in marks) else ""
+        lines.append(f"{i}. {x['label'].upper()}{urgent}")
+        status = []
+        if filed:
+            status.append("FILED: " + ", ".join(filed))
+        if unfiled:
+            status.append("UNFILED: " + ", ".join(unfiled))
+        if not marks:
+            status.append("not in the register")
+        lines.append(f"   {' | '.join(status)}")
+        lines.append(f"   {x['thesis']}")
+        if x["aspects"]:
+            lines.append("   Key aspects:")
+            lines.extend(f"     - {a}" for a in x["aspects"])
+        if x["detail"]:
+            lines.append(f"   Detail: {x['detail']}")
+        lines.append(f"   Evidence: {x['findings']} finding(s) across {x['documents']} document(s) "
+                     f"({', '.join(x['sources'][:4])}{' …' if len(x['sources']) > 4 else ''})")
+        if x["why"]:
+            lines.append(f"   Drawn because: {x['why']}")
+        lines.append("")
+    lines += ["-" * 72, "WHAT THIS LIST DOES NOT COVER", ""]
+    if m["missing"]:
+        lines.append(f"{len(m['missing'])} register entr(ies) no matter claims — these are NOT covered above:")
+        for k in m["missing"]:
+            lines.append(f"  - {k['id']} ({k['kind']}){' EP-URGENT' if k['ep_urgent'] else ''}: {k['title']}")
+    else:
+        lines.append("Every register entry is claimed by at least one matter.")
+    lines.append("")
+    if m["invented"]:
+        lines.append(f"Register ids cited that do not exist: {', '.join(m['invented'])}")
+    lines.append(f"{len(m['uncited'])} of {m['findings']} findings are in no matter.")
+    lines.append("This list ORGANISES; it does not rule. File/no-file, novelty and claim scope are "
+                 "Henry + counsel.")
+    return "\n".join(lines) + "\n"
+
+
 def write_findings(ident: str) -> Dict[str, Any]:
     """The synthesis session's input: every finding, compact, with the document each came from.
 
@@ -548,6 +722,11 @@ def themes(ident: str) -> Dict[str, Any]:
         cited.update(kept)
         sources = sorted({ids[m]["source"] for m in kept})
         out.append({"label": label, "thesis": thesis, "why": _clean(row.get("why"), 600),
+                    # Present only when the synthesis was asked for matters (a register was there to map to);
+                    # a themes-only run leaves them empty and reads exactly as it did before.
+                    "register": [_clean(x, 40) for x in (row.get("register") or []) if isinstance(x, str)],
+                    "aspects": [_clean(x, 300) for x in (row.get("aspects") or []) if isinstance(x, str)],
+                    "detail": _clean(row.get("detail"), 1500),
                     "members": kept, "findings": len(kept), "documents": len(sources), "sources": sources})
     return {"themes": sorted(out, key=lambda x: (-x["documents"], -x["findings"])),
             "uncited": [i for i in ids if i not in cited], "unknown": sorted(set(unknown)),

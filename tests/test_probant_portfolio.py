@@ -348,3 +348,80 @@ def test_a_document_that_honestly_holds_nothing_is_not_read_forever(home):
     # And a document nobody has opened yet is still unread, which is a different thing entirely.
     other = _stage(src)["id"]
     assert sorted(P.unread(other)) == sorted([first, second]) and P.barren(other) == []
+
+
+def _docx(path, paragraphs):
+    """A minimal real .docx: the zip members Word needs, and one w:p per paragraph."""
+    import zipfile
+    NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    body = "".join(f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragraphs)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        z.writestr("word/document.xml", f'<?xml version="1.0"?><w:document {NS}><w:body>{body}</w:body></w:document>')
+    return path
+
+
+def test_a_filing_as_deposited_is_staged_as_its_text_not_its_markup(home, tmp_path):
+    """Henry, 20 Sep: run this over the self-contained bundle — where the filings are .docx as deposited at
+    INPI. Handing those bytes to a session gives it a zip of XML, so the text is extracted here, and BOTH
+    hashes are kept: the staged text is what a quote is checked against, the original is the document of
+    record that the bundle's manifest lists."""
+    import hashlib
+    src = tmp_path / "bundle"
+    src.mkdir()
+    _docx(src / "FR2609630-P1.docx", ["A jacket with COOLANT-MARKER channels moulded between the cells.",
+                                      "Claim 1. A pack, characterised in that the channels are moulded."])
+    meta = P.stage([src / "FR2609630-P1.docx"], "bundle")
+    doc = meta["documents"][0]
+    assert doc["name"] == "FR2609630-P1.txt"          # staged as text, under a name a session can read
+    assert doc["converted_from"] == "docx" and doc["original_name"] == "FR2609630-P1.docx"
+    staged = (P.path_of(meta["id"]) / P.DOCS / doc["name"]).read_bytes()
+    assert b"<w:t>" not in staged and b"<?xml" not in staged        # no markup reached the session
+    assert b"COOLANT-MARKER channels moulded between" in staged
+    assert b"Claim 1." in staged                                     # paragraphs stay separate lines
+    # The two hashes answer different questions and must not be confused for one another.
+    assert doc["sha256"] == hashlib.sha256(staged).hexdigest()
+    assert doc["original_sha256"] == hashlib.sha256((src / "FR2609630-P1.docx").read_bytes()).hexdigest()
+    assert doc["sha256"] != doc["original_sha256"]
+    # A quote from the extracted text verifies against it — which is the only agreement that matters.
+    _propose(meta["id"], [{"title": "Cooling jacket", "summary": "s", "source": doc["name"],
+                           "quote": "COOLANT-MARKER channels moulded between the cells"}])
+    assert [c["title"] for c in P.candidates(meta["id"])] == ["Cooling jacket"]
+    with pytest.raises(S.ProbantError, match="could not be opened"):
+        P.docx_text(b"not a zip at all")
+
+
+def test_the_matter_list_says_which_register_entries_no_matter_claims(home, tmp_path):
+    """The synthesis is the step nothing can verify — no computation says a matter is the right matter. What
+    IS computable is whether it accounted for the index the portfolio already keeps. Today's themes run cited
+    285 of 4,420 findings and read like an answer; a list that silently drops register entries must not."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"},
+                     {"title": "Swelling", "summary": "s", "source": second,
+                      "quote": "SWELL-MARKER impedance drift over fifty"}])
+    _job(ident, first, second)
+    P.write_findings(ident)
+    reg = P.path_of(ident) / "register.json"
+    P._write_readonly(reg, json.dumps({
+        "filed": [{"id": "P1", "title": "Cooling jacket"}, {"id": "P2", "title": "Swelling prediction"}],
+        "surplus": [{"id": "TA-L3", "mechanism": "sealed-lane resale commitment", "ep_urgent": True,
+                     "status": "held", "risk": "high"}]}))
+    with (P.path_of(ident) / P.THEMES).open("a") as fh:
+        fh.write(json.dumps({"label": "Cooling", "thesis": "coolant between cells", "members": ["f1"],
+                             "register": ["P1", "NOT-A-REAL-ID"], "aspects": ["moulded channels", "per cell"],
+                             "detail": "does not cover air cooling"}) + "\n")
+    m = P.matter_list(ident)
+    assert m["known"] == 3 and m["covered"] == 1
+    assert [k["id"] for k in m["missing"]] == ["P2", "TA-L3"]     # named, not merely counted
+    assert m["invented"] == ["NOT-A-REAL-ID"]                     # a register id that does not exist
+    assert m["matters"][0]["aspects"] == ["moulded channels", "per cell"]
+    assert m["matters"][0]["detail"] == "does not cover air cooling"
+    text = P.render_matters(ident)
+    assert "1/3 register entries accounted for" in text
+    assert "TA-L3" in text and "EP-URGENT" in text                # the urgent one is not buried
+    assert "P2 (filed)" in text and "NOT covered" in text
+    assert "1 of 2 findings are in no matter" in text
+    assert "it does not rule" in text

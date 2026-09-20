@@ -365,7 +365,7 @@ def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def record_job(ident: str, job: Dict[str, Any], *, first: int, last: int, model: str, prompt: str,
-               seconds: float, exit_code: int, worked: bool = True) -> None:
+               seconds: float, exit_code: int, worked: bool = True, aborted: bool = False) -> None:
     """What a finding came from: which job, which documents, which model, which instruction, when.
 
     Without this a finding is a sentence with a quote and no history, and the only way to answer "must we
@@ -381,7 +381,8 @@ def record_job(ident: str, job: Dict[str, Any], *, first: int, last: int, model:
            "range": None if job.get("whole") else [job.get("start"), job.get("end")],
            "lines": [first, last], "found": max(0, last - first), "model": model,
            "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()[:16],
-           "seconds": round(seconds, 1), "exit": exit_code, "worked": bool(worked)}
+           "seconds": round(seconds, 1), "exit": exit_code, "worked": bool(worked),
+           "aborted": bool(aborted)}
     with (d / JOBS).open("a") as fh:
         fh.write(json.dumps(row) + "\n")
     os.chmod(d / JOBS, 0o600)
@@ -452,10 +453,21 @@ MAX_ATTEMPTS = 3        # after this many goes at a document that yields nothing
 
 
 def attempts(ident: str) -> Dict[str, int]:
-    """How many times each document has been handed to a session. Counted from the job log, which records
-    the documents of every job whether or not it produced anything."""
+    """How many times each document has actually been READ by a session that ran to completion.
+
+    A job that was KILLED is not an attempt. 20 Sep, caught on the real bundle: stopping a run for a
+    hardware power-off left four in-flight jobs on the largest filing (279 KB) recorded with `exit=-15`
+    and "aborted: Request aborted". They counted toward MAX_ATTEMPTS, so the retry cap retired a document
+    that had never once been read, and the next resume skipped it silently — the cap turning a shutdown
+    into permanent data loss.
+
+    So: a non-zero exit does not count, and neither does a round the client aborted. A document that
+    genuinely defeats a session still accumulates clean attempts and still terminates.
+    """
     out: Dict[str, int] = {}
     for row in _rows(path_of(ident) / JOBS):
+        if row.get("exit") not in (0, None) or row.get("aborted"):
+            continue
         for name in (row.get("documents") or []):
             if name:
                 out[name] = out.get(name, 0) + 1
@@ -859,6 +871,15 @@ def recall_against_register(ident: str, register: Path, floor: float = 0.6,
                      "This run did not read the whole portfolio, so the register is the wrong denominator "
                      "for it: the number is shown, the verdict is not. Read the corpus in full, or resume "
                      "this run until every document has been read, before judging recall.")}
+
+
+def last_round_aborted(ident: str) -> bool:
+    """Whether the round that just ended was aborted rather than finished — a stopped run, a killed
+    session. Its zero says nothing about the document, so it must not be counted as a reading of it."""
+    rows = _rows(path_of(ident) / "rounds.jsonl")
+    if not rows:
+        return False
+    return "abort" in str(rows[-1].get("error", "")).lower()
 
 
 def last_round_worked(ident: str) -> bool:

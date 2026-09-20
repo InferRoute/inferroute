@@ -532,18 +532,54 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
     meta = PF.stage(files, src.name)
     d = PF.path_of(meta["id"])
     jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
-    print(f"portfolio {meta['id']}: {len(meta['documents'])} document(s), {meta['bytes'] / 1e6:.2f} MB, "
-          f"{len(jobs)} reading job(s)")
+    dup = len(meta.get("duplicates") or [])
+    print(f"portfolio {meta['id']}: {len(meta['documents'])} distinct document(s), {meta['bytes'] / 1e6:.2f} MB, "
+          f"{len(jobs)} reading job(s)"
+          + (f"  ({dup} exact duplicate(s) of another file, read once)" if dup else ""))
+    # What the run is about to spend, by where the material lives, so a folder of process logs is a visible
+    # choice rather than a surprise on the bill.
+    import collections
+    by_top = collections.Counter()
+    size_top = collections.Counter()
+    for doc in meta["documents"]:
+        top = Path(doc["from"]).relative_to(src).parts[0] if src.is_dir() else doc["name"]
+        by_top[top] += 1
+        size_top[top] += doc["bytes"]
+    for top, n in by_top.most_common():
+        print(f"      {top[:40]:40s} {n:4d} file(s)  {size_top[top] / 1000:7.0f} KB")
     started = time.time()
+    register = src / "portfolio" / "corpus.json" if (src / "portfolio" / "corpus.json").is_file() else None
+    empty_jobs = []
     for i, job in enumerate(jobs, 1):
-        span = job["end"] - job["start"]
+        span = job.get("bytes") or (job["end"] - job["start"])
+        what = (f"{len(job['documents'])} document(s)" if job.get("whole")
+                else f"{job['document']} {job['start']}-{job['end']}")
+        PF.brief(meta["id"], register)          # what has been found so far, before this session reads
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
         rc = _portfolio_round(d, PF.instruction_for(job), out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d)
         got = len(PF.candidates(meta["id"])) - before
-        print(f"  [{i}/{len(jobs)}] {job['document']} {job['start']}-{job['end']} "
-              f"({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s" + (f" (exit {rc})" if rc else ""),
-              flush=True)
+        print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"
+              + (f" (exit {rc})" if rc else ""), flush=True)
+        # A job that records nothing is a FAILURE until shown otherwise: the two ways this pipeline broke
+        # (a denied write, a wrong path) both ended in a clean turn with nothing recorded, indistinguishable
+        # from a document that says nothing. Never let it average into a total that looks fine.
+        if got == 0:
+            empty_jobs.append(what)
+    if empty_jobs:
+        print(f"\n  ⚠ {len(empty_jobs)} job(s) recorded NOTHING — treat as failed, not as empty documents:")
+        for w in empty_jobs[:10]:
+            print(f"      {w}")
+    # The step that sees the WHOLE portfolio: not its 9.8 MB of text, which no context on this lane holds,
+    # but every finding drawn from it, in one session.
+    shape = PF.write_findings(meta["id"])
+    if shape["n"]:
+        print(f"\n  synthesis: {shape['n']} finding(s) from {shape['documents']} document(s), "
+              f"~{shape['tokens_roughly'] / 1000:.0f}k tokens — one session, all of them", flush=True)
+        t0 = time.time()
+        _portfolio_round(d, PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"]),
+                         out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d)
+        print(f"    done in {time.time() - t0:.0f}s")
     kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
     print(f"\n  {len(kept)} item(s) kept, {drop} dropped (a quote not in the document it names), "
           f"{time.time() - started:.0f}s total")
@@ -551,8 +587,23 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
 
 
 def cmd_portfolio_report(ident: str) -> int:
+    """Counts and coverage to the terminal; the analysis itself to a file.
+
+    Deliberately: the findings and themes are the client's confidential material, and whoever runs this may
+    be an agent whose transcript leaves this machine. The terminal gets arithmetic — how many, how covered,
+    how thin — and the reading happens in the Probant page or the file, not in a console someone is piping.
+    """
     from . import probant_portfolio as PF
     kept = PF.candidates(ident)
+    drawn = PF.themes(ident)
+    if drawn["themes"]:
+        print(f"\n  {len(drawn['themes'])} theme(s) over {drawn['findings']} finding(s):")
+        for t in drawn["themes"]:
+            print(f"      {t['findings']:3d} finding(s) across {t['documents']:3d} document(s)  {t['label'][:70]}")
+        if drawn["uncited"]:
+            print(f"    {len(drawn['uncited'])} finding(s) were in no theme.")
+        if drawn["unknown"]:
+            print(f"    {len(drawn['unknown'])} citation(s) named findings that do not exist — dropped.")
     cov = PF.coverage(ident)
     print(f"\n  what each document actually evidenced (largest span no quote falls in):\n")
     for row in cov:

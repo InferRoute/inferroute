@@ -796,14 +796,17 @@ export default function (pi: ExtensionAPI) {
 	// One call per cluster, each naming the candidates it holds. The host checks the partition (every
 	// candidate exactly once), compares it with the previous round's, and decides whether it has converged:
 	// an agent asked "have you converged?" says yes, and a partition compared with its predecessor cannot.
+	// ── the synthesis pass: every finding in the portfolio, in one context ──
+	// The corpus itself does not fit any context on this lane (measured 20 Sep: 2.46 M tokens against a 1 M
+	// ceiling). What it ASSERTS does — roughly 90 k tokens of findings — so this is the step that genuinely
+	// sees the whole portfolio at once, and every theme it draws must name the findings it rests on.
 	const clusterOut = process.env.IR_CLUSTER_OUT ?? "";
 	if (clusterOut) {
 		pi.registerTool({
 			name: "propose_cluster",
-			label: "Propose a cluster",
+			label: "Propose a theme",
 			description:
-				"Group the candidates you were given into themes, ONE call per cluster, until every candidate is in " +
-				"exactly one cluster. `label` names the theme in a few words; `thesis` is one sentence saying what the " +
+				"Record ONE theme of the portfolio per call, until every finding worth placing is in exactly one theme. `label` names the theme in a few words; `thesis` is one sentence saying what the " +
 				"members have in common that matters technically — not a category name, the actual claim; `members` is " +
 				"the list of candidate ids (c1, c2 …) exactly as given; `why` is what made you put these together and " +
 				"leave others out. Do not invent ids, do not leave a candidate out because it fits badly — put it where " +

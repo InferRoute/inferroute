@@ -35,8 +35,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import probant as S
 
-MAX_FILES = 400
+MAX_FILES = 800
 MAX_BYTES = 40_000_000
+BRIEF = "brief.json"
 CANDIDATES = "candidates.jsonl"
 DOCS = "documents"
 
@@ -83,6 +84,8 @@ def stage(paths: Sequence[Path], name: str = "") -> Dict[str, Any]:
         os.chmod(p, 0o700)
     documents = []
     seen: Dict[str, int] = {}
+    by_content: Dict[str, str] = {}
+    duplicates: List[Dict[str, str]] = []
     for p in sorted(files):
         # A flat, unique name per document: the session works in one directory, and two "README.md" from
         # different folders must not become one file.
@@ -93,13 +96,22 @@ def stage(paths: Sequence[Path], name: str = "") -> Dict[str, Any]:
         else:
             seen[base] = 1
         body = p.read_bytes()
+        # The same document filed in two places is one document. Measured here: 459 files, 385 distinct —
+        # 74 exact copies, 1.6 MB. Reading a copy costs a session AND invents a "two documents agree"
+        # signal, which is worse than the waste.
+        digest = hashlib.sha256(body).hexdigest()
+        if digest in by_content:
+            duplicates.append({"from": str(p), "same_as": by_content[digest]})
+            continue
+        by_content[digest] = base
         (d / DOCS / base).write_bytes(body)
         os.chmod(d / DOCS / base, 0o400)
         documents.append({"name": base, "from": str(p), "bytes": len(body),
                           "sha256": hashlib.sha256(body).hexdigest()})
     meta = {"schema": "inferroute.probant-portfolio/1", "id": ident, "name": _clean(name, 80) or "portfolio",
             "staged_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "documents": documents, "bytes": total}
+            "documents": documents, "bytes": sum(x["bytes"] for x in documents),
+            "given": len(files), "bytes_given": total, "duplicates": duplicates}
     (d / "meta.json").write_text(json.dumps(meta, indent=1))
     os.chmod(d / "meta.json", 0o600)
     return meta
@@ -213,18 +225,19 @@ OVERLAP = 2_000                # a range boundary must not cut an idea in half: 
 # The session works in the portfolio directory and the documents sit in documents/. Naming the path wrongly
 # here is not a typo: the first run said "in this directory", the read failed with ENOENT, and the session
 # ended its turn cleanly having recorded nothing — a silent empty result (20 Sep).
-EXTRACT_ONE = ("Read documents/{name}, all of it, and record every distinct technical assertion it makes "
-               "with record_findings — all of them in one call per part you read, not one call each: source "
-               "\"{name}\", a verbatim quote for each. Work through the document "
-               "from start to end — the last part matters as much as the first. Then stop with one line "
-               "saying how many you recorded. Nothing else.")
+EXTRACT_MANY = ("Read brief.json first — it says what this portfolio is and what has been recorded from the "
+                "other documents so far. Then read each of these in documents/, all of them, all the way "
+                "through: {names}. Record every distinct technical assertion they make with record_findings, "
+                "all the findings for a document in ONE call, giving `source` as that document's file name "
+                "and a verbatim quote for each. Then stop with one line: how many you recorded, from how "
+                "many documents. Nothing else.")
 
-EXTRACT_RANGE = ("Read documents/{name} from character {start} to character {end} — that range only, "
-                 "and all of it — and record every distinct technical assertion it makes with record_findings, "
-                 "all of them in one call per part you read, not one call each: source \"{name}\", a verbatim "
-                 "quote for each, each quote taken from within that range. Work "
-                 "through it from start to end. Then stop with one line saying how many you recorded. Nothing "
-                 "else.")
+EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and what has been recorded from the "
+                 "other documents so far. Then read documents/{name} from character {start} to character "
+                 "{end} — that range only, and all of it — and record every distinct technical assertion it "
+                 "makes with record_findings, all of them in one call per part you read: `source` "
+                 "\"{name}\", a verbatim quote for each, each quote taken from within that range. Then stop "
+                 "with one line saying how many you recorded. Nothing else.")
 
 
 def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
@@ -235,11 +248,27 @@ def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
     quote actually evidences.
     """
     jobs: List[Dict[str, Any]] = []
+    batch: List[Dict[str, Any]] = []
+    batched = 0
+
+    def flush() -> None:
+        nonlocal batch, batched
+        if batch:
+            jobs.append({"documents": [b["name"] for b in batch], "bytes": batched, "whole": True})
+            batch, batched = [], 0
+
     for doc in meta_of(ident)["documents"]:
         size = doc["bytes"]
         if size <= budget:
-            jobs.append({"document": doc["name"], "start": 0, "end": size, "whole": True})
+            # Several small documents per session: the mean file here is 24 KB and a session pays its
+            # attestation, sandbox and warm-up before reading a byte. One file per session spends that
+            # overhead 459 times for 9.8 MB.
+            if batched + size > budget:
+                flush()
+            batch.append(doc)
+            batched += size
             continue
+        flush()
         start = 0
         while start < size:
             end = min(size, start + budget)
@@ -247,12 +276,13 @@ def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
             if end >= size:
                 break
             start = end - OVERLAP
+    flush()
     return jobs
 
 
 def instruction_for(job: Dict[str, Any]) -> str:
     if job.get("whole"):
-        return EXTRACT_ONE.format(name=job["document"])
+        return EXTRACT_MANY.format(names=", ".join(job["documents"]))
     return EXTRACT_RANGE.format(name=job["document"], start=job["start"], end=job["end"])
 
 
@@ -281,3 +311,58 @@ def coverage(ident: str) -> List[Dict[str, Any]]:
                     "largest_unevidenced": biggest, "largest_unevidenced_share": round(biggest / size, 3),
                     "first_at": spots[0] if spots else None, "last_at": spots[-1] if spots else None})
     return sorted(out, key=lambda r: -r["largest_unevidenced_share"])
+
+
+# ───────────────────────────── the synthesis: every finding, one context ─────────────────────────────
+
+THEMES = "themes.jsonl"
+
+SYNTHESIS = ("Read findings.json in this directory: every distinct assertion recorded from all {docs} "
+             "documents of this portfolio, {n} of them, each with the document it came from. This is the "
+             "whole portfolio's content in one place — the documents themselves are far too large to hold "
+             "at once, these are their findings. Read brief.json too if it is there; it holds the register "
+             "this portfolio keeps of its own filings and candidates.\n\n"
+             "Draw the themes the portfolio actually turns on, with propose_cluster, one call per theme. "
+             "`members` are the finding ids (f1, f2 …) the theme rests on — only ids that are in the file. "
+             "`thesis` is one sentence a patent attorney could act on: the shared technical mechanism, not a "
+             "topic name. `why` says what made you draw the line there, and name anything that sits badly.\n\n"
+             "Then stop with a short answer: what this portfolio is about, and what is thin in it — a theme "
+             "resting on one document, or a claim asserted everywhere and evidenced nowhere. Nothing else.")
+
+
+def write_findings(ident: str) -> Dict[str, Any]:
+    """The synthesis session's input: every finding, compact, with the document each came from.
+
+    Ids are assigned HERE and are the only ones the session may cite, so a theme can be checked back to the
+    findings it claims — and through them to a verbatim quote in a named document.
+    """
+    items = candidates(ident)
+    d = path_of(ident)
+    rows = [{"id": f"f{i + 1}", "title": c["title"], "summary": c["summary"], "source": c["source"]}
+            for i, c in enumerate(items)]
+    (d / "findings.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False))
+    os.chmod(d / "findings.json", 0o400)
+    return {"n": len(rows), "documents": len({c["source"] for c in items}),
+            "tokens_roughly": sum(len(r["title"]) + len(r["summary"]) for r in rows) // 4}
+
+
+def themes(ident: str) -> Dict[str, Any]:
+    """The themes drawn over the findings, with the accounting: which findings were cited, which were not,
+    and which citations name nothing. A synthesis that quietly drops a third of the portfolio says so here."""
+    items = candidates(ident)
+    ids = {f"f{i + 1}": c for i, c in enumerate(items)}
+    out, cited, unknown = [], set(), []
+    for row in _rows(path_of(ident) / THEMES):
+        label, thesis = _clean(row.get("label"), 90), _clean(row.get("thesis"), 600)
+        named = [_clean(m, 24) for m in (row.get("members") or []) if isinstance(m, str)]
+        unknown.extend(m for m in named if m not in ids)
+        kept = [m for m in named if m in ids]
+        if not label or not kept:
+            continue
+        cited.update(kept)
+        sources = sorted({ids[m]["source"] for m in kept})
+        out.append({"label": label, "thesis": thesis, "why": _clean(row.get("why"), 600),
+                    "members": kept, "findings": len(kept), "documents": len(sources), "sources": sources})
+    return {"themes": sorted(out, key=lambda x: (-x["documents"], -x["findings"])),
+            "uncited": [i for i in ids if i not in cited], "unknown": sorted(set(unknown)),
+            "findings": len(ids)}

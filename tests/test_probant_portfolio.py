@@ -425,3 +425,27 @@ def test_the_matter_list_says_which_register_entries_no_matter_claims(home, tmp_
     assert "P2 (filed)" in text and "NOT covered" in text
     assert "1 of 2 findings are in no matter" in text
     assert "it does not rule" in text
+
+
+def test_the_register_is_never_staged_as_one_of_the_documents(home, tmp_path, monkeypatch, capsys):
+    """A self-contained bundle keeps its index beside its filings. Staging corpus.json as a document would
+    make the recall gate circular: a session that reads the answer key can report its entries as findings and
+    score full recall having learnt nothing from the filings it was supposed to read."""
+    from inferroute_cli import probant as CLI
+    src = tmp_path / "bundle"
+    (src / "filings").mkdir(parents=True)
+    _docx(src / "filings" / "FR2609630-P1.docx", ["COOLANT-MARKER channels moulded between the cells."])
+    (src / "P10-TEMP-surplus.md").write_text("TA-L3 is the sealed-lane resale commitment.\n")
+    (src / "corpus.json").write_text(json.dumps({"filed": [{"id": "P1", "title": "Cooling jacket"}],
+                                                 "surplus": [{"id": "TA-L3", "mechanism": "resale"}]}))
+    staged = {}
+    monkeypatch.setattr(CLI, "_portfolio_round", lambda *a, **k: 0)
+    real_stage = P.stage
+    monkeypatch.setattr(P, "stage", lambda files, *a, **k: staged.setdefault("m", real_stage(files, *a, **k)))
+    CLI.cmd_portfolio(str(src))
+    names = [d["name"] for d in staged["m"]["documents"]]
+    assert "corpus.json" not in names, names
+    assert sorted(names) == ["FR2609630-P1.txt", "P10-TEMP-surplus.md"]
+    # …and it IS kept as the register, beside the run, where the gate reads it.
+    assert (P.path_of(staged["m"]["id"]) / "register.json").is_file()
+    assert {k["id"] for k in P.matter_list(staged["m"]["id"])["register"]} == {"P1", "TA-L3"}

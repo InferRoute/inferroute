@@ -670,6 +670,10 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     src = Path(path).expanduser()
     files = sorted(p for p in (src.rglob("*") if src.is_dir() else [src])
                    if p.is_file() and p.suffix.lower() in PF.READABLE)
+    # The register is the ANSWER KEY, never one of the documents. A bundle keeps its index beside its
+    # filings, and staging it would make the recall gate circular: a session that reads corpus.json can
+    # report its entries as findings and score full recall having learnt nothing from the filings.
+    files = [p for p in files if p.name != "corpus.json"]
     if only:
         wanted = [w.strip().lower() for w in only.split(",") if w.strip()]
         files = [p for p in files if any(w in p.name.lower() for w in wanted)]

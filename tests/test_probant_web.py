@@ -992,3 +992,20 @@ def test_a_round_that_records_nothing_leaves_its_reason_behind(client, tmp_path,
     assert row["last_words"] == "I could not find the documents directory."
     assert row["ended"] == "nothing recorded after a reminder"
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
+
+
+def test_a_turn_that_stopped_on_an_error_is_recorded_not_left_as_silence(client, tmp_path, monkeypatch):
+    """In the first full-corpus pass, 62 of 76 empty rounds made NO tool call and said nothing at all: the
+    call failed and the round looked exactly like a document with nothing in it. The round log now carries
+    the error and whether the session got a usable answer, so a zero can be retried instead of believed."""
+    b, c = client
+    log = tmp_path / "rounds.jsonl"
+    monkeypatch.setenv("IR_ROUND_LOG", str(log))
+    b.publish({"kind": "assistant_end", "text": "", "stopped": "error", "error": "upstream refused the request"})
+    b._write_round_log("nothing recorded after a reminder")
+    row = json.loads(log.read_text().splitlines()[-1])
+    assert row["worked"] is False and row["recorded"] == 0
+    assert "upstream refused the request" in row["error"]
+    b.publish({"kind": "tool_start", "call": "1", "tool": "read", "args": {}})
+    b._write_round_log("work done")
+    assert json.loads(log.read_text().splitlines()[-1])["worked"] is True

@@ -586,3 +586,10 @@ def recall_against_register(ident: str, register: Path, floor: float = 0.6,
                      "This run did not read the whole portfolio, so the register is the wrong denominator "
                      "for it: the number is shown, the verdict is not. Read the corpus in full, or resume "
                      "this run until every document has been read, before judging recall.")}
+
+
+def last_round_worked(ident: str) -> bool:
+    """Did the last reading round get a usable answer at all? A round with no tool call is a failed call,
+    not a document that had nothing in it — the difference between retrying and believing a zero."""
+    rows = _rows(path_of(ident) / "rounds.jsonl")
+    return bool(rows) and bool(rows[-1].get("worked"))

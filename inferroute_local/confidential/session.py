@@ -505,7 +505,7 @@ def upstream_public(status: int) -> str:
     """What a user is told about an upstream non-200: the STATUS is ours to pass on, the BODY never is.
 
     2026-09-20, seen on Henry's screen: a 402 reached a user carrying
-    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to 5EsHt7Ju…`.
+    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to <address>`.
     Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust
     us — phishing-shaped whatever its origin. The same body also carried provider quota and balance,
     against the standing rule that user surfaces show OUTCOMES and plain dollars, never provider
@@ -515,6 +515,16 @@ def upstream_public(status: int) -> str:
     cc-proxy-prod learned this on 2026-07-04 after 2.4k tester 402s in 12h and made 402 retryable
     "instead of surfacing raw to the client"; this lane never got that change. Mapping the status is
     the floor — whether a 402 should instead trigger failover is the relay lane's call, not this one's.
+
+    AND THE ARGUMENT THAT SURVIVES SOMEONE PROPOSING "just redact the address" LATER (pi-attested
+    lane, 2026-09-20): THE SPECIMEN IS NOT STABLE. Enumerating one lane's round logs for one day
+    found **two distinct wallet addresses**, 8 occurrences of one and 7 of the other — so a denylist
+    keyed on the address that happened to be observed would have missed the second outright, on the
+    same day, in the same lane. The addresses are deliberately NOT reproduced here: embedding them
+    would ship them. So the insufficiency of a scrubber is not only that it leaves the balance and
+    the quota behind — it is that anything keyed on observed content is a filter fitted to
+    yesterday's sample. "No readable upstream body reaches a client" is a rule; a denylist is a
+    guess that needs updating every time the upstream changes its mind.
     """
     return f"the provider answered {status} ({UPSTREAM_PUBLIC.get(status, 'no further detail')})"
 

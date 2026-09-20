@@ -509,6 +509,45 @@ def barren(ident: str) -> List[Dict[str, Any]]:
     return sorted(out, key=lambda r: -r["bytes"])
 
 
+MIN_HOLE = 12_000              # a stretch smaller than this is not worth a session of its own
+
+
+def plan_holes(ident: str, budget: int = JOB_CHARS, min_hole: int = MIN_HOLE) -> List[Dict[str, Any]]:
+    """Read again the stretches of a document that NO quote evidences.
+
+    A document with findings is neither unread nor barren, so nothing re-plans it — yet it can be two
+    thirds unevidenced and still count as read. Measured on the real bundle, 21 Sep: P1 had 18 findings
+    across 99 KB with nothing at all from 0–53 KB, and its 0–60000 job had run 526 seconds, exited
+    cleanly and recorded nothing. Read is not the same as covered, and only the second one is checkable.
+
+    The ranges come from where the quotes actually fall, so this is aimed by measurement rather than by a
+    guess about which documents were hard. A smaller budget is usually right here: the stretch was already
+    read once at the default and gave nothing back.
+    """
+    sizes = {d["name"]: d["bytes"] for d in meta_of(ident)["documents"]}
+    spots: Dict[str, List[int]] = {}
+    for c in candidates(ident):
+        spots.setdefault(c["source"], []).append(int(c["where"]))
+    jobs: List[Dict[str, Any]] = []
+    for name in sorted(spots):
+        size = sizes.get(name, 0)
+        marks = sorted(spots[name])
+        edges = [0, *marks, size]
+        for a, b in zip(edges, edges[1:]):
+            if b - a < min_hole:
+                continue
+            # Start a little before the hole: the sentence that opens it usually begins in the evidenced
+            # part, and a range that starts mid-sentence is a range whose first quote cannot be verbatim.
+            start = max(0, a - OVERLAP)
+            while start < b:
+                end = min(b, start + budget)
+                jobs.append({"document": name, "start": start, "end": end, "whole": False})
+                if end >= b:
+                    break
+                start = end - OVERLAP
+    return jobs
+
+
 def plan_unread(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
     """The same planner, over what a resumed run still owes: documents never read, plus documents that came
     back empty and have not yet had MAX_ATTEMPTS goes.

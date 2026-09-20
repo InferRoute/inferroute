@@ -39,6 +39,14 @@ def _propose(ident, rows):
             fh.write(json.dumps(r) + "\n")
 
 
+def _job(ident, *documents, found=1, worked=True):
+    """Record that a session was GIVEN these documents, as a real run does after every round. Reading is
+    what the job log says happened; it is not inferred from whether findings came back, because a document
+    can be read honestly and hold nothing."""
+    P.record_job(ident, {"documents": list(documents), "whole": True}, first=0, last=found, model="m",
+                 prompt="p", seconds=1.0, exit_code=0, worked=worked)
+
+
 def test_documents_are_copied_read_only_and_two_files_of_one_name_stay_two(home):
     tmp, src = home
     meta = _stage(src)
@@ -232,6 +240,7 @@ def test_a_partial_run_reports_recall_but_gives_no_verdict(home, tmp_path):
     first = P.meta_of(ident)["documents"][0]["name"]
     _propose(ident, [{"title": "Cooling jacket", "summary": "channels", "source": first,
                       "quote": "COOLANT-MARKER channels moulded between"}])
+    _job(ident, first)
     register = tmp_path / "corpus.json"
     register.write_text(json.dumps({"filed": [{"id": "P1", "title": "Cooling jacket with coolant channels"},
                                               {"id": "P2", "title": "Predicting swelling from impedance drift"}]}))
@@ -251,10 +260,12 @@ def test_resuming_reads_only_what_produced_nothing(home):
     first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
     _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
                       "quote": "COOLANT-MARKER channels moulded between"}])
+    _job(ident, first)
     jobs = P.plan_unread(ident)
     assert len(jobs) == 1 and jobs[0]["documents"] == [second]
     _propose(ident, [{"title": "Swelling", "summary": "s", "source": second,
                       "quote": "SWELL-MARKER impedance drift over fifty"}])
+    _job(ident, second)
     assert P.plan_unread(ident) == [] and P.unread(ident) == []
 
 
@@ -272,6 +283,7 @@ def test_parallel_workers_keep_their_findings_apart_and_the_reader_puts_them_tog
             fh.write(json.dumps({"title": title, "summary": "s", "source": source, "quote": quote}) + "\n")
     got = P.candidates(ident)
     assert sorted(c["title"] for c in got) == ["Cooling jacket", "Swelling"]
+    _job(ident, first, second)
     assert P.unread(ident) == [] and P.dropped(ident) == 0
 
 
@@ -300,3 +312,39 @@ def test_a_quota_refusal_stops_the_run_instead_of_being_retried(home):
     log.write_text(json.dumps({"ended": "x", "recorded": 0, "turns": 2, "tools": {}, "worked": False,
                                "error": "aborted: Request aborted"}) + "\n")
     assert P.last_round_blocked(ident) == ""
+
+
+def test_a_document_that_honestly_holds_nothing_is_not_read_forever(home):
+    """The bug this fixes, found on the 20 Sep corpus run. "Unread" meant "no finding names it", so a
+    document that was read and honestly holds nothing quotable — a checksums file, a transcript manifest —
+    stayed unread for ever: every resume planned it again, and the completeness gate (`not unread()`) could
+    never be satisfied by any corpus containing one. That run reported 207 documents unread when 439 of 453
+    had been read, and was reading a 712 KB manifest for the eleventh time.
+
+    Reading is now what the job log says happened. An empty document is retried, because an empty result is
+    often a failed call rather than an empty document — but only MAX_ATTEMPTS times, so a resume terminates.
+    """
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"}])
+    _job(ident, first)
+    _job(ident, second, found=0)                      # read, and nothing came back
+
+    assert P.unread(ident) == []                      # both have been read: neither is UNread
+    empty = P.barren(ident)
+    assert [r["document"] for r in empty] == [second] and empty[0]["attempts"] == 1
+    assert empty[0]["give_up"] is False               # one go is not enough to call a document empty
+
+    # It is retried — up to the cap, and then the planner stops offering it.
+    for n in range(2, P.MAX_ATTEMPTS + 1):
+        assert [j.get("documents") or [j["document"]] for j in P.plan_unread(ident)] == [[second]]
+        _job(ident, second, found=0)
+        assert P.barren(ident)[0]["attempts"] == n
+    assert P.barren(ident)[0]["give_up"] is True
+    assert P.plan_unread(ident) == []                 # TERMINATES: this is the whole point
+
+    # And a document nobody has opened yet is still unread, which is a different thing entirely.
+    other = _stage(src)["id"]
+    assert sorted(P.unread(other)) == sorted([first, second]) and P.barren(other) == []

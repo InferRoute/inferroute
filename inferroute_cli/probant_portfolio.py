@@ -301,11 +301,15 @@ def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def record_job(ident: str, job: Dict[str, Any], *, first: int, last: int, model: str, prompt: str,
-               seconds: float, exit_code: int) -> None:
+               seconds: float, exit_code: int, worked: bool = True) -> None:
     """What a finding came from: which job, which documents, which model, which instruction, when.
 
     Without this a finding is a sentence with a quote and no history, and the only way to answer "must we
     read it all again?" is to read it all again.
+
+    `worked` is whether the session got a usable answer at all (it made a tool call). A job that found
+    nothing because the document holds nothing and a job that found nothing because the call failed are the
+    same row without it, and they call for opposite things: leave it alone, or read it again.
     """
     d = path_of(ident)
     row = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -313,7 +317,7 @@ def record_job(ident: str, job: Dict[str, Any], *, first: int, last: int, model:
            "range": None if job.get("whole") else [job.get("start"), job.get("end")],
            "lines": [first, last], "found": max(0, last - first), "model": model,
            "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()[:16],
-           "seconds": round(seconds, 1), "exit": exit_code}
+           "seconds": round(seconds, 1), "exit": exit_code, "worked": bool(worked)}
     with (d / JOBS).open("a") as fh:
         fh.write(json.dumps(row) + "\n")
     os.chmod(d / JOBS, 0o600)
@@ -380,16 +384,64 @@ def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
     return jobs
 
 
+MAX_ATTEMPTS = 3        # after this many goes at a document that yields nothing, stop paying to re-read it
+
+
+def attempts(ident: str) -> Dict[str, int]:
+    """How many times each document has been handed to a session. Counted from the job log, which records
+    the documents of every job whether or not it produced anything."""
+    out: Dict[str, int] = {}
+    for row in _rows(path_of(ident) / JOBS):
+        for name in (row.get("documents") or []):
+            if name:
+                out[name] = out.get(name, 0) + 1
+    return out
+
+
 def unread(ident: str) -> List[str]:
-    """Documents in this portfolio that no finding names — what a resumed run still has to read."""
+    """Documents no session has been given yet — what a resumed run still has to read.
+
+    This used to mean "documents no finding names", which is a different thing and a costly one. A document
+    that was read and honestly holds nothing quotable — a checksums file, a transcript manifest, a receipt —
+    names no finding and so was "unread" forever: every resume planned it again, and the completeness gate,
+    `not unread()`, could never be satisfied by any corpus containing one such file. Measured on the 20 Sep
+    run before the fix: of 453 documents, 439 had been read and 192 of those produced nothing, yet the run
+    reported 207 unread and was reading a 712 KB manifest for the eleventh time.
+
+    So: never handed to a session. `barren()` is the other half — read, and nothing came back.
+    """
+    tried = attempts(ident)
+    return [d["name"] for d in meta_of(ident)["documents"] if not tried.get(d["name"])]
+
+
+def barren(ident: str) -> List[Dict[str, Any]]:
+    """Documents that were read and produced nothing, with how often they have been tried.
+
+    Emptiness here is not a verdict on the document: the host cannot tell "holds no technical assertion"
+    from "the session fumbled it". What it can do is say which is which is UNKNOWN, show the size and the
+    number of attempts, and stop spending after MAX_ATTEMPTS — a 2 KB receipt and a 60 KB specification that
+    both came back empty deserve very different attention from a reader.
+    """
+    tried = attempts(ident)
     have = {c["source"] for c in candidates(ident)}
-    return [d["name"] for d in meta_of(ident)["documents"] if d["name"] not in have]
+    out = []
+    for d in meta_of(ident)["documents"]:
+        n = tried.get(d["name"], 0)
+        if n and d["name"] not in have:
+            out.append({"document": d["name"], "bytes": d["bytes"], "attempts": n,
+                        "give_up": n >= MAX_ATTEMPTS})
+    return sorted(out, key=lambda r: -r["bytes"])
 
 
 def plan_unread(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
-    """The same planner, over the documents a run has not managed to read yet. A re-run is a delta: the
-    findings already held are kept, and only what produced nothing is read again."""
-    missing = set(unread(ident))
+    """The same planner, over what a resumed run still owes: documents never read, plus documents that came
+    back empty and have not yet had MAX_ATTEMPTS goes.
+
+    A re-run is a delta — findings already held are kept — and it TERMINATES. Retrying an empty document is
+    worth doing, because an empty result is often a failed call rather than an empty document; retrying it
+    forever is worth nothing, and that is what this planner did until 20 Sep.
+    """
+    missing = set(unread(ident)) | {r["document"] for r in barren(ident) if not r["give_up"]}
     if not missing:
         return []
     sizes = {d["name"]: d["bytes"] for d in meta_of(ident)["documents"]}

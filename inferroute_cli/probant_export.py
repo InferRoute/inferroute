@@ -706,13 +706,20 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
    record (except one removed from the very end, which no counter can reveal).
-6. **Date bound — as given, not as applied.** Each statement carries the date bound the enclave was given
-   for that search, signed. That is a fact about configuration. Whether the returned documents were actually
-   filtered by it is NOT attested here: the statements carry a `cutoff_applied` field which is null in the
-   records seen so far, and the hits themselves are withheld from this pack. Report this claim as
-   "the enclave was given this bound", and say plainly that enforcement is behaviour, which no attestation
-   of what ran can establish. (A first auditor read the older wording as an enforcement claim; it was ours
-   that was wrong, not their reading.)
+6. **Filters — what was given, and what the enclave says applying them did.** Each statement carries the
+   filters it was given (`cutoff_date`, `from_date`, `offices`) and, from enclaves that report it, a
+   matching object with counts over the candidates that filter saw — `cutoff_applied`, `from_date_applied`,
+   `offices_applied`. The verifier checks the
+   report against what was signed and fails on disagreement — but read it for what it is: **the enclave's
+   own account of its filtering**, checked for internal consistency. Enforcement is behaviour, and no
+   attestation of what software ran can establish it. A `removed_by_*` of 0 is legitimate — no candidate
+   fell outside the bound — and is not evidence the filter did nothing. A statement with no `*_applied` is
+   from an enclave that predates the report: the verifier SKIPs it, naming the gap, and so should you.
+
+7. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
+   (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the
+   document" and "the enclave returned a fifth of one" are different claims, and only this field
+   distinguishes them. Report the coverage with the verdict, never as a footnote.
 
 ## How long this takes
 

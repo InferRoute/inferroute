@@ -449,3 +449,49 @@ def test_the_register_is_never_staged_as_one_of_the_documents(home, tmp_path, mo
     # …and it IS kept as the register, beside the run, where the gate reads it.
     assert (P.path_of(staged["m"]["id"]) / "register.json").is_file()
     assert {k["id"] for k in P.matter_list(staged["m"]["id"])["register"]} == {"P1", "TA-L3"}
+
+
+def test_a_reading_run_refuses_to_start_on_a_machine_already_near_the_wall(home, tmp_path, monkeypatch):
+    """20 Sep: three sealed sessions were launched onto mgld at 48 GB used / 13 available, hours after it
+    had hit swap 8.0/8.0 GiB with 1.9 MiB free. That box has no ECC, so an out-of-memory kill there is a
+    machine reset, not a failed job — the run must refuse rather than discover the wall."""
+    from inferroute_cli import probant as CLI
+    monkeypatch.setattr(P, "memory_available_gb", lambda: 2.0)
+    with pytest.raises(S.ProbantError, match="refusing to start"):
+        P.refuse_if_memory_is_short(1)
+    # It scales with how many sessions are being asked for: what one worker may start, three may not.
+    monkeypatch.setattr(P, "memory_available_gb", lambda: 7.0)
+    P.refuse_if_memory_is_short(1)                      # fine for one
+    with pytest.raises(S.ProbantError, match="fewer --workers"):
+        P.refuse_if_memory_is_short(3)                  # not for three
+    # Plenty of room: never refuses.
+    monkeypatch.setattr(P, "memory_available_gb", lambda: 40.0)
+    P.refuse_if_memory_is_short(8)
+    # Where memory cannot be read, it does NOT refuse: a guard that fires on the unknown would block every
+    # host for a fact it never established.
+    monkeypatch.setattr(P, "memory_available_gb", lambda: None)
+    P.refuse_if_memory_is_short(99)
+    # And the run itself is guarded, before anything is staged.
+    monkeypatch.setattr(P, "memory_available_gb", lambda: 1.0)
+    src = tmp_path / "corpus"
+    src.mkdir()
+    (src / "one.md").write_text("COOLANT-MARKER channels moulded between the cells.\n")
+    # A stub that SHOUTS if it is reached, so removing the guard fails this test because staging happened —
+    # not because a stub returned None somewhere downstream. The inversion has to fail for the real reason.
+    def _must_not_be_called(*a, **k):
+        raise RuntimeError("stage was reached: the run did not refuse before doing work")
+    monkeypatch.setattr(P, "stage", _must_not_be_called)
+    with pytest.raises(S.ProbantError, match="refusing to start"):
+        CLI.cmd_portfolio(str(src))
+
+
+def test_the_memory_guard_reads_available_not_free(monkeypatch, tmp_path):
+    """MemFree counts only unused pages, so a machine with a big page cache reads as nearly full. A guard on
+    free would refuse on a perfectly healthy host — this reads the kernel's own MemAvailable."""
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text("MemTotal:       65707072 kB\nMemFree:          812345 kB\n"
+                       "MemAvailable:   33554432 kB\nBuffers:          123456 kB\n")
+    monkeypatch.setattr(P, "Path", lambda *a, **k: meminfo if a and str(a[0]) == "/proc/meminfo" else Path(*a, **k))
+    assert abs(P.memory_available_gb() - 32.0) < 0.01          # 33554432 kB = 32 GiB, not the 0.77 of free
+    meminfo.write_text("MemTotal: 1 kB\n")                      # no MemAvailable line at all
+    assert P.memory_available_gb() is None

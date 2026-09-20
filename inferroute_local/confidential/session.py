@@ -274,16 +274,28 @@ class ConfidentialSession:
                 return ("error", 502, f"the relay is unreachable: {public_reason(e)}")
             if status == 200:
                 return ("ok", pinned, sealed, raw)
+            readable = True
             try:
                 detail = (await _drain(raw))[:400].decode("utf-8", "replace")
             except Exception as e:                       # the error body itself may be cut short
-                detail = f"(body unreadable: {type(e).__name__})"
+                detail, readable = f"(body unreadable: {type(e).__name__})", False
             if attempt == 1 and status in (400, 401, 403) and "nonce" in detail.lower():
                 async with self._lock:
                     self._pool_expire = 0.0
                 self.receipt.note("nonce-rejected", f"the gateway refused a nonce ({status}); fetched fresh nonces and resent once")
                 continue
-            return ("error", status, f"upstream {status}: {detail}")
+            logger.warning("upstream %s (body kept out of the client's response): %s", status, detail)
+            # An UNREADABLE body is still worth telling the user about — it leaks nothing by construction
+            # and a cut-off upstream is a different experience from a refusal (pinned since 2026-09-12).
+            # A READABLE body never reaches them. Both dialects return through here, so one site covers
+            # the Anthropic and the OpenAI-native paths alike.
+            said = upstream_public(status) + ("" if readable else " — body unreadable")
+            # A nonce rejected TWICE is worth naming, and naming it costs nothing: that this was a nonce
+            # is OUR OWN control flow — we dropped the pool and resent a moment ago — not a sentence
+            # copied out of the upstream. Reading the body to DECIDE is fine; passing it on is not.
+            if attempt == 2 and status in (400, 401, 403) and "nonce" in detail.lower():
+                said += " — the gateway rejected our request nonce twice, including one from a fresh pool"
+            return ("error", status, said)
         return ("error", 502, "the request could not be sent")
 
     async def messages(self, body: dict) -> tuple[int, dict, AsyncIterator[bytes]]:
@@ -517,6 +529,37 @@ class ConfidentialSession:
             self.receipt.ended_at = _now()
             self.receipt.save()
         return self.receipt
+
+
+UPSTREAM_PUBLIC = {
+    400: "the request was rejected as malformed",
+    401: "our credentials were refused",
+    402: "this lane is temporarily out of capacity",
+    403: "our credentials were refused",
+    404: "the model or route was not found",
+    429: "rate-limited — try again in a minute",
+    500: "the provider failed",
+    502: "the provider failed",
+    503: "the provider is temporarily unavailable",
+    504: "the provider timed out",
+}
+
+
+def upstream_public(status: int) -> str:
+    """What a user is told about an upstream non-200: the STATUS is ours to pass on, the BODY never is.
+
+    2026-09-20, seen on Henry's screen: a 402 reached a user carrying
+    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to 5EsHt7Ju…`.
+    Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust us —
+    phishing-shaped whatever its origin. The same body also carried provider quota and balance, against the
+    standing rule that user surfaces show OUTCOMES and plain dollars, never provider internals. So no
+    upstream body text reaches a client, and a scrubber for addresses alone would not have been enough: it
+    would still have leaked the balance.
+
+    Taken from master b4c1acd (PR #18), which fixed the same defect at the two sites it has there; this
+    branch funnels both dialects through one _send, so it lands once.
+    """
+    return f"the provider answered {status} ({UPSTREAM_PUBLIC.get(status, 'no further detail')})"
 
 
 def public_reason(e: BaseException) -> str:

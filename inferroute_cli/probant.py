@@ -460,6 +460,8 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
     pf.add_argument("--budget", type=int, default=0, help="characters per reading job (default 60000)")
     pf.add_argument("--only", default="", help="only documents whose name contains this")
+    pf.add_argument("--reader", default="", help="model for reading (its mistakes are checked: quotes, coverage, recall)")
+    pf.add_argument("--thinker", default="", help="model for the synthesis (nothing can check its judgement)")
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
     pr2.add_argument("id")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
@@ -493,7 +495,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
-            return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only)
+            return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
+                                 reader=a.reader, thinker=a.thinker)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "proposals":
@@ -514,7 +517,8 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "") -> int:
+def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
+                  reader: str = "", thinker: str = "") -> int:
     """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
 
     One sealed session per reading job, planned host-side. No clustering, no rounds: see
@@ -564,11 +568,11 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
         text = PF.instruction_for(job)
-        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d)
+        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d, model=reader)
         after = len(PF.candidates(meta["id"]))
         got = after - before
         PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
-                      model=os.environ.get("IR_PORTFOLIO_MODEL", "kimi-k2.6"), prompt=text)
+                      model=reader or "(lane default)", prompt=text)
         print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"
               + (f" (exit {rc})" if rc else ""), flush=True)
         # A job that records nothing is a FAILURE until shown otherwise: the two ways this pipeline broke
@@ -588,7 +592,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
               f"~{shape['tokens_roughly'] / 1000:.0f}k tokens — one session, all of them", flush=True)
         t0 = time.time()
         _portfolio_round(d, PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"]),
-                         out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d)
+                         out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d, model=thinker)
         print(f"    done in {time.time() - t0:.0f}s")
     kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
     print(f"\n  {len(kept)} item(s) kept, {drop} dropped (a quote not in the document it names), "
@@ -642,7 +646,7 @@ def cmd_portfolio_report(ident: str) -> int:
     return 0
 
 
-def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path) -> int:
+def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "") -> int:
     """One sealed session, one turn, no search tool, ending itself when its turn ends.
 
     It works in the PORTFOLIO directory, not in documents/: the sandbox lets a session write where it works,
@@ -656,6 +660,11 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     os.environ.update(out)
     os.chdir(cwd)
     from . import confidential as confidential_mod
-    return confidential_mod.launch([], agent="pi", probant={
+    # The model is per STEP, not per run: extraction's mistakes are caught by the host (a dropped quote, an
+    # unevidenced span, a missed register row), so it can be a cheap model checked hard. Synthesis has no
+    # such check — nothing can verify that a theme is the right theme — so it gets the best judgement
+    # available. Quality is spent where failure would be invisible.
+    args = ["--model", model] if model else []
+    return confidential_mod.launch(args, agent="pi", probant={
         "matter": f"portfolio · {portfolio_dir.name}", "mode": "intake", "web": True,
         "oneshot": True, "instruction": instruction})

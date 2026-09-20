@@ -38,6 +38,7 @@ from . import probant as S
 MAX_FILES = 800
 MAX_BYTES = 40_000_000
 BRIEF = "brief.json"
+JOBS = "jobs.jsonl"                      # what each reading job was, and what it produced
 CANDIDATES = "candidates.jsonl"
 DOCS = "documents"
 
@@ -238,6 +239,79 @@ EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and w
                  "makes with record_findings, all of them in one call per part you read: `source` "
                  "\"{name}\", a verbatim quote for each, each quote taken from within that range. Then stop "
                  "with one line saying how many you recorded. Nothing else.")
+
+
+def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
+    """What every reading session is told about the portfolio before it reads its own part.
+
+    A session that sees one file out of 385 records what looks notable IN THAT FILE — trivia from a thin
+    document, and half of a thing that only matters because six others circle it. This is the "together"
+    that fits: the register, the shape of the corpus, and the titles recorded so far, at a few thousand
+    tokens rather than the 2.07M the corpus actually is (which no context on this lane holds).
+
+    Titles only, never another document's text: a session reads one document — its own.
+    """
+    meta = meta_of(ident)
+    seen = candidates(ident)
+    out: Dict[str, Any] = {
+        "portfolio": meta["name"],
+        "documents": len(meta["documents"]),
+        "documents_read_so_far": len({c["source"] for c in seen}),
+        "recorded_so_far": [{"title": c["title"], "source": c["source"]} for c in seen][-400:],
+        "note": ("Findings already recorded from other documents, titles only. Record what YOUR document "
+                 "asserts, in its own words and with its own quote, even when a similar title is already "
+                 "here — two documents saying the same thing is itself a finding. Never record anything you "
+                 "cannot quote from your own document."),
+    }
+    if register and Path(register).is_file():
+        try:
+            out["register"] = json.loads(Path(register).read_text())
+        except ValueError:
+            pass
+    d = path_of(ident)
+    (d / BRIEF).write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    os.chmod(d / BRIEF, 0o400)
+    return out
+
+
+def record_job(ident: str, job: Dict[str, Any], *, first: int, last: int, model: str, prompt: str,
+               seconds: float, exit_code: int) -> None:
+    """What a finding came from: which job, which documents, which model, which instruction, when.
+
+    Without this a finding is a sentence with a quote and no history, and the only way to answer "must we
+    read it all again?" is to read it all again.
+    """
+    d = path_of(ident)
+    row = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "documents": job.get("documents") or [job.get("document")],
+           "range": None if job.get("whole") else [job.get("start"), job.get("end")],
+           "lines": [first, last], "found": max(0, last - first), "model": model,
+           "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()[:16],
+           "seconds": round(seconds, 1), "exit": exit_code}
+    with (d / JOBS).open("a") as fh:
+        fh.write(json.dumps(row) + "\n")
+    os.chmod(d / JOBS, 0o600)
+
+
+def provenance(ident: str) -> Dict[str, Any]:
+    """The run's account of itself: jobs, what each produced, which produced nothing, which models ran."""
+    jobs = _rows(path_of(ident) / JOBS)
+    empty = [j for j in jobs if not j.get("found")]
+    return {"jobs": len(jobs), "empty_jobs": len(empty),
+            "empty": [", ".join(j.get("documents") or []) for j in empty][:20],
+            "models": sorted({j.get("model", "") for j in jobs}),
+            "prompts": sorted({j.get("prompt_sha256", "") for j in jobs}),
+            "seconds": round(sum(j.get("seconds", 0) for j in jobs)),
+            "documents": {d["name"]: d["sha256"] for d in meta_of(ident)["documents"]}}
+
+
+def unchanged_since(ident: str, previous: str) -> Dict[str, str]:
+    """Documents whose bytes match a previous run's — what a re-run need not read again."""
+    try:
+        before = {d["sha256"]: d["name"] for d in meta_of(previous)["documents"]}
+    except S.ProbantError:
+        return {}
+    return {d["name"]: before[d["sha256"]] for d in meta_of(ident)["documents"] if d["sha256"] in before}
 
 
 def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:

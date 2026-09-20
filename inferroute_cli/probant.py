@@ -569,9 +569,9 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     if register:
         # Kept with the run: the answer key this run is judged against must be the one it was judged against,
         # not whatever the register says months later.
-        import shutil as _sh
-        _sh.copyfile(register, d / "register.json")
-        os.chmod(d / "register.json", 0o400)
+        # Through the one writer that unlocks before writing: this is the third artefact the host
+        # regenerates and leaves 0400, and the second to crash a run on its own previous copy.
+        PF._write_readonly(d / "register.json", Path(register).read_text(encoding="utf-8"))
     empty_jobs = []
     for i, job in enumerate(jobs, 1):
         span = job.get("bytes") or (job["end"] - job["start"])

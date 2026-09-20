@@ -209,3 +209,15 @@ def test_the_brief_is_rewritten_before_every_job(home):
     assert st.S_IMODE((P.path_of(ident) / P.BRIEF).stat().st_mode) == 0o400
     P.write_findings(ident)
     P.write_findings(ident)                     # same fault, same fix
+
+
+def test_the_instruction_forbids_translating_a_quote(home):
+    """Measured on the pilot: 4 of 5 quote failures came from the one FRENCH document, at 0.38-0.69
+    similarity to the nearest passage — not an encoding artefact (that would score ~0.95) but the model
+    rewriting or translating as it quoted. The host check caught all of them; the instruction now says it."""
+    job = {"documents": ["a.md"], "whole": True}
+    text = P.instruction_for(job)
+    assert "IN THE DOCUMENT'S OWN LANGUAGE" in text and "Do not translate a quote" in text
+    assert "Write the title and summary in English" in text          # the finding is still readable
+    ranged = P.instruction_for({"document": "a.md", "start": 0, "end": 100})
+    assert "own language, never translated" in ranged

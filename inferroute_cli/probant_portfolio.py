@@ -250,7 +250,8 @@ EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and w
                  "other documents so far. Then read documents/{name} from character {start} to character "
                  "{end} — that range only, and all of it — and record every distinct technical assertion it "
                  "makes with record_findings, all of them in one call per part you read: `source` "
-                 "\"{name}\", a verbatim quote for each, each quote taken from within that range. Then stop "
+                 "\"{name}\", a verbatim quote for each — copied character for character, in the document's "
+                 "own language, never translated or tidied — each quote taken from within that range. Then stop "
                  "with one line saying how many you recorded. Nothing else.")
 
 

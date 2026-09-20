@@ -77,7 +77,10 @@ def test_the_pack_brings_the_brief_and_this_computers_trust_anchors(tmp_path, V,
                  # the date-bound claim as enforcement when only configuration is attested.
                  "https://kdsintf.amd.com/vcek/v1/", "Write nothing inside this folder",
                  "Ten to fifteen minutes",          # an auditor's first run was killed early and gave nothing
-                 "as given, not as applied", "cutoff_applied", "NOT an independent verdict"):
+                 # The claim is the enclave's own account of its filtering, and a read's coverage is part
+                 # of what it returned — not footnotes (20 Sep, after a second instance of the same class).
+                 "own account of its filtering", "cutoff_applied", "NOT an independent verdict",
+                 "coverage is part of what it returned", "removed_by_* of 0 is legitimate".replace("*", "")):
         assert must in brief, must
     assert "Each search was bounded to documents published before" not in brief   # the overstated wording
     assert (pack / "trust-anchors" / "publication-key.txt").read_text().strip() == "ab" * 32

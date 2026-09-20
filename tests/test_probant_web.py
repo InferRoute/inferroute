@@ -5,6 +5,7 @@ from becoming the agent's way out, or another site's way in.
 """
 import asyncio
 import json
+import stat
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -974,3 +975,20 @@ def test_a_reading_round_ends_when_its_work_is_done_not_when_a_turn_ends(client)
     for tool, expect in (("read", 0), ("record_findings", 1), ("propose_matter", 2), ("ls", 2)):
         b.publish({"kind": "tool_end", "call": f"x:{tool}", "tool": tool, "ok": True, "text": ""})
         assert b.recorded == expect, tool
+
+
+def test_a_round_that_records_nothing_leaves_its_reason_behind(client, tmp_path, monkeypatch):
+    """Three jobs of seven produced nothing and all I had was a stopwatch reading (20 Sep). A round now
+    writes why it ended, how many turns it took and its own last words — to the run directory, never to a
+    console, because whoever runs this may be an agent whose transcript leaves the machine."""
+    b, c = client
+    log = tmp_path / "rounds.jsonl"
+    monkeypatch.setenv("IR_ROUND_LOG", str(log))
+    b.publish({"kind": "tool_start", "call": "1", "tool": "read", "args": {}})
+    b.publish({"kind": "assistant_end", "text": "I could not find the documents directory."})
+    b._write_round_log("nothing recorded after a reminder")
+    row = json.loads(log.read_text().splitlines()[-1])
+    assert row["recorded"] == 0 and row["turns"] == 1 and row["tools"] == {"read": 1}
+    assert row["last_words"] == "I could not find the documents directory."
+    assert row["ended"] == "nothing recorded after a reminder"
+    assert stat.S_IMODE(log.stat().st_mode) == 0o600

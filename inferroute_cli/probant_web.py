@@ -285,6 +285,9 @@ class Bridge:
         self.opening = ""                   # a reading session's first instruction; empty for a matter session
         self.oneshot = False                # a round of a portfolio run: end the session when its work is done
         self.recorded = 0                   # findings this session has actually written
+        self.turns = 0                      # assistant turns, so "barely started" is distinguishable
+        self.tool_counts: Dict[str, int] = {}
+        self.last_assistant = ""            # its own last words: usually why a round produced nothing
         self.nudged = False                 # a round gets ONE reminder, never a loop
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
@@ -312,6 +315,13 @@ class Bridge:
             was, self.busy = self.busy, bool(event["value"])
             if self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
+        if event["kind"] == "tool_start":
+            name = str(event.get("tool") or "")
+            self.tool_counts[name] = self.tool_counts.get(name, 0) + 1
+        if event["kind"] == "assistant_end":
+            self.turns += 1
+            if str(event.get("text") or "").strip():
+                self.last_assistant = str(event.get("text"))
         if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_")):
             self.recorded += 1
         if event["kind"] == "dialog":
@@ -395,6 +405,25 @@ class Bridge:
         except OSError:
             pass
 
+    def _write_round_log(self, why: str) -> None:
+        """Why a round ended, beside what it produced — written to the run directory, never to a console.
+
+        A job that records nothing gave me a stopwatch reading and no reason (three of seven, 20 Sep). The
+        session's own last words usually say it outright. Kept out of stdout because whoever runs this may
+        be an agent whose transcript leaves the machine, and a session's words are the client's material.
+        """
+        path = os.environ.get("IR_ROUND_LOG")
+        if not path:
+            return
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"ended": why, "recorded": self.recorded, "nudged": self.nudged,
+                                     "turns": self.turns, "tools": dict(self.tool_counts),
+                                     "last_words": (self.last_assistant or "")[:1500]}) + "\n")
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
     async def _end_round(self) -> None:
         """Close a one-shot round — but a turn ending is NOT the work being done.
 
@@ -416,6 +445,7 @@ class Bridge:
             except RuntimeError:
                 pass
             return
+        self._write_round_log("nothing recorded after a reminder" if not self.recorded else "work done")
         try:
             await self.stop_agent()
         finally:

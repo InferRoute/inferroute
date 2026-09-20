@@ -530,7 +530,8 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     files = sorted(p for p in (src.rglob("*") if src.is_dir() else [src])
                    if p.is_file() and p.suffix.lower() in (".md", ".txt", ".json", ".text"))
     if only:
-        files = [p for p in files if only.lower() in p.name.lower()]
+        wanted = [w.strip().lower() for w in only.split(",") if w.strip()]
+        files = [p for p in files if any(w in p.name.lower() for w in wanted)]
     if max_docs:
         files = files[:max_docs]
     meta = PF.stage(files, src.name)
@@ -657,6 +658,7 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     os.environ["IR_ATTESTED_CONFINE"] = "require"
     for k in ("IR_INTAKE_OUT", "IR_CLUSTER_OUT"):
         os.environ.pop(k, None)
+    os.environ["IR_ROUND_LOG"] = str(portfolio_dir / "rounds.jsonl")
     os.environ.update(out)
     os.chdir(cwd)
     from . import confidential as confidential_mod

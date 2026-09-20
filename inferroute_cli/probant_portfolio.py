@@ -243,7 +243,11 @@ EXTRACT_MANY = ("Read brief.json first — it says what this portfolio is and wh
                 "other documents so far. Then read each of these in documents/, all of them, all the way "
                 "through: {names}. Record every distinct technical assertion they make with record_findings, "
                 "all the findings for a document in ONE call, giving `source` as that document's file name "
-                "and a verbatim quote for each. Then stop with one line: how many you recorded, from how "
+                "and a verbatim quote for each — copied character for character from the document, IN THE "
+                "DOCUMENT'S OWN LANGUAGE. Do not translate a quote, do not tidy it, do not shorten it with an "
+                "ellipsis: a quote that is not in the document is discarded and its finding with it. Write the "
+                "title and summary in English whatever the document's language. Then stop with one line: how "
+                "many you recorded, from how "
                 "many documents. Nothing else.")
 
 EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and what has been recorded from the "

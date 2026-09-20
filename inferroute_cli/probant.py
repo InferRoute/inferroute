@@ -602,6 +602,13 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
         after = len(PF.candidates(meta["id"]))
         got = after - before
+        # A round that made no tool call never got a usable answer — 62 of 76 empty rounds in the first
+        # full pass were exactly that, two silent turns and no text. Retry once before believing it.
+        if got == 0 and not PF.last_round_worked(meta["id"]):
+            time.sleep(20)
+            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
+            after = len(PF.candidates(meta["id"]))
+            got = after - before
         PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
                       model=reader or "(lane default)", prompt=text)
         print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"

@@ -288,6 +288,7 @@ class Bridge:
         self.turns = 0                      # assistant turns, so "barely started" is distinguishable
         self.tool_counts: Dict[str, int] = {}
         self.last_assistant = ""            # its own last words: usually why a round produced nothing
+        self.last_error = ""                # a turn that stopped on an error says so here, not in silence
         self.nudged = False                 # a round gets ONE reminder, never a loop
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
@@ -322,6 +323,10 @@ class Bridge:
             self.turns += 1
             if str(event.get("text") or "").strip():
                 self.last_assistant = str(event.get("text"))
+            # A turn that stopped on an error is the commonest reason a round records nothing, and it is
+            # invisible in the text: 62 of 76 empty rounds made no tool call and said nothing at all.
+            if event.get("error") or event.get("stopped"):
+                self.last_error = f"{event.get('stopped') or 'error'}: {str(event.get('error') or '')[:300]}"
         if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_")):
             self.recorded += 1
         if event["kind"] == "dialog":
@@ -419,6 +424,10 @@ class Bridge:
             with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"ended": why, "recorded": self.recorded, "nudged": self.nudged,
                                      "turns": self.turns, "tools": dict(self.tool_counts),
+                                     "error": self.last_error,
+                                     # No tool call at all is a FAILED round, not a document with nothing in
+                                     # it: the session never got a usable answer to work from.
+                                     "worked": bool(self.tool_counts),
                                      "last_words": (self.last_assistant or "")[:1500]}) + "\n")
             os.chmod(path, 0o600)
         except OSError:

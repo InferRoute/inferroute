@@ -452,6 +452,14 @@ def main(argv: list[str] | None = None) -> int:
     rf = sub.add_parser("reference", help="operator: issue and sign the out-of-band reference that makes a record say InferRoute")
     rf.add_argument("args", nargs=argparse.REMAINDER)
     sub.add_parser("list")
+    idy = sub.add_parser("identity", help="your sharing fingerprint, contact card, and who you can share with")
+    idy.add_argument("--add", default="", help="record a contact under this name")
+    idy.add_argument("--card", dest="card_file", default="", help="their contact card file")
+    sh = sub.add_parser("share", help="seal a corpus of claims to another Probant user")
+    sh.add_argument("to"); sh.add_argument("--matter", default=""); sh.add_argument("--portfolio", default="")
+    sh.add_argument("--note", default=""); sh.add_argument("-o", "--out", default="")
+    osh = sub.add_parser("open-share", help="open a share someone sealed to you, as a matter of your own")
+    osh.add_argument("file"); osh.add_argument("client"); osh.add_argument("matter")
     ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
     ik.add_argument("document")
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
@@ -495,6 +503,12 @@ def main(argv: list[str] | None = None) -> int:
             return reference_mod.main(a.args)
         if a.cmd == "list":
             return cmd_list()
+        if a.cmd == "identity":
+            return cmd_identity(add=a.add, card_file=a.card_file)
+        if a.cmd == "share":
+            return cmd_share(a.to, out=a.out, matter=a.matter, portfolio=a.portfolio, note=a.note)
+        if a.cmd == "open-share":
+            return cmd_open_share(a.file, a.client, a.matter)
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
@@ -518,6 +532,94 @@ def main(argv: list[str] | None = None) -> int:
     except ProbantError as e:
         sys.stderr.write(f"\n  {e}\n\n")
         return 2
+    return 0
+
+
+def cmd_identity(add: str = "", card_file: str = "") -> int:
+    """This installation's identity, and the people it can share with."""
+    from . import probant_share as SH
+    if add:
+        try:
+            card = json.loads(Path(card_file).expanduser().read_text())
+        except (OSError, ValueError) as e:
+            raise ProbantError(f"could not read that contact card: {e}")
+        got = SH.add_contact(add, card)
+        print(f"  added {add} — fingerprint {got['fingerprint']}")
+        print("  CONFIRM that fingerprint with them by voice before you share anything: a card that reached")
+        print("  you by the same channel as an impostor's is worth what the channel is worth.")
+        return 0
+    me = SH.identity()
+    print(f"\n  Your Probant fingerprint:  {me['fingerprint']}")
+    print("  Read it to whoever shares with you, and check theirs the same way.\n")
+    card = SH.public_card(me)
+    out = Path.home() / f"probant-contact-{me['fingerprint']}.json"
+    out.write_text(json.dumps(card, indent=1))
+    print(f"  Your contact card (public keys only, safe to send): {out}")
+    known = SH.contacts()
+    if known:
+        print("\n  You can share with:")
+        for name, c in known.items():
+            print(f"      {name:20s} {c['fingerprint']}   added {c.get('added_at', '')[:10]}")
+    else:
+        print("\n  No contacts yet. Add one:  ir probant identity --add <name> --card <their-card.json>")
+    return 0
+
+
+def cmd_share(to: str, out: str = "", matter: str = "", portfolio: str = "", note: str = "") -> int:
+    """Seal a corpus of claims to another Probant user, signed so they know it is yours."""
+    from . import probant_share as SH
+    known = SH.contacts()
+    if to not in known:
+        raise ProbantError(f"no contact called {to!r}. Add them: ir probant identity --add {to} --card <file>")
+    me = SH.identity()
+    if portfolio:
+        claims = SH.claims_from_portfolio(portfolio)
+        name, bound, origin = f"portfolio {portfolio}", "", f"portfolio:{portfolio}"
+    elif matter:
+        client, m = _split_matter(matter)
+        rec = load_record(client, m)
+        from . import probant_intake  # noqa: F401  (kept for symmetry with the intake path)
+        claims = []
+        doc = workspace_path(client, m) / "disclosure.md"
+        if doc.is_file():
+            claims = [{"title": f"{client}/{m} disclosure", "summary": doc.read_text(encoding="utf-8")[:4000],
+                       "quote": "", "source": "disclosure.md", "source_sha256": ""}]
+        name, bound, origin = f"{client}/{m}", rec.get("date_bound", ""), f"matter:{client}/{m}"
+    else:
+        raise ProbantError("say what to share: --matter <client>/<matter> or --portfolio <id>")
+    if not claims:
+        raise ProbantError("there is nothing to share: no claims were found")
+    payload = SH.build_share(claims, matter=name, date_bound=bound, note=note, origin=origin)
+    blob = SH.seal_to(known[to], payload, me)
+    dest = Path(out).expanduser() if out else Path.home() / f"{S_safe(name)}-for-{to}{SH.SUFFIX}"
+    dest.write_bytes(blob)
+    os.chmod(dest, 0o600)
+    print(f"  {len(claims)} claim(s) sealed to {to} ({known[to]['fingerprint']}), signed as {me['fingerprint']}")
+    print(f"  {dest}")
+    print("  Only that fingerprint can open it. Send it by any channel you like; the channel cannot read it.")
+    return 0
+
+
+def S_safe(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-") or "share"
+
+
+def cmd_open_share(path: str, client: str, matter: str) -> int:
+    from . import probant_share as SH
+    try:
+        blob = Path(path).expanduser().read_bytes()
+    except OSError as e:
+        raise ProbantError(f"could not read that share: {e}")
+    payload = SH.open_sealed(blob)
+    who = payload.get("from_name") or "an UNKNOWN sender"
+    print(f"\n  Signed by {who} — fingerprint {payload.get('from_fingerprint')}")
+    if not payload.get("from_known"):
+        print("  This fingerprint is not in your contacts. The signature proves the claims are as that key")
+        print("  wrote them; it does not say whose key it is. Confirm it by voice before relying on this.")
+    print(f"  {len(payload.get('claims') or [])} claim(s), date bound {payload.get('date_bound') or '(none)'}")
+    made = SH.create_matter_from_share(payload, client, matter)
+    print(f"\n  opened as {made}")
+    print(f"  open it:    ir probant open {made}")
     return 0
 
 

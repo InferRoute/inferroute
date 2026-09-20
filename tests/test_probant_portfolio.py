@@ -256,3 +256,30 @@ def test_resuming_reads_only_what_produced_nothing(home):
     _propose(ident, [{"title": "Swelling", "summary": "s", "source": second,
                       "quote": "SWELL-MARKER impedance drift over fifty"}])
     assert P.plan_unread(ident) == [] and P.unread(ident) == []
+
+
+def test_parallel_workers_keep_their_findings_apart_and_the_reader_puts_them_together(home):
+    """One findings file shared by several sessions is a write race, and a lost line is a finding nobody
+    knows was found. Each worker appends to its own; candidates() reads them all."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    d = P.path_of(ident)
+    for worker, (title, source, quote) in enumerate((
+            ("Cooling jacket", first, "COOLANT-MARKER channels moulded between"),
+            ("Swelling", second, "SWELL-MARKER impedance drift over fifty"))):
+        with (d / f"candidates-{worker}-2.jsonl").open("a") as fh:
+            fh.write(json.dumps({"title": title, "summary": "s", "source": source, "quote": quote}) + "\n")
+    got = P.candidates(ident)
+    assert sorted(c["title"] for c in got) == ["Cooling jacket", "Swelling"]
+    assert P.unread(ident) == [] and P.dropped(ident) == 0
+
+
+def test_a_subset_run_gets_no_verdict_even_when_every_document_was_read(home, tmp_path):
+    """The gate judged a 15-document subset of prior art and specs against the whole register and said 20%
+    — but P2-P4 live in the filings folder that run never staged. Read-everything-staged is not
+    staged-everything-the-register-describes."""
+    _, src = home
+    meta = P.stage(sorted(src.rglob("*.md")), "subset", selection="first 15")
+    assert meta["selection"] == "first 15"
+    assert P.stage([src / "one.md"], "all")["selection"] == "whole corpus"

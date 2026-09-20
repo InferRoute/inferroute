@@ -595,9 +595,10 @@ def last_round_worked(ident: str) -> bool:
     return bool(rows) and bool(rows[-1].get("worked"))
 
 
-# A quota refusal is not a transient failure: retrying it burns hours and produces nothing. The first
-# full-corpus run hit "upstream 402: Quota exceeded and account balance is $0.0" partway through, and every
-# later round returned two silent turns — which the pipeline read as documents asserting nothing.
+# A quota refusal is not a per-job failure to retry immediately, nor a permanent one to stop on. Measured
+# 20 Sep: a run read for 3.5 hours, then every round from 06:27 came back "upstream 402: Quota exceeded /
+# Subscription usage cap exceeded" — and the same account answered normally ~20 minutes later. So the cap
+# resets over a window: wait it out, and give up only after refusals persist far longer than any window.
 OUT_OF_QUOTA = ("quota exceeded", "usage cap exceeded", "insufficient balance", "402")
 
 

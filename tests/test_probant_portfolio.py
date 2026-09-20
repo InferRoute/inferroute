@@ -191,3 +191,21 @@ def test_every_module_function_the_runner_calls_exists():
     missing = sorted(name for name in called if not hasattr(P, name))
     assert not missing, f"probant.py calls probant_portfolio.{missing}, which does not exist"
     assert {"brief", "record_job", "provenance", "candidates", "plan"} <= called   # the runner really uses them
+
+
+def test_the_brief_is_rewritten_before_every_job(home):
+    """It was not: brief.json was left 0400 for the session to read, so the SECOND job of a run died with
+    PermissionError writing the file the run had itself written (20 Sep, pilot killed after job 1 of 7).
+    Anything regenerated per job must be rewritable by the host and read-only to the session."""
+    import stat as st
+    _, src = home
+    ident = _stage(src)["id"]
+    first = P.brief(ident)
+    assert first["documents"] == 2 and first["documents_read_so_far"] == 0
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": P.meta_of(ident)["documents"][0]["name"],
+                      "quote": "COOLANT-MARKER channels moulded between"}])
+    again = P.brief(ident)                      # the failing call
+    assert [r["title"] for r in again["recorded_so_far"]] == ["Cooling jacket"]
+    assert st.S_IMODE((P.path_of(ident) / P.BRIEF).stat().st_mode) == 0o400
+    P.write_findings(ident)
+    P.write_findings(ident)                     # same fault, same fix

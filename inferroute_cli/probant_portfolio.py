@@ -47,6 +47,19 @@ def portfolio_root() -> Path:
     return S.probant_root() / ".portfolio"
 
 
+def _write_readonly(path: Path, text: str) -> None:
+    """Write a file the session may read but not change, and that the HOST rewrites every round.
+
+    0400 is for the session, not for us: leaving it 0400 made the second job of a run die with
+    PermissionError writing the brief it had itself written (20 Sep). Anything regenerated per job goes
+    through here.
+    """
+    if path.exists():
+        os.chmod(path, 0o600)
+    path.write_text(text, encoding="utf-8")
+    os.chmod(path, 0o400)
+
+
 def _clean(value: Any, limit: int) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
 
@@ -268,9 +281,7 @@ def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
             out["register"] = json.loads(Path(register).read_text())
         except ValueError:
             pass
-    d = path_of(ident)
-    (d / BRIEF).write_text(json.dumps(out, indent=1, ensure_ascii=False))
-    os.chmod(d / BRIEF, 0o400)
+    _write_readonly(path_of(ident) / BRIEF, json.dumps(out, indent=1, ensure_ascii=False))
     return out
 
 
@@ -414,8 +425,7 @@ def write_findings(ident: str) -> Dict[str, Any]:
     d = path_of(ident)
     rows = [{"id": f"f{i + 1}", "title": c["title"], "summary": c["summary"], "source": c["source"]}
             for i, c in enumerate(items)]
-    (d / "findings.json").write_text(json.dumps(rows, indent=1, ensure_ascii=False))
-    os.chmod(d / "findings.json", 0o400)
+    _write_readonly(d / "findings.json", json.dumps(rows, indent=1, ensure_ascii=False))
     return {"n": len(rows), "documents": len({c["source"] for c in items}),
             "tokens_roughly": sum(len(r["title"]) + len(r["summary"]) for r in rows) // 4}
 

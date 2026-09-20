@@ -462,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--only", default="", help="only documents whose name contains this")
     pf.add_argument("--reader", default="", help="model for reading (its mistakes are checked: quotes, coverage, recall)")
     pf.add_argument("--thinker", default="", help="model for the synthesis (nothing can check its judgement)")
+    pf.add_argument("--resume", default="", help="a portfolio id: read only the documents that produced nothing")
     pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
     pr2.add_argument("id")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
@@ -496,7 +497,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_intake(a.document, web=a.web)
         if a.cmd == "portfolio":
             return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
-                                 reader=a.reader, thinker=a.thinker)
+                                 reader=a.reader, thinker=a.thinker, resume=a.resume)
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "proposals":
@@ -518,7 +519,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
-                  reader: str = "", thinker: str = "") -> int:
+                  reader: str = "", thinker: str = "", resume: str = "") -> int:
     """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
 
     One sealed session per reading job, planned host-side. No clustering, no rounds: see
@@ -534,10 +535,21 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         files = [p for p in files if any(w in p.name.lower() for w in wanted)]
     if max_docs:
         files = files[:max_docs]
-    meta = PF.stage(files, src.name)
-    d = PF.path_of(meta["id"])
-    jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
-    dup = len(meta.get("duplicates") or [])
+    if resume:
+        # A re-run is a delta: keep what was found, read only what produced nothing. The corpus a portfolio
+        # staged is fixed at staging, so resuming judges recall against the same denominator as the original.
+        meta = PF.meta_of(resume)
+        d = PF.path_of(resume)
+        jobs = PF.plan_unread(resume, budget or PF.JOB_CHARS)
+        print(f"resuming {resume}: {len(PF.unread(resume))} document(s) still unread, {len(jobs)} job(s)")
+        if not jobs:
+            print("  every document has at least one finding; nothing to resume")
+            return cmd_portfolio_report(resume)
+    else:
+        meta = PF.stage(files, src.name)
+        d = PF.path_of(meta["id"])
+        jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
+    dup = len(meta.get("duplicates") or []) if not resume else 0
     print(f"portfolio {meta['id']}: {len(meta['documents'])} distinct document(s), {meta['bytes'] / 1e6:.2f} MB, "
           f"{len(jobs)} reading job(s)"
           + (f"  ({dup} exact duplicate(s) of another file, read once)" if dup else ""))
@@ -633,8 +645,12 @@ def cmd_portfolio_report(ident: str) -> int:
     # by construction; recall is not — except against what we already know is in there.
     reg = PF.path_of(ident) / "register.json"
     if reg.is_file():
-        r = PF.recall_against_register(ident, reg)
-        verdict = "ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again"
+        # The verdict is for a run that read everything it staged; otherwise the register is the wrong
+        # denominator and the number is informational.
+        complete = not PF.unread(ident)
+        r = PF.recall_against_register(ident, reg, complete=complete)
+        verdict = ("ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again") if complete else \
+                  f"no verdict: {len(PF.unread(ident))} document(s) unread"
         print(f"\n  recall against the register: {r['found']}/{r['known']} known items surfaced "
               f"({r['recall'] * 100:.0f}%, floor {r['floor'] * 100:.0f}%) — {verdict}")
         for m in r["misses"][:8]:

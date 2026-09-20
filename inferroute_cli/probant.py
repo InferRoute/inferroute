@@ -782,7 +782,9 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
                       model=reader or "(lane default)", prompt=text,
                       # Whether the session got a usable answer at all, so that a zero from a failed call is
                       # not filed as "this document holds nothing".
-                      worked=PF.last_round_worked(meta["id"]))
+                      worked=PF.last_round_worked(meta["id"]),
+                      # A killed round is not a reading of the document: see attempts().
+                      aborted=PF.last_round_aborted(meta["id"]))
         print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"
               + (f" (exit {rc})" if rc else ""), flush=True)
         # A job that records nothing is a FAILURE until shown otherwise: the two ways this pipeline broke

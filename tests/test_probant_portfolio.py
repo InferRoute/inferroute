@@ -495,3 +495,48 @@ def test_the_memory_guard_reads_available_not_free(monkeypatch, tmp_path):
     assert abs(P.memory_available_gb() - 32.0) < 0.01          # 33554432 kB = 32 GiB, not the 0.77 of free
     meminfo.write_text("MemTotal: 1 kB\n")                      # no MemAvailable line at all
     assert P.memory_available_gb() is None
+
+
+def test_a_job_that_was_killed_is_not_counted_as_having_read_the_document(home):
+    """Caught on the real bundle, 20 Sep, and it was MY cap that caused it. A run was stopped for a hardware
+    power-off; four in-flight jobs on the largest filing (279 KB) were recorded with exit=-15 and
+    "aborted: Request aborted". They counted toward MAX_ATTEMPTS, so the retry cap retired a filing that had
+    never once been read, and the next resume skipped it in silence. A cap that turns a shutdown into
+    permanent data loss is worse than the loop it replaced."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"}])
+    _job(ident, first)
+    # Three killed jobs on `second`: enough to retire it, if killing counted.
+    for _ in range(3):
+        P.record_job(ident, {"documents": [second], "whole": True}, first=0, last=0, model="m", prompt="p",
+                     seconds=1.0, exit_code=-15, worked=True)
+    assert P.attempts(ident).get(second, 0) == 0            # killed is not read
+    assert second in P.unread(ident) and P.barren(ident) == []
+    assert [j.get("documents") or [j["document"]] for j in P.plan_unread(ident)] == [[second]]
+
+    # A round the client aborted does not count either, even when the process exited 0.
+    P.record_job(ident, {"documents": [second], "whole": True}, first=0, last=0, model="m", prompt="p",
+                 seconds=1.0, exit_code=0, worked=False, aborted=True)
+    assert P.attempts(ident).get(second, 0) == 0
+
+    # …but a clean run that simply found nothing DOES count, so the cap still terminates.
+    for n in range(1, P.MAX_ATTEMPTS + 1):
+        _job(ident, second, found=0)
+        assert P.attempts(ident)[second] == n
+    assert P.barren(ident)[0]["give_up"] is True and P.plan_unread(ident) == []
+
+
+def test_an_aborted_round_is_recognised_from_its_error(home):
+    """The flag has to come from somewhere: the round that just ended says so in its error."""
+    _, src = home
+    ident = _stage(src)["id"]
+    log = P.path_of(ident) / "rounds.jsonl"
+    log.write_text(json.dumps({"ended": "work done", "error": "", "worked": True}) + "\n")
+    assert P.last_round_aborted(ident) is False
+    with log.open("a") as fh:
+        fh.write(json.dumps({"ended": "nothing recorded after a reminder",
+                             "error": "aborted: Request aborted", "worked": False}) + "\n")
+    assert P.last_round_aborted(ident) is True

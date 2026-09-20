@@ -3,6 +3,7 @@
 The agent's sandbox has no network; the browser does. These tests pin the properties that keep the page
 from becoming the agent's way out, or another site's way in.
 """
+import datetime as dt
 import asyncio
 import json
 import stat
@@ -1009,3 +1010,29 @@ def test_a_turn_that_stopped_on_an_error_is_recorded_not_left_as_silence(client,
     b.publish({"kind": "tool_start", "call": "1", "tool": "read", "args": {}})
     b._write_round_log("work done")
     assert json.loads(log.read_text().splitlines()[-1])["worked"] is True
+
+
+def test_a_round_says_when_it_happened_and_which_job_it_was(client, tmp_path, monkeypatch):
+    """A resumed run on 20 Sep had 195 rounds in its log and not one of them said WHEN. Working out whether
+    it was still moving meant reading process start times and file modification times from outside — an
+    artefact should not need an outside witness to be read, and "which document went quiet" should be
+    answerable from the log rather than by elimination."""
+    b, c = client
+    log = tmp_path / "rounds.jsonl"
+    monkeypatch.setenv("IR_ROUND_LOG", str(log))
+    monkeypatch.setenv("IR_ROUND_LABEL", "P3-claims.md 0-40000")
+    before = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    b.publish({"kind": "tool_start", "call": "1", "tool": "propose_item", "args": {}})
+    b._write_round_log("work done")
+    row = json.loads(log.read_text().splitlines()[-1])
+    assert row["label"] == "P3-claims.md 0-40000"
+    at = dt.datetime.strptime(row["at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    assert before <= at <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=1)
+    # A run whose rounds are timestamped can be read as a rate: two rounds, two times, in order.
+    b._write_round_log("work done")
+    rows = [json.loads(x) for x in log.read_text().splitlines()]
+    assert rows[0]["at"] <= rows[1]["at"]
+    # No label set (a session outside a portfolio run) is an empty string, never a missing key.
+    monkeypatch.delenv("IR_ROUND_LABEL")
+    b._write_round_log("work done")
+    assert json.loads(log.read_text().splitlines()[-1])["label"] == ""

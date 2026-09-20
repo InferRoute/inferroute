@@ -22,6 +22,7 @@ What the bridge guarantees, and the tests pin:
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hmac
 import json
 import os
@@ -422,7 +423,14 @@ class Bridge:
             return
         try:
             with open(path, "a", encoding="utf-8") as fh:
-                fh.write(json.dumps({"ended": why, "recorded": self.recorded, "nudged": self.nudged,
+                fh.write(json.dumps({"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                     # Which job this round was, so a log of 195 rounds says WHICH document
+                                     # went quiet. Without these two, reading progress out of a run means
+                                     # reconstructing it from process start times and file mtimes — which is
+                                     # what a resumed run cost me on 20 Sep, and the artefact should not need
+                                     # an outside witness to be read.
+                                     "label": os.environ.get("IR_ROUND_LABEL", ""),
+                                     "ended": why, "recorded": self.recorded, "nudged": self.nudged,
                                      "turns": self.turns, "tools": dict(self.tool_counts),
                                      "error": self.last_error,
                                      # No tool call at all is a FAILED round, not a document with nothing in

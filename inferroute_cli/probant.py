@@ -604,6 +604,13 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         got = after - before
         # A round that made no tool call never got a usable answer — 62 of 76 empty rounds in the first
         # full pass were exactly that, two silent turns and no text. Retry once before believing it.
+        blocked = PF.last_round_blocked(meta["id"])
+        if blocked:
+            print(f"\n  STOPPED: the model account refused the request — {blocked[:160]}\n"
+                  f"  {len(PF.candidates(meta['id']))} finding(s) are kept; resume with\n"
+                  f"    ir probant portfolio <folder> --resume {meta['id']}\n"
+                  f"  once the account has balance. Retrying a refusal is hours of refusals.", flush=True)
+            return 3
         if got == 0 and not PF.last_round_worked(meta["id"]):
             time.sleep(20)
             rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)

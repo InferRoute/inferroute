@@ -593,3 +593,16 @@ def last_round_worked(ident: str) -> bool:
     not a document that had nothing in it — the difference between retrying and believing a zero."""
     rows = _rows(path_of(ident) / "rounds.jsonl")
     return bool(rows) and bool(rows[-1].get("worked"))
+
+
+# A quota refusal is not a transient failure: retrying it burns hours and produces nothing. The first
+# full-corpus run hit "upstream 402: Quota exceeded and account balance is $0.0" partway through, and every
+# later round returned two silent turns — which the pipeline read as documents asserting nothing.
+OUT_OF_QUOTA = ("quota exceeded", "usage cap exceeded", "insufficient balance", "402")
+
+
+def last_round_blocked(ident: str) -> str:
+    """The account's own refusal, if that is why the last round did nothing. Empty when it is not."""
+    rows = _rows(path_of(ident) / "rounds.jsonl")
+    err = str(rows[-1].get("error") or "").lower() if rows else ""
+    return err if any(m in err for m in OUT_OF_QUOTA) else ""

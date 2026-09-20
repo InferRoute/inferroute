@@ -221,3 +221,38 @@ def test_the_instruction_forbids_translating_a_quote(home):
     assert "Write the title and summary in English" in text          # the finding is still readable
     ranged = P.instruction_for({"document": "a.md", "start": 0, "end": 100})
     assert "own language, never translated" in ranged
+
+
+def test_a_partial_run_reports_recall_but_gives_no_verdict(home, tmp_path):
+    """A run that staged 8 documents of 385 reported 13% and "NOT ACCEPTED" — true, useless, and the kind
+    of control that fires every time and so stops being read. The verdict belongs to a run that read
+    everything it staged; otherwise the register is the wrong denominator and only the number is shown."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first = P.meta_of(ident)["documents"][0]["name"]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "channels", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"}])
+    register = tmp_path / "corpus.json"
+    register.write_text(json.dumps({"filed": [{"id": "P1", "title": "Cooling jacket with coolant channels"},
+                                              {"id": "P2", "title": "Predicting swelling from impedance drift"}]}))
+    assert P.unread(ident) == [P.meta_of(ident)["documents"][1]["name"]]      # one document still unread
+    partial = P.recall_against_register(ident, register, complete=False)
+    assert partial["accepted"] is None and partial["complete"] is False
+    assert "wrong denominator" in partial["note"]
+    whole = P.recall_against_register(ident, register, complete=True)
+    assert whole["accepted"] is False                                        # 1 of 2, below the 0.6 floor
+
+
+def test_resuming_reads_only_what_produced_nothing(home):
+    """A re-run is a delta: findings already held are kept, and the corpus staged stays the same, so recall
+    is judged against the same denominator as the original run."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"}])
+    jobs = P.plan_unread(ident)
+    assert len(jobs) == 1 and jobs[0]["documents"] == [second]
+    _propose(ident, [{"title": "Swelling", "summary": "s", "source": second,
+                      "quote": "SWELL-MARKER impedance drift over fifty"}])
+    assert P.plan_unread(ident) == [] and P.unread(ident) == []

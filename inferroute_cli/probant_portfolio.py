@@ -370,6 +370,41 @@ def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
     return jobs
 
 
+def unread(ident: str) -> List[str]:
+    """Documents in this portfolio that no finding names — what a resumed run still has to read."""
+    have = {c["source"] for c in candidates(ident)}
+    return [d["name"] for d in meta_of(ident)["documents"] if d["name"] not in have]
+
+
+def plan_unread(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
+    """The same planner, over the documents a run has not managed to read yet. A re-run is a delta: the
+    findings already held are kept, and only what produced nothing is read again."""
+    missing = set(unread(ident))
+    if not missing:
+        return []
+    sizes = {d["name"]: d["bytes"] for d in meta_of(ident)["documents"]}
+    jobs, batch, batched = [], [], 0
+    for name in sorted(missing):
+        size = sizes.get(name, 0)
+        if size > budget:
+            start = 0
+            while start < size:
+                end = min(size, start + budget)
+                jobs.append({"document": name, "start": start, "end": end, "whole": False})
+                if end >= size:
+                    break
+                start = end - OVERLAP
+            continue
+        if batched + size > budget and batch:
+            jobs.append({"documents": batch, "bytes": batched, "whole": True})
+            batch, batched = [], 0
+        batch.append(name)
+        batched += size
+    if batch:
+        jobs.append({"documents": batch, "bytes": batched, "whole": True})
+    return jobs
+
+
 def instruction_for(job: Dict[str, Any]) -> str:
     if job.get("whole"):
         return EXTRACT_MANY.format(names=", ".join(job["documents"]))
@@ -495,7 +530,8 @@ def register_rows(register: Path) -> List[Dict[str, str]]:
     return rows
 
 
-def recall_against_register(ident: str, register: Path, floor: float = 0.6) -> Dict[str, Any]:
+def recall_against_register(ident: str, register: Path, floor: float = 0.6,
+                            complete: bool = True) -> Dict[str, Any]:
     """How much of what we ALREADY KNOW is in the portfolio did this run's findings surface?
 
     Precision is checkable by construction — every finding carries a quote verified against its document.
@@ -527,8 +563,16 @@ def recall_against_register(ident: str, register: Path, floor: float = 0.6) -> D
             misses.append({"register": row["id"], "title": row["title"], "best": round(score, 2)})
     total = len(hits) + len(misses)
     rate = (len(hits) / total) if total else 0.0
+    # The verdict belongs to a run that claims to have read the portfolio. Measured against a run that
+    # staged 8 documents of 385 it reported 13% and "NOT ACCEPTED" — true, useless, and the kind of control
+    # that fires every time and therefore stops being read. A partial run reports the number and says what
+    # it is: an incomplete denominator, not a failure.
     return {"known": total, "found": len(hits), "missed": len(misses), "recall": round(rate, 3),
-            "accepted": bool(total) and rate >= floor, "floor": floor,
-            "misses": misses[:30],
+            "accepted": bool(total) and rate >= floor if complete else None,
+            "complete": complete, "floor": floor, "misses": misses[:30],
             "note": ("Recall against the register, not against the portfolio: it says how much of what we "
-                     "already knew was surfaced. It cannot speak for anything the register does not list.")}
+                     "already knew was surfaced. It cannot speak for anything the register does not list."
+                     if complete else
+                     "This run did not read the whole portfolio, so the register is the wrong denominator "
+                     "for it: the number is shown, the verdict is not. Read the corpus in full, or resume "
+                     "this run until every document has been read, before judging recall.")}

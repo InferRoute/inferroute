@@ -582,7 +582,7 @@ class _PaymentSolicitationCarrier(FakeCarrier):
     """Upstream answers 402 with the body Henry saw on screen 2026-09-20."""
 
     BODY = (b'{"error": {"message": "upstream 402: {\'detail\': {\'message\': \'Quota exceeded and account '
-            b"balance is $0.0, please pay with fiat or send tao to 5EsHt7JuAbCdEfGhIjKlMnOpQrStUv'}}\"}}")
+            b"balance is $0.0, please pay with fiat or send tao to 5FAKEADDRnotarealaccountXXXXXXXXXXXXXXXXXXXXXXXX'}}\"}}")
 
     async def invoke(self, **kw):
         self.calls.append((kw.get("instance_id"), kw.get("nonce"), kw.get("stream")))
@@ -594,7 +594,7 @@ class _PaymentSolicitationCarrier(FakeCarrier):
 
 @pytest.mark.parametrize("openai_path", [False, True])
 def test_an_upstream_payment_solicitation_never_reaches_the_client(world, caplog, openai_path):
-    """2026-09-20: a 402 reached a user carrying "please pay with fiat or send tao to 5EsHt7Ju…".
+    """2026-09-20: a 402 reached a user carrying "please pay with fiat or send tao to <address>".
 
     Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust us.
     The same body carried the provider's quota and balance. The upstream STATUS may pass through; the
@@ -618,8 +618,8 @@ def test_an_upstream_payment_solicitation_never_reaches_the_client(world, caplog
             st, _, it = asyncio.run(s.messages(body))
         text = asyncio.run(_drain(it)).decode()
     assert st == 402, text
-    for leak in ("5EsHt7Ju", "send tao", "balance", "Quota exceeded", "pay with fiat"):
+    for leak in ("5FAKEADDR", "send tao", "balance", "Quota exceeded", "pay with fiat"):
         assert leak not in text, f"the client was told {leak!r}: {text}"
     assert "the provider answered 402" in text and "out of capacity" in text
     # …and the raw body is NOT destroyed: it stays where it is diagnostic.
-    assert "5EsHt7Ju" in caplog.text, "the upstream body must still reach the log"
+    assert "5FAKEADDR" in caplog.text, "the upstream body must still reach the log"

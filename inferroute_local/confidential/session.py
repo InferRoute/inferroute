@@ -549,7 +549,10 @@ def upstream_public(status: int) -> str:
     """What a user is told about an upstream non-200: the STATUS is ours to pass on, the BODY never is.
 
     2026-09-20, seen on Henry's screen: a 402 reached a user carrying
-    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to 5EsHt7Ju…`.
+    `Quota exceeded and account balance is $0.0, please pay with fiat or send tao to <address>`.
+    The address is not reproduced here: the message SHAPE is the point, and the lane emitted two
+    different addresses the same day — which is also why no denylist keyed on an observed specimen
+    can be the control (it would have missed the second one).
     Our product told a user to send cryptocurrency to a wallet address, on a surface where users trust us —
     phishing-shaped whatever its origin. The same body also carried provider quota and balance, against the
     standing rule that user surfaces show OUTCOMES and plain dollars, never provider internals. So no

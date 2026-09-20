@@ -805,3 +805,61 @@ def test_a_firmware_floor_can_travel_in_the_reference(tmp_path, V, kms):
     p.write_text(json.dumps(ref))
     _, out = _run(d, "--reference", str(p))
     assert "PASS firmware TCB at or above minimum" in out
+
+
+# ───────────────── the filters: what was GIVEN, and what the enclave says applying it did ─────────────────
+
+def _filters_statement():
+    """A real statement from the search service (sealed-research d7d0fd5), exercising all three filters:
+    a legitimate removed=0 on both date bounds, and a real removal on offices."""
+    return json.loads((FIX.parent / "statement-filters-applied.json").read_text())
+
+
+def _filter_rows(V, st):
+    c = V.Checks()
+    V.check_filters_applied(c, st)
+    return {name: (status, detail) for status, name, detail in c.rows}
+
+
+def test_a_filter_report_is_checked_against_the_filter_the_statement_asked_for(V):
+    """A statement carrying only a filter's INPUT attests configuration, never enforcement. An auditor read
+    "date bound" as an enforcement claim (19 Sep), and a jurisdiction filter was found matching nothing while
+    a statement would have said the search was restricted to it (20 Sep). One rule for every filter."""
+    rows = _filter_rows(V, _filters_statement())
+    assert rows["date bound was applied"][0] == "PASS"
+    assert rows["from-date bound was applied"][0] == "PASS"
+    assert rows["offices was applied"][0] == "PASS"
+    assert "2 of 5 candidate(s) removed" in rows["offices was applied"][1]
+    # A real zero is the common case and must not read as "the filter did nothing".
+    assert "no candidate fell outside it" in rows["date bound was applied"][1]
+    # k needs no report of its own: k and hits_n are both signed, so the check is arithmetic.
+    assert rows["at most k results"][0] == "PASS"
+
+
+def test_a_filter_report_that_disagrees_with_the_statement_fails(V):
+    st = _filters_statement()
+    st["offices_applied"]["offices"] = ["EP"]
+    rows = _filter_rows(V, st)
+    assert rows["offices was applied"][0] == "FAIL"
+    assert "is NOT the offices signed in the statement" in rows["offices was applied"][1]
+    # A filter reported but never asked for is equally wrong: a bound applied that nobody requested.
+    st2 = _filters_statement()
+    st2["from_date"] = None
+    assert _filter_rows(V, st2)["from-date bound was applied"][0] == "FAIL"
+    st3 = _filters_statement()
+    st3["hits_n"] = st3["k"] + 4
+    assert _filter_rows(V, st3)["at most k results"][0] == "FAIL"
+
+
+def test_an_older_record_skips_rather_than_rots(V):
+    """Every record made before an enclave reported this carries no *_applied. They must not fail: a record
+    that verified last week and fails this week is indistinguishable from tampering to the person holding it."""
+    st = _filters_statement()
+    st.pop("cutoff_applied")
+    rows = _filter_rows(V, st)
+    assert rows["date bound was applied"][0] == "SKIP"
+    assert "not what applying it did" in rows["date bound was applied"][1]
+    assert "enforcement is unattested" in rows["date bound was applied"][1]
+    # A filter neither requested nor reported says nothing at all — no row, no noise.
+    bare = {k: v for k, v in st.items() if k not in ("offices", "offices_applied", "from_date", "from_date_applied")}
+    assert "offices was applied" not in _filter_rows(V, bare)

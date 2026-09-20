@@ -1,0 +1,59 @@
+{
+ "v": 1,
+ "lifetime_id": "2b328a5bf590c1a0cfcb42b8de9f121d",
+ "request_id": "71a7a98cf8b3f03ec450f6afed170665",
+ "seq": 1,
+ "reply_to_sha256": "6c62fb598d1032810bb146aa4b61580dcadd0d5f76ba7f2e6fe79d456a188152",
+ "runtime_data_sha256": "f74ca07b32e0139317db7ada4bef094690b66c71536f0a32dc947859949916c7",
+ "index_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "model_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "canaries_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+ "pipeline_version": "stub-1",
+ "started_utc": "2026-09-20T01:09:41Z",
+ "kind": "search",
+ "session_id": "21c3c77b05518c814e88b568c6cf36aa",
+ "session_seq": 1,
+ "query_sha256": "b7cbe706091fc1291e91f632617fa4c8c8442d7268788c78a535d0ddda0079f8",
+ "result_sha256": "b76a85cc0f5867a5de4a3572145e91aead903dce0601d953c0a91c2c8d41554c",
+ "hits_n": 3,
+ "k": 5,
+ "cutoff_date": 20200101,
+ "from_date": 19900101,
+ "offices": [
+  "US"
+ ],
+ "legs": {
+  "semantic": 3
+ },
+ "candidates_total": 16000,
+ "cpc_predicted": [],
+ "canary": [],
+ "calibration": null,
+ "calibration_papers": null,
+ "paper_coverage": null,
+ "undated_hits": 0,
+ "hits_by_source": null,
+ "cutoff_applied": {
+  "cutoff_date": 20200101,
+  "candidates_considered": 5,
+  "removed_by_cutoff": 0
+ },
+ "from_date_applied": {
+  "from_date": 19900101,
+  "candidates_considered": 5,
+  "removed_by_from_date": 0
+ },
+ "offices_applied": {
+  "offices": [
+   "US"
+  ],
+  "candidates_considered": 5,
+  "removed_by_offices": 2
+ },
+ "text_coverage": null,
+ "claim_boundary": "surfaces related art; does not certify completeness or absence",
+ "outcome": "answered",
+ "search_seconds": 0.0,
+ "finished_utc": "2026-09-20T01:09:41Z",
+ "sig": "6f1e367f6e8731b29a699a386d63d8e97039e344fb8ca87f05e3bda68d0eb492ee4ca49530579305b08d2bafae9c0a260b314bcfc0765fb16979682ef24dab0e"
+}

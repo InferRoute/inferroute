@@ -916,7 +916,60 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
               "(consistency with an unsigned value — the signed number is the fact)")
     else:
         c.add(None, "date bound the enclave was given", f"signed statement cutoff_date {st.get('cutoff_date')}; the record states no matter date bound")
+    check_filters_applied(c, st)
     return c
+
+
+# Every filter the enclave accepts, and the report it makes about applying it. A signed statement that
+# carries only the filter's INPUT attests configuration, never enforcement: on 2026-09-19 an auditor read
+# "date bound" as an enforcement claim when nothing enforced was attested, and on 2026-09-20 a jurisdiction
+# filter was found to match nothing while a statement would have said the search was restricted to it. Same
+# class, so one rule rather than a privileged case for the date.
+FILTERS = (("cutoff_date", "cutoff_applied", "removed_by_cutoff", "date bound"),
+           ("from_date", "from_date_applied", "removed_by_from_date", "from-date bound"),
+           ("offices", "offices_applied", "removed_by_offices", "offices"))
+
+
+def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
+    """The enclave's own signed account of what each filter DID, checked for consistency with what it was
+    given. This is not proof of enforcement — enforcement is behaviour, and no attestation of what ran can
+    establish it. It is the difference between a filter that reports its work and one that is silent.
+
+    Absent or null is a SKIP, never a failure: records made before an enclave reported this must not rot,
+    and an enclave that simply was not asked for a filter has nothing to report.
+    """
+    for given_key, applied_key, removed_key, label in FILTERS:
+        given, applied = st.get(given_key), st.get(applied_key)
+        if applied in (None, {}, []):
+            if given in (None, "", [], "None"):
+                continue                        # filter not requested, nothing reported: nothing to say
+            c.add(None, f"{label} was applied",
+                  f"this enclave reports only the {label} it was GIVEN ({given!r}), not what applying it did; "
+                  "enforcement is unattested here")
+            continue
+        if not isinstance(applied, dict):
+            c.add(False, f"{label} was applied", f"{applied_key} is not an object: {type(applied).__name__}")
+            continue
+        reported = applied.get(given_key)
+        if given in (None, "", [], "None"):
+            c.add(False, f"{label} was applied",
+                  f"the enclave reports applying {label} {reported!r} that this statement never asked for")
+            continue
+        considered, removed = applied.get("candidates_considered"), applied.get(removed_key)
+        same = reported == given
+        detail = (f"{label} {reported!r} as signed; {removed} of {considered} candidate(s) removed by it"
+                  if same else f"applied {label} {reported!r} is NOT the {label} signed in the statement ({given!r})")
+        if same and removed == 0:
+            # A real 0 is the common case and must not read as "the filter did nothing" (sealed-research,
+            # 20 Sep): it means no candidate fell outside the bound.
+            detail += " — no candidate fell outside it, which is not the same as the filter not running"
+        c.add(same, f"{label} was applied", detail)
+    # k needs no report of its own: the statement carries both k and hits_n, so the applied-k check is
+    # arithmetic on what is already signed.
+    k, hits = st.get("k"), st.get("hits_n")
+    if isinstance(k, int) and isinstance(hits, int):
+        c.add(hits <= k, "at most k results", f"{hits} hit(s) against k={k}"
+              if hits <= k else f"{hits} hit(s) exceeds the k={k} this statement asked for")
 
 
 def check_recipient(c: Checks, st: Dict[str, Any], row: Dict[str, Any]) -> None:

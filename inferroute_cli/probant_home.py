@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import datetime as dt
 import json
 import os
 import re
@@ -571,6 +572,96 @@ class Home:
             except (TypeError, ValueError):
                 return problem("that proposal is not one this document has", 400)
             return {"ok": True, "id": made}
+
+        # ── sharing a corpus of matters with another Probant user ──
+        @app.get("/api/sharing")
+        async def sharing():
+            """This installation's identity and the people it can share with. Public material only."""
+            from . import probant_share as SH
+            me = SH.identity()
+            return {"fingerprint": me["fingerprint"], "card": SH.public_card(me),
+                    "contacts": [{"name": n, **c} for n, c in SH.contacts().items()]}
+
+        @app.post("/api/sharing/contact")
+        async def add_contact(request: Request):
+            from . import probant_share as SH
+            d = await body(request)
+            card = d.get("card")
+            if isinstance(card, str):
+                try:
+                    card = json.loads(card)
+                except ValueError:
+                    return problem("that is not a contact card: paste the JSON they sent you", 400)
+            try:
+                got = SH.add_contact(str(d.get("name") or ""), card or {})
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            return {"ok": True, "name": d.get("name"), "fingerprint": got["fingerprint"]}
+
+        @app.post("/api/sharing/share")
+        async def share(request: Request):
+            """Seal the chosen matters to a contact. The file lands beside the matters, for the person to
+            send however they like — the channel cannot read it."""
+            import asyncio
+            from . import probant_share as SH
+            d = await body(request)
+            to = str(d.get("to") or "")
+            known = SH.contacts()
+            if to not in known:
+                return problem("no such contact", 404)
+            ids = [str(x) for x in (d.get("matters") or [])]
+            if not ids:
+                return problem("choose at least one matter to share", 400)
+
+            def build() -> Dict[str, Any]:
+                me = SH.identity()
+                entries = []
+                for mid in ids:
+                    client, matter, _ = matter_of(mid)
+                    entries.append(SH.matter_payload(client, matter))
+                payload = SH.build_share(entries, note=str(d.get("note") or ""))
+                cards = [known[to]] + ([SH.public_card(me)] if d.get("keep_copy", True) else [])
+                blob = SH.seal_to(cards, payload, me)
+                stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                dest = S.probant_root() / f"probant-corpus-for-{to}-{stamp}{SH.SUFFIX}"
+                dest.write_bytes(blob)
+                os.chmod(dest, 0o600)
+                return {"path": str(dest), "matters": len(entries), "bytes": len(blob),
+                        "to_fingerprint": known[to]["fingerprint"], "from_fingerprint": me["fingerprint"]}
+
+            try:
+                return {"ok": True, **await asyncio.to_thread(build)}
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/sharing/open")
+        async def open_share(request: Request):
+            """Open a share sealed to this installation: every matter in it becomes one of the reader's own."""
+            import asyncio
+            from . import probant_share as SH
+            d = await body(request)
+            path = Path(str(d.get("path") or "")).expanduser()
+            try:
+                blob = await asyncio.to_thread(path.read_bytes)
+            except OSError:
+                return problem("could not read that file on this computer", 400)
+            try:
+                payload = SH.open_sealed(blob)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            if not d.get("client"):
+                # A look before the leap: who signed it, whether we know them, and what is inside.
+                return {"ok": True, "preview": True, "from": payload.get("from_fingerprint"),
+                        "from_name": payload.get("from_name"), "known": payload.get("from_known"),
+                        "made_at": payload.get("made_at"), "note": payload.get("note"),
+                        "matters": [{"matter": m.get("matter"), "date_bound": m.get("date_bound"),
+                                     "claims": len(m.get("claims") or []),
+                                     "marks": len(m.get("marks") or {})} for m in payload.get("matters") or []]}
+            try:
+                made = await asyncio.to_thread(SH.create_matters_from_share, payload, str(d["client"]))
+            except S.ProbantError as e:
+                return problem(str(e), 409)
+            return {"ok": True, "opened": made}
 
         @app.get("/record")
         async def record(id: str = "", name: str = "", v: str = ""):

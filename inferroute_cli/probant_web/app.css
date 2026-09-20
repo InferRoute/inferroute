@@ -462,3 +462,12 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .proposal .quote { margin: 0 0 8px; padding: 6px 0 6px 12px; border-left: 3px solid var(--line); color: var(--muted);
   font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .proposal .card-actions { padding: 10px 14px; border-top: 1px solid var(--line); }
+
+/* sharing: a fingerprint is read aloud, so it is shown big enough to read aloud */
+.fingerprint-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 14px 16px; box-shadow: var(--shadow); }
+.fingerprint { font-family: var(--mono); font-size: 22px; letter-spacing: 1px; margin: 6px 0 10px; }
+.card-box { width: 100%; min-height: 96px; font-family: var(--mono); font-size: 12px; margin-bottom: 8px; }
+.record-row.pick { grid-template-columns: 24px minmax(0, 1fr) 160px 110px; cursor: pointer; }
+.share-result { margin-top: 14px; padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--line); }
+.share-result .mono { display: block; word-break: break-all; margin: 6px 0; }

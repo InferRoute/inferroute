@@ -731,7 +731,8 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
         text = PF.instruction_for(job)
-        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
+        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+                              label=what)
         after = len(PF.candidates(meta["id"]))
         got = after - before
         # A round that made no tool call never got a usable answer — 62 of 76 empty rounds in the first
@@ -745,7 +746,8 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             print(f"      the model account is refusing (usage cap); waiting {wait // 60} min", flush=True)
             time.sleep(wait)
             waited += wait
-            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
+            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+                              label=what)
             after = len(PF.candidates(meta["id"]))
             got = after - before
         if PF.last_round_blocked(meta["id"]):
@@ -755,7 +757,8 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             return 3
         if got == 0 and not PF.last_round_worked(meta["id"]):
             time.sleep(20)
-            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader)
+            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+                              label=what)
             after = len(PF.candidates(meta["id"]))
             got = after - before
         PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
@@ -781,7 +784,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         print(f"\n  synthesis: {shape['n']} finding(s) from {shape['documents']} document(s), "
               f"~{shape['tokens_roughly'] / 1000:.0f}k tokens — one session, all of them", flush=True)
         t0 = time.time()
-        _portfolio_round(d, PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"]),
+        _portfolio_round(d, PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"]), label="synthesis",
                          out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d, model=thinker)
         print(f"    done in {time.time() - t0:.0f}s")
     kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
@@ -865,7 +868,8 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
     return cmd_portfolio(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
 
 
-def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "") -> int:
+def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "",
+                     label: str = "") -> int:
     """One sealed session, one turn, no search tool, ending itself when its turn ends.
 
     It works in the PORTFOLIO directory, not in documents/: the sandbox lets a session write where it works,
@@ -877,6 +881,7 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     for k in ("IR_INTAKE_OUT", "IR_CLUSTER_OUT"):
         os.environ.pop(k, None)
     os.environ["IR_ROUND_LOG"] = str(portfolio_dir / "rounds.jsonl")
+    os.environ["IR_ROUND_LABEL"] = label        # which job the round log is about
     os.environ.update(out)
     os.chdir(cwd)
     from . import confidential as confidential_mod

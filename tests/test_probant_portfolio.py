@@ -571,3 +571,54 @@ def test_the_unevidenced_stretches_of_a_read_document_can_be_read_again(home):
     assert where - P.OVERLAP in [j["start"] for j in jobs], jobs
     # A stretch smaller than the floor is not worth a session of its own.
     assert P.plan_holes(ident, budget=30000, min_hole=10 ** 9) == []
+
+
+def test_the_holes_flag_reaches_the_workers(home, tmp_path, monkeypatch):
+    """21 Sep: the parent printed "3 worker(s) over 25 job(s)" and the workers finished in ONE SECOND. The
+    spawn command did not carry --holes, so each worker planned with the ordinary planner, found every
+    document already read, and exited. Both sides were right and the seam was wrong — which is why the
+    argv itself is pinned here, not just plan_holes()."""
+    import subprocess
+    from inferroute_cli import probant as CLI
+    _, src = home
+    ident = _stage(src)["id"]                      # a real run: _portfolio_workers reads its state
+    spawned = []
+    class _P:
+        def wait(self): return 0
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: (spawned.append(argv), _P())[1])
+    monkeypatch.setattr(CLI, "cmd_portfolio", lambda *a, **k: 0)
+    CLI._portfolio_workers(ident, src, 2, "m", "t", 30000, 4, holes=True)
+    assert spawned, "no worker was spawned"
+    for argv in spawned:
+        assert "--holes" in argv, argv
+        assert "--budget" in argv and "30000" in argv, argv
+        assert "--slice" in argv, argv
+    spawned.clear()
+    CLI._portfolio_workers(ident, src, 2, "m", "t", 30000, 4, holes=False)
+    assert spawned and all("--holes" not in argv for argv in spawned), spawned
+
+
+def test_a_fully_read_corpus_can_still_be_synthesised(home, tmp_path, monkeypatch):
+    """"Nothing to READ" is not "nothing to DO". A resume with no jobs returned the report and skipped the
+    synthesis, so a corpus that was fully read but never synthesised had no way to be given a matter list —
+    re-running just printed the report again (21 Sep)."""
+    from inferroute_cli import probant as CLI
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "s", "source": first,
+                      "quote": "COOLANT-MARKER channels moulded between"},
+                     {"title": "Swelling", "summary": "s", "source": second,
+                      "quote": "SWELL-MARKER impedance drift over fifty"}])
+    _job(ident, first, second)
+    assert P.plan_unread(ident) == []                       # nothing left to read
+    ran = []
+    monkeypatch.setattr(CLI, "_portfolio_round", lambda *a, **k: ran.append(k.get("label")) or 0)
+    CLI.cmd_portfolio(str(src), resume=ident)
+    assert "synthesis" in ran, "a fully-read corpus with no themes must still synthesise"
+    # Once the synthesis HAS run, a later resume is a report and does not pay for it twice.
+    (P.path_of(ident) / P.THEMES).write_text(json.dumps(
+        {"label": "Thermal", "thesis": "t", "members": ["f1"]}) + "\n")
+    ran.clear()
+    CLI.cmd_portfolio(str(src), resume=ident)
+    assert ran == [], "the synthesis must not run again once themes exist"

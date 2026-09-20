@@ -71,7 +71,9 @@ def test_no_route_beyond_what_the_page_needs(home):
                      # deleting a matter (19 Sep): restorable for 30 days, then erased
                      "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase",
                      # reading a document and proposing matters from it (20 Sep)
-                     "/api/intake", "/api/intakes", "/api/intake/create"}
+                     "/api/intake", "/api/intakes", "/api/intake/create",
+                     # sharing a corpus of matters with another Probant user (20 Sep)
+                     "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open"}
 
 
 # ── matters ──
@@ -403,3 +405,63 @@ def test_the_child_gets_the_node_that_sits_beside_its_agent(tmp_path):
     assert env["PATH"].split(":")[0] == str(binary.parent)          # where node is, not where the link goes
     assert str(real.parent) not in env["PATH"]
     assert agents.put_agent_on_path(str(binary), dict(env))["PATH"] == env["PATH"]   # not added twice
+
+
+def test_the_page_shares_a_corpus_and_never_shows_a_secret(home, tmp_path):
+    """The lawyer's side of this is a person who will not open a terminal. What the page may show is the
+    public card and fingerprints; the secret keys must not appear in any response it makes."""
+    h, c, tmp = home
+    from inferroute_cli import probant_share as SH
+    assert S.main(["new", "Acme", "battery"]) == 0
+    assert S.main(["new", "Acme", "swelling"]) == 0
+    mine = c.get("/api/sharing").json()
+    assert mine["fingerprint"] and set(mine["card"]) == {"schema", "mlkem_pub", "ed_pub", "fingerprint"}
+    body = json.dumps(mine)
+    secrets = SH.identity()
+    for key in ("mlkem_sk", "ed_sk", "mlkem_seed"):
+        assert not secrets.get(key) or secrets[key] not in body
+    # A contact whose card disagrees with its own keys is refused by the page, as by the command.
+    bad = {**mine["card"], "fingerprint": "0000-0000-0000-0000"}
+    assert c.post("/api/sharing/contact", json={"name": "impostor", "card": bad}).status_code == 400
+    # Sharing to yourself is the honest test here: one installation, both ends.
+    assert c.post("/api/sharing/contact", json={"name": "me", "card": mine["card"]}).json()["ok"]
+    out = c.post("/api/sharing/share", json={"to": "me", "matters": ["Acme/battery", "Acme/swelling"],
+                                             "note": "for review"}).json()
+    assert out["matters"] == 2 and Path(out["path"]).is_file()
+    assert b"battery" not in Path(out["path"]).read_bytes()          # nothing in the clear
+    look = c.post("/api/sharing/open", json={"path": out["path"]}).json()
+    assert look["preview"] is True and look["known"] is True
+    assert sorted(m["matter"] for m in look["matters"]) == ["Acme/battery", "Acme/swelling"]
+    made = c.post("/api/sharing/open", json={"path": out["path"], "client": "FromMe"}).json()
+    assert made["opened"] == ["FromMe/battery", "FromMe/swelling"]
+    again = c.post("/api/sharing/open", json={"path": out["path"], "client": "FromMe"})
+    assert again.status_code == 409 and "already taken" in again.json()["error"]
+
+
+def test_the_sharing_page_shows_a_fingerprint_and_a_public_card_and_never_a_key():
+    """Henry, 20 Sep: "lets do the sharing now as well" — from the page, not the terminal. This drives the
+    page's real renderSharing() (tests/sharing_sim.js) against a server stub that hands it MORE than it
+    should: an identity with its secret keys attached. The page must put the fingerprint and the public card
+    on screen and nothing else, because a key that reaches the screen reaches screenshots and support
+    tickets. Both halves are inverted in the harness's own notes: rendering the whole identity object leaks
+    all three secrets, and dropping the unknown-sender warning turns that flag false.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "sharing_sim.js")], cwd=root, capture_output=True,
+                       text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["leaked"] == []                       # no secret key material anywhere in the rendered tree
+    assert out["showsFingerprint"] and out["showsPublicCard"]
+    assert out["listsBothMatters"]                   # a corpus is chosen from the matters, not typed out
+    # Sharing sends exactly what was ticked, to the contact chosen — never "all of them" by default.
+    assert out["sent"] == {"to": "betrancourt", "matters": ["Acme/battery-0"], "note": ""}
+    assert out["confirmed"] and out["pathShown"]     # where the file is, so it can actually be sent
+    # A share signed by a fingerprint that is not a contact SAYS so: a signature proves the corpus is as that
+    # key wrote it, never whose key it is.
+    assert out["unknownWarned"]

@@ -632,17 +632,170 @@
     setTimeout(() => client.focus(), 0);
   }
 
+  // ── sharing a corpus of matters with another Probant user ──
+  //
+  // Nothing secret is ever shown or sent: what leaves this page is a card of PUBLIC keys, and what the
+  // other person receives is sealed to their key alone. The one thing a person must do off-screen is read
+  // a fingerprint aloud — so the page says that where they will read it, not in a help page.
+  async function renderSharing() {
+    const p = page();
+    let d;
+    try { d = await api("/api/sharing"); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
+    clear(p);
+    p.append(el("div", "page-head", el("h1", "", "Sharing"),
+      el("p", "sub", "Send a corpus of matters to another Probant user — your lawyer, your co-counsel. "
+        + "They open it as matters of their own and run their own searches, on their own account.")));
+
+    p.append(el("h2", "section", "You"));
+    p.append(el("div", "fingerprint-card",
+      el("div", "sub", "Your fingerprint — read it to them, and check theirs the same way."),
+      el("div", "fingerprint", d.fingerprint),
+      el("p", "sub", "Send them your card below. It holds public keys only: anyone who reads it learns "
+        + "nothing and can decrypt nothing."),
+      el("textarea", "card-box", JSON.stringify(d.card, null, 1)),
+      button("Copy your card", "ghost small", () => navigator.clipboard
+        .writeText(JSON.stringify(d.card, null, 1)).then(() => toast("Copied.", "info")).catch(() => {}))));
+
+    p.append(el("h2", "section", "People you can share with"));
+    if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone with the card they sent you."));
+    for (const c of d.contacts) {
+      p.append(el("div", "record-row", el("span", "", c.name), el("span", "mono sub", c.fingerprint),
+        el("span", "sub", `added ${localTime(c.added_at)}`), el("span", "")));
+    }
+    p.append(el("div", "row", button("Add someone", "ghost", () => addContactDialog(() => renderSharing())),
+      button("Open a share sent to you", "ghost", () => openShareDialog())));
+
+    p.append(el("h2", "section", "Send matters"));
+    if (!d.contacts.length) {
+      p.append(el("p", "sub", "Add someone first: you seal a corpus to their key, so you need their card."));
+      return;
+    }
+    let matters = [];
+    try { matters = (await api("/api/overview")).matters; } catch (_) { matters = []; }
+    if (!matters.length) { p.append(el("p", "sub", "No matters to send yet.")); return; }
+    const chosen = new Set();
+    const list = el("div", "sessions");
+    for (const m of matters) {
+      const box = input("checkbox");
+      box.addEventListener("change", () => { box.checked ? chosen.add(m.id) : chosen.delete(m.id); });
+      list.append(el("label", "record-row pick", box, el("span", "", m.id),
+        el("span", "sub", `date bound ${m.date_bound || "—"}`),
+        el("span", "sub", plural(m.marks, "mark", "marks"))));
+    }
+    const to = document.createElement("select");
+    for (const c of d.contacts) {
+      const o = document.createElement("option");
+      o.value = c.name;
+      o.textContent = `${c.name} · ${c.fingerprint}`;
+      to.append(o);
+    }
+    const note = input("textarea", "A line for them: what this is, and what you want back.");
+    note.rows = 2;
+    const result = el("div", "share-result");
+    result.hidden = true;
+    const go = button("Seal and write the file", "primary", async () => {
+      if (!chosen.size) { toast("Choose at least one matter.", "error"); return; }
+      go.disabled = true;
+      try {
+        const r = await api("/api/sharing/share", { to: to.value, matters: [...chosen], note: note.value });
+        clear(result);
+        result.hidden = false;
+        result.append(el("div", "", el("b", "", `${r.matters} matter(s) sealed to ${to.value}`),
+          ` (${r.to_fingerprint}), signed as ${r.from_fingerprint}.`),
+          el("span", "mono", r.path),
+          el("p", "sub", "Send that file however you like — email, a share, a USB stick. Only their "
+            + "fingerprint can open it, and a copy is sealed to you so you can reopen what you sent."),
+          button("Copy the path", "ghost small", () => navigator.clipboard.writeText(r.path)
+            .then(() => toast("Copied.", "info")).catch(() => {})));
+      } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }
+    });
+    p.append(list, field("Send to", to), field("A note for them", note), el("div", "row", go), result);
+  }
+
+  function addContactDialog(onAdded) {
+    const name = input("text", "e.g. betrancourt");
+    const card = input("textarea", "Paste the card they sent you.");
+    card.rows = 6;
+    const err = el("p", "form-error");
+    const go = button("Add", "primary", async () => {
+      err.textContent = "";
+      try {
+        const r = await api("/api/sharing/contact", { name: name.value, card: card.value });
+        closeDialog();
+        toast(`${r.name} added — fingerprint ${r.fingerprint}`, "info");
+        onAdded();
+      } catch (e) { err.textContent = e.message; }
+    });
+    dialog("Add someone to share with", [
+      el("p", "", "Paste the card they sent you. Probant works out the fingerprint from the keys in it — "
+        + "then CONFIRM that fingerprint with them by voice before you send anything. A card that reached "
+        + "you the same way an impostor's would is worth what that channel is worth."),
+      field("Name", name, "What you will call them here."),
+      field("Their card", card),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), go]);
+  }
+
+  function openShareDialog() {
+    const path = input("text", "/home/you/probant-corpus-for-you-….probant-share");
+    const client = input("text", "e.g. Henry");
+    const err = el("p", "form-error");
+    const preview = el("div", "share-result");
+    preview.hidden = true;
+    const look = button("Look at it", "ghost", async () => {
+      err.textContent = "";
+      try {
+        const r = await api("/api/sharing/open", { path: path.value });
+        clear(preview);
+        preview.hidden = false;
+        preview.append(el("div", "", el("b", "", `Signed by ${r.from_name || "an UNKNOWN sender"}`),
+          ` — fingerprint ${r.from}`));
+        if (!r.known) {
+          preview.append(el("p", "warn-text", "This fingerprint is not one of your contacts. The signature "
+            + "proves the matters are as that key wrote them; it does not say whose key it is. Confirm it "
+            + "by voice before you rely on this."));
+        }
+        if (r.note) preview.append(el("p", "", r.note));
+        for (const m of r.matters) {
+          preview.append(el("div", "record-row", el("span", "", m.matter),
+            el("span", "sub", `date bound ${m.date_bound || "—"}`),
+            el("span", "sub", `${m.claims} claim(s)`), el("span", "sub", `${m.marks} mark(s) of theirs`)));
+        }
+      } catch (e) { err.textContent = e.message; }
+    });
+    const go = button("Open them as my matters", "primary", async () => {
+      err.textContent = "";
+      go.disabled = true;
+      try {
+        const r = await api("/api/sharing/open", { path: path.value, client: client.value });
+        closeDialog();
+        toast(`Opened ${r.opened.length} matter(s).`, "info");
+        location.hash = "#/";
+      } catch (e) { err.textContent = e.message; go.disabled = false; }
+    });
+    dialog("Open a share sent to you", [
+      el("p", "", "A file someone sealed to your fingerprint. Look at it first: who signed it, and what is "
+        + "inside. Opening it creates one matter of your own per matter in the share, each with the date "
+        + "bound the sender set."),
+      field("The file", path),
+      field("Open them under this client name", client, "Yours to choose — e.g. the sender's name."),
+      err, preview,
+    ], [button("Cancel", "ghost", closeDialog), look, go]);
+  }
+
   // ── routing ──
   async function route() {
     stopWatching();
     closeDialog();
     const h = location.hash || "#/";
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
-    for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === (parts[0] === "help" ? "#/help" : "#/"));
+    const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
+    for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === here);
     // A matter id ("client/matter") travels encoded as ONE segment: #/matter/Acme%2Fcooling.
     if (parts[0] === "matter" && parts[1]) return renderMatter(parts[1]);
     if (parts[0] === "session" && parts[1] && parts[2]) return renderSession(parts[1], parts[2]);
     if (parts[0] === "document" && parts[1]) return renderDocument(parts[1]);
+    if (parts[0] === "sharing") return renderSharing();
     if (parts[0] === "help") return renderHelp();
     return renderMatters();
   }

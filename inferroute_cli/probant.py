@@ -702,7 +702,12 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         if not jobs:
             print("  nothing left to read: every document has been read, and those that gave nothing back "
                   f"have had their {PF.MAX_ATTEMPTS} attempts")
-            return cmd_portfolio_report(resume)
+            # …but "nothing to READ" is not "nothing to DO". If the synthesis has never run, this is exactly
+            # the moment it should: returning the report here left a fully-read corpus with no matter list
+            # and no way to ask for one (21 Sep).
+            if (d / PF.THEMES).exists():
+                return cmd_portfolio_report(resume)
+            print("  the synthesis has not run over these findings yet — doing that now", flush=True)
     else:
         # What was staged, recorded with the run: the register's verdict is only meaningful over a corpus
         # that could contain the register's material. A 15-document subset of prior art and specs cannot
@@ -732,7 +737,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     # shared by parallel sessions is a write race, and a lost line is a finding nobody knows was found.
     # Sequential, the corpus measures 24 s/KB on the reader that actually reads it — 55 hours for 8.3 MB.
     if workers > 1 and not slice_of:
-        return _portfolio_workers(meta["id"], src, workers, reader, thinker, budget, len(jobs))
+        return _portfolio_workers(meta["id"], src, workers, reader, thinker, budget, len(jobs), holes)
     if slice_of:
         i, n = (int(x) for x in slice_of.split("/"))
         jobs = jobs[i::n]
@@ -931,7 +936,7 @@ def cmd_portfolio_report(ident: str) -> int:
 
 
 def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker: str, budget: int,
-                       total_jobs: int) -> int:
+                       total_jobs: int, holes: bool = False) -> int:
     """Run the reading jobs in N sessions at once, then synthesise once over what they all found."""
     import subprocess
     import time
@@ -943,6 +948,9 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
         argv = [sys.executable, "-m", "inferroute_cli", "probant", "portfolio", str(src), "--resume", ident,
                 "--slice", f"{i}/{n}", "--reader", reader or "", "--thinker", thinker or ""]
         argv += ["--budget", str(budget)] if budget else []
+        # WITHOUT this the worker plans with the ordinary planner, finds nothing and exits in a second,
+        # while the parent reports "25 jobs" — each side correct, the seam wrong (21 Sep).
+        argv += ["--holes"] if holes else []
         procs.append(subprocess.Popen([a for a in argv if a != ""], env=dict(os.environ, IR_PROBANT_NO_BROWSER="1"),
                                       stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT))
     for p in procs:
@@ -950,6 +958,8 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
     from . import probant_portfolio as PF
     print(f"  workers finished in {time.time() - started:.0f}s; {len(PF.candidates(ident))} finding(s) kept, "
           f"{len(PF.unread(ident))} document(s) never read", flush=True)
+    # Back through the front door to synthesise over everyone's findings. NOT with holes: the workers have
+    # just done that pass, and re-planning the stretches they narrowed would read for ever in one process.
     return cmd_portfolio(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
 
 

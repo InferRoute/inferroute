@@ -676,9 +676,13 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         meta = PF.meta_of(resume)
         d = PF.path_of(resume)
         jobs = PF.plan_unread(resume, budget or PF.JOB_CHARS)
-        print(f"resuming {resume}: {len(PF.unread(resume))} document(s) still unread, {len(jobs)} job(s)")
+        never, gave_nothing = PF.unread(resume), PF.barren(resume)
+        print(f"resuming {resume}: {len(never)} document(s) never read, "
+              f"{sum(1 for r in gave_nothing if not r['give_up'])} read but empty and worth another go, "
+              f"{len(jobs)} job(s)")
         if not jobs:
-            print("  every document has at least one finding; nothing to resume")
+            print("  nothing left to read: every document has been read, and those that gave nothing back "
+                  f"have had their {PF.MAX_ATTEMPTS} attempts")
             return cmd_portfolio_report(resume)
     else:
         # What was staged, recorded with the run: the register's verdict is only meaningful over a corpus
@@ -762,7 +766,10 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             after = len(PF.candidates(meta["id"]))
             got = after - before
         PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
-                      model=reader or "(lane default)", prompt=text)
+                      model=reader or "(lane default)", prompt=text,
+                      # Whether the session got a usable answer at all, so that a zero from a failed call is
+                      # not filed as "this document holds nothing".
+                      worked=PF.last_round_worked(meta["id"]))
         print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"
               + (f" (exit {rc})" if rc else ""), flush=True)
         # A job that records nothing is a FAILURE until shown otherwise: the two ways this pipeline broke
@@ -811,27 +818,49 @@ def cmd_portfolio_report(ident: str) -> int:
             print(f"    {len(drawn['uncited'])} finding(s) were in no theme.")
         if drawn["unknown"]:
             print(f"    {len(drawn['unknown'])} citation(s) named findings that do not exist — dropped.")
-    cov = PF.coverage(ident)
+    # Three states, kept apart. A document never handed to a session and a document read twice that gave
+    # nothing back both show "100% unevidenced, 0 items", and reading them as the same thing is how this
+    # report said 327 documents were barely evidenced when most of them had simply not been reached yet.
+    waiting, empty = PF.unread(ident), PF.barren(ident)
+    skip = {r["document"] for r in empty} | set(waiting)
+    cov = [r for r in PF.coverage(ident) if r["document"] not in skip]
     print(f"\n  what each document actually evidenced (largest span no quote falls in):\n")
     for row in cov:
-        bar = "·" * 0 if row["items"] else ""
         print(f"  {row['largest_unevidenced_share'] * 100:5.1f}% unevidenced  {row['items']:3d} item(s)  "
-              f"{row['bytes'] / 1000:6.0f} KB  {row['document']}{bar}")
+              f"{row['bytes'] / 1000:6.0f} KB  {row['document']}")
     thin = [r for r in cov if r["largest_unevidenced_share"] > 0.4]
     if thin:
         print(f"\n  {len(thin)} document(s) have a span over 40% of their length with nothing quoted from it: "
               f"read them again with a smaller budget, or treat their items as partial.")
+    if waiting:
+        print(f"\n  {len(waiting)} document(s) have not been read at all yet — resume to reach them.")
+    if empty:
+        done = [r for r in empty if r["give_up"]]
+        big = [r for r in empty if r["bytes"] > 8000]
+        print(f"\n  {len(empty)} document(s) were read and gave nothing back. Whether that is right, this "
+              f"cannot tell: an empty result is a document with no technical assertion in it OR a call that "
+              f"failed. Size and attempts are what a reader has to go on.")
+        for r in big[:12]:
+            print(f"      {r['bytes'] / 1000:6.0f} KB  {r['attempts']} attempt(s)  {r['document']}")
+        if len(big) > 12:
+            print(f"      … and {len(big) - 12} more over 8 KB")
+        print(f"    {len(empty) - len(big)} of them are under 8 KB (receipts, checksums, stubs — emptiness "
+              f"is unremarkable there); {len(big)} are larger, and those are worth a look.")
+        if done:
+            print(f"    {len(done)} reached {PF.MAX_ATTEMPTS} attempts and will not be read again by a resume.")
     # The question that decides whether this run can be trusted or must be done again. Precision is checkable
     # by construction; recall is not — except against what we already know is in there.
     reg = PF.path_of(ident) / "register.json"
     if reg.is_file():
-        # The verdict is for a run that read everything it staged; otherwise the register is the wrong
-        # denominator and the number is informational.
-        complete = not PF.unread(ident) and PF.meta_of(ident).get("selection", "whole corpus") == "whole corpus"
+        # The verdict is for a run with nothing left to do over the whole corpus; otherwise the register is
+        # the wrong denominator and the number is informational. "Nothing left to do" is what a resume would
+        # still plan — not "every document produced a finding", which a corpus holding one checksums file can
+        # never reach, and which kept this verdict permanently withheld.
+        owed = PF.plan_unread(ident)
+        complete = not owed and PF.meta_of(ident).get("selection", "whole corpus") == "whole corpus"
         r = PF.recall_against_register(ident, reg, complete=complete)
-        unread_n = len(PF.unread(ident))
         verdict = ("ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again") if complete else (
-            f"no verdict: {unread_n} document(s) unread" if unread_n else
+            f"no verdict: {len(owed)} job(s) still owed" if owed else
             f"no verdict: this run staged {PF.meta_of(ident).get('selection')}, not the whole corpus")
         print(f"\n  recall against the register: {r['found']}/{r['known']} known items surfaced "
               f"({r['recall'] * 100:.0f}%, floor {r['floor'] * 100:.0f}%) — {verdict}")
@@ -864,7 +893,7 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
         p.wait()
     from . import probant_portfolio as PF
     print(f"  workers finished in {time.time() - started:.0f}s; {len(PF.candidates(ident))} finding(s) kept, "
-          f"{len(PF.unread(ident))} document(s) still unread", flush=True)
+          f"{len(PF.unread(ident))} document(s) never read", flush=True)
     return cmd_portfolio(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
 
 

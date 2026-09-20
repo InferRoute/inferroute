@@ -283,3 +283,20 @@ def test_a_subset_run_gets_no_verdict_even_when_every_document_was_read(home, tm
     meta = P.stage(sorted(src.rglob("*.md")), "subset", selection="first 15")
     assert meta["selection"] == "first 15"
     assert P.stage([src / "one.md"], "all")["selection"] == "whole corpus"
+
+
+def test_a_quota_refusal_stops_the_run_instead_of_being_retried(home):
+    """The first full-corpus run hit "upstream 402: Quota exceeded and account balance is $0.0" partway
+    through, and every later round came back as two silent turns — which the pipeline read as documents
+    asserting nothing, and would have retried 88 jobs into the same refusal."""
+    _, src = home
+    ident = _stage(src)["id"]
+    log = P.path_of(ident) / "rounds.jsonl"
+    log.write_text(json.dumps({"ended": "x", "recorded": 0, "turns": 2, "tools": {}, "worked": False,
+                               "error": 'error: 402 upstream: {"detail":"Subscription usage cap exceeded."}'}) + "\n")
+    assert "402" in P.last_round_blocked(ident)
+    assert P.last_round_worked(ident) is False
+    # A round that failed for another reason is retried, not treated as the account refusing.
+    log.write_text(json.dumps({"ended": "x", "recorded": 0, "turns": 2, "tools": {}, "worked": False,
+                               "error": "aborted: Request aborted"}) + "\n")
+    assert P.last_round_blocked(ident) == ""

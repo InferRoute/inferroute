@@ -549,6 +549,12 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
         print(f"      {top[:40]:40s} {n:4d} file(s)  {size_top[top] / 1000:7.0f} KB")
     started = time.time()
     register = src / "portfolio" / "corpus.json" if (src / "portfolio" / "corpus.json").is_file() else None
+    if register:
+        # Kept with the run: the answer key this run is judged against must be the one it was judged against,
+        # not whatever the register says months later.
+        import shutil as _sh
+        _sh.copyfile(register, d / "register.json")
+        os.chmod(d / "register.json", 0o400)
     empty_jobs = []
     for i, job in enumerate(jobs, 1):
         span = job.get("bytes") or (job["end"] - job["start"])
@@ -557,8 +563,12 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "")
         PF.brief(meta["id"], register)          # what has been found so far, before this session reads
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
-        rc = _portfolio_round(d, PF.instruction_for(job), out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d)
-        got = len(PF.candidates(meta["id"])) - before
+        text = PF.instruction_for(job)
+        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(d / PF.CANDIDATES)}, cwd=d)
+        after = len(PF.candidates(meta["id"]))
+        got = after - before
+        PF.record_job(meta["id"], job, first=before, last=after, seconds=time.time() - t0, exit_code=rc,
+                      model=os.environ.get("IR_PORTFOLIO_MODEL", "kimi-k2.6"), prompt=text)
         print(f"  [{i}/{len(jobs)}] {what} ({span / 1000:.0f} KB): {got} item(s) in {time.time() - t0:.0f}s"
               + (f" (exit {rc})" if rc else ""), flush=True)
         # A job that records nothing is a FAILURE until shown otherwise: the two ways this pipeline broke
@@ -614,7 +624,21 @@ def cmd_portfolio_report(ident: str) -> int:
     if thin:
         print(f"\n  {len(thin)} document(s) have a span over 40% of their length with nothing quoted from it: "
               f"read them again with a smaller budget, or treat their items as partial.")
-    print(f"\n  {len(kept)} item(s): {PF.path_of(ident) / PF.CANDIDATES}")
+    # The question that decides whether this run can be trusted or must be done again. Precision is checkable
+    # by construction; recall is not — except against what we already know is in there.
+    reg = PF.path_of(ident) / "register.json"
+    if reg.is_file():
+        r = PF.recall_against_register(ident, reg)
+        verdict = "ACCEPTED" if r["accepted"] else "NOT ACCEPTED — read it again"
+        print(f"\n  recall against the register: {r['found']}/{r['known']} known items surfaced "
+              f"({r['recall'] * 100:.0f}%, floor {r['floor'] * 100:.0f}%) — {verdict}")
+        for m in r["misses"][:8]:
+            print(f"      missed {m['register']}")
+        print(f"    {r['note']}")
+    prov = PF.provenance(ident)
+    print(f"\n  the run: {prov['jobs']} job(s), {prov['empty_jobs']} that found nothing, "
+          f"{prov['seconds']}s, model(s) {', '.join(prov['models'])}")
+    print(f"  {len(kept)} item(s): {PF.path_of(ident) / PF.CANDIDATES}")
     return 0
 
 

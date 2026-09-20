@@ -146,3 +146,32 @@ def test_the_same_document_filed_twice_is_read_once(home):
     assert meta["given"] == 3 and len(meta["documents"]) == 2
     assert len(meta["duplicates"]) == 1 and meta["duplicates"][0]["same_as"] in [d["name"] for d in meta["documents"]]
     assert meta["bytes"] < meta["bytes_given"]                        # what is read, and what was handed over
+
+
+def test_recall_is_measured_against_the_register_because_nothing_else_can_measure_it(home, tmp_path):
+    """Henry, 20 Sep: "are you sure we can trust the results and will not need to run it again?" Precision is
+    checkable by construction — every finding carries a verified quote. Recall is not: no reading pass can
+    say what the model chose not to record. But this portfolio keeps a register of its own filings and
+    candidates, and that is an answer key: a run that misses a third of it did not read the portfolio,
+    whatever its totals say."""
+    _, src = home
+    ident = _stage(src)["id"]
+    first, second = [d["name"] for d in P.meta_of(ident)["documents"]]
+    _propose(ident, [
+        {"title": "Cooling jacket with coolant channels between cells", "summary": "moulded jacket",
+         "quote": "COOLANT-MARKER channels moulded between", "source": first},
+    ])
+    register = tmp_path / "corpus.json"
+    register.write_text(json.dumps({
+        "filed": [{"id": "P1", "title": "Cooling jacket with coolant channels between cells",
+                   "concepts": [["C1", "coolant channels moulded between the cells of a pack"]]}],
+        "surplus": [{"id": "TA-L3", "mechanism": "sealed lane resale commitment on a sealed transport"}],
+    }))
+    rows = P.register_rows(register)
+    assert sorted(r["id"] for r in rows) == ["P1", "P1:C1", "TA-L3"]     # filings, their concepts, candidates
+    got = P.recall_against_register(ident, register, floor=0.8)
+    assert got["known"] == 3 and got["found"] == 2 and got["missed"] == 1
+    assert got["misses"][0]["register"] == "TA-L3"                      # named, not counted away
+    assert got["recall"] == 0.667 and got["accepted"] is False          # two of three: below an 0.8 floor
+    assert P.recall_against_register(ident, register, floor=0.6)["accepted"] is True
+    assert "cannot speak for anything the register does not list" in got["note"]

@@ -682,6 +682,16 @@
         el("span", "sub", `date bound ${m.date_bound || "—"}`),
         el("span", "sub", plural(m.marks, "mark", "marks"))));
     }
+    // Documents that describe the WHOLE corpus — a matter list, a reading guide. They quote every filing,
+    // so they travel inside the seal with the matters rather than as attachments to an email.
+    const docs = new Set();
+    const docBox = el("div", "sessions");
+    for (const f of d.documents || []) {
+      const box = input("checkbox");
+      box.addEventListener("change", () => { box.checked ? docs.add(f.id) : docs.delete(f.id); });
+      docBox.append(el("label", "record-row pick", box, el("span", "", f.name),
+        el("span", "sub", f.run), el("span", "sub", `${Math.round((f.bytes || 0) / 1000)} KB`)));
+    }
     const to = document.createElement("select");
     for (const c of d.contacts) {
       const o = document.createElement("option");
@@ -697,10 +707,13 @@
       if (!chosen.size) { toast("Choose at least one matter.", "error"); return; }
       go.disabled = true;
       try {
-        const r = await api("/api/sharing/share", { to: to.value, matters: [...chosen], note: note.value });
+        const r = await api("/api/sharing/share", { to: to.value, matters: [...chosen], note: note.value,
+                                                    documents: [...docs], corpus_name: corpusName.value });
         clear(result);
         result.hidden = false;
-        result.append(el("div", "", el("b", "", `${r.matters} matter(s) sealed to ${to.value}`),
+        result.append(el("div", "", el("b", "", `${r.matters} matter(s)`
+          + (r.documents && r.documents.length ? ` and ${r.documents.length} document(s)` : "")
+          + ` sealed to ${to.value}`),
           ` (${r.to_fingerprint}), signed as ${r.from_fingerprint}.`),
           el("span", "mono", r.path),
           el("p", "sub", "Send that file however you like — email, a share, a USB stick. Only their "
@@ -709,7 +722,16 @@
             .then(() => toast("Copied.", "info")).catch(() => {})));
       } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }
     });
-    p.append(list, field("Send to", to), field("A note for them", note), el("div", "row", go), result);
+    const corpusName = input("text", "e.g. InferRoute portfolio — 9 filings + surplus");
+    p.append(list);
+    if ((d.documents || []).length) {
+      p.append(el("h2", "section", "Documents about the whole corpus"),
+        el("p", "sub", "These describe the portfolio rather than any one matter — a matter list, a reading "
+          + "guide. They quote the filings, so they are sealed with the matters, never attached to an email."),
+        docBox);
+    }
+    p.append(field("Send to", to), field("Name this corpus", corpusName), field("A note for them", note),
+             el("div", "row", go), result);
   }
 
   function addContactDialog(onAdded) {
@@ -756,6 +778,12 @@
             + "by voice before you rely on this."));
         }
         if (r.note) preview.append(el("p", "", r.note));
+        if (r.corpus) preview.append(el("p", "sub", `Corpus: ${r.corpus}`));
+        for (const f of r.documents || []) {
+          preview.append(el("div", "record-row", el("span", "", f.name),
+            el("span", "sub", "describes the whole corpus"),
+            el("span", "sub", `${Math.round((f.bytes || 0) / 1000)} KB`), el("span", "")));
+        }
         for (const m of r.matters) {
           preview.append(el("div", "record-row", el("span", "", m.matter),
             el("span", "sub", `date bound ${m.date_bound || "—"}`),
@@ -769,7 +797,8 @@
       try {
         const r = await api("/api/sharing/open", { path: path.value, client: client.value });
         closeDialog();
-        toast(`Opened ${r.opened.length} matter(s).`, "info");
+        const extra = (r.documents || []).length ? ` and ${r.documents.length} document(s) in ${r.corpus_dir}` : "";
+        toast(`Opened ${r.opened.length} matter(s)${extra}.`, "info");
         location.hash = "#/";
       } catch (e) { err.textContent = e.message; go.disabled = false; }
     });

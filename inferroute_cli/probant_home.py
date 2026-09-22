@@ -573,6 +573,26 @@ class Home:
                 return problem("that proposal is not one this document has", 400)
             return {"ok": True, "id": made}
 
+        def corpus_documents() -> List[Dict[str, Any]]:
+            """The documents this installation can send WITH a corpus: what a portfolio run wrote about the
+            whole portfolio (its matter list, its reading guide).
+
+            The page chooses by ID from this list and never sends a path. A path from a browser page is a
+            path someone can edit, and "seal this file to a stranger" is the last place to accept one.
+            """
+            from . import probant_portfolio as PF
+            out: List[Dict[str, Any]] = []
+            root = PF.portfolio_root()
+            if not root.is_dir():
+                return out
+            for run in sorted(root.iterdir(), reverse=True):
+                for name in ("MATTERS.txt", "READING-GUIDE.txt"):
+                    f = run / name
+                    if f.is_file():
+                        out.append({"id": f"{run.name}/{name}", "name": name, "run": run.name,
+                                    "bytes": f.stat().st_size, "path": str(f)})
+            return out
+
         # ── sharing a corpus of matters with another Probant user ──
         @app.get("/api/sharing")
         async def sharing():
@@ -580,7 +600,9 @@ class Home:
             from . import probant_share as SH
             me = SH.identity()
             return {"fingerprint": me["fingerprint"], "card": SH.public_card(me),
-                    "contacts": [{"name": n, **c} for n, c in SH.contacts().items()]}
+                    "contacts": [{"name": n, **c} for n, c in SH.contacts().items()],
+                    # Offered by id; the page never sends a path back (see corpus_documents).
+                    "documents": [{k: v for k, v in x.items() if k != "path"} for x in corpus_documents()]}
 
         @app.post("/api/sharing/contact")
         async def add_contact(request: Request):
@@ -612,6 +634,9 @@ class Home:
             ids = [str(x) for x in (d.get("matters") or [])]
             if not ids:
                 return problem("choose at least one matter to share", 400)
+            # Resolve the chosen documents against OUR list, by id — never against a path from the page.
+            offered = {x["id"]: x for x in corpus_documents()}
+            chosen = [offered[str(x)] for x in (d.get("documents") or []) if str(x) in offered]
 
             def build() -> Dict[str, Any]:
                 me = SH.identity()
@@ -619,7 +644,9 @@ class Home:
                 for mid in ids:
                     client, matter, _ = matter_of(mid)
                     entries.append(SH.matter_payload(client, matter))
-                payload = SH.build_share(entries, note=str(d.get("note") or ""))
+                files = SH.corpus_files([Path(x["path"]) for x in chosen])
+                payload = SH.build_share(entries, note=str(d.get("note") or ""), files=files,
+                                         corpus_name=str(d.get("corpus_name") or ""))
                 cards = [known[to]] + ([SH.public_card(me)] if d.get("keep_copy", True) else [])
                 blob = SH.seal_to(cards, payload, me)
                 stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -627,6 +654,7 @@ class Home:
                 dest.write_bytes(blob)
                 os.chmod(dest, 0o600)
                 return {"path": str(dest), "matters": len(entries), "bytes": len(blob),
+                        "documents": [x["name"] for x in chosen], "corpus": payload["corpus"]["id"],
                         "to_fingerprint": known[to]["fingerprint"], "from_fingerprint": me["fingerprint"]}
 
             try:
@@ -654,14 +682,21 @@ class Home:
                 return {"ok": True, "preview": True, "from": payload.get("from_fingerprint"),
                         "from_name": payload.get("from_name"), "known": payload.get("from_known"),
                         "made_at": payload.get("made_at"), "note": payload.get("note"),
+                        "corpus": (payload.get("corpus") or {}).get("name", ""),
+                        "documents": [{"name": f.get("name"), "bytes": f.get("bytes")}
+                                      for f in ((payload.get("corpus") or {}).get("files") or [])],
                         "matters": [{"matter": m.get("matter"), "date_bound": m.get("date_bound"),
                                      "claims": len(m.get("claims") or []),
                                      "marks": len(m.get("marks") or {})} for m in payload.get("matters") or []]}
             try:
                 made = await asyncio.to_thread(SH.create_matters_from_share, payload, str(d["client"]))
+                # The corpus documents describe the WHOLE delivery. Opening the matters and not writing them
+                # loses, in silence, the material the delivery was made for.
+                wrote = await asyncio.to_thread(SH.write_corpus, payload, str(d["client"]))
             except S.ProbantError as e:
                 return problem(str(e), 409)
-            return {"ok": True, "opened": made}
+            return {"ok": True, "opened": made, "documents": wrote.get("written") or [],
+                    "corpus": wrote.get("id") or "", "corpus_dir": wrote.get("dir") or ""}
 
         @app.get("/record")
         async def record(id: str = "", name: str = "", v: str = ""):

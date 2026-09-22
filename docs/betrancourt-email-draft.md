@@ -109,10 +109,7 @@ préfère vous citer une barre que vous pouvez aller vérifier qu'un superlatif.
 Ce que nous voulons construire : un outil qui vous fasse gagner du temps sur ce que vous faites
 aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé à une preuve aussi solide et
 aussi nette qu'une preuve peut l'être : une attestation matérielle qui remonte aux clés du fabricant, des
-énoncés signés, revérifiables par un tiers sans avoir à nous croire. Sur la recherche elle-même, je ne
-prétends pas encore être devant. Mais aucune solution existante ne cherche sans que l'invention sorte en
-clair, ni ne vous laisse une pièce de cette nature : ce ne sont pas des degrés sur la même échelle, et ce
-sont les deux qui comptent pour un dossier non déposé.
+énoncés signés, revérifiables par un tiers sans avoir à nous croire.
 
 **Une question** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
 l'imagine utile là où votre diligence peut être mise en cause longtemps après — une opposition, un
@@ -165,6 +162,13 @@ InferRoute SASU
   work justify itself.
 - **Why one email and not two.** The delivery is what earns the right to make the offer. Sending the
   pre-work and then a separate pitch would waste the credibility the pre-work buys.
+- **The closing hedge was cut** (Henry, 23 Sep): "sur la recherche elle-même, je ne prétends pas encore
+  être devant" and the "aucune solution existante" comparison. Checked what that costs before agreeing it
+  is safe: the honesty is still carried THREE times earlier — "C'est peu." on the figure, "le meilleur
+  résultat publié … est la cible sur laquelle nous travaillons" on DAPFAM, and "les chiffres n'y sont pas
+  comparables" on the two quantities — and the two differentiating properties are already stated as their
+  own paragraph ("Deux propriétés sont vraies aujourd'hui"). Nothing is claimed here that is not
+  established above, and the fourth admission was the one that had started to sound like pleading.
 - **"Plus efficace que tout" was NOT written, and it is the one place I softened Henry's instruction**
   (23 Sep: useful because more efficient than anything by the next version, with a proof as solid and clean
   as it gets). The PROOF half is written as asked and is defensible: hardware attestation chaining to the

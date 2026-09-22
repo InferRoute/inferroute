@@ -736,15 +736,27 @@ brief; the first attempt of one was stopped early at nine minutes and produced n
    - Read it completely before running it. It has no dependencies beyond Python and `cryptography` 42+.
      Report anything that would let a check pass without being done: a comparison that cannot fail, an
      exception swallowed, a verdict written before the work, a branch that returns OK when data is absent.
-   - **Compare it against a copy you obtained yourself.** InferRoute publishes its client; if you can get
-     `verify_record.py` from the published package or the public repository, compare it byte for byte with
-     this one and report the result — a match makes this the program InferRoute stands behind rather than
-     the one this folder happens to contain. **If you cannot obtain it independently, say so in your report
-     as a named limitation**, and rely on step 3: the checks you redo with your own tools are the ones that
-     do not depend on trusting this file at all.
+   - **Get your own copy and compare, before you run anything.** InferRoute publishes this verifier inside
+     its client package. Fetch it yourself — from a machine and a network the professional does not
+     control, if you can:
 
-   The professional is told the same thing, so a "could not obtain it" in your report is expected
-   information, not a failure of the audit.
+         pip download inferroute --no-deps -d /tmp/ir-check
+         cd /tmp/ir-check && python3 -c "import zipfile,glob,hashlib; z=zipfile.ZipFile(glob.glob('*.whl')[0]); \
+           n=[x for x in z.namelist() if x.endswith('verify_record.py')][0]; \
+           print(hashlib.sha256(z.read(n)).hexdigest())"
+         sha256sum <this folder>/verify_record.py
+
+     Report the two hashes and whether they match. A match means you audited the program InferRoute stands
+     behind publicly, not the one this folder happens to contain — and that is a materially stronger
+     statement than "I read it and it looked fine". A MISMATCH is a finding in its own right: report it
+     prominently and do not treat the local copy's output as evidence of anything.
+
+   - **If you cannot obtain it independently** — no network, the package unavailable, the file not in the
+     version you can reach — **say so in your report as a named limitation** and rely on step 3: the checks
+     you redo with your own tools are the ones that do not depend on trusting this file at all.
+
+   The professional is told the same thing, so either answer in your report is expected information, not a
+   failure of the audit.
 2. Run it:
 
        python3 verify_record.py . --reference trust-anchors/reference.json --reference-key=$(cat trust-anchors/publication-key.txt)

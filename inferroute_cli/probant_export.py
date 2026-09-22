@@ -838,10 +838,21 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         # rests on an enclave-signed statement per search; with none, the pack is a folder of tooling and
         # the only honest verdict is "could not check" on all of it. Refusing costs a click; not refusing
         # costs the professional's credibility with whoever they sent it to.
+        # "Run a search first" is useless advice if no search machine is configured — 23 Sep, Henry hit
+        # exactly that: the enclave this computer points at no longer resolves, so the product was telling
+        # him to do something it knows he cannot do. A refusal has to name the thing that is actually in
+        # the way, or the reader concludes the product is broken rather than the search machine.
+        from . import pi_attested
+        configured = pi_attested.search_config_path().is_file()
+        why = ("Open the matter and run a prior-art search, then export the record and make the pack from "
+               "it. If no search can be run — the search machine not answering, for instance — the "
+               "matter's own panel says what this computer was able to check."
+               if configured else
+               "No search machine is set up on this computer yet, so no search can be run: set one up "
+               "first, and this computer will check it before anything is sent to it.")
         raise S.ProbantError(
             "this record contains no searches, so there is nothing for an auditor to check: every claim in "
-            "the brief rests on a signed statement per search. Run a search on this matter first, then "
-            "export the record and make the pack from it.")
+            "the brief rests on a signed statement per search. " + why)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     dest = Path(out_dir) if out_dir else src.parent / f"audit-pack-{stamp}"
     sync = S._under_sync_root(dest)

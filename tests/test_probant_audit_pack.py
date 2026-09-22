@@ -135,3 +135,27 @@ def test_the_brief_tells_the_auditor_the_verifier_is_untrusted_and_how_to_check_
     # …and the report must separate what the auditor computed from what our program told them.
     assert "which of it you computed yourself" in md
     assert "COULD NOT CHECK and the report should say" in md
+
+
+def test_the_empty_pack_refusal_names_what_is_actually_in_the_way(tmp_path, monkeypatch):
+    """23 Sep, Henry trying the audit: he got "Run a search on this matter first" — advice he cannot take,
+    because the enclave this computer points at no longer resolves. A refusal that tells someone to do
+    something the product knows they cannot do reads as the product being broken, not the search machine.
+    With no search machine configured it now says so."""
+    from inferroute_cli import pi_attested
+    rec = tmp_path / "record"
+    rec.mkdir()
+    (rec / "searches.json").write_text("[]")
+    (rec / "MANIFEST.json").write_text(json.dumps({"files": {}, "matter_cutoff": 20260814}))
+
+    monkeypatch.setattr(pi_attested, "search_config_path", lambda: tmp_path / "absent.json")
+    with pytest.raises(S.ProbantError, match="No search machine is set up"):
+        E.write_audit_pack(rec, tmp_path / "pack-a")
+
+    cfg = tmp_path / "search.json"
+    cfg.write_text(json.dumps({"enclave": "http://x"}))
+    monkeypatch.setattr(pi_attested, "search_config_path", lambda: cfg)
+    # Configured is not the same as WORKING — Henry's own machine has a search.json pointing at an enclave
+    # that no longer resolves — so the configured branch must not promise that a search is possible either.
+    with pytest.raises(S.ProbantError, match="the search machine not answering"):
+        E.write_audit_pack(rec, tmp_path / "pack-b")

@@ -121,8 +121,11 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
                 "technical": []}
     if search is None:
         return {"key": "search", "state": OFF, "title": "Patent search",
-                "summary": "Not set up on this computer, so the assistant can't search.",
-                "points": [], "more": ["You can still work with the assistant on the disclosure."], "technical": []}
+                "summary": "Not set up on this computer — nothing can leave for a search machine.",
+                "points": ["The assistant cannot search, and cannot send any of this matter anywhere."],
+                "more": ["You can still work with the assistant on the disclosure.",
+                         "Set a search machine up when you want prior art; this computer will check it then."],
+                "technical": []}
     steps = search.get("steps") or []
     technical = [{"label": str(s.get("step", "")), "ok": bool(s.get("ok")), "value": str(s.get("detail", ""))}
                  for s in steps if isinstance(s, dict)]
@@ -223,11 +226,25 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
     states = {i["key"]: i["state"] for i in items}
     if states["ai"] == FAIL:
         verdict, headline = "blocked", "Not opened: the AI machine could not be verified, so nothing was sent."
-    elif any(states[k] in (FAIL, WARN) for k in ("ai", "search", "computer")) or states["search"] == OFF:
+    elif any(states[k] in (FAIL, WARN) for k in ("ai", "search", "computer")):
         verdict, headline = "limited", "Partly protected. Read the items marked below before using a client's invention."
     else:
-        verdict, headline = "private", ("Private: your client's invention can be read only on this computer and "
-                                        "inside two sealed machines, both checked just now.")
+        # A MISSING search is not a WEAKENED protection (Henry, 22 Sep: "if this is just the mcp not being up
+        # why do we need to tell the user 'Partly protected'"). With no search there is no second machine and
+        # no route off this computer at all — strictly MORE confidentiality, and reporting it as "Partly
+        # protected" tells a professional their client's invention is at risk when the opposite is true.
+        # The same reasoning is already written into search_item()'s intake branch; this path contradicted it.
+        # What changes is the COUNT of sealed machines, which must not claim two when one was checked.
+        verdict = "private"
+        if states["search"] == OK:
+            headline = ("Private: your client's invention can be read only on this computer and inside two "
+                        "sealed machines, both checked just now.")
+        else:
+            missing = ("no patent search is set up on this computer" if states["search"] == OFF
+                       else "no search tool is offered while reading a document")
+            headline = ("Private: your client's invention can be read only on this computer and inside one "
+                        f"sealed machine, checked just now — and {missing}, so nothing can leave this "
+                        "computer for a search machine at all.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items, "control_note": CONTROL_NOTE,
             "limits": limits(states["search"], search_is_inferroutes(search), surface), "mode": mode, "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}

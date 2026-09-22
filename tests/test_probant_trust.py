@@ -100,14 +100,49 @@ def test_a_missing_check_row_is_not_read_as_a_pass():
 
 
 @pytest.mark.parametrize("search,state", [
-    (None, T.OFF),
     (_search(ok=False, refusal="the enclave did not answer"), T.FAIL),
     (_search(test_roots=True), T.WARN),
 ])
-def test_any_search_short_of_verified_is_never_private(search, state):
+def test_a_search_machine_that_FAILED_a_check_is_never_private(search, state):
+    """A search machine that was checked and fell short is a real weakening: it exists, it is reachable, and
+    something about it did not verify. That is "Partly protected". An ABSENT search is a different thing —
+    see the test below, which this parametrise used to contradict."""
     s = T.build(_receipt(), search, ADDRESS)
     assert _item(s, "search")["state"] == state
     assert s["verdict"] == "limited"
+
+
+def test_no_search_at_all_is_MORE_private_and_must_not_read_as_degraded():
+    """Henry, 22 Sep, using the product: "if this is just the mcp not being up why do we need to tell the
+    user 'Partly protected'". He was right, and it was a logic error rather than wording: OFF was folded in
+    with FAIL and WARN. With no search machine there is no second machine and no route off this computer at
+    all — strictly MORE confidentiality — and telling a professional their client's invention is only partly
+    protected, when nothing can leave the building, is the most damaging thing this panel can get wrong.
+    search_item()'s intake branch already made exactly this argument; this path contradicted it."""
+    s = T.build(_receipt(), None, ADDRESS)
+    assert _item(s, "search")["state"] == T.OFF
+    assert s["verdict"] == "private"
+    assert "Partly protected" not in _text(s)
+    head = s["headline"]
+    assert "one sealed machine" in head and "two sealed machines" not in head   # never claim a machine we did not check
+    assert "nothing can leave this computer for a search machine" in head
+    # The item itself leads with what it protects, not with what is absent.
+    assert "nothing can leave" in _item(s, "search")["summary"]
+
+
+def test_reading_a_document_offers_no_search_and_says_so_without_alarm():
+    """Intake mode has no search TOOL at all. It was already worded correctly and was still being counted as
+    a degraded state in the verdict — and it would have claimed "two sealed machines" when one was checked."""
+    s = T.build(_receipt(), None, ADDRESS, mode="intake")
+    assert _item(s, "search")["state"] == T.INFO
+    assert s["verdict"] == "private"
+    assert "one sealed machine" in s["headline"]
+    assert "while reading a document" in s["headline"]
+
+
+def test_a_verified_search_machine_is_the_only_thing_that_earns_two_machines():
+    s = T.build(_receipt(), _search(), ADDRESS)
+    assert s["verdict"] == "private" and "two sealed machines" in s["headline"]
 
 
 def test_an_unreachable_search_machine_is_said_plainly():

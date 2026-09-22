@@ -72,13 +72,7 @@ annoncer une place que je ne peux pas définir ne vous servirait à rien.
 Autrement dit : ce n'est pas encore un outil qui remplace une recherche professionnelle. C'en est un qui
 prouve ce qu'il a fait, et qui ne fait pas sortir l'invention.
 
-**Ce que je ne vous demande pas encore.** Vous faire passer un dossier réel dans un moteur qui, sur cinq
-antériorités qu'un examinateur citerait, en retrouve aujourd'hui un peu moins d'une, ce serait vous faire
-porter le coût d'une version que je sais incomplète. L'essai,
-je vous le proposerai quand la prochaine version du moteur sera déployée — c'est une affaire de semaines,
-et je reviendrai vers vous avec un chiffre à jour et une date, pas avant.
-
-**Ce que je vous demande maintenant, et qui ne coûte rien.** Deux choses, à répondre en trois lignes si
+**Ce que je vous demande, et qui ne coûte rien.** Deux choses, à répondre en trois lignes si
 vous voulez. D'abord : est-ce que le certificat vaut ce que je crois qu'il vaut ? C'est-à-dire, dans votre
 pratique, une pièce établissant ce qui a été cherché, sur quel corpus et à quelle date, opposable des
 années plus tard — est-ce que cela vous servirait, et dans quel contexte précisément ? Ensuite : à quoi
@@ -112,8 +106,9 @@ Il me faut pour cela votre **carte publique** : deux commandes, je vous envoie l
 que la version est prête. Elle ne contient que des clés publiques et ne permet rien d'autre que de vous
 adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit ne parte.
 
-Le même client vous servira le jour de l'essai, quand la prochaine version du moteur sera déployée :
-l'enceinte est montée pour la séance et démontée ensuite, et je vous accompagne.
+Le même client vous servira pour l'essai, que je vous proposerai quand la prochaine version du moteur sera
+déployée — c'est une affaire de semaines, et je reviendrai vers vous avec un chiffre à jour et une date.
+L'enceinte est montée pour la séance et démontée ensuite, et je vous accompagne.
 
 Bien à vous,
 Henry Decléty
@@ -142,6 +137,10 @@ InferRoute SASU
   0% of its oracle ceiling on 22 Sep), no "SOTA".
 - **TA-L3 is named.** Still your ruling — EPO has no grace period, he is the counsel who would advise, and
   asking him is circular. Delete the clause if you would rather raise it by voice.
+- **The paragraph explaining WHY the trial waits was cut (Henry, 23 Sep).** It said the same thing twice —
+  once apologetically in the offer, once factually in section 3 — and repeating the weak number at the
+  moment of the ask dwells on it. The deferral now appears ONCE, as a fact with a timescale attached, where
+  a reader looks for what happens next.
 - **The search trial is HELD for Build 2, at Henry's call (22 Sep), and he was right for a reason beyond
   timing: the search enclave does not currently exist — `ir-sealed-search.eastus2.azurecontainer.io` no
   longer resolves — so a session could not be scheduled today even if he said yes. Asking a professional to

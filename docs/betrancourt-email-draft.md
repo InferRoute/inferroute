@@ -116,8 +116,7 @@ l'imagine utile là où votre diligence peut être mise en cause longtemps aprè
 contentieux, une due diligence où l'on vous demande ce qui avait été cherché et à quelle date, ou un client
 qui revient sur le périmètre d'une recherche facturée deux ans plus tôt.
 
-Si vous préférez vous faire votre propre idée plutôt que de me croire, le client comporte un bouton qui
-prépare un dossier d'audit : la preuve, débarrassée de tout ce qui touche à l'invention, le vérificateur,
+Le client comporte un bouton qui prépare un dossier d'audit : la preuve, débarrassée de tout ce qui touche à l'invention, le vérificateur,
 et la marche à suivre pour qu'un tiers — votre propre IA, par exemple — en contrôle la solidité et refasse
 les vérifications lui-même.
 
@@ -230,6 +229,9 @@ InferRoute SASU
   everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je les ai relus et je les assume"
   keeps the responsibility yours: an agent drafted it, a professional stands
   behind it, and he is told which is which before he reads a word of it.
+- **No "si vous préférez me croire ou vérifier"** (Henry, 23 Sep). The opener presumed a doubt he has not
+  expressed, and putting trust on the table is what makes a reader weigh it. The button is now stated as a
+  plain feature; that it can be used to check us is evident from what it does, and needs no framing.
 - **He is pointed at the audit button** (Henry, 23 Sep), which answers the question by demonstration
   rather than by assertion — and is the only honest way to ask a sceptic to assess evidence. Three things
   make it worth the four lines: the pack is evidence-ONLY, so nothing about a client's invention travels

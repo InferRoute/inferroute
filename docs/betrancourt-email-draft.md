@@ -72,8 +72,9 @@ annoncer une place que je ne peux pas définir ne vous servirait à rien.
 Autrement dit : ce n'est pas encore un outil qui remplace une recherche professionnelle. C'en est un qui
 prouve ce qu'il a fait, et qui ne fait pas sortir l'invention.
 
-**Ce que je ne vous demande pas encore.** Vous faire passer un dossier réel dans un moteur qui en
-retrouve un cinquième, ce serait vous faire porter le coût d'une version que je sais incomplète. L'essai,
+**Ce que je ne vous demande pas encore.** Vous faire passer un dossier réel dans un moteur qui, sur cinq
+antériorités qu'un examinateur citerait, en retrouve aujourd'hui un peu moins d'une, ce serait vous faire
+porter le coût d'une version que je sais incomplète. L'essai,
 je vous le proposerai quand la prochaine version du moteur sera déployée — c'est une affaire de semaines,
 et je reviendrai vers vous avec un chiffre à jour et une date, pas avant.
 

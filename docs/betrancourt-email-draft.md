@@ -47,9 +47,16 @@ named benchmark he can look up, rather than an adjective. If Henry wants the str
 route is the one the recall session offered: implement passage-level retrieval, re-measure, and the claim
 becomes a fact.
 
-**"MCP" is not in the letter either.** It means nothing to a patent attorney and would read as jargon
-padding. The same fact in his language: "c'est ce moteur qui équipe l'assistant dans le client" — which
-also does useful work, tying the benchmark number to the thing he would actually use.
+**"agent", not "assistant"** (Henry, 23 Sep), and the sentence now flows from the benchmark instead of
+jumping: the next version targets the published best, AND it is what will feed the search tool the agent
+uses. The architecture detail lands as a consequence rather than a non sequitur.
+
+**"MCP" is still not written, and this time for a factual reason** rather than a stylistic one. Henry says
+he knows what an MCP is — he does — but in THIS client `prior_art_search` is a Pi extension tool
+registered in `ir-attested.ts`; the only occurrence of "mcp" anywhere in the package is a comment in
+probant_trust.py. Writing "le MCP" to a technical reader who may later look would be wrong. "L'outil de
+recherche que l'agent utilise" is true either way. If there is an MCP serving this elsewhere — sealed-
+research's side — I do not have it, and Henry can tell me.
 
 **Cut to three lines** (Henry, 23 Sep) from ninety words. What had to survive, and did: the benchmark
 NAMED with its arXiv reference (a bar he can check is the whole point — the line arguing that is gone
@@ -122,8 +129,8 @@ tenus à l'écart de sa mise au point. C'est peu. Mais les leviers qui font mont
 mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines.
 
 Nous nous mesurons aussi sur DAPFAM (arXiv:2506.22141), un jeu d'évaluation public — chiffres non
-comparables à celui ci-dessus, le corpus y est fermé. C'est ce moteur qui équipe l'assistant dans le client, et la
-prochaine version vise le meilleur résultat publié sur ce jeu.
+comparables à celui ci-dessus, le corpus y est fermé. La prochaine version vise le meilleur résultat publié sur ce
+jeu ; c'est elle qui alimentera l'outil de recherche que l'agent utilise dans le client.
 
 Ce que nous voulons construire : un outil qui vous fasse gagner du temps sur ce que vous faites
 aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé à une preuve aussi solide et

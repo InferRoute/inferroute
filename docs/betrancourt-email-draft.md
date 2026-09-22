@@ -69,8 +69,10 @@ du document et en position exacte, de sorte qu'une recherche sur les mots cités
 
 Un point que je ne vous aurais pas signalé si la machine ne l'avait pas rendu visible : **chaque dépôt
 porte une invention et une seule**, à une vingtaine de passages près sur tout le portefeuille. Ces
-passages-là sont ceux où un dépôt empiète sur le sujet d'un autre ; ils sont cités intégralement et
-localisés, parce que c'est là, et seulement là, que la question du périmètre se pose.
+passages-là sont ceux où la matière d'une invention se trouve dispersée dans le dépôt d'une autre ; ils
+sont cités intégralement et localisés, parce que c'est ce qu'il faut savoir au moment de décider comment
+regrouper les nouvelles demandes. C'est aussi, je crois, un élément de réponse à la question de
+regroupement que vous m'aviez posée.
 
 Chaque affirmation est rattachée à une citation littérale, vérifiée caractère par caractère contre le
 document qui la porte ; une citation introuvable est supprimée avec l'affirmation qu'elle portait. Le
@@ -135,6 +137,22 @@ InferRoute SASU
 
 ## Notes for Henry, not part of the email
 
+- **⚠ HE ASKED YOU TWO QUESTIONS ON 2026-09-04 AND HAS BEEN WAITING SINCE 09-07** (thread
+  19ff13148e34a92a, then 1a07b3d9f7852fff). This letter should not go out as if that exchange did not
+  happen:
+  1. **Grouping preference** — he suggested concentrating on ONE grouping first and asked your order of
+     preference. **The eight objects ARE an answer to that question**, which is why the finding is now
+     framed as feeding the re-drafting rather than as "where scope is contested". Consider answering it
+     explicitly, with an order, rather than leaving him to infer one from the list.
+  2. **Whether you object to Santarelli using AI** — they hold Claude Team and ChatGPT Business licences
+     plus a French private server for the most sensitive matters, and he asked directly. Still unanswered.
+     Note the happy accident: this letter now OPENS by disclosing that a LLM prepared it, which answers him
+     by example before he has to ask twice. Worth one explicit line either way.
+- **The "périmètre" framing was wrong and Henry caught it** (23 Sep). It assumed the nine provisionals
+  would be prosecuted as they stand. They will not: counsel's 2026-09-04 read is that they are not
+  "régulières" for INPI (English, formalism) and a rewrite for a new filing is needed. Overlap between
+  filings that are being re-drafted is not a scope question — it is an input to how the NEW applications
+  get carved. Same finding, correct use.
 - **The opening no longer quotes him back to himself** (Henry, 23 Sep). "Vous m'aviez dit que les dépôts
   étaient trop longs" attributed a statement to the reader in the first line of a letter — which invites
   him to correct the paraphrase instead of reading on, and can land as a reproach when the filings are his.

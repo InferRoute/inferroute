@@ -444,6 +444,18 @@ def main(argv: list[str] | None = None) -> int:
     # owner-only: records hold search text and results, receipts and state hold the matter's history. A
     # common default umask (0002 or 0022) would leave them readable by every other account on this computer.
     os.umask(0o077)
+    # `ir probant` with no subcommand is what a new user types first. argparse answers it with
+    # "error: the following arguments are required: cmd" above a wall of nineteen subcommand names —
+    # true, useless, and the first thing a patent professional would see. Say what to do instead.
+    if not argv and len(sys.argv) <= 2:
+        sys.stderr.write(
+            "\n  Probant — prior-art research, one matter at a time, on this computer.\n\n"
+            "  Start here:      ir probant home        opens the page where everything happens\n\n"
+            "  Or from here:    ir probant new <client> <matter> --priority-date YYYY-MM-DD\n"
+            "                   ir probant list\n"
+            "                   ir probant identity    your key card, to receive sealed matters\n\n"
+            "  Every command:   ir probant --help\n\n")
+        return 2
     p = argparse.ArgumentParser(prog="ir probant", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)

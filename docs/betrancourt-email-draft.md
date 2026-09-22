@@ -15,97 +15,94 @@ becomes the first client, and the delivery is what earns the right to ask.
 - **Anything about agentic confirmation** — a live-model run on 22 Sep captured **0%** of the oracle
   ceiling (recall 0.08, recovered 1 of 12). It is an unrealised ceiling, not a result.
 
+**"Recall" is rendered "exhaustivité", not "rappel"** (Henry, 23 Sep). "Rappel" is the correct
+information-retrieval term and the wrong word for this reader: to a practitioner it reads as "reminder",
+and it names a metric rather than the thing he actually judges a search on. "Exhaustivité" is what a CPI
+evaluates, so the sentence defines it once — "la part des antériorités pertinentes que la recherche
+retrouve effectivement" — and then uses it.
+
+**TA-L3 is no longer named** (Henry, 23 Sep). Section 3 gives the reason for sealed delivery as "vos dépôts
+et l'ensemble non déposé", which is sufficient and carries no identifier.
+
+**More positive on exhaustivité, WITHOUT a new claim.** The number and its definition are unchanged; what
+changed is where the emphasis falls — "le point important est ailleurs : les leviers qui le font monter
+sont déjà mesurés, pas espérés". Measured-not-hoped is true and is the strongest honest thing available.
+No figure was added, no ceiling implied, no ranking promised: inventing optimism here would undo the
+calibration the whole email is built on.
+
 The only number in writing is **~0.19 with its definition**. Mechanisms are withheld pending IP review —
 the same gate being applied to our own seven mechanisms currently in diode-runs.
 
 ---
 
-Objet : le travail préparatoire sur le portefeuille — et ce que je voudrais vous proposer ensuite
+Objet : le travail préparatoire sur le portefeuille
 
 Cher Maître,
 
-**1. Le travail préparatoire dont nous avions parlé**
+**1. Le travail préparatoire**
 
-Vous m'aviez dit que les dépôts étaient trop longs pour être relus tels quels et qu'il fallait d'abord
-isoler ce qui compte. C'est fait. Deux documents.
+Vous m'aviez dit que les dépôts étaient trop longs pour être relus tels quels. Voici deux documents.
 
-**La liste des objets.** Les neuf dépôts et l'ensemble non déposé ont été ramenés à **huit inventions** —
-huit objets au sens où vous les instruiriez. Pour chacun : le mécanisme en une phrase, les caractéristiques
-qui pèseraient dans une revendication, ce qu'il ne couvre pas, et les entrées du registre qu'il recouvre.
-Les 36 entrées (9 dépôts, 27 candidats non déposés) sont toutes rattachées — aucune n'est restée de côté.
+**La liste des objets** : les neuf dépôts et l'ensemble non déposé ramenés à **huit inventions**, au sens où
+vous les instruiriez — le mécanisme, les caractéristiques qui pèseraient dans une revendication, ce qui
+n'est pas couvert, et les entrées du registre recouvertes. Les 36 entrées sont toutes rattachées, aucune
+n'est restée de côté.
 
-**Le guide de lecture.** Pour chaque dépôt, à quel endroit se trouve la matière de chaque invention : en
-pourcentage du document et en position exacte, de sorte qu'une recherche sur les mots cités tombe sur le
-passage. C'est ce qui remplace la relecture intégrale.
+**Le guide de lecture** : pour chaque dépôt, où se trouve la matière de chaque invention — en pourcentage
+du document et en position exacte, de sorte qu'une recherche sur les mots cités tombe sur le passage.
 
-Un point que je ne vous aurais pas signalé si la machine ne l'avait pas rendu visible : **chaque dépôt porte
-une invention et une seule**, à quelques passages près. Ces passages — une vingtaine sur l'ensemble du
-portefeuille — sont ceux où un dépôt empiète sur le sujet d'un autre. Ils sont cités intégralement et
+Un point que je ne vous aurais pas signalé si la machine ne l'avait pas rendu visible : **chaque dépôt
+porte une invention et une seule**, à une vingtaine de passages près sur tout le portefeuille. Ces
+passages-là sont ceux où un dépôt empiète sur le sujet d'un autre ; ils sont cités intégralement et
 localisés, parce que c'est là, et seulement là, que la question du périmètre se pose.
 
-**Ce que vaut ce qui précède.** Chaque affirmation est rattachée à une citation littérale, vérifiée
-caractère par caractère contre le document qui la porte ; une citation introuvable est supprimée avec
-l'affirmation qu'elle portait. En revanche, le regroupement en huit objets est un jugement, pas un calcul :
-il est vérifié quant à sa couverture du registre, jamais quant à sa justesse. C'est exactement là que votre
-lecture est irremplaçable, et c'est pour cela que je vous l'envoie avant d'en tirer quoi que ce soit.
+Chaque affirmation est rattachée à une citation littérale, vérifiée caractère par caractère contre le
+document qui la porte ; une citation introuvable est supprimée avec l'affirmation qu'elle portait. Le
+regroupement en huit objets, lui, est un jugement : vérifié quant à sa couverture du registre, jamais quant
+à sa justesse. C'est exactement là que votre lecture est irremplaçable.
 
-**2. Ce que je voudrais vous proposer**
+**2. L'outil**
 
-Ces deux documents sortent de l'outil que nous construisons, et je préfère vous dire d'emblée où il en est,
-plutôt que de vous laisser le découvrir.
+Ces documents sortent de l'outil que nous construisons. Deux propriétés sont vraies aujourd'hui.
 
-**Deux propriétés sont vraies aujourd'hui.** D'abord, la recherche s'exécute dans une enceinte matérielle
-scellée : l'invention non déposée de votre client ne quitte jamais votre poste en clair, ce qui est
-précisément la difficulté d'une recherche d'antériorité avant dépôt. Ensuite, chaque recherche produit un
-**certificat** : ce qui a été cherché, sur quel corpus, à quelle date d'antériorité, scellé — et
-re-vérifiable par un tiers sans avoir à nous faire confiance. Si une recherche de diligence vous est
-opposée dans cinq ans, c'est cette pièce-là qui répond.
+La recherche s'exécute dans une **enceinte matérielle scellée** : l'invention non déposée ne quitte jamais
+votre poste en clair — la difficulté même d'une recherche d'antériorité avant dépôt. Et chaque recherche
+produit un **certificat** : ce qui a été cherché, sur quel corpus, à quelle date d'antériorité, scellé, et
+re-vérifiable par un tiers sans avoir à nous faire confiance. Si votre diligence vous est opposée dans cinq
+ans, c'est cette pièce-là qui répond.
 
-**Une propriété ne l'est pas encore : le rappel.** Le moteur déployé retrouve aujourd'hui **environ 19 %
-des antériorités citées par les examinateurs** (corpus américain, évaluation hors échantillon et non
-circulaire). C'est un plancher mesuré, pas un résultat dont nous nous satisfaisons. Plusieurs leviers sont
-mesurés et en cours d'intégration — je ne les décris pas ici, ils font l'objet d'un examen de brevetabilité
-de notre côté — et le chiffre progresse de façon matérielle. Je ne vous promets pas un rang ni une
-comparaison à l'état de l'art : nous n'avons pas situé cette barre sur un référentiel comparable, et vous
-annoncer une place que je ne peux pas définir ne vous servirait à rien.
+La troisième, l'**exhaustivité** — la part des antériorités pertinentes que la recherche retrouve
+effectivement —, est celle que nous construisons en ce moment. Le moteur déployé retrouve environ 19 % des
+antériorités citées par les examinateurs (corpus américain, évaluation hors échantillon et non circulaire).
+C'est un plancher, mesuré prudemment, et le point important est ailleurs : les leviers qui le font monter
+sont déjà mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines. Je ne les décris
+pas ici — ils font l'objet d'un examen de brevetabilité de notre côté.
 
-Autrement dit : ce n'est pas encore un outil qui remplace une recherche professionnelle. C'en est un qui
-prouve ce qu'il a fait, et qui ne fait pas sortir l'invention.
+Ce que nous voulons construire : un outil qui vous soit réellement utile, et qui fasse mieux que ce que
+vous utilisez aujourd'hui. Sur l'exhaustivité, je ne prétends pas y être déjà. Sur les deux autres points,
+la comparaison est d'une autre nature : à ma connaissance, aucune solution existante ne cherche sans que
+l'invention sorte en clair, ni ne vous laisse une pièce qu'un tiers peut revérifier. Ce ne sont pas des
+degrés sur la même échelle, et ce sont précisément les deux qui comptent pour un dossier non déposé.
 
-**Ce que je vous demande, et qui ne coûte rien.** Une seule chose, à répondre en trois lignes si le cœur
-vous en dit : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je l'imagine utile là où votre
-diligence peut être mise en cause longtemps après — une opposition, un contentieux, une due diligence où
-l'on vous demande ce qui avait été cherché et à quelle date, ou un client qui revient sur le périmètre
-d'une recherche facturée deux ans plus tôt. C'est mon hypothèse, pas votre expérience : si je vise à côté,
-c'est maintenant qu'il est utile de me le dire.
-
-**Ce que nous voulons construire.** Un outil qui vous soit réellement utile, et qui fasse mieux que ce que
-vous utilisez aujourd'hui. Sur le rappel, je viens de vous dire où nous en sommes et je ne prétends pas y
-être déjà. Mais sur les deux autres points, la comparaison est d'une autre nature : à ma connaissance,
-aucune solution existante ne fait la recherche sans que l'invention sorte en clair, ni ne vous laisse une
-pièce qu'un tiers peut revérifier sans nous faire confiance. Ce ne sont pas des degrés sur la même échelle,
-ce sont des choses qui ne se font pas ailleurs — et ce sont précisément celles qui comptent pour un dossier
-non déposé.
-
-L'orienter pendant qu'il se construit, c'est ce qui décide s'il vous est utile ou seulement ingénieux. Et
-si le résultat vous convient une fois votre retour intégré, j'aimerais que votre cabinet en soit le premier
-utilisateur.
+**Une question, qui ne coûte rien** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
+l'imagine utile là où votre diligence peut être mise en cause longtemps après — une opposition, un
+contentieux, une due diligence où l'on vous demande ce qui avait été cherché et à quelle date, ou un client
+qui revient sur le périmètre d'une recherche facturée deux ans plus tôt. C'est mon hypothèse, pas votre
+expérience : si je vise à côté, c'est maintenant qu'il est utile de me le dire.
 
 **3. En pratique**
 
-Les deux documents citent vos dépôts et l'ensemble non déposé, dont **TA-L3**, qui n'est pas déposé et pour
-lequel l'OEB n'accorde aucun délai de grâce. Je ne les envoie donc pas en pièce jointe : ils vous
-parviendront chiffrés à votre seule clé, avec les huit objets, dans un même envoi scellé que vous ouvrez
-sur votre poste. Les objets deviennent vos propres dossiers, les deux documents se placent à côté, et vous
-pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
+Ces deux documents citent vos dépôts et l'ensemble non déposé ; je ne les envoie donc pas en pièce jointe.
+Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans un même envoi scellé que vous
+ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
+vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
 
 Il me faut pour cela votre **carte publique** : deux commandes, je vous envoie les instructions exactes dès
 que la version est prête. Elle ne contient que des clés publiques et ne permet rien d'autre que de vous
-adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit ne parte.
+adresser l'envoi ; nous vérifierons l'empreinte de vive voix avant que quoi que ce soit ne parte.
 
 Le même client vous servira pour l'essai, que je vous proposerai quand la prochaine version du moteur sera
-déployée — c'est une affaire de semaines, et je reviendrai vers vous avec un chiffre à jour et une date.
-L'enceinte est montée pour la séance et démontée ensuite, et je vous accompagne.
+déployée — avec un chiffre à jour et une date.
 
 Bien à vous,
 Henry Decléty

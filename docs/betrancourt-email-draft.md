@@ -122,7 +122,8 @@ les vérifications lui-même.
 
 **3. En pratique**
 
-Ces deux documents citent nos dépôts et l'ensemble non déposé ; je ne les envoie donc pas en pièce jointe.
+Vous avez déjà les dépôts. Ces deux documents-ci citent aussi l'ensemble non déposé, je ne les mets donc
+pas en pièce jointe.
 Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans un même envoi scellé que vous
 ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
 vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
@@ -229,6 +230,11 @@ InferRoute SASU
   everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je les ai relus et je les assume"
   keeps the responsibility yours: an agent drafted it, a professional stands
   behind it, and he is told which is which before he reads a word of it.
+- **He already HAS the filings** (Henry, 23 Sep; sent 2026-09-04, he read them within hours). So the
+  sealed envelope is not protecting the filings from him, and saying so would have been transparently
+  hollow. The reason stands on what he does NOT have: these two documents also quote the unfiled set. The
+  sentence now says that — "Vous avez déjà les dépôts. Ces deux documents-ci citent aussi l'ensemble non
+  déposé" — which is true, is a reason he can check, and incidentally shows we remember what we sent him.
 - **"nos dépôts", not "vos"** (Henry, 23 Sep — the filings are his, Bétrancourt is counsel on them).
   Checked every second-person form in the body rather than only that one: 24 others, all correct — "votre
   diligence", "votre lecture", "au sens où vous les instruiriez", "votre poste", "vos propres dossiers"

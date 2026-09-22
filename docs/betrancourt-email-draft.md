@@ -1,65 +1,64 @@
-# Bétrancourt — first email
+# Bétrancourt — delivery note
 
-**STATUS: DRAFT FOR HENRY. Not sent. Henry approves and sends; IP/legal clearance for external
-distribution is Henry + counsel's and is not cleared at the time of writing.**
+**STATUS: DRAFT FOR HENRY. Not sent. Henry approves and sends. IP/legal clearance for external
+distribution is Henry + counsel's and is open at the time of writing.**
 
-What this email deliberately does NOT do: ask him to install anything. Both clients (`ir probant` for the
-sealed corpus, `sealedresearch` for the search) are blocked on a release decision, and the search enclave
-is not persistent — `ir-sealed-search.eastus2.azurecontainer.io` no longer resolves. Asking a busy
-practitioner to install something that cannot be installed is how you spend a favour and get nothing.
-So this email asks one question — is he willing — and offers two concrete things he can say yes or no to
-separately.
+Rewritten 22 Sep. The first draft was a cold ask — "are you willing" — which was wrong: Henry has already
+discussed both the portfolio and the product test with him, and what Bétrancourt asked for is specifically
+**the pre-work**, because the filings are huge. So this is a delivery note, not an introduction.
+
+It assumes nothing is attached yet: the sealed corpus needs his public card, which needs the client, which
+needs the 0.9.3 release. The email therefore asks for the one thing that unblocks everything and tells him
+what arrives when it does.
 
 ---
 
-Objet : deux choses à vous soumettre — relecture du portefeuille, et un essai de recherche d'antériorité
+Objet : le travail préparatoire sur le portefeuille — et ce qu'il vous faut pour l'ouvrir
 
 Cher Maître,
 
-Deux demandes distinctes, indépendantes l'une de l'autre : vous pouvez accepter l'une, l'autre, les deux
-ou aucune.
+Voici le travail préparatoire dont nous avions parlé : vous m'aviez dit que les dépôts étaient trop longs
+pour être relus tels quels et qu'il fallait d'abord isoler ce qui compte. C'est fait, et cela a donné deux
+documents.
 
-**1. Une relecture du portefeuille, en tant que conseil.**
+**La liste des objets.** Les neuf dépôts et l'ensemble non déposé ont été ramenés à **huit inventions** —
+huit objets au sens où vous les instruiriez. Pour chacun : le mécanisme technique en une phrase, les
+caractéristiques qui pèseraient dans une revendication, ce qu'il ne couvre pas, et les identifiants du
+registre qu'il recouvre. Les 36 entrées du registre (les 9 dépôts et les 27 candidats non déposés) sont
+toutes rattachées à un objet — aucune n'est restée de côté.
 
-Nous avons repris les neuf demandes provisoires déposées (FR2609630 → FR2611881) et l'ensemble non déposé,
-et nous en avons tiré une liste de **huit objets** — huit inventions au sens où vous les instruiriez, avec
-pour chacune le mécanisme technique, les caractéristiques qui comptent pour une revendication, et ce
-qu'elle ne couvre pas. Chaque affirmation de cette liste est rattachée à une **citation littérale** du
-document qui la porte, vérifiée mot à mot : rien n'y figure qui ne soit dans vos dépôts.
+**Le guide de lecture.** Pour chaque dépôt, à quel endroit se trouve la matière de chaque invention : en
+pourcentage du document et en position exacte, de sorte qu'une recherche sur les mots cités tombe sur le
+passage. C'est ce qui remplace la relecture intégrale.
 
-Un point mérite votre attention en priorité : **TA-L3** (l'engagement de revente en enceinte scellée) est
-le seul élément signalé comme urgent au regard de l'EPO, qui n'accorde aucun délai de grâce. Il est
-construit et retenu, non déposé.
+Un point que je ne vous aurais pas signalé si la machine ne l'avait pas rendu visible : **chaque dépôt porte
+une invention et une seule**, à quelques passages près. Ces passages-là — une vingtaine sur l'ensemble du
+portefeuille — sont ceux où un dépôt empiète sur le sujet d'un autre. Ils sont cités intégralement et
+localisés, parce que c'est là que les périmètres de revendication se touchent, et c'est le seul endroit où
+la question de la portée se pose vraiment.
 
-**2. Un essai de notre outil de recherche d'antériorité, sur vos propres divulgations.**
+**Sur la méthode, pour que vous sachiez ce que vaut ce qui suit.** Chaque affirmation de ces deux documents
+est rattachée à une citation littérale, vérifiée caractère par caractère contre le document qui la porte :
+rien n'y figure qui ne soit dans vos dépôts. Ce qui a été écarté l'a été automatiquement — une citation
+introuvable dans le document nommé est supprimée avec l'affirmation qu'elle portait. En revanche, le
+regroupement en huit objets est un jugement, pas un calcul : il est vérifié quant à sa couverture du
+registre, jamais quant à sa justesse. C'est précisément là que votre lecture est irremplaçable.
 
-C'est le second sujet, et je préfère être direct sur ce qu'il vaut aujourd'hui.
+**Comment cela vous parviendra.** Ces documents citent vos dépôts et l'ensemble non déposé — dont **TA-L3**,
+qui n'est pas déposé et pour lequel l'OEB n'accorde aucun délai de grâce. Je ne les envoie donc pas en pièce
+jointe. Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans un même envoi scellé
+que vous ouvrez sur votre poste : les objets deviennent vos propres dossiers, les deux documents se placent
+à côté, et vous pouvez créer vos propres dossiers à partir de là sans qu'ils se mélangent aux miens.
 
-Ce que l'outil **prouve**, et qui est entièrement vrai dès maintenant : chaque recherche produit un
-**certificat** établissant ce qui a été cherché, sur quel corpus, à quelle date d'antériorité, et que la
-requête n'a été lisible que dans une enceinte matérielle scellée — vérifiée par les clés d'AMD et de
-Microsoft avant tout envoi. Un tiers peut revérifier ce certificat sans nous faire confiance et sans
-accéder au contenu. C'est la propriété sur laquelle nous vous demandons un avis.
+**Ce dont j'ai besoin de vous :** installez le client et envoyez-moi votre carte publique — deux commandes,
+je vous envoie les instructions exactes dès que la version est prête. La carte ne contient que des clés
+publiques ; elle ne permet rien d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive
+voix avant que quoi que ce soit ne parte.
 
-Ce que l'outil **ne fait pas encore bien** : le rappel. Le moteur déployé aujourd'hui est purement
-sémantique et retrouve environ **19 % des antériorités qu'un examinateur citerait** (mesuré sur les
-citations d'examinateurs américains). C'est un plancher, pas un résultat dont nous sommes satisfaits. Deux
-leviers sont mesurés et validés — une reformulation par éléments de revendication (+57 % d'atteignabilité)
-et l'expansion par graphe de citations (+23 % ) — et leur intégration est en cours, à l'échelle de
-quelques semaines.
-
-Je vous le dis avant l'essai plutôt qu'après, pour que le résultat ne vous surprenne pas : si vous cherchez
-un outil qui remplace une recherche professionnelle aujourd'hui, ce n'est pas encore celui-là.
-
-**Ce que nous vous demandons, et qui a le plus de valeur pour nous :** nos mesures portent sur des abrégés
-de demandes déjà publiées. Vos divulgations réelles, non déposées, sont une distribution que nous n'avons
-jamais pu mesurer — c'est notre inconnue principale, et votre retour oriente directement la suite.
-Rien de ce que vous soumettriez ne quitte votre poste en clair.
-
-**En pratique.** Si l'un ou l'autre vous intéresse, nous convenons d'un créneau : l'enceinte de recherche
-est montée pour la séance puis démontée, et nous vous accompagnons. La liste des huit objets peut vous
-être transmise chiffrée à votre seule clé, à lire sur votre poste — nous vous indiquerons comment la
-produire le moment venu.
+Le même client vous servira pour l'essai de recherche d'antériorité dont nous avions parlé. Je vous
+écrirai séparément pour convenir d'un créneau : l'enceinte est montée pour la séance et démontée ensuite,
+et je vous accompagne. Je vous redirai à ce moment-là, avant l'essai et non après, ce que l'outil retrouve
+aujourd'hui et ce qu'il ne retrouve pas encore.
 
 Bien à vous,
 Henry Decléty
@@ -69,19 +68,21 @@ InferRoute SASU
 
 ## Notes for Henry, not part of the email
 
-- **Language.** Drafted in French on the assumption he is a French CPI (INPI, récépissés, FR numbers). Say
-  the word for English.
-- **The 19% is stated before he tests, on purpose.** A tester told the weakness reads a modest result as
-  calibration; one who discovers it reads it as concealment. It is also the only version of this email
-  that stays true if he runs ten searches and finds little.
-- **Nothing is attached and nothing is promised as software.** When the release lands, the follow-up is
-  short: how to install, how to produce his card, and a date for the session.
-- **His public card** is what the sealed transfer needs, and it needs the client, which needs the release.
-  That is why it is described ("nous vous indiquerons comment") rather than requested now.
-- **Claims check.** The certificate sentence is the only strong claim and it is true today. "Vérifiée par
-  les clés d'AMD et de Microsoft" matches what the panel actually checks. No claim is made about what the
-  software inside the enclave does with the text beyond that, which is the honest boundary — attestation
-  proves identity, never retention.
-- **Unresolved before sending:** IP clearance for external distribution; whether TA-L3 should be named in
-  writing at all before it is filed, given EPO has no grace period — that is exactly the kind of sentence
-  that wants counsel's eye, and he IS counsel, which is circular. Henry to rule.
+- **What changed from the first draft.** It no longer asks whether he is willing — you have already had that
+  conversation. It delivers, explains what the work is worth, and asks for the card.
+- **The "one filing, one invention" line is the strongest thing in the email**, and neither of us knew it
+  before the run: it is a structural finding about the portfolio, it came out of arithmetic rather than
+  opinion, and it is exactly what counsel would want to be told. It also sets up the crossing passages as
+  the thing worth his billable attention.
+- **The methodology paragraph concedes the weak half on purpose.** The quotes are checked; the grouping is
+  a judgement. Saying so is what makes the checked half believable, and he will find the seam anyway.
+- **Recall is deliberately NOT quantified here.** This email is the portfolio delivery; the search test is a
+  separate thread with its own framing (certificate first, ~0.19 named before he tests). Putting a weak
+  number about a different product into a strong delivery note would spend the delivery's credibility on
+  something it is not about.
+- **TA-L3 is named.** You have not ruled on whether it should appear in writing before filing — EPO has no
+  grace period, he is the counsel who would tell you, and asking him is circular. It is in the draft
+  because the sealed channel is the safest transmission available and the reading guide quotes it anyway;
+  delete the clause if you would rather raise it by voice first.
+- **Blocked on:** the 0.9.3 release (he cannot install anything today), and IP clearance. The email promises
+  instructions "dès que la version est prête", which is honest and commits you to nothing.

@@ -57,7 +57,7 @@ relus et je les assume.
 
 **1. Le travail préparatoire**
 
-Vous m'aviez dit que les dépôts étaient trop longs pour être relus tels quels. Voici deux documents.
+Voici deux documents pour rendre le corpus plus lisible.
 
 **La liste des objets** : les neuf dépôts et l'ensemble non déposé ramenés à **huit inventions**, au sens où
 vous les instruiriez — le mécanisme, les caractéristiques qui pèseraient dans une revendication, ce qui
@@ -135,6 +135,11 @@ InferRoute SASU
 
 ## Notes for Henry, not part of the email
 
+- **The opening no longer quotes him back to himself** (Henry, 23 Sep). "Vous m'aviez dit que les dépôts
+  étaient trop longs" attributed a statement to the reader in the first line of a letter — which invites
+  him to correct the paraphrase instead of reading on, and can land as a reproach when the filings are his.
+  "Voici deux documents pour rendre le corpus plus lisible" says what the documents are FOR and lets the
+  work justify itself.
 - **Why one email and not two.** The delivery is what earns the right to make the offer. Sending the
   pre-work and then a separate pitch would waste the credibility the pre-work buys.
 - **The ambition and the no-ranking refusal sit on DIFFERENT AXES, deliberately** (Henry, 23 Sep: don't

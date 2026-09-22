@@ -39,6 +39,18 @@ sont déjà mesurés, pas espérés". Measured-not-hoped is true and is the stro
 No figure was added, no ceiling implied, no ranking promised: inventing optimism here would undo the
 calibration the whole email is built on.
 
+**"Very high recall scores" was NOT written** (Henry, 23 Sep, asked for it). Our tests do not estimate it.
+The ~0.55 is THEIR published result, reached by a technique we have not implemented; we have never measured
+it ourselves, so "nos tests estiment" would be false about the tests. What IS true and says the same thing
+more credibly: "la prochaine version vise le meilleur résultat publié sur ce jeu" — a named target on a
+named benchmark he can look up, rather than an adjective. If Henry wants the stronger sentence, the honest
+route is the one the recall session offered: implement passage-level retrieval, re-measure, and the claim
+becomes a fact.
+
+**"MCP" is not in the letter either.** It means nothing to a patent attorney and would read as jargon
+padding. The same fact in his language: "c'est ce moteur qui équipe l'assistant dans le client" — which
+also does useful work, tying the benchmark number to the thing he would actually use.
+
 **Cut to three lines** (Henry, 23 Sep) from ninety words. What had to survive, and did: the benchmark
 NAMED with its arXiv reference (a bar he can check is the whole point — the line arguing that is gone
 because the reference makes it), the explicit non-comparability with the 19%, and the honest standing.
@@ -110,8 +122,8 @@ tenus à l'écart de sa mise au point. C'est peu. Mais les leviers qui font mont
 mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines.
 
 Nous nous mesurons aussi sur DAPFAM (arXiv:2506.22141), un jeu d'évaluation public — chiffres non
-comparables à celui ci-dessus, le corpus y est fermé. Nous y sommes au niveau des meilleures méthodes
-publiées au niveau document ; leur meilleur résultat, obtenu au niveau passage, est notre cible.
+comparables à celui ci-dessus, le corpus y est fermé. C'est ce moteur qui équipe l'assistant dans le client, et la
+prochaine version vise le meilleur résultat publié sur ce jeu.
 
 Ce que nous voulons construire : un outil qui vous fasse gagner du temps sur ce que vous faites
 aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé à une preuve aussi solide et

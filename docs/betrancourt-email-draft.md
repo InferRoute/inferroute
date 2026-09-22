@@ -15,6 +15,11 @@ becomes the first client, and the delivery is what earns the right to ask.
 - **Anything about agentic confirmation** — a live-model run on 22 Sep captured **0%** of the oracle
   ceiling (recall 0.08, recovered 1 of 12). It is an unrealised ceiling, not a result.
 
+**The levers are still withheld — the letter just no longer ANNOUNCES it** (Henry, 23 Sep: don't say
+"ils sont en cours d'examen de brevetabilité"). Announcing an omission draws attention to it, and to a
+patent attorney "we are patenting this" is either obvious or slightly odd coming from a supplier. The
+mechanisms remain undescribed, which was the IP requirement; nothing now points at the gap.
+
 **The metric is not named at all** (Henry rejected "rappel", then "exhaustivité", 23 Sep). No French noun
 works: "rappel" reads as "reminder" to a practitioner, "exhaustivité" claims a completeness we do not have,
 and the English "recall" is jargon in a French letter. So the sentence describes the CAPABILITY instead —
@@ -102,8 +107,7 @@ ans, c'est cette pièce-là qui répond.
 La troisième — retrouver les antériorités pertinentes — est celle que nous construisons. Le moteur en
 retrouve aujourd'hui environ 19 % de celles que citent les examinateurs américains, mesuré sur des dossiers
 tenus à l'écart de sa mise au point. C'est peu. Mais les leviers qui font monter ce chiffre sont déjà
-mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines ; je ne les détaille pas ici,
-ils sont en cours d'examen de brevetabilité.
+mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines.
 
 Nous nous mesurons aussi sur DAPFAM (arXiv:2506.22141), un jeu d'évaluation public — chiffres non
 comparables à celui ci-dessus, le corpus y est fermé. Nous y sommes au niveau des meilleures méthodes

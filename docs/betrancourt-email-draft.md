@@ -52,7 +52,7 @@ Objet : le travail préparatoire sur le portefeuille
 
 Cher Maître,
 
-Un mot d'abord : ce travail et cette lettre ont été préparés par l'agent que nous construisons ; je les ai
+Un mot d'abord : ce travail et cette lettre ont été préparés par un LLM, depuis mon ordinateur ; je les ai
 relus et j'en réponds.
 
 **1. Le travail préparatoire**
@@ -167,6 +167,14 @@ InferRoute SASU
   him to RUN anything to learn what a real unfiled disclosure looks like as an input — a description does
   it. If we wait for Build 2 to ask, Build 2 gets built blind to the one thing the recall session calls its
   principal unknown. So the trial waits; the requirements question goes now, at zero cost to him.
+- **"un LLM, depuis mon ordinateur"** (Henry, 23 Sep), not "l'agent que nous construisons" — more concrete,
+  and it stops the letter-writer being conflated with the product being sold. One word changed from his
+  wording: "DEPUIS mon ordinateur", not "SUR". The agent runs on his machine; the model does not. To a
+  reader, "un LLM sur mon ordinateur" states local inference, which is false for this letter (a hosted
+  model) and false for the portfolio work (a sealed enclave). In a letter whose whole argument is that the
+  invention never leaves the machine in the clear, a careless claim about where computation happens is the
+  one inaccuracy that would cost most if he noticed it. Say "sur" instead if you prefer — but it would not
+  be true.
 - **The agent disclosure is FIRST and one sentence** (Henry, 23 Sep; I had put it last and he moved it).
   At the top it has to be short, flat and unapologetic or it becomes a disclaimer the reader weighs
   everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je

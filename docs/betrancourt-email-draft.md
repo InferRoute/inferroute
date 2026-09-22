@@ -87,9 +87,17 @@ publiées ; vos divulgations réelles, non déposées, sont une distribution que
 mesurer, et c'est notre inconnue principale. Nous n'avons pas besoin que vous nous confiiez un dossier
 pour l'apprendre — il suffit que vous nous disiez de quoi il a l'air.
 
-Je ne vous propose pas d'acheter un produit fini. Je vous propose d'en orienter un qui ne l'est pas, avant
-qu'il le soit — et, si le résultat vous convient une fois votre retour intégré, que votre cabinet en soit
-le premier utilisateur.
+**Ce que nous voulons construire.** Un outil qui vous soit réellement utile, et qui fasse mieux que ce que
+vous utilisez aujourd'hui. Sur le rappel, je viens de vous dire où nous en sommes et je ne prétends pas y
+être déjà. Mais sur les deux autres points, la comparaison est d'une autre nature : à ma connaissance,
+aucune solution existante ne fait la recherche sans que l'invention sorte en clair, ni ne vous laisse une
+pièce qu'un tiers peut revérifier sans nous faire confiance. Ce ne sont pas des degrés sur la même échelle,
+ce sont des choses qui ne se font pas ailleurs — et ce sont précisément celles qui comptent pour un dossier
+non déposé.
+
+L'orienter pendant qu'il se construit, c'est ce qui décide s'il vous est utile ou seulement ingénieux. Et
+si le résultat vous convient une fois votre retour intégré, j'aimerais que votre cabinet en soit le premier
+utilisateur.
 
 **3. En pratique**
 
@@ -116,6 +124,12 @@ InferRoute SASU
 
 - **Why one email and not two.** The delivery is what earns the right to make the offer. Sending the
   pre-work and then a separate pitch would waste the credibility the pre-work buys.
+- **The ambition and the no-ranking refusal sit on DIFFERENT AXES, deliberately** (Henry, 23 Sep: don't
+  say "I'm not selling you a finished product"; say we want to build something useful and better than what
+  exists). Claiming to beat others on RECALL would be the SOTA overclaim the R&D session vetoed. Claiming
+  it on confidentiality and provability is not a claim about degree at all — nothing else does the search
+  without the invention leaving in the clear, and nothing else leaves a third-party-verifiable certificate.
+  "Ce ne sont pas des degrés sur la même échelle" is the sentence that keeps both true in one paragraph.
 - **The honest-weakness paragraph is the commercial move, not a concession.** He is a professional who will
   re-measure us. A firm told 19% that sees 19% trusts the next number; a firm that inferred more and sees
   19% does not take the second meeting. Naming it before the test converts a weak number into evidence that

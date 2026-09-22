@@ -106,11 +106,13 @@ plain-pied : notre approche hybride se situe au niveau des meilleures d'entre el
 le meilleur résultat publié, obtenu au niveau passage, est la cible sur laquelle nous travaillons. Je
 préfère vous citer une barre que vous pouvez aller vérifier qu'un superlatif.
 
-Ce que nous voulons construire : un outil qui vous soit réellement utile, et qui fasse mieux que ce que
-vous utilisez aujourd'hui. Sur ce dernier point, je ne prétends pas y être déjà. Sur les deux autres points,
-la comparaison est d'une autre nature : à ma connaissance, aucune solution existante ne cherche sans que
-l'invention sorte en clair, ni ne vous laisse une pièce qu'un tiers peut revérifier. Ce ne sont pas des
-degrés sur la même échelle, et ce sont précisément les deux qui comptent pour un dossier non déposé.
+Ce que nous voulons construire : un outil qui vous fasse gagner du temps sur ce que vous faites
+aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé à une preuve aussi solide et
+aussi nette qu'une preuve peut l'être : une attestation matérielle qui remonte aux clés du fabricant, des
+énoncés signés, revérifiables par un tiers sans avoir à nous croire. Sur la recherche elle-même, je ne
+prétends pas encore être devant. Mais aucune solution existante ne cherche sans que l'invention sorte en
+clair, ni ne vous laisse une pièce de cette nature : ce ne sont pas des degrés sur la même échelle, et ce
+sont les deux qui comptent pour un dossier non déposé.
 
 **Une question** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
 l'imagine utile là où votre diligence peut être mise en cause longtemps après — une opposition, un
@@ -163,6 +165,16 @@ InferRoute SASU
   work justify itself.
 - **Why one email and not two.** The delivery is what earns the right to make the offer. Sending the
   pre-work and then a separate pitch would waste the credibility the pre-work buys.
+- **"Plus efficace que tout" was NOT written, and it is the one place I softened Henry's instruction**
+  (23 Sep: useful because more efficient than anything by the next version, with a proof as solid and clean
+  as it gets). The PROOF half is written as asked and is defensible: hardware attestation chaining to the
+  manufacturer's keys, signed statements, third-party re-verifiable is about as strong as evidence gets
+  here. The "more efficient than anything" half would contradict the DAPFAM paragraph TWO LINES ABOVE,
+  where the letter says the published passage-level best is the target we work toward — and a reader who
+  catches that is the reader we most need to keep. So the ambition is "vous fasse gagner du temps sur ce
+  que vous faites aujourd'hui", which is the useful claim, and superiority stays where it is true: nothing
+  else searches without the invention leaving in the clear, nothing else leaves a proof of that nature.
+  Say the word and I will write it flat — it would just be the one sentence a careful reader could falsify.
 - **The ambition and the no-ranking refusal sit on DIFFERENT AXES, deliberately** (Henry, 23 Sep: don't
   say "I'm not selling you a finished product"; say we want to build something useful and better than what
   exists). Claiming to beat others on RECALL would be the SOTA overclaim the R&D session vetoed. Claiming

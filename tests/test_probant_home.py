@@ -460,8 +460,75 @@ def test_the_sharing_page_shows_a_fingerprint_and_a_public_card_and_never_a_key(
     assert out["showsFingerprint"] and out["showsPublicCard"]
     assert out["listsBothMatters"]                   # a corpus is chosen from the matters, not typed out
     # Sharing sends exactly what was ticked, to the contact chosen — never "all of them" by default.
-    assert out["sent"] == {"to": "betrancourt", "matters": ["Acme/battery-0"], "note": ""}
+    assert out["sent"]["to"] == "betrancourt" and out["sent"]["matters"] == ["Acme/battery-0"]
+    assert out["sent"]["note"] == "" and out["sent"]["documents"] == []      # nothing ticked, nothing sent
     assert out["confirmed"] and out["pathShown"]     # where the file is, so it can actually be sent
     # A share signed by a fingerprint that is not a contact SAYS so: a signature proves the corpus is as that
     # key wrote it, never whose key it is.
     assert out["unknownWarned"]
+
+
+def test_opening_a_corpus_from_the_page_does_not_drop_its_documents(home, tmp_path, monkeypatch):
+    """The CLI wrote the corpus documents and the PAGE did not — it opened the matters and returned. The
+    reading guide and matter list arrived sealed and were dropped in silence, which is the worst shape a
+    loss can take: the delivery was made FOR those documents (Henry, 22 Sep: "did you integrate the corpus
+    object in the client?" — the answer was no, and this is the half that mattered)."""
+    from inferroute_cli import probant_share as SH
+    _h, app_client, _tmp = home
+    # Build a real sealed corpus from a second installation, addressed to this one.
+    me = SH.identity()
+    guide = tmp_path / "READING-GUIDE.txt"
+    guide.write_text("READING GUIDE\n\nFR2609630-P1.txt  read: 5-29%\n")
+    payload = SH.build_share([{"matter": "InferRoute/continuity", "date_bound": "2026-07-13",
+                               "disclosure": "d", "marks": {}, "claims": [], "origin": "x"}],
+                             note="the pre-work", files=SH.corpus_files([guide]),
+                             corpus_name="InferRoute portfolio")
+    blob = SH.seal_to(SH.public_card(me), payload, me)
+    share = tmp_path / "corpus.probant-share"
+    share.write_bytes(blob)
+
+    # A LOOK first: the preview must name the documents, or a reader cannot tell what they are accepting.
+    r = app_client.post("/api/sharing/open", json={"path": str(share)})
+    assert r.status_code == 200, r.text
+    assert [f["name"] for f in r.json()["documents"]] == ["READING-GUIDE.txt"]
+    assert r.json()["corpus"] == "InferRoute portfolio"
+
+    # …then opening it writes them, and SAYS where.
+    r = app_client.post("/api/sharing/open", json={"path": str(share), "client": "FromHenry"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["opened"] == ["FromHenry/continuity"]
+    assert body["documents"] == ["READING-GUIDE.txt"] and body["corpus_dir"]
+    landed = SH.corpus_dir("FromHenry") / "READING-GUIDE.txt"
+    assert landed.is_file() and "FR2609630-P1.txt" in landed.read_text()
+
+
+def test_the_page_offers_corpus_documents_by_id_and_never_takes_a_path(home, tmp_path, monkeypatch):
+    """A path from a browser page is a path someone can edit, and "seal this file to a stranger" is the last
+    place to accept one. The page picks from what the server offers, by id."""
+    from inferroute_cli import probant_portfolio as PF
+    from inferroute_cli import probant_share as SH
+    _h, c, _tmp = home
+    run = PF.portfolio_root() / "20260920T151600Z-2695ad"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "MATTERS.txt").write_text("MATTERS\n\n1. CONTINUITY\n")
+    secret = tmp_path / "not-offered.txt"
+    secret.write_text("this file was never offered by the server")
+
+    offered = c.get("/api/sharing").json()["documents"]
+    assert [x["name"] for x in offered] == ["MATTERS.txt"]
+    assert all("path" not in x for x in offered), "the page is never told a filesystem path"
+
+    SH.add_contact("betrancourt", SH.public_card(SH.identity()))
+    # A matter must EXIST or the share below never happens and every assertion after it is a no-op — which
+    # is exactly how this test first passed under inversion.
+    assert S.cmd_new("Acme", "cooling", "2026-01-01") == 0
+    mid = "Acme/cooling"
+
+    # An id the server did not offer is ignored rather than read: a path, a traversal, and a real id.
+    r = c.post("/api/sharing/share", json={"to": "betrancourt", "matters": [mid],
+                                           "documents": [str(secret), "../../etc/passwd", offered[0]["id"]]})
+    assert r.status_code == 200, r.text
+    assert r.json()["documents"] == ["MATTERS.txt"], r.json()
+    sealed = Path(r.json()["path"]).read_bytes()
+    assert b"never offered" not in sealed and b"root:" not in sealed

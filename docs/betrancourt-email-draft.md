@@ -72,10 +72,20 @@ annoncer une place que je ne peux pas définir ne vous servirait à rien.
 Autrement dit : ce n'est pas encore un outil qui remplace une recherche professionnelle. C'en est un qui
 prouve ce qu'il a fait, et qui ne fait pas sortir l'invention.
 
-**Ce que je vous demande, et qui a le plus de valeur pour nous.** Nos mesures portent sur des abrégés de
-demandes déjà publiées. Vos divulgations réelles, non déposées, sont une distribution que nous n'avons
-jamais pu mesurer — c'est notre inconnue principale. Un essai sur vos propres dossiers, et votre avis sur
-ce qui manque, orientent directement ce que nous construisons ensuite.
+**Ce que je ne vous demande pas encore.** Vous faire passer un dossier réel dans un moteur qui en
+retrouve un cinquième, ce serait vous faire porter le coût d'une version que je sais incomplète. L'essai,
+je vous le proposerai quand la prochaine version du moteur sera déployée — c'est une affaire de semaines,
+et je reviendrai vers vous avec un chiffre à jour et une date, pas avant.
+
+**Ce que je vous demande maintenant, et qui ne coûte rien.** Deux choses, à répondre en trois lignes si
+vous voulez. D'abord : est-ce que le certificat vaut ce que je crois qu'il vaut ? C'est-à-dire, dans votre
+pratique, une pièce établissant ce qui a été cherché, sur quel corpus et à quelle date, opposable des
+années plus tard — est-ce que cela vous servirait, et dans quel contexte précisément ? Ensuite : à quoi
+ressemble, chez vous, ce qu'on donnerait à chercher — une note d'invention de trois pages, un projet de
+revendications, la description d'un inventeur ? Nos mesures portent sur des abrégés de demandes déjà
+publiées ; vos divulgations réelles, non déposées, sont une distribution que nous n'avons jamais pu
+mesurer, et c'est notre inconnue principale. Nous n'avons pas besoin que vous nous confiiez un dossier
+pour l'apprendre — il suffit que vous nous disiez de quoi il a l'air.
 
 Je ne vous propose pas d'acheter un produit fini. Je vous propose d'en orienter un qui ne l'est pas, avant
 qu'il le soit — et, si le résultat vous convient une fois votre retour intégré, que votre cabinet en soit
@@ -93,8 +103,8 @@ Il me faut pour cela votre **carte publique** : deux commandes, je vous envoie l
 que la version est prête. Elle ne contient que des clés publiques et ne permet rien d'autre que de vous
 adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit ne parte.
 
-Le même client vous servira pour l'essai. Je vous écrirai pour convenir d'un créneau : l'enceinte est
-montée pour la séance et démontée ensuite, et je vous accompagne.
+Le même client vous servira le jour de l'essai, quand la prochaine version du moteur sera déployée :
+l'enceinte est montée pour la séance et démontée ensuite, et je vous accompagne.
 
 Bien à vous,
 Henry Decléty
@@ -117,5 +127,17 @@ InferRoute SASU
   0% of its oracle ceiling on 22 Sep), no "SOTA".
 - **TA-L3 is named.** Still your ruling — EPO has no grace period, he is the counsel who would advise, and
   asking him is circular. Delete the clause if you would rather raise it by voice.
+- **The search trial is HELD for Build 2, at Henry's call (22 Sep), and he was right for a reason beyond
+  timing: the search enclave does not currently exist — `ir-sealed-search.eastus2.azurecontainer.io` no
+  longer resolves — so a session could not be scheduled today even if he said yes. Asking a professional to
+  put a client's unfiled invention through a one-fifth-recall engine is asking him to carry the cost of a
+  version we know is incomplete, and it spends the first impression on the weakest thing we have.
+- **But the distribution-shift question is NOT held**, and that is the split that matters. We do not need
+  him to RUN anything to learn what a real unfiled disclosure looks like as an input — a description does
+  it. If we wait for Build 2 to ask, Build 2 gets built blind to the one thing the recall session calls its
+  principal unknown. So the trial waits; the requirements question goes now, at zero cost to him.
+- **The other ask is a validation of the lead claim:** does the certificate matter in his practice, and in
+  what context. If the answer is lukewarm from the one professional we have, that is worth knowing before
+  more is built on it.
 - **Blocked on:** 0.9.3 release (he cannot install today) and IP clearance. The email promises instructions
   "dès que la version est prête", which commits you to nothing.

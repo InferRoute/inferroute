@@ -116,6 +116,11 @@ l'imagine utile là où votre diligence peut être mise en cause longtemps aprè
 contentieux, une due diligence où l'on vous demande ce qui avait été cherché et à quelle date, ou un client
 qui revient sur le périmètre d'une recherche facturée deux ans plus tôt.
 
+Si vous préférez vous faire votre propre idée plutôt que de me croire, le client comporte un bouton qui
+prépare un dossier d'audit : la preuve, débarrassée de tout ce qui touche à l'invention, le vérificateur,
+et la marche à suivre pour qu'un tiers — votre propre IA, par exemple — en contrôle la solidité et refasse
+les vérifications lui-même.
+
 **3. En pratique**
 
 Ces deux documents citent vos dépôts et l'ensemble non déposé ; je ne les envoie donc pas en pièce jointe.
@@ -225,6 +230,17 @@ InferRoute SASU
   everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je les ai relus et je les assume"
   keeps the responsibility yours: an agent drafted it, a professional stands
   behind it, and he is told which is which before he reads a word of it.
+- **He is pointed at the audit button** (Henry, 23 Sep), which answers the question by demonstration
+  rather than by assertion — and is the only honest way to ask a sceptic to assess evidence. Three things
+  make it worth the four lines: the pack is evidence-ONLY, so nothing about a client's invention travels
+  with it; it ships the verifier and the instructions, so he is not taking our word for the checking
+  either; and "votre propre IA" lands directly on his own open question of 2026-09-04, where he asked
+  whether Henry objects to Santarelli using Claude Team and ChatGPT Business. The letter now invites him to
+  point that exact tooling at our evidence.
+- **Note for when he does it:** the audit brief tells the auditor to treat the shipped verifier as
+  untrusted and to compare it against the published package. That instruction only works once 0.9.3 is
+  released — it is the version that carries verify_record.py. Releasing and inviting the audit are one
+  decision, not two.
 - **The question asks about LEGAL VALIDITY, not about value** (Henry, 23 Sep). "Est-ce que le certificat
   vaut ce que je crois qu'il vaut ?" asked him to rate our self-assessment — vague, and it invites a polite
   answer. "Est-ce qu'une telle pièce a une valeur juridique ?" is a question inside his competence that has

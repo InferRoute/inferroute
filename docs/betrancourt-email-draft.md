@@ -53,7 +53,7 @@ Objet : le travail préparatoire sur le portefeuille
 Cher Maître,
 
 Un mot d'abord : ce travail et cette lettre ont été préparés par un LLM, depuis mon ordinateur ; je les ai
-relus et j'en réponds.
+relus et je les assume.
 
 **1. Le travail préparatoire**
 
@@ -167,6 +167,10 @@ InferRoute SASU
   him to RUN anything to learn what a real unfiled disclosure looks like as an input — a description does
   it. If we wait for Build 2 to ask, Build 2 gets built blind to the one thing the recall session calls its
   principal unknown. So the trial waits; the requirements question goes now, at zero cost to him.
+- **"je les assume", not "j'en réponds"** (Henry queried it, 23 Sep). "Répondre de quelque chose" is
+  correct and is legal register, but as the letter's FIRST sentence it protests slightly — it answers an
+  accusation nobody has made yet. "Je les assume" states the same responsibility flatly and gets out of the
+  way, which is what an opening line should do.
 - **"un LLM, depuis mon ordinateur"** (Henry, 23 Sep), not "l'agent que nous construisons" — more concrete,
   and it stops the letter-writer being conflated with the product being sold. One word changed from his
   wording: "DEPUIS mon ordinateur", not "SUR". The agent runs on his machine; the model does not. To a
@@ -177,8 +181,8 @@ InferRoute SASU
   be true.
 - **The agent disclosure is FIRST and one sentence** (Henry, 23 Sep; I had put it last and he moved it).
   At the top it has to be short, flat and unapologetic or it becomes a disclaimer the reader weighs
-  everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je
-  les ai relus et j'en réponds" keeps the responsibility yours: an agent drafted it, a professional stands
+  everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je les ai relus et je les assume"
+  keeps the responsibility yours: an agent drafted it, a professional stands
   behind it, and he is told which is which before he reads a word of it.
 - **One question, and it SUGGESTS the contexts rather than asking for them** (Henry, 23 Sep). An open
   "in what context?" makes a busy practitioner do the work of answering; naming three plausible ones and

@@ -252,3 +252,22 @@ def test_a_base_install_says_what_to_install_instead_of_a_traceback(monkeypatch,
     assert "Traceback" not in err
     assert "cryptography" in err and "pip install 'inferroute[confidential]'" in err
     assert "Nothing was changed" in err
+
+
+def test_bare_ir_probant_says_where_to_start(monkeypatch, capsys):
+    """22 Sep, walking the install as a newcomer: `ir probant` answered with argparse's "error: the
+    following arguments are required: cmd" above nineteen subcommand names. True, useless, and the first
+    thing a patent professional sees. A first screen should answer "what do I do", not "what did you do
+    wrong"."""
+    import sys as _sys
+    from inferroute_cli import probant as CLI
+    monkeypatch.setattr(_sys, "argv", ["ir", "probant"])
+    rc = CLI.main([])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "ir probant home" in err and "opens the page" in err
+    assert "the following arguments are required" not in err
+    assert "identity" in err                       # the command he needs to be sent a sealed corpus
+    # A real subcommand is untouched by the guard.
+    monkeypatch.setattr(_sys, "argv", ["ir", "probant", "list"])
+    assert CLI.main(["list"]) == 0

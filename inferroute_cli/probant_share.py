@@ -30,12 +30,15 @@ import hashlib
 import json
 import os
 import re
+import secrets
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import probant as S
 
-SCHEMA = "inferroute.probant-share/2"
+SCHEMA = "inferroute.probant-share/3"        # /2 shares still open: the corpus block is optional
+MAX_CORPUS_FILE = 4_000_000                  # one side document; the reading guide of a 9-filing portfolio is 47 KB
+MAX_CORPUS_TOTAL = 16_000_000
 SUFFIX = ".probant-share"
 
 
@@ -271,15 +274,55 @@ def portfolio_payload(ident: str, limit: int = 2000) -> Dict[str, Any]:
             "marks": {}, "claims": claims_from_portfolio(ident, limit), "origin": f"portfolio:{ident}"}
 
 
-def build_share(matters: List[Dict[str, Any]], note: str = "") -> Dict[str, Any]:
+def corpus_files(paths: Sequence[Path]) -> List[Dict[str, Any]]:
+    """Side documents that belong to the DELIVERY rather than to any one matter.
+
+    A matter list and a reading guide describe a portfolio as a whole; there was nowhere for them to travel,
+    so they would have gone as plain email attachments — carrying verbatim quotes from every filing and from
+    the UNFILED surplus. That is the disclosure this product exists to prevent, and the fix is not to warn
+    about it but to give the corpus somewhere to put them, inside the same seal as the matters.
+
+    Text only, and said so: these are read by a person, not re-verified by a machine.
+    """
+    out: List[Dict[str, Any]] = []
+    total = 0
+    for path in paths:
+        p = Path(path)
+        if not p.is_file():
+            raise S.ProbantError(f"no such file to include: {p}")
+        raw = p.read_bytes()
+        if len(raw) > MAX_CORPUS_FILE:
+            raise S.ProbantError(f"{p.name} is {len(raw) / 1e6:.1f} MB; a corpus document may be up to "
+                                  f"{MAX_CORPUS_FILE / 1e6:.0f} MB")
+        total += len(raw)
+        if total > MAX_CORPUS_TOTAL:
+            raise S.ProbantError("those documents come to more than this share carries; send fewer")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise S.ProbantError(f"{p.name} is not text; a corpus document travels as text a person reads") from e
+        out.append({"name": re.sub(r"[^A-Za-z0-9._ -]+", "-", p.name)[:80] or "document.txt",
+                    "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "text": text})
+    return out
+
+
+def build_share(matters: List[Dict[str, Any]], note: str = "", files: Optional[List[Dict[str, Any]]] = None,
+                corpus_name: str = "") -> Dict[str, Any]:
     """A corpus of matters in one share: several matters, one file, one signature, one key exchange.
 
     One matter at a time was the first shape, and it is the wrong unit for the job — handing a portfolio to
     counsel means handing over everything at once, not fifteen files and fifteen confirmations.
+
+    The corpus also carries an IDENTITY and its own side documents. The identity is what lets the recipient
+    tell three things apart that otherwise blur into one folder: the matters that arrived in this delivery,
+    the documents that describe the delivery as a whole, and the matters they go on to create themselves.
+    Without it, work done on top of someone else's corpus is indistinguishable from the corpus.
     """
     if not matters:
         raise S.ProbantError("there is nothing to share")
-    return {"schema": SCHEMA, "matters": matters, "note": note[:2000],
+    corpus = {"id": f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}",
+              "name": (corpus_name or "shared corpus")[:80], "files": list(files or [])}
+    return {"schema": SCHEMA, "matters": matters, "corpus": corpus, "note": note[:2000],
             "made_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "evidence": ("Each claim carries a verbatim quote and the sha256 of the document it came from. "
                          "Those documents are NOT in this share, so the Probant that opens it cannot "
@@ -309,6 +352,78 @@ def _matter_document(entry: Dict[str, Any], payload: Dict[str, Any], who: str) -
         lines += [""]
     lines += ["## About this evidence", "", payload.get("evidence", ""), ""]
     return "\n".join(lines)
+
+
+def corpus_dir(client: str) -> Path:
+    """Where a delivery's own documents live: beside the matters, named so nobody mistakes them for one.
+
+    Not inside a matter, because they describe the whole corpus, and not under confidential/, because the
+    recipient is meant to READ them.
+    """
+    return S.probant_root() / S.sanitize(client, "client") / "shared-corpus"
+
+
+def corpora_record(corpus_id: str) -> Path:
+    return S._irhome() / "confidential" / "corpora" / f"{re.sub(r'[^A-Za-z0-9-]+', '-', corpus_id)[:60]}.json"
+
+
+def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
+    """Write the delivery's side documents and record the delivery itself. Returns what was written.
+
+    Each file is checked against the sha256 the sender put beside it — not proof of anything about the
+    document's CONTENT, which only the sender's signature covers, but it catches a file that did not
+    survive the trip, which otherwise shows up as a silently short reading guide.
+    """
+    corpus = payload.get("corpus") or {}
+    files = corpus.get("files") or []
+    if not corpus:
+        return {"id": "", "written": [], "corpus": {}}
+    d = corpus_dir(client)
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    written = []
+    for f in files:
+        name = re.sub(r"[^A-Za-z0-9._ -]+", "-", str(f.get("name") or "document.txt"))[:80] or "document.txt"
+        raw = str(f.get("text") or "").encode("utf-8")
+        said = str(f.get("sha256") or "")
+        if said and hashlib.sha256(raw).hexdigest() != said:
+            raise S.ProbantError(f"{name} did not arrive as it was sent (its hash does not match); "
+                                  "ask for the share again rather than reading a truncated document")
+        out = d / name
+        out.write_bytes(raw)
+        os.chmod(out, 0o600)
+        written.append(name)
+    record = {"schema": "inferroute.probant-corpus/1", "id": corpus.get("id", ""),
+              "name": corpus.get("name", ""), "client": client,
+              "from": payload.get("from_fingerprint"), "from_name": payload.get("from_name"),
+              "known_contact": payload.get("from_known"), "made_at": payload.get("made_at"),
+              "note": payload.get("note", ""), "files": written,
+              "matters": [e.get("matter") for e in (payload.get("matters") or [])],
+              "opened_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    rec = corpora_record(record["id"] or "unnamed")
+    rec.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(rec.parent, 0o700)
+    rec.write_text(json.dumps(record, indent=1))
+    os.chmod(rec, 0o600)
+    return {"id": record["id"], "written": written, "corpus": record, "dir": str(d)}
+
+
+def note_corpus_origin(client: str, matter: str, corpus_id: str, how: str = "created here") -> Path:
+    """Mark a matter as belonging to, or derived from, a delivery.
+
+    Two different facts, kept apart on purpose: a matter that ARRIVED in the corpus, and one the recipient
+    created afterwards while reading it. Both trace to the same delivery; only the first is the sender's
+    work, and conflating them would let someone else's claims acquire your authorship, or yours theirs.
+    """
+    c, m = S.sanitize(client, "client"), S.sanitize(matter, "matter")
+    rd = S.records_dir(c, m)
+    rd.mkdir(parents=True, exist_ok=True)
+    out = rd / "corpus-origin.json"
+    out.write_text(json.dumps({"schema": "inferroute.probant-corpus-origin/1", "corpus": corpus_id,
+                               "how": how,
+                               "at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}, indent=1))
+    os.chmod(out, 0o600)
+    return out
 
 
 def create_matters_from_share(payload: Dict[str, Any], client: str,
@@ -345,6 +460,8 @@ def create_matters_from_share(payload: Dict[str, Any], client: str,
         rd.mkdir(parents=True, exist_ok=True)
         (rd / "shared-origin.json").write_text(json.dumps(provenance, indent=1))
         os.chmod(rd / "shared-origin.json", 0o600)
+        if (payload.get("corpus") or {}).get("id"):
+            note_corpus_origin(c, m, payload["corpus"]["id"], how="arrived in this corpus")
         made.append(f"{c}/{m}")
     if taken:
         raise S.ProbantError(f"opened {len(made)}; these names are already taken in {client}: "

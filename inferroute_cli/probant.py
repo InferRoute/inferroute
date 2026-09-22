@@ -147,7 +147,7 @@ def make_private(client: str, matter: str) -> None:
             pass
 
 
-def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
+def cmd_new(client: str, matter: str, priority_date: str | None, from_corpus: str = "") -> int:
     client, matter = sanitize(client, "client"), sanitize(matter, "matter")
     if record_path(client, matter).exists():
         raise ProbantError(f"matter {client}/{matter} already exists")
@@ -169,6 +169,12 @@ def cmd_new(client: str, matter: str, priority_date: str | None) -> int:
            "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "workspace": str(ws.resolve()), "changes": []}
     _write_record(client, matter, rec)
+    if from_corpus:
+        # Created BY the recipient while reading a delivery — tied to it, never one of its matters. The
+        # distinction is the point: someone else's claims must not acquire your authorship, or yours theirs.
+        from . import probant_share as SH
+        SH.note_corpus_origin(client, matter, from_corpus, how="created here while reading this corpus")
+        print(f"  tied to corpus {from_corpus} (created here, not part of it)")
     print(f"created matter {client}/{matter}")
     print(f"  workspace   {ws}")
     print(f"  date bound  {bound}" + (" (pre-filing default = today; set the real priority date with "
@@ -441,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="ir probant", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
+    n.add_argument("--from-corpus", default="", help="tie this matter to a corpus you received, without making it part of it")
     d = sub.add_parser("set-date"); d.add_argument("matter"); d.add_argument("date")
     o = sub.add_parser("open"); o.add_argument("matter")
     o.add_argument("--dev-unconfined", action="store_true",
@@ -463,6 +470,9 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--all", dest="every", action="store_true", help="every matter on this installation")
     sh.add_argument("--no-copy", dest="keep_copy", action="store_false",
                     help="do not seal a copy to yourself (you then cannot reopen what you sent)")
+    sh.add_argument("--file", action="append", default=[],
+                    help="a document describing the whole corpus, sealed with it (repeatable)")
+    sh.add_argument("--corpus-name", default="", help="what to call this delivery")
     sh.add_argument("--note", default=""); sh.add_argument("-o", "--out", default="")
     osh = sub.add_parser("open-share", help="open a share sealed to you: every matter in it, as your own")
     osh.add_argument("file"); osh.add_argument("client")
@@ -502,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
-            return cmd_new(a.client, a.matter, a.priority_date)
+            return cmd_new(a.client, a.matter, a.priority_date, a.from_corpus)
         if a.cmd == "set-date":
             return cmd_set_date(a.matter, a.date)
         if a.cmd == "open":
@@ -520,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_identity(add=a.add, card_file=a.card_file)
         if a.cmd == "share":
             return cmd_share(a.to, out=a.out, matters=a.matter, portfolios=a.portfolio,
-                             every=a.every, note=a.note, keep_copy=a.keep_copy)
+                             every=a.every, note=a.note, keep_copy=a.keep_copy, files=a.file, corpus_name=a.corpus_name)
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
@@ -582,7 +592,8 @@ def cmd_identity(add: str = "", card_file: str = "") -> int:
 
 
 def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portfolios: Optional[List[str]] = None,
-              every: bool = False, note: str = "", keep_copy: bool = True) -> int:
+              every: bool = False, note: str = "", keep_copy: bool = True,
+              files: Optional[List[str]] = None, corpus_name: str = "") -> int:
     """Seal a corpus of matters to another Probant user, signed so they know it is yours."""
     from . import probant_share as SH
     known = SH.contacts()
@@ -603,7 +614,13 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portf
                 entries.append(SH.matter_payload(client, m))
     if not entries:
         raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --portfolio <id>, or --all")
-    payload = SH.build_share(entries, note=note)
+    # Side documents travel INSIDE the seal. A matter list and a reading guide quote every filing and the
+    # unfiled surplus; as email attachments they would be the disclosure this product exists to prevent.
+    extra = SH.corpus_files([Path(f).expanduser() for f in (files or [])])
+    payload = SH.build_share(entries, note=note, files=extra, corpus_name=corpus_name)
+    if extra:
+        print(f"  including {len(extra)} corpus document(s): "
+              f"{', '.join(f['name'] for f in extra)} ({sum(f['bytes'] for f in extra) // 1000} KB)")
     cards = [known[to]] + ([SH.public_card(me)] if keep_copy else [])
     blob = SH.seal_to(cards, payload, me)
     dest = Path(out).expanduser() if out else Path.home() / f"probant-corpus-for-{to}-{_stamp()}{SH.SUFFIX}"
@@ -647,6 +664,7 @@ def cmd_open_share(path: str, client: str) -> int:
     payload = SH.open_sealed(blob)
     who = payload.get("from_name") or "an UNKNOWN sender"
     entries = payload.get("matters") or []
+    corpus = payload.get("corpus") or {}
     print(f"\n  Signed by {who} — fingerprint {payload.get('from_fingerprint')}")
     if not payload.get("from_known"):
         print("  This fingerprint is not in your contacts. The signature proves the matters are as that key")
@@ -655,10 +673,22 @@ def cmd_open_share(path: str, client: str) -> int:
     for e in entries:
         print(f"      {e.get('matter')}  ·  {len(e.get('claims') or [])} claim(s)"
               f"{'  ·  date bound ' + e['date_bound'] if e.get('date_bound') else ''}")
+    if corpus.get("files"):
+        print(f"  {len(corpus['files'])} corpus document(s) describing the whole delivery:")
+        for f in corpus["files"]:
+            print(f"      {f.get('name')}  ({int(f.get('bytes') or 0) // 1000} KB)")
     made = SH.create_matters_from_share(payload, client)
+    written = SH.write_corpus(payload, client)
     print(f"\n  opened {len(made)} matter(s) under {client}:")
     for m in made:
         print(f"      ir probant open {m}")
+    if written.get("written"):
+        print(f"\n  corpus documents written to {written['dir']}:")
+        for n in written["written"]:
+            print(f"      {n}")
+        print(f"\n  This delivery is corpus {written['id']}. A matter you create yourself while reading it")
+        print(f"  can be tied to it without becoming part of it:")
+        print(f"      ir probant new <client> <matter> --from-corpus {written['id']}")
     return 0
 
 

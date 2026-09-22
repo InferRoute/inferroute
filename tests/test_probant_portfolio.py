@@ -669,3 +669,57 @@ def test_the_reading_guide_maps_evidence_to_places_in_the_filing(home):
     crossing = text.split("WHERE ONE FILING REACHES INTO ANOTHER'S SUBJECT")[1]
     assert crossing.count("SWELL-MARKER impedance drift over fifty cycles") == 1, crossing
     assert "1 crossing passage(s) in total." in crossing
+
+
+def test_a_disclosure_never_names_our_own_filings(home):
+    """Henry, 23 Sep: "why refer to the filed patents there?" — the first generated set opened with
+    "Filed patents — P1 (FR2609630...)" and each filing's lead concepts.
+
+    disclosure.md is what the AGENT reads before searching. Our own applications are not prior art against
+    us: naming them invites a search to chase our filing numbers or to treat our own text as known art, and
+    the date bound already carries priority. Portfolio bookkeeping belongs in the matter list, which a
+    person reads. Not even in an HTML comment — the agent reads the file as text, and our source filenames
+    ARE our filing numbers."""
+    _, src = home
+    (src / "FR2609630-P1.md").write_text("COOLANT-MARKER channels moulded between the cells.\n" * 40)
+    ident = P.stage([src / "FR2609630-P1.md"], "filings")["id"]
+    name = P.meta_of(ident)["documents"][0]["name"]
+    _propose(ident, [{"title": "Cooling jacket", "summary": "channels between cells", "source": name,
+                      "quote": "COOLANT-MARKER channels moulded between the cells"}])
+    _job(ident, name)
+    P.write_findings(ident)
+    with (P.path_of(ident) / P.THEMES).open("a") as fh:
+        fh.write(json.dumps({"label": "Thermal", "thesis": "coolant between cells", "members": ["f1"],
+                             "register": ["P1"], "aspects": ["moulded channels"],
+                             "detail": "does not cover air cooling"}) + "\n")
+    text = P.disclosure_from_matter(ident, "Thermal")
+    assert "Thermal" in text and "coolant between cells" in text
+    assert "moulded channels" in text and "does not cover air cooling" in text
+    assert "COOLANT-MARKER channels moulded" in text          # the substance a search is built from
+    # …and nothing that names the filing, in prose OR in a comment.
+    assert "FR2609630" not in text, text
+    assert "P1" not in text.replace("Thermal", "")             # no register id either
+    assert "Filed patents" not in text
+
+
+def test_a_disclosure_says_how_many_passages_it_shows_of_how_many(home):
+    """The first set ended a list with "- ... and 194 more", which tells a reader nothing and reads as a
+    dump. A sample must say it is one, and say where the rest is."""
+    _, src = home
+    body = "".join(f"MARKER-{i} the coolant channels are moulded between cells.\n" for i in range(40))
+    (src / "big.md").write_text(body)
+    ident = P.stage([src / "big.md"], "one")["id"]
+    name = P.meta_of(ident)["documents"][0]["name"]
+    _propose(ident, [{"title": f"F{i}", "summary": "s", "source": name,
+                      "quote": f"MARKER-{i} the coolant channels are moulded between cells"}
+                     for i in range(40)])
+    _job(ident, name)
+    P.write_findings(ident)
+    with (P.path_of(ident) / P.THEMES).open("a") as fh:
+        fh.write(json.dumps({"label": "Thermal", "thesis": "t",
+                             "members": [f"f{i + 1}" for i in range(40)]}) + "\n")
+    text = P.disclosure_from_matter(ident, "Thermal", passages=8)
+    assert "8 sur 40" in text                                   # a stated sample, not a truncation
+    assert "guide de lecture" in text                           # …and where the rest lives
+    assert "more" not in text.lower().split("## passages")[1][:200]
+    assert text.count("MARKER-") == 8

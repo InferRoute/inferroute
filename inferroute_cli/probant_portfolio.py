@@ -786,6 +786,55 @@ def _pct(a: int, b: int, size: int) -> str:
     return f"{a * 100 // max(1, size)}–{b * 100 // max(1, size)}%"
 
 
+def disclosure_from_matter(ident: str, label: str, passages: int = 12) -> str:
+    """A matter's disclosure.md: what the invention IS, written so a prior-art search can be built from it.
+
+    Two things it deliberately leaves out, both learned from the first generated set (Henry, 23 Sep).
+
+    NO REFERENCE TO OUR OWN FILINGS. The first version opened with "Filed patents — P1 (FR2609630...)" and
+    the lead concepts of each. This document is what the agent READS before searching, and our own
+    applications are not prior art against us — naming them invites a search to chase our filing numbers or
+    to treat our own text as known art, and the date bound already carries priority. Portfolio bookkeeping
+    belongs in the matter list, which is for the reader, not in the disclosure, which is for the search.
+
+    NO DANGLING "... and 194 more". A truncated list with a raw count tells a reader nothing and reads as a
+    dump. The passages here are a stated sample spread across the evidence, and the document says where the
+    rest is.
+    """
+    m = matter_list(ident)
+    want = next((x for x in m["matters"] if x["label"] == label), None)
+    if want is None:
+        raise S.ProbantError(f"no matter called {label!r} in this run")
+    items = candidates(ident)
+    ids = {f"f{i + 1}": c for i, c in enumerate(items)}
+    rows = [ids[i] for i in want["members"] if i in ids]
+    rows.sort(key=lambda c: (c["source"], int(c["where"])))
+    step = max(1, len(rows) // max(1, passages))
+    shown = rows[::step][:passages]
+
+    out = [f"# {want['label']}", "", want["thesis"], ""]
+    if want["aspects"]:
+        out += ["## Ce que couvre l'invention", ""]
+        out += [f"- {a}" for a in want["aspects"]]
+        out.append("")
+    if want["detail"]:
+        out += ["## Détail et limites", "", want["detail"], ""]
+    out += [f"## Passages du corpus ({len(shown)} sur {len(rows)}, répartis)", "",
+            "Extraits vérifiés mot à mot contre le document nommé. L'ensemble des passages et leur position "
+            "exacte figurent dans le guide de lecture du portefeuille.", ""]
+    for c in shown:
+        out.append(f"- **{c['title']}** — {c['summary']}")
+        out.append(f"  > {c['quote'].strip()}")
+        # No source filename here, not even in a comment: the agent reads this file as text, and our
+        # filenames ARE our filing numbers. Traceability lives in the reading guide, which is read by a
+        # person; this document is read by a search.
+
+    out += ["", "---", "",
+            f"Tiré de {len(set(c['source'] for c in rows))} document(s) du portefeuille. "
+            "Le regroupement est un jugement ; les citations sont vérifiées."]
+    return "\n".join(out) + "\n"
+
+
 def render_highlights(ident: str, anchors_per_document: int = 3) -> str:
     """The reading guide: which passages of which filing carry which invention, with a few verbatim anchors.
 

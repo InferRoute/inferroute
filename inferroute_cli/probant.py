@@ -486,6 +486,8 @@ def main(argv: list[str] | None = None) -> int:
     pm = sub.add_parser("portfolio-matters", help="the matter list a portfolio run produced, as plain text")
     pm.add_argument("id")
     pm.add_argument("-o", "--out", default="", help="where to write it (default: MATTERS.txt in the run)")
+    pm.add_argument("--guide", action="store_true",
+                    help="the reading guide instead: where in each filing each invention's evidence sits")
     pr = sub.add_parser("proposals", help="what a reading session proposed")
     pr.add_argument("id")
     fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
@@ -530,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "portfolio-report":
             return cmd_portfolio_report(a.id)
         if a.cmd == "portfolio-matters":
-            return cmd_portfolio_matters(a.id, a.out)
+            return cmd_portfolio_matters(a.id, a.out, a.guide)
         if a.cmd == "proposals":
             return cmd_proposals(a.id)
         if a.cmd == "from-proposal":
@@ -838,15 +840,16 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     return cmd_portfolio_report(meta["id"])
 
 
-def cmd_portfolio_matters(ident: str, out: str = "") -> int:
+def cmd_portfolio_matters(ident: str, out: str = "", guide: bool = False) -> int:
     """The matter list as plain text, to a file by default.
 
     To a FILE, not a console: this is the client's material and whoever runs this may be an agent whose
     transcript leaves the machine — the same rule the rest of this pipeline keeps.
     """
     from . import probant_portfolio as PF
-    text = PF.render_matters(ident)
-    dest = Path(out).expanduser() if out else PF.path_of(ident) / "MATTERS.txt"
+    text = PF.render_highlights(ident) if guide else PF.render_matters(ident)
+    dest = (Path(out).expanduser() if out else
+            PF.path_of(ident) / ("READING-GUIDE.txt" if guide else "MATTERS.txt"))
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         os.chmod(dest, 0o600)

@@ -622,3 +622,50 @@ def test_a_fully_read_corpus_can_still_be_synthesised(home, tmp_path, monkeypatc
     ran.clear()
     CLI.cmd_portfolio(str(src), resume=ident)
     assert ran == [], "the synthesis must not run again once themes exist"
+
+
+def test_the_reading_guide_maps_evidence_to_places_in_the_filing(home):
+    """Bétrancourt's ask via Henry (22 Sep): the filings are huge, highlight the sections that matter. Which
+    sections those ARE is not a judgement — it is where the verified quotes fall — so the regions are
+    computed, complete, and the quotes shown under them are declared to be a sample."""
+    _, src = home
+    body = ("X" * 20000) + "\nCOOLANT-MARKER channels moulded between the cells.\n" + ("Y" * 20000) + \
+           "\nJACKET-MARKER coolant enters at the base of the pack.\n" + ("Y" * 20000) + \
+           "\nSWELL-MARKER impedance drift over fifty cycles.\n" + ("Z" * 5000)
+    (src / "big.md").write_text(body)
+    ident = P.stage([src / "big.md"], "one big filing")["id"]
+    name = P.meta_of(ident)["documents"][0]["name"]
+    _propose(ident, [{"title": "Cooling", "summary": "s", "source": name,
+                      "quote": "COOLANT-MARKER channels moulded between the cells"},
+                     {"title": "Swelling", "summary": "s", "source": name,
+                      "quote": "SWELL-MARKER impedance drift over fifty cycles"},
+                     # The SAME sentence carrying a second finding — a real case, and the one the crossing
+                     # section must print once. It is cited BY the minor matter, or the dedupe is never
+                     # reached and the assertion below is a control that cannot fail.
+                     {"title": "Swelling, restated", "summary": "s", "source": name,
+                      "quote": "SWELL-MARKER impedance drift over fifty cycles"},
+                     {"title": "Jacket", "summary": "s", "source": name,
+                      "quote": "JACKET-MARKER coolant enters at the base of the pack"}])
+    _job(ident, name)
+    P.write_findings(ident)
+    with (P.path_of(ident) / P.THEMES).open("a") as fh:
+        # Thermal is the MAJOR matter here (2 distinct passages); Degradation is the minor one and its two
+        # findings rest on ONE sentence — so the crossing section is where the dedupe has to hold.
+        fh.write(json.dumps({"label": "Thermal", "thesis": "t", "members": ["f1", "f4"], "register": ["P1"],
+                             "aspects": ["moulded channels"]}) + "\n")
+        fh.write(json.dumps({"label": "Degradation", "thesis": "t", "members": ["f2", "f3"],
+                             "register": ["P2"]}) + "\n")
+    # Far-apart quotes are two regions, not one span covering the whole document.
+    assert len(P.regions([100, 200, 90000])) == 2
+    assert P.regions([100, 200, 90000])[0] == (100, 200)
+    text = P.render_highlights(ident)
+    assert "READING GUIDE" in text
+    assert "are a sample" in text and "judgement this cannot make" in text   # never claims to rank
+    assert "COOLANT-MARKER channels moulded" in text                          # an anchor a reader can search
+    assert "BY FILING" in text
+    # A passage evidencing a matter that is MOSTLY another filing's is the part counsel needs.
+    assert "WHERE ONE FILING REACHES INTO ANOTHER'S SUBJECT" in text
+    # One sentence carrying two findings is printed ONCE in the crossing section.
+    crossing = text.split("WHERE ONE FILING REACHES INTO ANOTHER'S SUBJECT")[1]
+    assert crossing.count("SWELL-MARKER impedance drift over fifty cycles") == 1, crossing
+    assert "1 crossing passage(s) in total." in crossing

@@ -84,7 +84,7 @@ la comparaison est d'une autre nature : à ma connaissance, aucune solution exis
 l'invention sorte en clair, ni ne vous laisse une pièce qu'un tiers peut revérifier. Ce ne sont pas des
 degrés sur la même échelle, et ce sont précisément les deux qui comptent pour un dossier non déposé.
 
-**Une question, qui ne coûte rien** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
+**Une question** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
 l'imagine utile là où votre diligence peut être mise en cause longtemps après — une opposition, un
 contentieux, une due diligence où l'on vous demande ce qui avait été cherché et à quelle date, ou un client
 qui revient sur le périmètre d'une recherche facturée deux ans plus tôt. C'est mon hypothèse, pas votre

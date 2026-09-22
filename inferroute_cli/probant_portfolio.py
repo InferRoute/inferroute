@@ -733,6 +733,137 @@ def matter_list(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
             "covered": len(ids) - len(missing), "known": len(ids)}
 
 
+REGION_GAP = 8_000            # offsets closer than this are one stretch of the document, not two
+
+
+def regions(offsets: Sequence[int], gap: int = REGION_GAP) -> List[Tuple[int, int]]:
+    """Contiguous stretches from a list of quote offsets: where in a document the evidence actually sits.
+
+    Bétrancourt's ask, via Henry (22 Sep): the filings are huge, highlight the sections that matter. Which
+    sections those are is not a judgement — it is where the verified quotes fall. Merging what is close
+    turns 137 scattered offsets into a handful of passages a reader can open the .docx at.
+    """
+    out: List[Tuple[int, int]] = []
+    for o in sorted(int(x) for x in offsets):
+        if out and o - out[-1][1] <= gap:
+            out[-1] = (out[-1][0], o)
+        else:
+            out.append((o, o))
+    return out
+
+
+def highlight_map(ident: str) -> Dict[str, Any]:
+    """For each matter, where its evidence lives in each filing; and for each filing, which matters it feeds.
+
+    Two views of one fact, because a reader uses both: "what do I read for THIS invention" and "I have this
+    filing open, what is it for".
+    """
+    drawn = themes(ident)
+    items = candidates(ident)
+    ids = {f"f{i + 1}": c for i, c in enumerate(items)}
+    sizes = {d["name"]: d["bytes"] for d in meta_of(ident)["documents"]}
+    matters, by_doc = [], {}
+    for m in drawn["themes"]:
+        per_doc = {}
+        for mid in m["members"]:
+            c = ids.get(mid)
+            if c:
+                per_doc.setdefault(c["source"], []).append(c)
+        spread = []
+        for doc in sorted(per_doc, key=lambda d: -len(per_doc[d])):
+            rows = sorted(per_doc[doc], key=lambda c: int(c["where"]))
+            size = max(1, sizes.get(doc, 1))
+            rs = regions(int(c["where"]) for c in rows)
+            spread.append({"document": doc, "bytes": size, "findings": len(rows), "regions": rs,
+                           "share": round(sum(b - a for a, b in rs) / size, 3),
+                           "anchors": rows})
+            by_doc.setdefault(doc, []).append({"matter": m["label"], "findings": len(rows), "regions": rs})
+        matters.append({**m, "spread": spread})
+    return {"matters": matters, "by_document": by_doc, "sizes": sizes}
+
+
+def _pct(a: int, b: int, size: int) -> str:
+    return f"{a * 100 // max(1, size)}–{b * 100 // max(1, size)}%"
+
+
+def render_highlights(ident: str, anchors_per_document: int = 3) -> str:
+    """The reading guide: which passages of which filing carry which invention, with a few verbatim anchors.
+
+    Deliberately NOT every quote. All 901 of them run to 686 KB, which re-creates the problem it is meant
+    to solve — the filings were already huge. The regions are complete and computed; the anchors are a
+    sample, evenly spread, and SAID to be a sample.
+    """
+    h = highlight_map(ident)
+    out = [f"READING GUIDE — {meta_of(ident)['name']}", "=" * 74, "",
+           "Where in each filing the evidence for each invention actually sits.",
+           "Positions are given as a percentage through the document and as character offsets into the",
+           "text extracted from the .docx, so a search for the quoted words will land on the passage.",
+           "The REGIONS are complete: every verified quote falls inside one. The QUOTES shown under each",
+           "are a sample, spread across the region — not a selection of the most important, which is a",
+           "judgement this cannot make and does not claim to.", ""]
+    for i, m in enumerate(h["matters"], 1):
+        out += [f"{i}. {m['label'].upper()}", f"   {m['thesis']}"]
+        if m["register"]:
+            out.append(f"   Register: {', '.join(m['register'])}")
+        for a in m["aspects"]:
+            out.append(f"     - {a}")
+        out.append("")
+        for sp in m["spread"]:
+            span = ", ".join(_pct(a, b, sp["bytes"]) for a, b in sp["regions"][:8])
+            more = f" (+{len(sp['regions']) - 8} more)" if len(sp["regions"]) > 8 else ""
+            out.append(f"   {sp['document']}  ({sp['bytes'] // 1000} KB)  {sp['findings']} passage(s)")
+            out.append(f"     read: {span}{more}")
+            step = max(1, len(sp["anchors"]) // max(1, anchors_per_document))
+            for c in sp["anchors"][::step][:anchors_per_document]:
+                at = int(c["where"])
+                out.append(f'     @{at} ({_pct(at, at, sp["bytes"]).split("–")[0]}%) "{c["quote"][:220].strip()}"')
+            out.append("")
+        out.append("")
+    out += ["-" * 74, "BY FILING — what each document is for", ""]
+    for doc in sorted(h["by_document"]):
+        size = h["sizes"].get(doc, 0)
+        out.append(f"{doc}  ({size // 1000} KB)")
+        for row in sorted(h["by_document"][doc], key=lambda r: -r["findings"]):
+            span = ", ".join(_pct(a, b, size) for a, b in row["regions"][:6])
+            out.append(f"   {row['findings']:4d} passage(s)  {row['matter'][:46]:48} {span}")
+        out.append("")
+    # The cross-references are the part worth a practitioner's time, and they only became visible once the
+    # by-filing view was built: each filing turns out to carry ONE invention almost entirely, plus a handful
+    # of passages that reach into a neighbour's. For a single-invention filing "which sections matter" is
+    # "all of it" and the highlight is useless; these few passages are where scope actually touches.
+    out += ["-" * 74, "WHERE ONE FILING REACHES INTO ANOTHER'S SUBJECT", "",
+            "For each filing, the passages that evidence an invention which is mostly carried by a DIFFERENT",
+            "filing. These are few, so they are quoted in full. They are where claim scope overlaps.", ""]
+    crossings = 0
+    for doc in sorted(h["by_document"]):
+        rows = sorted(h["by_document"][doc], key=lambda r: -r["findings"])
+        minor = rows[1:]
+        if not minor:
+            continue
+        size = h["sizes"].get(doc, 0)
+        out.append(f"{doc}  — mainly {rows[0]['matter']}")
+        for row in minor:
+            spread = next((sp for m in h["matters"] if m["label"] == row["matter"]
+                           for sp in m["spread"] if sp["document"] == doc), None)
+            seen_here = set()
+            for c in (spread["anchors"] if spread else []):
+                at = int(c["where"])
+                # Two findings can rest on the SAME sentence (different titles, one passage). Printing it
+                # twice makes a reader check whether they missed a difference; there is none.
+                if (at, c["quote"]) in seen_here:
+                    continue
+                seen_here.add((at, c["quote"]))
+                crossings += 1
+                out.append(f"   -> {row['matter']}  @{at} ({at * 100 // max(1, size)}%)")
+                out.append(f'      "{c["quote"].strip()}"')
+        out.append("")
+    out.append(f"{crossings} crossing passage(s) in total.")
+    out.append("")
+    out.append("Every quoted passage was checked character-for-character against the document named.")
+    out.append("This guide ORGANISES; it does not rule. Novelty and claim scope are Henry + counsel.")
+    return "\n".join(out) + "\n"
+
+
 def render_matters(ident: str, register: Optional[Path] = None) -> str:
     """The matter list as plain text: one list, each matter with its aspects and its detail, and the
     accounting underneath. Written to a file rather than a console — it is the client's material."""

@@ -15,11 +15,15 @@ becomes the first client, and the delivery is what earns the right to ask.
 - **Anything about agentic confirmation** — a live-model run on 22 Sep captured **0%** of the oracle
   ceiling (recall 0.08, recovered 1 of 12). It is an unrealised ceiling, not a result.
 
-**"Recall" is rendered "exhaustivité", not "rappel"** (Henry, 23 Sep). "Rappel" is the correct
-information-retrieval term and the wrong word for this reader: to a practitioner it reads as "reminder",
-and it names a metric rather than the thing he actually judges a search on. "Exhaustivité" is what a CPI
-evaluates, so the sentence defines it once — "la part des antériorités pertinentes que la recherche
-retrouve effectivement" — and then uses it.
+**The metric is not named at all** (Henry rejected "rappel", then "exhaustivité", 23 Sep). No French noun
+works: "rappel" reads as "reminder" to a practitioner, "exhaustivité" claims a completeness we do not have,
+and the English "recall" is jargon in a French letter. So the sentence describes the CAPABILITY instead —
+"retrouver les antériorités pertinentes" — which is what he cares about anyway. A metric only needs a name
+when you are comparing numbers; here there is one number and it is defined in the same breath.
+
+The definition survives the simplification in plain words: "de celles que citent les examinateurs
+américains, mesuré sur des dossiers tenus à l'écart de sa mise au point" carries both held-out and
+non-circular, which the recall session required the figure never to appear without.
 
 **TA-L3 is no longer named** (Henry, 23 Sep). Section 3 gives the reason for sealed delivery as "vos dépôts
 et l'ensemble non déposé", which is sufficient and carries no identifier.
@@ -89,12 +93,11 @@ produit un **certificat** : ce qui a été cherché, sur quel corpus, à quelle 
 re-vérifiable par un tiers sans avoir à nous faire confiance. Si votre diligence vous est opposée dans cinq
 ans, c'est cette pièce-là qui répond.
 
-La troisième, l'**exhaustivité** — la part des antériorités pertinentes que la recherche retrouve
-effectivement —, est celle que nous construisons en ce moment. Le moteur déployé retrouve environ 19 % des
-antériorités citées par les examinateurs (corpus américain, évaluation hors échantillon et non circulaire).
-C'est un plancher, mesuré prudemment, et le point important est ailleurs : les leviers qui le font monter
-sont déjà mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines. Je ne les décris
-pas ici — ils font l'objet d'un examen de brevetabilité de notre côté.
+La troisième — retrouver les antériorités pertinentes — est celle que nous construisons. Le moteur en
+retrouve aujourd'hui environ 19 % de celles que citent les examinateurs américains, mesuré sur des dossiers
+tenus à l'écart de sa mise au point. C'est peu. Mais les leviers qui font monter ce chiffre sont déjà
+mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines ; je ne les détaille pas ici,
+ils sont en cours d'examen de brevetabilité.
 
 **Une barre publique, pour situer.** Nous évaluons aussi le moteur sur DAPFAM (arXiv:2506.22141), un jeu
 d'évaluation public de recherche d'antériorité. Les chiffres n'y sont pas comparables à celui ci-dessus —
@@ -104,7 +107,7 @@ le meilleur résultat publié, obtenu au niveau passage, est la cible sur laquel
 préfère vous citer une barre que vous pouvez aller vérifier qu'un superlatif.
 
 Ce que nous voulons construire : un outil qui vous soit réellement utile, et qui fasse mieux que ce que
-vous utilisez aujourd'hui. Sur l'exhaustivité, je ne prétends pas y être déjà. Sur les deux autres points,
+vous utilisez aujourd'hui. Sur ce dernier point, je ne prétends pas y être déjà. Sur les deux autres points,
 la comparaison est d'une autre nature : à ma connaissance, aucune solution existante ne cherche sans que
 l'invention sorte en clair, ni ne vous laisse une pièce qu'un tiers peut revérifier. Ce ne sont pas des
 degrés sur la même échelle, et ce sont précisément les deux qui comptent pour un dossier non déposé.

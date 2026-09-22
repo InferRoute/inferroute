@@ -30,6 +30,19 @@ sont déjà mesurés, pas espérés". Measured-not-hoped is true and is the stro
 No figure was added, no ceiling implied, no ranking promised: inventing optimism here would undo the
 calibration the whole email is built on.
 
+**DAPFAM is named; no DAPFAM number is written** (cleared 23 Sep, after they pulled the paper's tables
+rather than answering from memory). The facts: paper BM25 doc-level 0.330, paper dense reference ~0.396,
+paper BEST passage-level ~0.55; ours e5 dense 0.380, RRF hybrid 0.413. So we edge their document-level
+baselines and sit well below their passage-level best. **We are not beating the record**, and the letter
+does not say we are — it says the passage-level best is the target we work toward, which is true and
+checkable. Henry's "chasing the records" survives as effort against a NAMED public bar rather than as an
+achievement.
+
+The two hard rules that shaped the wording: a DAPFAM figure must never sit beside the ~0.19 or be equated
+with it (a closed 45k pool is structurally ~2x easier than the open 17.5M corpus — merging them is the
+worst overclaim available here), and since we do not lead the benchmark, nothing may imply we do. Hence
+the explicit "les chiffres n'y sont pas comparables à celui ci-dessus" and no number at all.
+
 The only number in writing is **~0.19 with its definition**. Mechanisms are withheld pending IP review —
 the same gate being applied to our own seven mechanisms currently in diode-runs.
 
@@ -77,6 +90,13 @@ antériorités citées par les examinateurs (corpus américain, évaluation hors
 C'est un plancher, mesuré prudemment, et le point important est ailleurs : les leviers qui le font monter
 sont déjà mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines. Je ne les décris
 pas ici — ils font l'objet d'un examen de brevetabilité de notre côté.
+
+**Une barre publique, pour situer.** Nous évaluons aussi le moteur sur DAPFAM (arXiv:2506.22141), un jeu
+d'évaluation public de recherche d'antériorité. Les chiffres n'y sont pas comparables à celui ci-dessus —
+le corpus y est fermé et bien plus petit —, mais la comparaison aux méthodes publiées, elle, se fait de
+plain-pied : notre approche hybride se situe au niveau des meilleures d'entre elles au niveau document, et
+le meilleur résultat publié, obtenu au niveau passage, est la cible sur laquelle nous travaillons. Je
+préfère vous citer une barre que vous pouvez aller vérifier qu'un superlatif.
 
 Ce que nous voulons construire : un outil qui vous soit réellement utile, et qui fasse mieux que ce que
 vous utilisez aujourd'hui. Sur l'exhaustivité, je ne prétends pas y être déjà. Sur les deux autres points,

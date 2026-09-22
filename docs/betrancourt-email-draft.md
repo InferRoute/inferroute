@@ -34,6 +34,12 @@ sont déjà mesurés, pas espérés". Measured-not-hoped is true and is the stro
 No figure was added, no ceiling implied, no ranking promised: inventing optimism here would undo the
 calibration the whole email is built on.
 
+**Cut to three lines** (Henry, 23 Sep) from ninety words. What had to survive, and did: the benchmark
+NAMED with its arXiv reference (a bar he can check is the whole point — the line arguing that is gone
+because the reference makes it), the explicit non-comparability with the 19%, and the honest standing.
+"Nous y sommes au niveau des meilleures méthodes publiées au niveau document" is the cleared phrasing —
+not "égalons", not "dépassons", though we do edge them.
+
 **DAPFAM is named; no DAPFAM number is written** (cleared 23 Sep, after they pulled the paper's tables
 rather than answering from memory). The facts: paper BM25 doc-level 0.330, paper dense reference ~0.396,
 paper BEST passage-level ~0.55; ours e5 dense 0.380, RRF hybrid 0.413. So we edge their document-level
@@ -99,12 +105,9 @@ tenus à l'écart de sa mise au point. C'est peu. Mais les leviers qui font mont
 mesurés, pas espérés, et leur intégration est l'affaire de quelques semaines ; je ne les détaille pas ici,
 ils sont en cours d'examen de brevetabilité.
 
-**Une barre publique, pour situer.** Nous évaluons aussi le moteur sur DAPFAM (arXiv:2506.22141), un jeu
-d'évaluation public de recherche d'antériorité. Les chiffres n'y sont pas comparables à celui ci-dessus —
-le corpus y est fermé et bien plus petit —, mais la comparaison aux méthodes publiées, elle, se fait de
-plain-pied : notre approche hybride se situe au niveau des meilleures d'entre elles au niveau document, et
-le meilleur résultat publié, obtenu au niveau passage, est la cible sur laquelle nous travaillons. Je
-préfère vous citer une barre que vous pouvez aller vérifier qu'un superlatif.
+Nous nous mesurons aussi sur DAPFAM (arXiv:2506.22141), un jeu d'évaluation public — chiffres non
+comparables à celui ci-dessus, le corpus y est fermé. Nous y sommes au niveau des meilleures méthodes
+publiées au niveau document ; leur meilleur résultat, obtenu au niveau passage, est notre cible.
 
 Ce que nous voulons construire : un outil qui vous fasse gagner du temps sur ce que vous faites
 aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé à une preuve aussi solide et

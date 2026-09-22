@@ -72,15 +72,12 @@ annoncer une place que je ne peux pas définir ne vous servirait à rien.
 Autrement dit : ce n'est pas encore un outil qui remplace une recherche professionnelle. C'en est un qui
 prouve ce qu'il a fait, et qui ne fait pas sortir l'invention.
 
-**Ce que je vous demande, et qui ne coûte rien.** Deux choses, à répondre en trois lignes si
-vous voulez. D'abord : est-ce que le certificat vaut ce que je crois qu'il vaut ? C'est-à-dire, dans votre
-pratique, une pièce établissant ce qui a été cherché, sur quel corpus et à quelle date, opposable des
-années plus tard — est-ce que cela vous servirait, et dans quel contexte précisément ? Ensuite : à quoi
-ressemble, chez vous, ce qu'on donnerait à chercher — une note d'invention de trois pages, un projet de
-revendications, la description d'un inventeur ? Nos mesures portent sur des abrégés de demandes déjà
-publiées ; vos divulgations réelles, non déposées, sont une distribution que nous n'avons jamais pu
-mesurer, et c'est notre inconnue principale. Nous n'avons pas besoin que vous nous confiiez un dossier
-pour l'apprendre — il suffit que vous nous disiez de quoi il a l'air.
+**Ce que je vous demande, et qui ne coûte rien.** Une seule chose, à répondre en trois lignes si le cœur
+vous en dit : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je l'imagine utile là où votre
+diligence peut être mise en cause longtemps après — une opposition, un contentieux, une due diligence où
+l'on vous demande ce qui avait été cherché et à quelle date, ou un client qui revient sur le périmètre
+d'une recherche facturée deux ans plus tôt. C'est mon hypothèse, pas votre expérience : si je vise à côté,
+c'est maintenant qu'il est utile de me le dire.
 
 **Ce que nous voulons construire.** Un outil qui vous soit réellement utile, et qui fasse mieux que ce que
 vous utilisez aujourd'hui. Sur le rappel, je viens de vous dire où nous en sommes et je ne prétends pas y
@@ -150,8 +147,15 @@ InferRoute SASU
   him to RUN anything to learn what a real unfiled disclosure looks like as an input — a description does
   it. If we wait for Build 2 to ask, Build 2 gets built blind to the one thing the recall session calls its
   principal unknown. So the trial waits; the requirements question goes now, at zero cost to him.
-- **The other ask is a validation of the lead claim:** does the certificate matter in his practice, and in
-  what context. If the answer is lukewarm from the one professional we have, that is worth knowing before
-  more is built on it.
+- **One question, and it SUGGESTS the contexts rather than asking for them** (Henry, 23 Sep). An open
+  "in what context?" makes a busy practitioner do the work of answering; naming three plausible ones and
+  inviting correction costs him a yes, a no, or a better answer. It also shows we have thought about his
+  practice rather than asking him to explain it.
+- **It validates the LEAD claim.** If the one professional we have is lukewarm about the certificate, that
+  is worth knowing before more is built on top of it.
+- **The distribution-shift question was cut at Henry's instruction.** Consequence, stated once and not
+  argued: unless it is obtained another way — a call, or the trial at Build 2 — the next engine version
+  gets built without the one input the recall session calls its principal unknown. Worth raising by voice
+  when he replies.
 - **Blocked on:** 0.9.3 release (he cannot install today) and IP clearance. The email promises instructions
   "dès que la version est prête", which commits you to nothing.

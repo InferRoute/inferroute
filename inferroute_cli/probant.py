@@ -558,6 +558,18 @@ def main(argv: list[str] | None = None) -> int:
     except ProbantError as e:
         sys.stderr.write(f"\n  {e}\n\n")
         return 2
+    except ImportError as e:
+        # Probant's own dependencies live in the `confidential` extra, so a base install crashes on the
+        # FIRST command a new user runs — `ir probant identity`, the one that makes the key card they have
+        # to send before anyone can share anything with them. A traceback there is the worst possible first
+        # impression of a product whose subject is careful handling. The package already keeps `click` core
+        # for exactly this reason; this is the same treatment for the rest.
+        missing = getattr(e, "name", "") or "a dependency"
+        sys.stderr.write(
+            f"\n  Probant needs {missing}, which is not installed.\n\n"
+            "      pip install 'inferroute[confidential]'\n\n"
+            "  That brings the sealed lane, the key handling and the local page. Nothing was changed.\n\n")
+        return 2
     return 0
 
 

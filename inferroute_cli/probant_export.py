@@ -728,16 +728,32 @@ brief; the first attempt of one was stopped early at nine minutes and produced n
 
 ## How to do it
 
-1. Read `verify_record.py` completely before running it. It is short and has no dependencies beyond
-   Python and the `cryptography` package, version 42 or newer. Report anything in it that would let a
-   check pass without being done.
+1. **Treat `verify_record.py` as untrusted code, because that is what it is.** It came from the
+   professional's computer with everything else in this folder. Every claim below is a claim this program
+   makes; if it were altered, the alterations would pass every check it performs, including the one over
+   its own hash — the manifest that lists it is in the same folder. So:
+
+   - Read it completely before running it. It has no dependencies beyond Python and `cryptography` 42+.
+     Report anything that would let a check pass without being done: a comparison that cannot fail, an
+     exception swallowed, a verdict written before the work, a branch that returns OK when data is absent.
+   - **Compare it against a copy you obtained yourself.** InferRoute publishes its client; if you can get
+     `verify_record.py` from the published package or the public repository, compare it byte for byte with
+     this one and report the result — a match makes this the program InferRoute stands behind rather than
+     the one this folder happens to contain. **If you cannot obtain it independently, say so in your report
+     as a named limitation**, and rely on step 3: the checks you redo with your own tools are the ones that
+     do not depend on trusting this file at all.
+
+   The professional is told the same thing, so a "could not obtain it" in your report is expected
+   information, not a failure of the audit.
 2. Run it:
 
        python3 verify_record.py . --reference trust-anchors/reference.json --reference-key=$(cat trust-anchors/publication-key.txt)
 
    Exit code: 0 = every check passed under production roots; 1 = something failed; 2 = refused to run;
    3 = test roots; 4 = passed but the reference was not authenticated.
-3. **Don't rely on it alone.** Pick at least two searches and redo claims 1, 2 and 4 yourself:
+3. **This is the part that carries the audit — not step 2.** Everything the verifier reports is
+   downstream of trusting the verifier. Pick at least two searches and redo claims 1, 2 and 4 yourself with
+   your own tools, so that those three stand on arithmetic you performed:
    `python3 verify_record.py . --extract ../extracted` writes each search's raw report, certificates, runtime
    data and statement as separate files. Get AMD's certificate chain for the product line named in the VCEK
    (Genoa, Milan or Turin) from AMD's key distribution service — `https://kdsintf.amd.com/vcek/v1/<Product>/cert_chain`
@@ -772,9 +788,15 @@ brief; the first attempt of one was stopped early at nine minutes and produced n
 
 ## Your report
 
-One line per claim (1 to 6): VERIFIED, NOT VERIFIED or COULD NOT CHECK, then the evidence you used, and
-anything you redid yourself rather than trusting the verifier. Then the verifier's exit code, and
-anything in `verify_record.py` or in the data that looked wrong. Keep it readable by a patent attorney.
+One line per claim (1 to 7): VERIFIED, NOT VERIFIED or COULD NOT CHECK, then the evidence you used, and
+**which of it you computed yourself rather than taking from `verify_record.py`** — that distinction is the
+value of this audit, so make it visible per claim rather than in a closing remark. Then: the verifier's exit
+code; whether you could obtain an independent copy of the verifier and what the comparison showed; and
+anything in the code or the data that looked wrong. Keep it readable by a patent attorney.
+
+If this folder contains no searches, the answer to every claim is COULD NOT CHECK and the report should say
+so in one line rather than at length: there is nothing here to audit, and a long report about an empty
+folder reads as a finding about the evidence.
 """
 
 PACK_RECORD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit pack</title></head>
@@ -798,6 +820,16 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     src_manifest = json.loads((src / "MANIFEST.json").read_text(encoding="utf-8"))
     if not isinstance(rows, list):
         raise S.ProbantError("this record's searches.json is not a list; refusing to make an audit pack from it")
+    if not rows:
+        # 22 Sep: a pack was made from a matter with no searches and handed to an auditor, who spent ten
+        # minutes reaching a verdict on claims that NOTHING in the folder could evidence. Every claim here
+        # rests on an enclave-signed statement per search; with none, the pack is a folder of tooling and
+        # the only honest verdict is "could not check" on all of it. Refusing costs a click; not refusing
+        # costs the professional's credibility with whoever they sent it to.
+        raise S.ProbantError(
+            "this record contains no searches, so there is nothing for an auditor to check: every claim in "
+            "the brief rests on a signed statement per search. Run a search on this matter first, then "
+            "export the record and make the pack from it.")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     dest = Path(out_dir) if out_dir else src.parent / f"audit-pack-{stamp}"
     sync = S._under_sync_root(dest)

@@ -232,3 +232,23 @@ def test_a_share_without_a_corpus_block_still_opens(tmp_path, monkeypatch):
     got = SH.open_sealed(blob, lawyer)
     assert SH.create_matters_from_share(got, "Old") == ["Old/b"]
     assert SH.write_corpus(got, "Old") == {"id": "", "written": [], "corpus": {}}
+
+
+def test_a_base_install_says_what_to_install_instead_of_a_traceback(monkeypatch, capsys):
+    """Caught by installing the release candidate in a clean venv: `ir probant identity` — the FIRST command
+    a new user runs, the one that makes the key card they must send before anyone can share with them —
+    died with ModuleNotFoundError. Probant's dependencies live in the `confidential` extra, and a traceback
+    is the worst possible first impression of a product whose subject is careful handling. The package
+    already keeps `click` core for this exact reason ("the henry-ft failure" in pyproject)."""
+    import sys as _sys
+    from inferroute_cli import probant as CLI
+
+    def _boom(*a, **k):
+        raise ImportError("No module named 'cryptography'", name="cryptography")
+    monkeypatch.setattr(CLI, "cmd_identity", _boom)
+    rc = CLI.main(["identity"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "Traceback" not in err
+    assert "cryptography" in err and "pip install 'inferroute[confidential]'" in err
+    assert "Nothing was changed" in err

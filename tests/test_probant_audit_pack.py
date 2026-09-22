@@ -159,3 +159,42 @@ def test_the_empty_pack_refusal_names_what_is_actually_in_the_way(tmp_path, monk
     # that no longer resolves — so the configured branch must not promise that a search is possible either.
     with pytest.raises(S.ProbantError, match="the search machine not answering"):
         E.write_audit_pack(rec, tmp_path / "pack-b")
+
+
+def test_the_bundle_carries_the_conversation_receipt_and_the_brief_asks_about_it(tmp_path, monkeypatch):
+    """Henry, 23 Sep: "can't it check that the part that checks that the chat I had with the confidential AI
+    was confidential?"
+
+    It could not. record.html DESCRIBES the model lane verbatim from this device's receipt, and the receipt
+    stayed on the device — so the strongest sentence in the document rested on our word, which is the
+    receipt-written-by-the-audited-component shape. The receipt travels now, and the brief asks about it
+    honestly: the raw attestation behind its fifteen verdicts is not in the folder, so an auditor compares
+    the measurements against the published reference and REPORTS what they read rather than verified."""
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    assert S.cmd_new("Acme", "cooling", "2026-01-15") == 0
+    receipts = tmp_path / "ir" / "confidential" / "receipts"
+    receipts.mkdir(parents=True)
+    rp = receipts / "r1.json"
+    rp.write_text(json.dumps({"verdict": "confidential", "checks": {"sig_ok": {"ok": True, "why": "w"}},
+                              "instance": {"mrtd": "abc", "rtmrs": ["d"]},
+                              "counters": {"plaintext_bytes_sealed_here": 10}}))
+    rdir = S.records_dir("Acme", "cooling")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "sess1.json").write_text(json.dumps({
+        "session_id": "sess1", "surface": "browser", "confinement": "require",
+        "model_lane": {"verified": True, "checks": "15/15", "receipt": str(rp)}}))
+
+    b = E.build_bundle("Acme", "cooling")
+    assert len(b["sessions"]) == 1                       # exposed so the writer can carry the receipt
+    dest = E.write_bundle("Acme", "cooling", str(tmp_path / "out"))
+    carried = dest / "session-sess1.receipt.json"
+    assert carried.is_file(), sorted(p.name for p in dest.iterdir())
+    assert json.loads(carried.read_text())["instance"]["mrtd"] == "abc"
+
+    md = E.AUDIT_MD
+    assert "The CONVERSATION, not only the searches" in md
+    assert "session-*.receipt.json" in md
+    assert "is NOT in this folder" in md                 # the limit is stated, not implied
+    assert "which of this you verified and which you read" in md
+    assert "claim (1 to 8)" in md

@@ -467,7 +467,11 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the attorney's machine.</p>")
     A("</body></html>")
     return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff,
-            "unanswered": unanswered}
+            "unanswered": unanswered,
+            # Returned so the WRITER can carry each session's model-lane receipt into the bundle. The HTML
+            # quotes that receipt; without the file beside it, the record's claims about the conversation
+            # rest on this device's word alone.
+            "sessions": sessions}
 
 
 def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
@@ -590,6 +594,20 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     files: Dict[str, bytes] = {"record.html": b["html"].encode("utf-8"),
                                "searches.json": json.dumps(b["searches"], indent=1, ensure_ascii=False).encode("utf-8"),
                                "VERIFY.md": VERIFY_MD.encode("utf-8")}
+    # The CONVERSATION's own proof, not only the searches' (Henry, 23 Sep: "can't it check that the part
+    # that checks that the chat I had with the confidential AI was confidential?"). The record already
+    # describes the model lane, verbatim from this device's receipt — but the receipt stayed on the device,
+    # so a reader was asked to take the strongest sentence in the document on our word. It travels now.
+    # It carries verdicts and hardware measurements, never a prompt, a query or an answer: checked.
+    for sess in b.get("sessions") or []:
+        rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
+        if not rp:
+            continue
+        try:
+            raw = Path(rp).read_bytes()
+        except OSError:
+            continue
+        files[f"session-{sess['session_id']}.receipt.json"] = raw
     if b.get("unanswered"):
         files["unanswered.json"] = json.dumps(b["unanswered"], indent=1, ensure_ascii=False).encode("utf-8")
     for sha, content in b["evidence"].items():
@@ -716,7 +734,18 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
    fell outside the bound — and is not evidence the filter did nothing. A statement with no `*_applied` is
    from an enclave that predates the report: the verifier SKIPs it, naming the gap, and so should you.
 
-7. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
+7. **The CONVERSATION, not only the searches.** A matter's work happens in a sealed session with an AI
+   machine, and `session-*.receipt.json` is this device's record of checking that machine before anything
+   was sent to it: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), and the
+   hash of the encryption key the session sealed to. **Read it for exactly what it is.** The raw
+   attestation evidence behind those fifteen verdicts is NOT in this folder, so you cannot re-verify the
+   quote the way you can for a search — the verdicts are the professional's own device speaking. What you
+   CAN do, and should: compare the measurements in the receipt against InferRoute's published reference in
+   `trust-anchors/`, check that the counters show ciphertext leaving and plaintext only ever sealed on the
+   device, and report any check whose `ok` is true but whose `why` does not support it. Say plainly in your
+   report which of this you verified and which you read.
+
+8. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
    (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the
    document" and "the enclave returned a fifth of one" are different claims, and only this field
    distinguishes them. Report the coverage with the verdict, never as a footnote.
@@ -800,7 +829,7 @@ brief; the first attempt of one was stopped early at nine minutes and produced n
 
 ## Your report
 
-One line per claim (1 to 7): VERIFIED, NOT VERIFIED or COULD NOT CHECK, then the evidence you used, and
+One line per claim (1 to 8): VERIFIED, NOT VERIFIED or COULD NOT CHECK, then the evidence you used, and
 **which of it you computed yourself rather than taking from `verify_record.py`** — that distinction is the
 value of this audit, so make it visible per claim rather than in a closing remark. Then: the verifier's exit
 code; whether you could obtain an independent copy of the verifier and what the comparison showed; and

@@ -123,8 +123,11 @@ def test_the_brief_tells_the_auditor_the_verifier_is_untrusted_and_how_to_check_
     being able to make it, rather than implying a check that silently does not happen."""
     md = E.AUDIT_MD
     assert "Treat `verify_record.py` as untrusted code" in md
-    assert "Compare it against a copy you obtained yourself" in md
-    assert "If you cannot obtain it independently, say so in your report" in md
+    assert "Get your own copy and compare, before you run anything" in md
+    assert "pip download inferroute" in md          # executable, not an aspiration
+    assert "Report the two hashes and whether they match" in md
+    assert "A MISMATCH is a finding in its own right" in md
+    assert "If you cannot obtain it independently" in md
     # The self-reference that makes reading it insufficient is stated, not left for the auditor to notice.
     assert "the manifest that lists it is in the same folder" in md
     # Redoing the checks is named as the part that carries the audit, above running our program.

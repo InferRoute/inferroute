@@ -155,3 +155,80 @@ def test_your_own_fingerprint_is_a_sender_you_know(tmp_path, monkeypatch):
     assert mine["from_known"] is True and mine["from_name"] == "you (this installation)"
     theirs = SH.open_sealed(blob, lawyer)
     assert theirs["from_known"] is False                     # they still have to confirm it is Henry's
+
+
+CORPUS_DOC = ("READING GUIDE\n\nFR2609630-P1.txt (99 KB) 137 passage(s)\n"
+              "  read: 5-29%, 38-95%\n  @5584 \"the coolant channels are moulded between the cells\"\n")
+
+
+def test_a_corpus_carries_the_documents_that_describe_the_whole_delivery(tmp_path, monkeypatch):
+    """Henry, 22 Sep: "should we create a corpus object that includes such side files".
+
+    A matter list and a reading guide describe a PORTFOLIO, not any one matter, so there was nowhere for
+    them to travel and they would have gone as plain email attachments — carrying verbatim quotes from every
+    filing and from the UNFILED surplus, which is the disclosure this product exists to prevent. They now
+    travel inside the same seal as the matters."""
+    henry = _install(tmp_path, "henry", monkeypatch)
+    guide = tmp_path / "READING-GUIDE.txt"
+    guide.write_text(CORPUS_DOC)
+    matters_txt = tmp_path / "MATTERS.txt"
+    matters_txt.write_text("MATTERS\n\n1. CONTINUITY\n")
+    files = SH.corpus_files([guide, matters_txt])
+    assert [f["name"] for f in files] == ["READING-GUIDE.txt", "MATTERS.txt"]
+    payload = SH.build_share([{"matter": "InferRoute/continuity", "date_bound": "2026-07-13",
+                               "disclosure": "d", "marks": {}, "claims": CLAIMS, "origin": "x"}],
+                             note="the pre-work you asked for", files=files, corpus_name="InferRoute portfolio")
+    lawyer = _install(tmp_path, "lawyer", monkeypatch)
+    blob = SH.seal_to(SH.public_card(lawyer), payload, henry)
+    # The side documents are sealed with everything else — not in the clear anywhere in the file.
+    assert b"coolant channels are moulded" not in blob
+    got = SH.open_sealed(blob, lawyer)
+    assert got["corpus"]["name"] == "InferRoute portfolio" and got["corpus"]["id"]
+
+    SH.create_matters_from_share(got, "FromHenry")
+    written = SH.write_corpus(got, "FromHenry")
+    assert sorted(written["written"]) == ["MATTERS.txt", "READING-GUIDE.txt"]
+    landed = SH.corpus_dir("FromHenry") / "READING-GUIDE.txt"
+    assert landed.read_text() == CORPUS_DOC and stat.S_IMODE(landed.stat().st_mode) == 0o600
+    # …and they are NOT inside a matter: they describe the delivery, not one invention.
+    assert "shared-corpus" in str(landed) and "continuity" not in str(landed)
+
+    # A matter that ARRIVED says which delivery it came in.
+    origin = json.loads((S.records_dir("FromHenry", "continuity") / "corpus-origin.json").read_text())
+    assert origin["corpus"] == got["corpus"]["id"] and "arrived in this corpus" in origin["how"]
+
+    # A matter the RECIPIENT creates while reading it is tied to the delivery but is NOT part of it —
+    # someone else's claims must not acquire your authorship, nor yours theirs.
+    S.cmd_new("FromHenry", "my-own-idea", None, from_corpus=got["corpus"]["id"])
+    mine = json.loads((S.records_dir("FromHenry", "my-own-idea") / "corpus-origin.json").read_text())
+    assert mine["corpus"] == got["corpus"]["id"]
+    assert mine["how"] != origin["how"] and "created here" in mine["how"]
+    record = json.loads(SH.corpora_record(got["corpus"]["id"]).read_text())
+    assert record["matters"] == ["InferRoute/continuity"] and record["from"] == henry["fingerprint"]
+
+
+def test_a_corpus_document_that_did_not_survive_the_trip_is_refused(tmp_path, monkeypatch):
+    """A truncated reading guide reads as a short one. The sha256 beside each file does not prove anything
+    about its CONTENT — only the signature does — but it catches a file that did not arrive whole."""
+    henry = _install(tmp_path, "henry", monkeypatch)
+    f = tmp_path / "GUIDE.txt"
+    f.write_text(CORPUS_DOC)
+    files = SH.corpus_files([f])
+    files[0]["text"] = files[0]["text"][:40]              # truncated in transit
+    payload = SH.build_share([{"matter": "A/b", "date_bound": "", "disclosure": "", "marks": {},
+                               "claims": CLAIMS, "origin": "x"}], files=files)
+    with pytest.raises(S.ProbantError, match="did not arrive as it was sent"):
+        SH.write_corpus(payload, "FromHenry")
+
+
+def test_a_share_without_a_corpus_block_still_opens(tmp_path, monkeypatch):
+    """Schema /2 shares predate the corpus and must keep working: the block is optional, not required."""
+    henry = _install(tmp_path, "henry", monkeypatch)
+    lawyer = _install(tmp_path, "lawyer", monkeypatch)
+    payload = SH.build_share([{"matter": "A/b", "date_bound": "", "disclosure": "d", "marks": {},
+                               "claims": CLAIMS, "origin": "x"}])
+    payload.pop("corpus")
+    blob = SH.seal_to(SH.public_card(lawyer), payload, henry)
+    got = SH.open_sealed(blob, lawyer)
+    assert SH.create_matters_from_share(got, "Old") == ["Old/b"]
+    assert SH.write_corpus(got, "Old") == {"id": "", "written": [], "corpus": {}}

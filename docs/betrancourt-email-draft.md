@@ -52,6 +52,9 @@ Objet : le travail préparatoire sur le portefeuille
 
 Cher Maître,
 
+Un mot d'abord : ce travail et cette lettre ont été préparés par l'agent que nous construisons ; je les ai
+relus et j'en réponds.
+
 **1. Le travail préparatoire**
 
 Vous m'aviez dit que les dépôts étaient trop longs pour être relus tels quels. Voici deux documents.
@@ -124,13 +127,6 @@ adresser l'envoi ; nous vérifierons l'empreinte de vive voix avant que quoi que
 Le même client vous servira pour l'essai, que je vous proposerai quand la prochaine version du moteur sera
 déployée — avec un chiffre à jour et une date.
 
-**Un mot sur la forme.** Le travail préparatoire ci-dessus, et cette lettre, ont été préparés par l'agent
-que nous construisons ; je les ai relus et j'en réponds. Je vous le dis parce que vous l'auriez deviné, et
-parce que c'est sans doute la démonstration la plus directe que je puisse vous faire de ce dont il s'agit :
-huit objets tirés de 1,5 Mo de dépôts, chaque affirmation rattachée à une citation vérifiée, et le
-regroupement présenté comme un jugement plutôt que comme un résultat. Ce que vous en penserez vaut plus que
-ce que j'en dirais.
-
 Bien à vous,
 Henry Decléty
 InferRoute SASU
@@ -171,11 +167,11 @@ InferRoute SASU
   him to RUN anything to learn what a real unfiled disclosure looks like as an input — a description does
   it. If we wait for Build 2 to ask, Build 2 gets built blind to the one thing the recall session calls its
   principal unknown. So the trial waits; the requirements question goes now, at zero cost to him.
-- **The agent is disclosed** (Henry, 23 Sep), and placed last on purpose. As a disclaimer at the top it
-  would invite him to discount everything that follows; arriving after he has read the portfolio work it
-  recontextualises what he just found useful, which is the strongest form the disclosure can take. "Je les
-  ai relus et j'en réponds" keeps the responsibility yours — an agent drafted it, a professional stands
-  behind it, and he is being told which is which.
+- **The agent disclosure is FIRST and one sentence** (Henry, 23 Sep; I had put it last and he moved it).
+  At the top it has to be short, flat and unapologetic or it becomes a disclaimer the reader weighs
+  everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je
+  les ai relus et j'en réponds" keeps the responsibility yours: an agent drafted it, a professional stands
+  behind it, and he is told which is which before he reads a word of it.
 - **One question, and it SUGGESTS the contexts rather than asking for them** (Henry, 23 Sep). An open
   "in what context?" makes a busy practitioner do the work of answering; naming three plausible ones and
   inviting correction costs him a yes, a no, or a better answer. It also shows we have thought about his

@@ -111,11 +111,10 @@ aujourd'hui — c'est ce que vise la prochaine version, qui arrive — adossé �
 aussi nette qu'une preuve peut l'être : une attestation matérielle qui remonte aux clés du fabricant, des
 énoncés signés, revérifiables par un tiers sans avoir à nous croire.
 
-**Une question** : est-ce que le certificat vaut ce que je crois qu'il vaut ? Je
+**Une question** : est-ce qu'une telle pièce a une valeur juridique ? Je
 l'imagine utile là où votre diligence peut être mise en cause longtemps après — une opposition, un
 contentieux, une due diligence où l'on vous demande ce qui avait été cherché et à quelle date, ou un client
-qui revient sur le périmètre d'une recherche facturée deux ans plus tôt. C'est mon hypothèse, pas votre
-expérience : si je vise à côté, c'est maintenant qu'il est utile de me le dire.
+qui revient sur le périmètre d'une recherche facturée deux ans plus tôt.
 
 **3. En pratique**
 
@@ -226,6 +225,13 @@ InferRoute SASU
   everything against — so it states the fact and stops, and the letter that follows is the evidence. "Je les ai relus et je les assume"
   keeps the responsibility yours: an agent drafted it, a professional stands
   behind it, and he is told which is which before he reads a word of it.
+- **The question asks about LEGAL VALIDITY, not about value** (Henry, 23 Sep). "Est-ce que le certificat
+  vaut ce que je crois qu'il vaut ?" asked him to rate our self-assessment — vague, and it invites a polite
+  answer. "Est-ce qu'une telle pièce a une valeur juridique ?" is a question inside his competence that has
+  a real answer, possibly no. It is also the only question whose answer we cannot get anywhere else: we can
+  measure retrieval ourselves, we cannot determine admissibility ourselves. The closing "c'est mon
+  hypothèse, pas votre expérience" went with it — having asked a precise question, inviting him to correct
+  the premise weakens it.
 - **One question, and it SUGGESTS the contexts rather than asking for them** (Henry, 23 Sep). An open
   "in what context?" makes a busy practitioner do the work of answering; naming three plausible ones and
   inviting correction costs him a yes, a no, or a better answer. It also shows we have thought about his

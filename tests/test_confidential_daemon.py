@@ -128,3 +128,45 @@ def test_the_token_never_reaches_a_command_line(monkeypatch):
     # Exact shape, not a heuristic: anything added to this list would be visible in `ps`.
     assert seen["argv"][1:] == ["-m", "inferroute_cli", "confidential", "daemon", "serve",
                                 "--model", "kimi-k2.6"], seen["argv"]
+
+
+def test_goose_cowork_points_at_the_daemon_when_one_is_running(monkeypatch, tmp_path):
+    """The reason cowork could not be sealed was that the endpoint died with the command. A daemon that
+    outlives it closes that, and the desktop app reads the config we write."""
+    from inferroute_cli import cowork
+    monkeypatch.setattr(cowork, "_sealed_endpoint", lambda: ("http://127.0.0.1:41999", "ir-live-token"))
+    written = {}
+    monkeypatch.setattr(cowork, "_write_merged",
+                        lambda path, updates, secret: written.setdefault("secret" if secret else "plain", updates))
+    creds = type("C", (), {"api_url": "https://api.inferroute.ai", "api_key": "cloud-key", "is_valid": True})()
+    host = cowork.configure(creds, model="kimi-k2.6")
+    assert host == "http://127.0.0.1:41999"
+    assert written["plain"]["OPENAI_BASE_URL"] == "http://127.0.0.1:41999"
+    # the daemon's key, not the cloud key: the endpoint refuses anything else
+    assert written["secret"]["OPENAI_API_KEY"] == "ir-live-token"
+    assert "cloud-key" not in json.dumps(written), "the cloud key must not travel to a sealed endpoint"
+
+
+def test_goose_cowork_falls_back_and_says_how_to_seal_it(monkeypatch):
+    from inferroute_cli import cowork
+    monkeypatch.setattr(cowork, "_sealed_endpoint", lambda: None)
+    monkeypatch.setattr(cowork, "_write_merged", lambda *a, **k: None)
+    monkeypatch.setattr(cowork, "_anthropic_host", lambda creds: "https://api.inferroute.ai")
+    creds = type("C", (), {"api_url": "https://api.inferroute.ai", "api_key": "cloud-key", "is_valid": True})()
+    assert cowork.configure(creds, model="kimi-k2.6") == "https://api.inferroute.ai"
+
+
+def test_the_cowork_reason_now_names_the_remedy_not_a_dead_end():
+    """It used to say the endpoint "cannot outlive this command" — true when written, and now false.
+    A backlog entry that is no longer accurate is worse than none: it stops anyone looking again."""
+    from inferroute_cli import lane
+    assert "daemon start" in lane.COWORK
+    assert "cannot" not in lane.COWORK
+
+
+def test_a_daemon_that_is_not_serving_is_not_offered_as_sealed(monkeypatch):
+    """`running()` reports a daemon that answers but has stopped serving; pointing goose at that would
+    configure it against an endpoint returning 503."""
+    from inferroute_cli import cowork
+    monkeypatch.setattr(D, "running", lambda: {"port": 1, "token": "t", "serving": False})
+    assert cowork._sealed_endpoint() is None

@@ -163,10 +163,12 @@ def test_cowork_announces_although_it_reaches_neither_launcher():
     assert "lane_mod.COWORK" in src, "and cite the enumerated reason, so it stays in the backlog"
 
 
-def test_the_cowork_reason_names_the_actual_blocker():
-    """A placeholder reason ("not supported yet") would sit in the backlog forever with nobody knowing
-    what would have to change. This one says what to fix."""
-    assert "detached" in lane.COWORK and "outlive" in lane.COWORK
+def test_the_cowork_reason_names_what_to_do_about_it():
+    """It first named the blocker — the desktop app outlives the command, the endpoint did not — which
+    was the right thing to say while that was true. The daemon made it false, so the reason now names the
+    remedy. A backlog entry that has gone stale is worse than none: it stops anyone looking again."""
+    assert "daemon start" in lane.COWORK, "it must name the remedy, not only the obstacle"
+    assert "cannot" not in lane.COWORK, "it is no longer impossible, so it must not read that way"
 
 
 def _creds():

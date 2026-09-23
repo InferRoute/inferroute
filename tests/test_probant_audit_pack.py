@@ -77,7 +77,7 @@ def test_the_pack_brings_the_brief_and_this_computers_trust_anchors(tmp_path, V,
                  # address, tripped the integrity check by writing scratch files into the folder, and read
                  # the date-bound claim as enforcement when only configuration is attested.
                  "https://kdsintf.amd.com/vcek/v1/", "Write nothing inside this folder",
-                 "Ten to fifteen minutes",          # an auditor's first run was killed early and gave nothing
+                 "stop when", "do not pad",        # effort guidance without an anecdote about other auditors
                  # The claim is the enclave's own account of its filtering, and a read's coverage is part
                  # of what it returned — not footnotes (20 Sep, after a second instance of the same class).
                  "own account of its filtering", "cutoff_applied", "NOT an independent verdict",
@@ -278,3 +278,51 @@ def test_the_pack_carries_the_receipt_alongside_searches_too(tmp_path, V, kms, n
     pack = E.write_audit_pack(rec, tmp_path / "pack")
     assert json.loads((pack / "session-zz9.receipt.json").read_text())["verdict"] == "confidential"
     assert "no prior-art searches" not in (pack / "AUDIT.md").read_text()   # no banner
+
+
+def test_claim_7_sends_the_auditor_somewhere_that_can_hold_the_values_it_asks_for():
+    """Two independent auditors hit this. Claim 7 said "compare the measurements against InferRoute's
+    published reference in trust-anchors/" — but that file describes the SEV-SNP SEARCH lane and carries
+    no mrtd/rtmrs at all, while the receipt is Intel TDX. The instruction had no operands. The second
+    auditor found the strongest positive result in the pack (all four registers matching a named published
+    build) only by ignoring the instruction and going to PyPI on its own initiative."""
+    md = E.AUDIT_MD
+    assert "inferroute_local/confidential/builds.py" in md and "BUNDLED" in md
+    assert "pip download inferroute" in md
+    assert "`trust-anchors/` will not" in md, "it must say where NOT to look, or the next auditor repeats it"
+    assert "compare the measurements in the receipt against InferRoute's published reference in" not in md
+
+
+def test_the_place_claim_7_sends_them_actually_has_builds_in_it():
+    """The anchor behind claim 7, asserted here so an empty list fails OUR build and not an auditor's
+    afternoon — the same discipline the client-audit brief applies to its own anchors."""
+    from inferroute_local.confidential import builds
+    assert builds.BUNDLED, "claim 7 sends the auditor to builds.BUNDLED; it is empty"
+    first = builds.BUNDLED[0]
+    for field in ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3"):
+        assert first.get(field), f"claim 7 asks them to match {field}, which this entry lacks"
+
+
+def test_the_brief_asks_what_the_counters_show_rather_than_presuming_it():
+    """"check that the counters show ciphertext leaving" presupposes its own answer, and on this record
+    every counter is zero. Phrased as a test with a presumed outcome, it invites a reported pass."""
+    md = E.AUDIT_MD
+    assert "report what the counters show" in md
+    assert "check that the counters show ciphertext leaving" not in md
+
+
+def test_the_brief_does_not_lean_on_the_auditor_with_an_anecdote():
+    """It carried a story about another auditor being stopped at nine minutes and "producing nothing at
+    all". That is a nudge to keep going dressed as a fact, and it says nothing about the evidence."""
+    md = E.AUDIT_MD
+    assert "nine minutes" not in md and "Let it finish" not in md
+    assert "stop when" in md and "do not pad" in md
+
+
+def test_verify_md_does_not_name_a_reference_file_that_is_in_neither_folder():
+    """`--reference reference.json` appears in no record and in no pack: in a pack the file sits under
+    trust-anchors/, and a record ships no reference at all."""
+    text = E.VERIFY_MD          # the product's text, not the fixture's stub
+    assert "--reference reference.json" not in text
+    assert "trust-anchors/reference.json" in text
+    assert "not inside this folder" in text

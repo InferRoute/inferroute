@@ -36,44 +36,64 @@ def test_openhands_always_gets_the_flag_that_makes_the_env_count():
     assert "--override-with-envs" in argv
 
 
-def test_codewhale_keeps_the_token_out_of_the_config_file(tmp_path, monkeypatch):
-    """The token is per session; a config file in the user's home would keep it after the session it
-    belonged to is gone. The file names an env var instead."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+def _cw(env, passthrough, api_key="k"):
+    """The launch also calls `codewhale auth set`; tests that are not about that stub it out."""
+    import subprocess
+    from unittest import mock
+    with mock.patch.object(subprocess, "run", lambda *a, **k: None):
+        return agents.codewhale_env_argv("codewhale", env, passthrough, base_url="http://127.0.0.1:4111",
+                                         api_key=api_key, alias=_Alias())
+
+
+def test_codewhale_uses_the_builtin_openai_provider_not_a_custom_one():
+    """Its docs describe a `[providers.<name>]` table for custom gateways. The real binary (0.10.0)
+    answers `--provider inferroute` with "configured custom providers are accepted only by exec and
+    fleet", so that design does not work at all — caught by running it, not by reading."""
     env: dict = {}
-    argv = agents.codewhale_env_argv("codewhale", env, [], base_url="http://127.0.0.1:4111",
-                                     api_key="ir-secret-token", alias=_Alias())
-    cfg = (tmp_path / ".codewhale" / "config.toml").read_text()
-    assert "ir-secret-token" not in cfg, "the session token was written to disk"
-    assert 'api_key_env = "IR_CODEWHALE_KEY"' in cfg
-    assert env["IR_CODEWHALE_KEY"] == "ir-secret-token"
-    assert 'base_url = "http://127.0.0.1:4111/v1"' in cfg
-    assert argv[:5] == ["codewhale", "--provider", "inferroute", "--model", "kimi-k2.6"]
+    argv = _cw(env, ["--foo"], "ir-secret-token")
+    assert argv[:5] == ["codewhale", "--provider", "openai", "--model", "kimi-k2.6"]
+    assert "inferroute" not in argv, "the binary rejects a custom provider name outright"
+    assert env["OPENAI_BASE_URL"] == "http://127.0.0.1:4111/v1"
+    assert "OPENAI_API_KEY" not in env, "measured: it is ignored, so setting it would only mislead"
 
 
-def test_codewhale_leaves_the_users_own_providers_alone(tmp_path, monkeypatch):
+def test_codewhale_hands_the_key_over_on_stdin_because_the_env_var_is_silently_dropped(monkeypatch):
+    """MEASURED: with OPENAI_API_KEY set, CodeWhale 0.10.0 sends NO Authorization header — the request
+    arrives with empty auth and the sealed endpoint would 401 every turn. Only `auth set --api-key-stdin`
+    delivers it without putting it in the process table."""
+    seen = {}
+    import subprocess
+    monkeypatch.setattr(subprocess, "run",
+                        lambda a, **k: seen.update(argv=a, stdin=k.get("input")) or None)
+    agents.codewhale_env_argv("codewhale", {}, [], base_url="http://x", api_key="ir-secret-token",
+                              alias=_Alias())
+    assert seen["argv"] == ["codewhale", "auth", "set", "--provider", "openai", "--api-key-stdin"]
+    assert seen["stdin"] == "ir-secret-token"
+    assert "ir-secret-token" not in " ".join(seen["argv"])
+
+
+def test_codewhale_keeps_the_token_off_the_command_line():
+    """CodeWhale takes `--api-key` on argv. We do not use it: that is the process table, which is where
+    a key of ours already leaks once via xdg-open."""
+    argv = _cw({}, [], "ir-secret-token")
+    assert "--api-key" not in argv
+    assert not any("ir-secret-token" in a for a in argv)
+
+
+def test_codewhale_writes_no_config_file(tmp_path, monkeypatch):
+    """The earlier design wrote ~/.codewhale/config.toml. Pointing by environment means no file, so no
+    per-session token can outlive the session on disk."""
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    d = tmp_path / ".codewhale"
-    d.mkdir()
-    (d / "config.toml").write_text('provider = "mine"\n\n[providers.mine]\nbase_url = "http://mine"\n')
-    agents.codewhale_env_argv("codewhale", {}, [], base_url="http://x", api_key="k", alias=_Alias())
-    cfg = (d / "config.toml").read_text()
-    assert '[providers.mine]' in cfg and 'http://mine' in cfg
-    assert cfg.count("[providers.inferroute]") == 1
+    _cw({}, [])
+    assert not (tmp_path / ".codewhale").exists()
 
 
-def test_rewriting_the_config_does_not_stack_up_copies(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    for _ in range(3):
-        agents.codewhale_env_argv("codewhale", {}, [], base_url="http://x", api_key="k", alias=_Alias())
-    cfg = (tmp_path / ".codewhale" / "config.toml").read_text()
-    assert cfg.count("[providers.inferroute]") == 1
-
-
-def test_the_codewhale_config_is_private(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-    agents.codewhale_env_argv("codewhale", {}, [], base_url="http://x", api_key="k", alias=_Alias())
-    assert oct((tmp_path / ".codewhale" / "config.toml").stat().st_mode)[-3:] == "600"
+def test_codewhale_suppresses_its_own_telemetry():
+    """It reports usage to PostHog by default. We turn an agent's telemetry off on this lane, as we do
+    for Pi."""
+    argv = _cw({}, [])
+    i = argv.index("--telemetry")
+    assert argv[i + 1] == "false"
 
 
 @pytest.mark.parametrize("cmd", ["openhands", "codewhale"])

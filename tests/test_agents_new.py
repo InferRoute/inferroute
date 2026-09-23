@@ -119,3 +119,37 @@ def test_both_are_known_agents_with_a_description():
     for a in ("openhands", "codewhale"):
         assert a in agents.AGENTS
         assert agents._AGENT_DESC.get(a), f"{a} would show a blank row in the picker"
+
+
+def test_every_agent_ir_can_install_is_one_ir_can_run():
+    """An installer for an agent the CLI cannot launch would be a dead end, and an agent with no
+    installer is a support question. The two lists are kept honest against each other."""
+    from inferroute_cli.add import AGENT_INSTALLS
+    for name in AGENT_INSTALLS:
+        assert name in agents.AGENTS or name == "cline", name
+    # cline is the exception on purpose: we cannot write its provider config, so `ir cline` hands the
+    # values over rather than launching it. It is installable but not an agent we spawn.
+    assert "cline" not in agents.AGENTS
+
+
+def test_the_install_commands_are_the_ones_that_were_actually_run():
+    """These were run on this machine before being written down. A plausible-looking command that does
+    not exist is the failure mode: `pip install openhands-ai` gets the LIBRARY, not the CLI."""
+    from inferroute_cli.add import AGENT_INSTALLS
+    assert AGENT_INSTALLS["openhands"][1] == ["pipx", "install", "openhands"]
+    assert AGENT_INSTALLS["codewhale"][1] == ["npm", "install", "-g", "codewhale"]
+    assert AGENT_INSTALLS["cline"][1] == ["npm", "install", "-g", "cline"]
+
+
+def test_the_installer_checks_the_program_appeared_rather_than_the_exit_code(monkeypatch, capsys):
+    """A package can install cleanly and put nothing on PATH. Exit code 0 is not the thing we care about."""
+    import subprocess
+
+    from inferroute_cli import add
+    monkeypatch.setattr(add, "AGENT_INSTALLS", {"codewhale": ("npm", ["npm", "i"], "d")})
+    monkeypatch.setattr("shutil.which", lambda t: "/usr/bin/npm")
+    monkeypatch.setattr(subprocess, "run", lambda c: type("R", (), {"returncode": 0})())
+    from inferroute_cli import agents as A
+    monkeypatch.setattr(A, "find_agent", lambda n: None)
+    assert add._add_agent("codewhale", yes=True) == 1
+    assert "no `codewhale` program was found" in capsys.readouterr().out

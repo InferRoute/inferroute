@@ -16,6 +16,10 @@ ir --model glm-5.2 --plain              # opt out: the standard lane, and it say
 ir pi --model kimi-k2.6                 # Pi on the confidential lane (native OpenAI dialect, no translation)
 ir opencode run "…"                     # OpenCode, same
 ir goose                                # Goose, same
+ir openhands --model kimi-k2.6          # OpenHands (LiteLLM; sealed-only, no plaintext fallback)
+ir codewhale --model glm-5.2            # CodeWhale, same
+ir cline                                # Cline: prints its settings values + installs the guard
+ir confidential daemon start            # a sealed session that outlives the command
 ir --confidential -c                    # continue the latest session, still sealed
 ir confidential show                    # re-print the last session's panel
 ir confidential card                    # export the last panel as an SVG card

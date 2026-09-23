@@ -71,11 +71,57 @@ _LEGACY_MARKER_END   = "# <<< inferroute local-routing <<<"
 _VALID_LEVELS = ("metadata", "full", "off")
 
 
+# How each agent is actually installed — every command here was run on a clean machine before it was
+# written down, because the alternative is telling someone to run something that does not work.
+AGENT_INSTALLS: dict[str, tuple[str, list[str], str]] = {
+    "openhands":  ("pipx", ["pipx", "install", "openhands"],
+                   "OpenHands — autonomous multi-step agent (PyPI `openhands`, the CLI package; "
+                   "`openhands-ai` is the library)"),
+    "codewhale":  ("npm", ["npm", "install", "-g", "codewhale"],
+                   "CodeWhale — terminal agent, open models first"),
+    "cline":      ("npm", ["npm", "install", "-g", "cline"],
+                   "Cline — the one agent besides Pi that can refuse a model request"),
+}
+
+
+def _add_agent(name: str, *, yes: bool) -> int:
+    import shutil
+    import subprocess
+
+    from . import agents as agents_mod
+
+    tool, cmd, desc = AGENT_INSTALLS[name]
+    if agents_mod.find_agent(name):
+        print(f"\n  {name} is already installed ({agents_mod.find_agent(name)}).\n")
+        return 0
+    if not shutil.which(tool):
+        print(f"\n  `{tool}` is needed to install {name} and is not on PATH.\n")
+        return 2
+    print(f"\n  {desc}\n\n      {' '.join(cmd)}\n")
+    if not yes and input("  Run it? [y/N] ").strip().lower() not in ("y", "yes"):
+        print("  Aborted.\n")
+        return 1
+    rc = subprocess.run(cmd).returncode
+    if rc != 0:
+        print(f"\n  Install failed (exit {rc}).\n")
+        return rc
+    # Found, not assumed: a package that installs and puts nothing on PATH is the failure this catches.
+    where = agents_mod.find_agent(name)
+    if not where:
+        print(f"\n  {name} installed but no `{name}` program was found afterwards — open a new shell "
+              "and try again, or check the installer's output above.\n")
+        return 1
+    sealed = "`ir cline` prints what to paste into its settings" if name == "cline" \
+        else f"`ir {name} --model kimi-k2.6` runs it on the confidential lane"
+    print(f"\n  ✓ {name} → {where}\n     {sealed}\n")
+    return 0
+
+
 def cmd_add(rest: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="ir add", description="Add an optional feature.")
     ap.add_argument(
-        "feature", choices=["recording", "local-routing"],
-        help="Which feature to add (use 'recording').",
+        "feature", choices=["recording", "local-routing", *sorted(AGENT_INSTALLS)],
+        help="Which feature to add: recording, or an agent (%s)." % ", ".join(sorted(AGENT_INSTALLS)),
     )
     ap.add_argument(
         "--level", choices=_VALID_LEVELS, default=None,
@@ -95,6 +141,9 @@ def cmd_add(rest: list[str]) -> int:
         help="Accept defaults without prompting (level=full unless --level given).",
     )
     ns = ap.parse_args(rest)
+
+    if ns.feature in AGENT_INSTALLS:
+        return _add_agent(ns.feature, yes=ns.yes)
 
     if ns.feature == "local-routing":
         print("  note: `local-routing` is now `recording` (no router anymore). "

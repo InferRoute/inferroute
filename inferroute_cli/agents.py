@@ -23,7 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
-AGENTS = ("claude", "pi", "opencode", "goose")
+AGENTS = ("claude", "pi", "opencode", "goose", "openhands", "codewhale")
 INSTALL_HINT = {
     "goose": "Goose is an open-source agent from https://github.com/block/goose — one way: `pipx install goose-ai`",
     "pi": "Pi is an open-source agent: `npm install -g @earendil-works/pi-coding-agent` (https://pi.dev)",
@@ -293,6 +293,8 @@ _AGENT_DESC = {
     "pi": "Pi — attested tool use, used by Probant",
     "opencode": "OpenCode — open-source terminal agent",
     "goose": "Goose — Block's agent (CLI here; `ir goose-cowork` for the desktop app)",
+    "openhands": "OpenHands — autonomous multi-step agent",
+    "codewhale": "CodeWhale — terminal agent, open models first",
 }
 
 
@@ -308,3 +310,62 @@ def agent_options() -> list[tuple]:
     return [(a, a.upper(), colours.get(a, "#9ece6a"), a.replace("opencode", "OpenCode").capitalize()
              if a != "opencode" else "OpenCode", _AGENT_DESC.get(a, ""))
             for a in installed()]
+
+
+def openhands_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str,
+                       alias) -> list[str]:
+    """OpenHands reaches its model through LiteLLM, so the model name carries the dialect.
+
+    `openai/<model>` tells LiteLLM to speak OpenAI chat-completions, which is what the sealed endpoint
+    serves, and LiteLLM appends `/chat/completions` to the base URL — hence the `/v1`. The `LLM_*`
+    variables are only consulted when `--override-with-envs` is passed, so passing it is not optional:
+    without it OpenHands would quietly keep whatever provider the user configured before, which on this
+    lane means the session would not be sealed at all.
+    """
+    env["LLM_MODEL"] = f"openai/{alias.short}"
+    env["LLM_BASE_URL"] = base_url.rstrip("/") + "/v1"
+    env["LLM_API_KEY"] = api_key
+    return [binary, "--override-with-envs", *passthrough]
+
+
+CODEWHALE_PROVIDER = "inferroute"
+CODEWHALE_KEY_ENV = "IR_CODEWHALE_KEY"
+
+
+def codewhale_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str,
+                       alias) -> list[str]:
+    """CodeWhale takes a provider table in `~/.codewhale/config.toml`.
+
+    The table names an ENV VAR for the key (`api_key_env`) rather than carrying the key itself. That is
+    deliberate: the token is per session — per daemon lifetime at most — and writing it into a config
+    file in the user's home would leave a stale secret on disk after the session it belonged to is gone.
+    The file gets the endpoint, the environment gets the secret.
+    """
+    _write_codewhale_config(base_url.rstrip("/") + "/v1", alias.short)
+    env[CODEWHALE_KEY_ENV] = api_key
+    env["CODEWHALE_PROVIDER"] = CODEWHALE_PROVIDER
+    env["CODEWHALE_BASE_URL"] = base_url.rstrip("/") + "/v1"
+    env["CODEWHALE_MODEL"] = alias.short
+    return [binary, "--provider", CODEWHALE_PROVIDER, "--model", alias.short, *passthrough]
+
+
+def _write_codewhale_config(base_url: str, model: str) -> None:
+    """Add (or refresh) only our own provider table, leaving every other line of the file alone —
+    it is the user's config, and they may have providers of their own in it."""
+    import re
+
+    path = Path.home() / ".codewhale" / "config.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    block = (f"[providers.{CODEWHALE_PROVIDER}]\n"
+             f'kind = "openai-compatible"\n'
+             f'base_url = "{base_url}"\n'
+             f'api_key_env = "{CODEWHALE_KEY_ENV}"\n'
+             f'model = "{model}"\n')
+    pattern = re.compile(rf"^\[providers\.{CODEWHALE_PROVIDER}\]\n(?:(?!^\[).*\n)*", re.M)
+    text = pattern.sub("", text).rstrip()
+    path.write_text((text + "\n\n" if text else "") + block, encoding="utf-8")
+    os.chmod(path, 0o600)

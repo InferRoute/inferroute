@@ -318,6 +318,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                                                     alias=alias, upstream_name=f"{alias.model_id} [confidential]")
             elif agent == "goose":
                 argv = agents_mod.goose_env_argv(binary, env, passthrough, base_url=local, api_key=local_key, alias=alias)
+            elif agent == "openhands":
+                argv = agents_mod.openhands_env_argv(binary, env, passthrough, base_url=local,
+                                                     api_key=local_key, alias=alias)
+            elif agent == "codewhale":
+                argv = agents_mod.codewhale_env_argv(binary, env, passthrough, base_url=local,
+                                                     api_key=local_key, alias=alias)
             else:
                 console.print(f"[red]unknown agent {agent}[/]")
                 return 2

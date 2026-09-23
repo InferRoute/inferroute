@@ -13,6 +13,13 @@ import pytest
 from inferroute_cli import lane, launch
 
 
+def _flat(out: str) -> str:
+    """The banner wraps its reason across lines inside a box; this recovers the sentence."""
+    import re
+    body = [l.strip("║ ").strip() for l in out.splitlines() if l.strip().startswith("║")]
+    return re.sub(r"\s+", " ", " ".join(body))
+
+
 def _tee(m):        # stand-in for the catalog's -TEE marking, so these tests need no network
     return m in ("Kimi-K2.6", "kimi-k2.6")
 
@@ -44,7 +51,8 @@ def test_the_banner_is_a_block_and_names_the_lane_and_the_reason():
     out = buf.getvalue()
     assert out.count("\n") >= 5, "a one-line notice scrolls away; that is what this replaces"
     assert "InferRoute can read this session" in out
-    assert lane.NO_ENCLAVE in out
+    # the reason is wrapped into the box, so compare on collapsed text rather than on the raw lines
+    assert lane.NO_ENCLAVE in _flat(out)
     assert "ir confidential models" in out, "it must say where the sealed models are"
 
 
@@ -108,3 +116,51 @@ def test_the_launchers_themselves_announce_not_just_their_callers(monkeypatch, c
             pass
         assert said, f"{fn.__name__} ran without announcing the lane"
         assert said[0].kind == lane.STANDARD and said[0].why == lane.NO_ENCLAVE
+
+
+def test_the_server_cannot_move_a_known_enclave_model_to_the_readable_lane(monkeypatch):
+    """The "-TEE" marking comes from a catalog fetched from InferRoute's own server and cached here, so
+    the server can stop marking a model. It can only ever downgrade — attestation still has to pass, so
+    it cannot make a plain model look sealed — but downgrade is the direction that matters. The bundled
+    floor is what the catalog cannot go under; same problem and same shape as `builds.BUNDLED`."""
+    from inferroute_cli import models
+
+    class _Plain:                       # what a downgraded catalog row looks like
+        ref_key = "moonshotai/Kimi-K2.6"
+    monkeypatch.setattr(models, "get", lambda m: _Plain())
+    monkeypatch.setattr(models, "short_for_model_id", lambda m: "")
+    assert lane.enclave_backed("kimi-k2.6") is True, "a downgraded catalog moved a sealed model"
+    assert lane.enclave_backed("some-model-never-sealed") is False, "the floor must not vouch for anything"
+
+
+def test_the_floor_names_models_the_catalog_actually_knows():
+    """A floor entry that matches no real model protects nothing and would never be noticed."""
+    from inferroute_cli import models
+    known = {a.short.lower() for a in models.all_aliases()}
+    assert lane.ENCLAVE_FLOOR <= known, sorted(lane.ENCLAVE_FLOOR - known)
+    assert all(lane.enclave_backed(m) for m in lane.ENCLAVE_FLOOR)
+
+
+def test_main_and_lane_do_not_hold_two_copies_of_the_predicate():
+    from inferroute_cli import main
+    for m in ("kimi-k2.6", "Kimi-K2.6", "minimax-m3", "claude-sonnet-5", ""):
+        assert main._is_confidential_model(m) == lane.enclave_backed(m), m
+
+
+def test_cowork_announces_although_it_reaches_neither_launcher():
+    """cowork writes goose's config and starts the desktop app detached, so the launcher-announces rule
+    does not reach it. It is the third plaintext entry point and it must say so itself."""
+    import inspect
+
+    from inferroute_cli import cowork
+    src = inspect.getsource(cowork.cmd_cowork)
+    assert "lane_mod.announce" in src
+    i, j = src.index("lane_mod.announce"), src.index("_launch_desktop")
+    assert i < j, "it must say so before it launches, not after"
+    assert "lane_mod.COWORK" in src, "and cite the enumerated reason, so it stays in the backlog"
+
+
+def test_the_cowork_reason_names_the_actual_blocker():
+    """A placeholder reason ("not supported yet") would sit in the backlog forever with nobody knowing
+    what would have to change. This one says what to fix."""
+    assert "detached" in lane.COWORK and "outlive" in lane.COWORK

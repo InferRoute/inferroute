@@ -107,9 +107,9 @@ def _extract_plain(args: list[str]) -> tuple[bool, list[str]]:
 
 
 def _is_confidential_model(model: str) -> bool:
-    """True when the pinned model runs inside an enclave (TEE-backed in the catalog)."""
-    a = models.get(model)
-    return bool(a and (a.ref_key or "").endswith("-TEE"))
+    """True when the pinned model runs inside an enclave. Delegates to `lane`, which holds the one
+    definition and the bundled floor the server-fetched catalog cannot go under."""
+    return lane.enclave_backed(model)
 
 
 def _is_premium_anthropic(model: str) -> bool:

@@ -136,6 +136,10 @@ def test_the_brief_tells_the_auditor_the_verifier_is_untrusted_and_how_to_check_
     assert "which of it you computed yourself" in md
     # An empty folder gets a one-line report — but claim 7 is NOT empty just because no search ran, and
     # the brief used to say "there is nothing here to audit", which dismissed the one thing that was.
+    # An auditor planted a file under trust-anchors/ and integrity still said "no unlisted files".
+    # The warning was true only at the top level, and the same blind spot leaves the anchors unhashed.
+    assert "AT THE TOP LEVEL" in md
+    assert "does not descend into subdirectories" in md
     assert "every claim EXCEPT 7 is COULD NOT CHECK" in md
     assert "Claim 7 rests on the session receipt and not on any search" in md
 
@@ -249,8 +253,10 @@ def test_a_pack_with_no_searches_tells_the_auditor_so_before_they_start(tmp_path
     pack = E.write_audit_pack(_bare_record(tmp_path, receipt=receipt), tmp_path / "pack")
     brief = (pack / "AUDIT.md").read_text()
     banner = brief.split("\n\n")[1]
-    assert "no prior-art searches" in banner and "COULD NOT CHECK" in banner
-    assert "claim 7" in banner
+    assert "`searches.json` is empty" in banner
+    # An auditor, 23 Sep: "an audit brief that supplies the findings has pre-empted the thing it
+    # commissioned." The banner states the FACT and stops; the verdicts are the auditor's to reach.
+    assert "COULD NOT CHECK" not in banner and "Claims 1 to 6" not in banner
     # The brief asks the auditor to report the exit code. 1 here means "not a pass", not "a check found
     # something wrong", and nothing else in the folder says so.
     assert "NOTHING VERIFIED" in banner and "exit 1" in banner

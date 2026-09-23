@@ -46,6 +46,15 @@ and compare hashes — turning "read it carefully" into "check it against ours".
 `verify_record.py` as untrusted code, points out that the manifest listing its hash sits in the same folder,
 and says a mismatch is a finding in its own right.
 
+**The audit can ask about the conversation, not only the searches.** A matter's work happens in a sealed
+session with an AI machine, and the record described that session from this device's receipt while leaving
+the receipt on the device — our own word with nothing beside it. The pack now carries each
+`session-*.receipt.json`, and claim 7 states exactly what it is worth: the raw attestation behind those
+verdicts is not in the folder, so an auditor cannot re-verify the quote the way they can for a search, but
+they can check the measurements against the published reference and the counters against the claim that
+plaintext was only ever sealed on the device. The receipt's `path` is dropped — it names the professional
+and their folders and evidences nothing.
+
 ## Fixes a user would notice
 
 - **A missing search no longer reads as weakened protection.** With no search machine configured the panel
@@ -56,8 +65,12 @@ and says a mismatch is a finding in its own right.
   the key card a new user must send before anyone can share with them — died with `ModuleNotFoundError`.
   It now names the dependency and gives the one command that fixes it. *Found only by installing the
   candidate in a clean virtualenv; every development machine already had it.*
-- **An audit pack cannot be built from a record with no searches.** One was, and an auditor spent ten
-  minutes reaching "could not check" on seven claims that each rest on a signed statement per search.
+- **An audit pack is refused only when there is genuinely nothing to audit.** A pack built from a matter
+  that had never been searched cost an auditor ten minutes to reach "could not check" on every claim. But
+  refusing on *searches alone* then blocked the opposite case — no search machine resolves from this device,
+  yet the conversation was sealed and is auditable under claim 7. It now refuses only when there is neither
+  a search nor a session, and when searches are absent it says so above the brief instead of letting the
+  auditor spend the fifteen minutes it asks for to reach the same verdict.
 - **A killed reading job no longer counts as having read the document.** A retry cap turned an interrupted
   run into permanent data loss: the largest filing in a portfolio was marked read-and-empty and silently
   skipped on every later resume.

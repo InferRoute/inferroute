@@ -55,6 +55,15 @@ they can check the measurements against the published reference and the counters
 plaintext was only ever sealed on the device. The receipt's `path` is dropped — it names the professional
 and their folders and evidences nothing.
 
+**Auditing the client itself — `ir probant audit-client`.** The evidence pack asks whether a record holds
+up; a firm asks the prior question first, which is whether the program that produced it does what we say.
+The client is the one part of this system that needs no trust: it is plain Python on the professional's own
+disk, so their own AI can read it. The command writes a folder with the SHA-256 of every source file, where
+they sit, and six claims to test — beginning with "nothing leaves this computer unsealed", and asking the
+auditor to hunt for a counter-example rather than accept the claim. Every file and symbol the brief cites is
+verified to exist before the folder is written; if a rename moved one, it refuses and names it rather than
+send an auditor chasing a function that is gone.
+
 ## Fixes a user would notice
 
 - **A missing search no longer reads as weakened protection.** With no search machine configured the panel

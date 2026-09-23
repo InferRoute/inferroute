@@ -44,8 +44,9 @@ def _resolve_model(short: str | None):
     from . import models as models_mod
     short = short or DEFAULT_MODEL
     alias = models_mod.get(short)
-    if alias is None or not (alias.ref_key or "").endswith("-TEE"):
-        tee = [a.short for a in models_mod.all_aliases() if (a.ref_key or "").endswith("-TEE")]
+    from . import lane as lane_mod
+    if alias is None or not lane_mod.enclave_backed(short):
+        tee = [a.short for a in models_mod.all_aliases() if lane_mod.enclave_backed(a.short)]
         sys.stderr.write(f"\n  `{short}` cannot run confidentially. Models that can: {', '.join(tee) or '(none in catalog)'}\n\n")
         sys.exit(2)
     return alias
@@ -438,8 +439,11 @@ def run(rest: list[str]) -> int:
     if ns.action == "models":
         from . import models as models_mod
         print()
+        from . import lane as lane_mod
+        # Through the floor: the standard-lane banner sends people to THIS command, so a downgraded
+        # catalog must not be able to make its own advice wrong.
         for a in models_mod.all_aliases():
-            if (a.ref_key or "").endswith("-TEE"):
+            if lane_mod.enclave_backed(a.short):
                 print(f"  ir --confidential --model {a.short:<18} {a.label}")
         print()
         return 0

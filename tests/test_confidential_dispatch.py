@@ -18,7 +18,10 @@ def _capture(monkeypatch):
     import inferroute_cli.confidential as C
     monkeypatch.setattr(C, "launch", lambda args, agent="claude": calls.append(("confidential", agent, list(args))) or 0)
     monkeypatch.setattr(M.launch, "launch_through_inferroute", lambda *a, **k: calls.append(("plain-claude", a[0])) or 0)
-    monkeypatch.setattr(M.launch, "launch_agent_plain", lambda agent, model, creds, extra_args=(): calls.append(("plain", agent, model)) or 0)
+    # `why` is required now: launch_agent_plain is the third plaintext launcher and announces the lane
+    # itself, so a stub has to accept the reason its caller is obliged to give.
+    monkeypatch.setattr(M.launch, "launch_agent_plain",
+                        lambda agent, model, creds, extra_args=(), *, why="": calls.append(("plain", agent, model, why)) or 0)
     monkeypatch.setattr(M.launch, "launch_goose", lambda *a, **k: calls.append(("plain-goose", a[0])) or 0)
     monkeypatch.setattr(M.config, "load", lambda: type("C", (), {"is_valid": True, "api_url": "u", "api_key": "k"})())
     return calls
@@ -41,7 +44,9 @@ def test_plain_opts_out_and_non_enclave_models_stay_plain(monkeypatch, capsys):
     M.main(["--model", "glm-5.2", "--plain", "-p", "hi"])
     M.main(["pi", "--model", "kimi-k2.6", "--plain"])
     M.main(["--model", "minimax-m3", "-p", "hi"])
-    assert calls == [("plain-claude", "glm-5.2"), ("plain", "pi", "kimi-k2.6"), ("plain-claude", "minimax-m3")]
+    assert calls == [("plain-claude", "glm-5.2"),
+                     ("plain", "pi", "kimi-k2.6", M.lane.USER_ASKED),
+                     ("plain-claude", "minimax-m3")]
     # The lane notice used to be written here as two one-liners, one of which skipped resumes — where a
     # silent drop to the readable lane was found on 23 Sep. It is now a block printed by the launcher
     # itself; this test stubs the launchers, so what it proves is the ROUTING above. That the launcher

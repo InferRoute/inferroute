@@ -129,6 +129,24 @@ def _persist_last_model(model_id: str) -> None:
         pass
 
 
+def last_agent() -> str | None:
+    """The agent of the most recent inferroute launch, or None. Used to order the agent picker so the
+    one you used last is first and Enter keeps it — a remembered default without a second settings file.
+    Best-effort like the index itself: an unreadable index simply means no memory, never a wrong answer."""
+    try:
+        rows = launch_index()
+    except Exception:
+        return None
+    best, when = None, ""
+    for rec in (rows or {}).values():
+        if not isinstance(rec, dict):
+            continue
+        a, ts = rec.get("agent"), str(rec.get("at") or rec.get("ts") or "")
+        if a and ts >= when:
+            best, when = a, ts
+    return best
+
+
 def last_model() -> str | None:
     """The canonical model_id of the most recent inferroute launch, or None.
 
@@ -939,9 +957,14 @@ def _load_yaml(path: Path) -> dict:
         return {}
 
 
-def launch_agent_plain(agent: str, model_id: str, creds: Credentials, extra_args: Iterable[str] = ()) -> None:
+def launch_agent_plain(agent: str, model_id: str, creds: Credentials, extra_args: Iterable[str] = (),
+                       *, why: str) -> None:
     """Exec Pi or OpenCode on the STANDARD lane: straight at api.inferroute.ai with the user's
     key (Anthropic Messages dialect, which both speak natively), tagged with a session id."""
+    from . import lane as _lane
+    # The third plaintext launcher. The chokepoint added on 23 Sep covered the other two and missed
+    # this one, which is the whole argument for the launcher announcing rather than its callers.
+    _lane.announce(_lane.Lane(_lane.STANDARD, model_id, why))
     from . import agents as agents_mod, models
     binary = agents_mod.binary_for(agent)
     if not creds.is_valid:

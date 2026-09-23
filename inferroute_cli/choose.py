@@ -235,7 +235,22 @@ class ChooseApp(App):
         self.exit()
 
 
-def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
+def _pick_agent(default: str) -> str | None:
+    """The second step of bare `ir`: which agent runs the model you just chose.
+
+    Shown only when there is a real choice — two or more agents installed — so the common single-agent
+    machine keeps its one-keystroke flow. The last agent you used is listed first, so Enter keeps it and
+    the step costs nothing to someone who never changes it.
+    """
+    from . import agents as agents_mod
+    rows = agents_mod.agent_options()
+    if len(rows) < 2:
+        return default
+    rows.sort(key=lambda r: r[0] != default)      # last-used first; Enter keeps it
+    return pick(rows, "Which agent should run it?")
+
+
+def run(extra_args=None, agent: str = "claude", plain: bool = False, pick_agent: bool = False) -> int:
     extra_args = list(extra_args or [])
 
     # The picker is a full-screen TUI — it needs a real terminal. Bail clearly
@@ -255,6 +270,15 @@ def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
     if short is None:
         return 130  # user quit without choosing
 
+    # Which agent runs it — asked after the model, because the model is what people came for, and only
+    # for a routed pick (native Anthropic is Claude Code by definition, so there is nothing to ask).
+    if pick_agent and short != _ANTHROPIC:
+        from .launch import last_agent
+        chosen = _pick_agent(last_agent() or agent)
+        if chosen is None:
+            return 130                             # quit at the agent step means quit, not "use default"
+        agent = chosen
+
     # rich ships with textual; render markup so [bold] doesn't print literally.
     from rich.console import Console
 
@@ -264,7 +288,8 @@ def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
     if short == _ANTHROPIC:
         console.print("    [bold]ir anthropic[/bold]")
     else:
-        console.print(f"    [bold]ir --model {short}[/bold]")
+        prefix = "ir" if agent == "claude" else f"ir {agent}"
+        console.print(f"    [bold]{prefix} --model {short}[/bold]")
     console.print()
 
     # Spawn it now so the picker isn't a dead-end.
@@ -280,7 +305,8 @@ def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
         sys.stderr.write(f"  internal error: alias '{short}' missing\n")
         return 1
 
-    if not plain and (alias.ref_key or "").endswith("-TEE"):
+    from . import lane as lane_mod
+    if not plain and lane_mod.enclave_backed(alias.short):
         # enclave-backed pick → the confidential lane (the default), for every Anthropic-native agent
         from . import confidential as confidential_mod
         return confidential_mod.launch(["--model", alias.short, *extra_args], agent=agent)
@@ -289,7 +315,9 @@ def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
         launch_goose(alias.short, load(), extra_args=extra_args, why=lane_mod.why_standard(alias.short))
     elif agent in ("pi", "opencode"):
         from .launch import launch_agent_plain
-        launch_agent_plain(agent, alias.short, load(), extra_args=extra_args)
+        from . import lane as lane_mod
+        launch_agent_plain(agent, alias.short, load(), extra_args=extra_args,
+                           why=lane_mod.why_standard(alias.short))
     else:
         from . import lane as lane_mod
         launch_through_inferroute(alias.short, load(), extra_args=extra_args,
@@ -310,5 +338,8 @@ def pick(options: list[tuple], tagline: str) -> str | None:
 def confidential_options() -> list[tuple]:
     """Picker rows for the models that can run on the confidential lane (TEE-backed), in the
     picker's own order; badge/accent/desc come from the catalog like the normal picker."""
-    tee = {a.short for a in models.all_aliases() if (a.ref_key or "").endswith("-TEE")}
+    from . import lane as lane_mod
+    # Through lane.enclave_backed, not the catalog row directly: a downgraded catalog would otherwise
+    # stop OFFERING a sealed model here, which is the same server-side move the floor exists to refuse.
+    tee = {a.short for a in models.all_aliases() if lane_mod.enclave_backed(a.short)}
     return [row for row in _options() if row[0] in tee]

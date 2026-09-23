@@ -285,3 +285,26 @@ def goose_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: 
     if passthrough and passthrough[0] in ("run", "session"):
         return [binary, *passthrough]
     return [binary, "session", *passthrough]
+
+
+# Descriptions for the picker. Kept here beside AGENTS so a new agent cannot be added without one.
+_AGENT_DESC = {
+    "claude": "Anthropic's Claude Code — the default",
+    "pi": "Pi — attested tool use, used by Probant",
+    "opencode": "OpenCode — open-source terminal agent",
+    "goose": "Goose — Block's agent (CLI here; `ir goose-cowork` for the desktop app)",
+}
+
+
+def installed() -> list[str]:
+    """The agents actually present on this machine, in AGENTS order."""
+    return [a for a in AGENTS if find_agent(a)]
+
+
+def agent_options() -> list[tuple]:
+    """Picker rows for the installed agents: (id, badge, colour, name, desc) — the shape choose.pick
+    takes, so the agent step looks like the model step rather than inventing a second idiom."""
+    colours = {"claude": "#d97757", "pi": "#7aa2f7", "opencode": "#9ece6a", "goose": "#e0af68"}
+    return [(a, a.upper(), colours.get(a, "#9ece6a"), a.replace("opencode", "OpenCode").capitalize()
+             if a != "opencode" else "OpenCode", _AGENT_DESC.get(a, ""))
+            for a in installed()]

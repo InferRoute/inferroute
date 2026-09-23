@@ -285,12 +285,15 @@ def run(extra_args=None, agent: str = "claude", plain: bool = False) -> int:
         from . import confidential as confidential_mod
         return confidential_mod.launch(["--model", alias.short, *extra_args], agent=agent)
     elif agent == "goose":
-        launch_goose(alias.short, load(), extra_args=extra_args)
+        from . import lane as lane_mod
+        launch_goose(alias.short, load(), extra_args=extra_args, why=lane_mod.why_standard(alias.short))
     elif agent in ("pi", "opencode"):
         from .launch import launch_agent_plain
         launch_agent_plain(agent, alias.short, load(), extra_args=extra_args)
     else:
-        launch_through_inferroute(alias.short, load(), extra_args=extra_args)
+        from . import lane as lane_mod
+        launch_through_inferroute(alias.short, load(), extra_args=extra_args,
+                                  why=lane_mod.why_standard(alias.short))
     return 0  # never reached — exec replaces process
 
 

@@ -295,7 +295,10 @@ def _capture_launch(monkeypatch, tmp_path, *, lane=None, ir_grant=None):
     monkeypatch.setattr("os.execvpe", _fake_execvpe)
 
     creds = Credentials(api_url="https://api.inferroute.ai", api_key="k")
-    _launch_mod.launch_through_inferroute("moonshotai/Kimi-K2.6-TEE", creds)
+    # `why` is required: the plaintext launcher announces the lane itself, so every caller — tests
+    # included — has to say why it is on the readable lane.
+    from inferroute_cli import lane as _lane
+    _launch_mod.launch_through_inferroute("moonshotai/Kimi-K2.6-TEE", creds, why=_lane.USER_ASKED)
     return captured["env"], grab_calls["n"]
 
 

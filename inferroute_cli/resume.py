@@ -317,7 +317,9 @@ def _launch(model: str, extra_args: list[str], session_id: str | None) -> int:
             "  Run `ir login` to set one up, or `ir help` for options.\n\n"
         )
         return 2
-    launch.launch_through_inferroute(model, creds, extra_args=extra_args, session_id=session_id)
+    from . import lane as lane_mod
+    launch.launch_through_inferroute(model, creds, extra_args=extra_args, session_id=session_id,
+                                     why=lane_mod.why_standard(model))
     return 0  # never reached — exec replaces process
 
 

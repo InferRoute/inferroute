@@ -92,8 +92,10 @@ def cmd_integrate(args: list[str]) -> int:
     # safe `ir` research commands only (NOT bare `ir`/`ir auto`, which would launch a
     # nested session — also blocked by the CLAUDECODE guard in launch.py). The prompt
     # is the first positional; --allowedTools is variadic so it goes last.
+    from . import lane as lane_mod
     launch_through_inferroute(
         alias.short, creds,
+        why=lane_mod.INTEGRATE,
         extra_args=[
             prompt, *rest,
             # Block subagent spawning — it's a tiny task; Explore/Task subagents

@@ -42,8 +42,11 @@ def test_plain_opts_out_and_non_enclave_models_stay_plain(monkeypatch, capsys):
     M.main(["pi", "--model", "kimi-k2.6", "--plain"])
     M.main(["--model", "minimax-m3", "-p", "hi"])
     assert calls == [("plain-claude", "glm-5.2"), ("plain", "pi", "kimi-k2.6"), ("plain-claude", "minimax-m3")]
-    err = capsys.readouterr().err
-    assert "standard lane (--plain)" in err and "not enclave-backed" in err
+    # The lane notice used to be written here as two one-liners, one of which skipped resumes — where a
+    # silent drop to the readable lane was found on 23 Sep. It is now a block printed by the launcher
+    # itself; this test stubs the launchers, so what it proves is the ROUTING above. That the launcher
+    # then says so is tests/test_lane.py, and that every caller states a reason is the census there.
+    assert capsys.readouterr().err.count("standard lane (--plain)") == 0
     assert M._is_confidential_model("kimi-k2.6") and not M._is_confidential_model("minimax-m3") and not M._is_confidential_model("nope")
 
 

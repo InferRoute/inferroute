@@ -328,44 +328,34 @@ def openhands_env_argv(binary: str, env: dict, passthrough: list[str], *, base_u
     return [binary, "--override-with-envs", *passthrough]
 
 
-CODEWHALE_PROVIDER = "inferroute"
-CODEWHALE_KEY_ENV = "IR_CODEWHALE_KEY"
+def _codewhale_set_key(binary: str, api_key: str) -> None:
+    """Hand CodeWhale the session key on STDIN.
+
+    Measured, not assumed: with OPENAI_API_KEY in the environment it sends no Authorization header at all
+    (the request arrives with an empty auth), so the sealed endpoint would 401 every turn. `--api-key`
+    works but puts the token in the process table — CodeWhale's own help calls that "discouraged". `auth
+    set --api-key-stdin` is the path that neither leaks nor silently drops it; the key lands in
+    ~/.codewhale/secrets/ and is replaced by the next launch.
+    """
+    import subprocess
+    try:
+        subprocess.run([binary, "auth", "set", "--provider", "openai", "--api-key-stdin"],
+                       input=api_key, text=True, capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass          # the launch continues and fails loudly at the endpoint rather than silently here
 
 
 def codewhale_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str,
                        alias) -> list[str]:
-    """CodeWhale takes a provider table in `~/.codewhale/config.toml`.
+    """CodeWhale through its built-in `openai` provider, pointed by environment.
 
-    The table names an ENV VAR for the key (`api_key_env`) rather than carrying the key itself. That is
-    deliberate: the token is per session — per daemon lifetime at most — and writing it into a config
-    file in the user's home would leave a stale secret on disk after the session it belonged to is gone.
-    The file gets the endpoint, the environment gets the secret.
+    Its docs describe a `[providers.<name>]` table for custom gateways; the real binary (0.10.0) answers
+    `--provider inferroute` with "configured custom providers are accepted only by exec and fleet", so
+    that design does not work at all. `--provider openai` with OPENAI_BASE_URL resolves cleanly.
+
+    `--telemetry false` because CodeWhale reports usage to PostHog by default, and we suppress an agent's
+    own telemetry on this lane exactly as we do for Pi.
     """
-    _write_codewhale_config(base_url.rstrip("/") + "/v1", alias.short)
-    env[CODEWHALE_KEY_ENV] = api_key
-    env["CODEWHALE_PROVIDER"] = CODEWHALE_PROVIDER
-    env["CODEWHALE_BASE_URL"] = base_url.rstrip("/") + "/v1"
-    env["CODEWHALE_MODEL"] = alias.short
-    return [binary, "--provider", CODEWHALE_PROVIDER, "--model", alias.short, *passthrough]
-
-
-def _write_codewhale_config(base_url: str, model: str) -> None:
-    """Add (or refresh) only our own provider table, leaving every other line of the file alone —
-    it is the user's config, and they may have providers of their own in it."""
-    import re
-
-    path = Path.home() / ".codewhale" / "config.toml"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        text = ""
-    block = (f"[providers.{CODEWHALE_PROVIDER}]\n"
-             f'kind = "openai-compatible"\n'
-             f'base_url = "{base_url}"\n'
-             f'api_key_env = "{CODEWHALE_KEY_ENV}"\n'
-             f'model = "{model}"\n')
-    pattern = re.compile(rf"^\[providers\.{CODEWHALE_PROVIDER}\]\n(?:(?!^\[).*\n)*", re.M)
-    text = pattern.sub("", text).rstrip()
-    path.write_text((text + "\n\n" if text else "") + block, encoding="utf-8")
-    os.chmod(path, 0o600)
+    _codewhale_set_key(binary, api_key)
+    env["OPENAI_BASE_URL"] = base_url.rstrip("/") + "/v1"
+    return [binary, "--provider", "openai", "--model", alias.short, "--telemetry", "false", *passthrough]

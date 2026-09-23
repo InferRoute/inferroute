@@ -6,14 +6,14 @@ point-and-click app, no terminal needed.
 
 It's powered by [**goose**](https://github.com/block/goose) (Block / Linux
 Foundation, Apache-2.0), an open-source agent with both a **desktop app** and a
-**CLI**. We don't fork it — `ir cowork` just wires goose to InferRoute and
+**CLI**. We don't fork it — `ir goose-cowork` (still answers to `ir cowork`) just wires goose to InferRoute and
 launches it. Because the wiring is config-only and re-asserted on every launch,
 goose updates can't drift it out of sync.
 
 ## Fastest path
 
 ```bash
-ir cowork
+ir goose-cowork
 ```
 
 This will:
@@ -30,19 +30,19 @@ You'll also be offered Cowork at the end of `ir setup`.
 
 | command | what it does |
 |---|---|
-| `ir cowork` | wire goose to InferRoute and launch the desktop app |
-| `ir cowork --configure-only` | wire it up, don't launch |
-| `ir cowork --model NAME` | pin a model (short alias like `kimi`/`glm`, or a canonical id) |
+| `ir goose-cowork` | wire goose to InferRoute and launch the desktop app |
+| `ir goose-cowork --configure-only` | wire it up, don't launch |
+| `ir goose-cowork --model NAME` | pin a model (short alias like `kimi`/`glm`, or a canonical id) |
 
 ## In the app
 
 When the desktop app opens, pick a model from the list (populated from InferRoute's
 `/v1/models`) and start a session. The same `inf_…` key you use with `ir` works
-here — Cowork reads it from goose's local secret store, which `ir cowork` writes.
+here — Cowork reads it from goose's local secret store, which `ir goose-cowork` writes.
 
 ## What gets configured (and why it's safe)
 
-`ir cowork` owns a small, stable set of keys and **merges** them into goose's
+`ir goose-cowork` owns a small, stable set of keys and **merges** them into goose's
 files without touching your other goose settings:
 
 - `~/.config/goose/config.yaml` — `GOOSE_PROVIDER: anthropic`,
@@ -53,12 +53,12 @@ files without touching your other goose settings:
   `GOOSE_DISABLE_KEYRING=true`, so goose uses its file secret store on machines
   without a working OS keyring
 
-These are re-written every time you run `ir cowork`, so they self-heal across
+These are re-written every time you run `ir goose-cowork`, so they self-heal across
 goose updates.
 
 ## Wiring it by hand
 
-If you'd rather not use `ir cowork`, point any goose install at InferRoute:
+If you'd rather not use `ir goose-cowork`, point any goose install at InferRoute:
 
 ```yaml
 # ~/.config/goose/config.yaml
@@ -77,7 +77,7 @@ On Linux, also set `GOOSE_DISABLE_KEYRING=true` (e.g. in
 
 ## Notes
 
-- **Updates:** the desktop app auto-updates; `ir cowork` re-asserts the config
+- **Updates:** the desktop app auto-updates; `ir goose-cowork` re-asserts the config
   each launch, so that's handled.
 - **Cost display:** goose's in-app cost readout depends on
   [block/goose#9719](https://github.com/block/goose/pull/9719); until it merges,

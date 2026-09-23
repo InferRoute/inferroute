@@ -39,6 +39,9 @@ ir --model NAME     pin a model — short alias or canonical id; any claude flag
 ir choose           interactive picker — pick a model, then launch
 ir anthropic        escape hatch — plain Claude, your own setup
 ir pi / ir opencode same, with Pi or OpenCode instead of Claude Code
+ir openhands / ir codewhale     same, sealed-only (no plaintext fallback built for them)
+ir cline                        prints what to paste into Cline, plus the plugin that enforces it
+ir add openhands|codewhale|cline installs one
 ir --plain          standard lane (InferRoute can read the requests); the default for
                     enclave-backed models is the CONFIDENTIAL lane — see below
 ir confidential …   show | card | models — re-print the last panel, export it, list models

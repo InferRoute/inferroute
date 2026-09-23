@@ -27,7 +27,7 @@ def _tee(m):        # stand-in for the catalog's -TEE marking, so these tests ne
 def test_the_plaintext_launchers_cannot_be_called_without_stating_a_reason():
     """The teeth. A new entry point that forgets the lane is a TypeError the suite catches, not a
     downgrade a law firm discovers."""
-    for f in (launch.launch_through_inferroute, launch.launch_goose):
+    for f in (launch.launch_through_inferroute, launch.launch_goose, launch.launch_agent_plain):
         p = inspect.signature(f).parameters["why"]
         assert p.default is inspect.Parameter.empty, f"{f.__name__} lets a caller omit the reason"
         assert p.kind is inspect.Parameter.KEYWORD_ONLY, f"{f.__name__} could take it positionally by luck"
@@ -88,7 +88,7 @@ def test_no_caller_of_the_plaintext_launchers_omits_its_reason():
         if f.name == "launch.py":
             continue          # it DEFINES them, and its module docstring names them as prose
         src = f.read_text(encoding="utf-8")
-        for m in re.finditer(r"launch_(?:through_inferroute|goose)\s*\(", src):
+        for m in re.finditer(r"launch_(?:through_inferroute|goose|agent_plain)\s*\(", src):
             if src[:m.start()].rstrip().endswith("def"):
                 continue
             tail = src[m.end():m.end() + 400]
@@ -108,10 +108,13 @@ def test_the_launchers_themselves_announce_not_just_their_callers(monkeypatch, c
     said = []
     monkeypatch.setattr(lane, "announce", lambda l, out=None: said.append(l))
     creds = Credentials(api_url="https://api.inferroute.ai", api_key="k")
-    for fn in (launch.launch_through_inferroute, launch.launch_goose):
+    for fn in (launch.launch_through_inferroute, launch.launch_goose, launch.launch_agent_plain):
         said.clear()
         try:
-            fn("moonshotai/Kimi-K2.6-TEE", creds, why=lane.NO_ENCLAVE)
+            if fn is launch.launch_agent_plain:
+                fn("pi", "moonshotai/Kimi-K2.6-TEE", creds, why=lane.NO_ENCLAVE)
+            else:
+                fn("moonshotai/Kimi-K2.6-TEE", creds, why=lane.NO_ENCLAVE)
         except SystemExit:
             pass
         assert said, f"{fn.__name__} ran without announcing the lane"
@@ -222,3 +225,45 @@ def test_goose_cowork_is_the_name_and_cowork_still_answers(monkeypatch):
     text = "\n".join(help_mod.lines() if hasattr(help_mod, "lines") else [])
     if text:
         assert "ir goose-cowork" in text and "  ir cowork " not in text
+
+
+def test_no_module_keeps_its_own_copy_of_the_enclave_test():
+    """There were four: main, choose's launch branch, choose's confidential_options, and lane. Three of
+    them read the catalog row directly, so they bypassed the bundled floor entirely — a downgraded
+    catalog would still have moved a session, and would have stopped OFFERING the model in the picker."""
+    import pathlib
+    root = pathlib.Path(launch.__file__).parent
+    offenders = []
+    for f in sorted(root.glob("*.py")):
+        if f.name == "lane.py":
+            continue
+        if 'endswith("-TEE")' in f.read_text(encoding="utf-8"):
+            offenders.append(f.name)
+    assert offenders == [], f"{offenders} decide enclave-backing without the floor"
+
+
+def test_bare_ir_offers_the_agent_and_a_named_agent_does_not_ask(monkeypatch):
+    """Henry, 23 Sep: "when we just do ir and get to choose the model we should also get to choose the
+    agent". `ir pi` has already said which, so it must not ask again."""
+    from inferroute_cli import choose
+    asked = []
+    monkeypatch.setattr(choose, "pick", lambda rows, tagline: (asked.append([r[0] for r in rows]), "pi")[1])
+    assert choose._pick_agent("claude") == "pi"
+    assert asked and asked[0][0] == "claude", "the agent you used last is offered first"
+
+
+def test_the_agent_step_is_skipped_when_there_is_no_choice(monkeypatch):
+    """A machine with one agent installed keeps its one-keystroke flow."""
+    from inferroute_cli import agents, choose
+    monkeypatch.setattr(agents, "installed", lambda: ["claude"])
+    monkeypatch.setattr(choose, "pick", lambda *a: pytest.fail("asked with nothing to choose between"))
+    assert choose._pick_agent("claude") == "claude"
+
+
+def test_quitting_the_agent_step_quits(monkeypatch):
+    """Not "fall back to the default" — they pressed q."""
+    from inferroute_cli import choose, models
+    monkeypatch.setattr(choose.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(choose, "ChooseApp", lambda **k: type("A", (), {"run": lambda s: None, "selected_short": "kimi-k2.6"})())
+    monkeypatch.setattr(choose, "_pick_agent", lambda d: None)
+    assert choose.run([], pick_agent=True) == 130

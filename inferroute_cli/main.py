@@ -229,9 +229,11 @@ def main(argv: list[str] | None = None) -> int:
                 launch.launch_through_inferroute(user_model, creds, extra_args=passthrough,
                                                  why=lane.why_standard(user_model))
             return 0  # never reached — exec replaces process
-        # No model specified → interactive picker so the user chooses one.
+        # No model specified → interactive picker so the user chooses one. Bare `ir` also picks the
+        # AGENT (Henry, 23 Sep: "when we just do ir and get to choose the model we should also get to
+        # choose the agent"). `ir pi` / `ir goose` / `ir opencode` already said which, so they do not ask.
         from . import choose as choose_mod
-        return choose_mod.run(passthrough, agent=agent)
+        return choose_mod.run(passthrough, agent=agent, pick_agent=user_agent is None)
 
     cmd, rest = args[0], args[1:]
 
@@ -267,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if cmd == "choose":
         from . import choose as choose_mod
-        return choose_mod.run(rest)
+        return choose_mod.run(rest, pick_agent=True)
 
     if cmd == "gate":
         from . import gate as gate_mod
@@ -332,7 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         if not creds.is_valid:
             sys.stderr.write("\n  No inferroute key configured.\n  Run `ir login` to set one up.\n\n")
             return 2
-        launch.launch_agent_plain(cmd, user_model, creds, extra_args=passthrough)
+        launch.launch_agent_plain(cmd, user_model, creds, extra_args=passthrough,
+                                  why=lane.why_standard(user_model))
         return 0  # never reached — exec replaces process
 
     if cmd == "goose":

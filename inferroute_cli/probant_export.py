@@ -44,7 +44,11 @@ bundle the exporter produced; `ots` needs the opentimestamps-client and is not e
 
 ## 1. Run the bundled verifier
 
-    python3 verify_record.py . --reference reference.json
+    python3 verify_record.py . --reference <InferRoute's published reference>
+
+The reference is deliberately not inside this folder: identity must come from something the folder cannot
+vouch for. An audit pack made from this record carries this computer's copy at
+`trust-anchors/reference.json` — use that path there, and check its key against your engagement letter.
 
 One line per check (PASS / FAIL / SKIP with the reason). Exit 0 only if EVERY check passed under production
 roots; 1 if any failed (including "no reference" and "no sealed searches"); 2 if refused (bad flags, old
@@ -740,9 +744,14 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
    hash of the encryption key the session sealed to. **Read it for exactly what it is.** The raw
    attestation evidence behind those fifteen verdicts is NOT in this folder, so you cannot re-verify the
    quote the way you can for a search — the verdicts are the professional's own device speaking. What you
-   CAN do, and should: compare the measurements in the receipt against InferRoute's published reference in
-   `trust-anchors/`, check that the counters show ciphertext leaving and plaintext only ever sealed on the
-   device, and report any check whose `ok` is true but whose `why` does not support it. Say plainly in your
+   CAN do, and should: check the receipt's `mrtd` and `rtmrs` against the build list bundled in
+   InferRoute's published client — `BUNDLED` in `inferroute_local/confidential/builds.py`, inside a package
+   you download yourself (`pip download inferroute --no-deps`). That list ships in a release rather than
+   being served at run time, which makes it the stronger of the two origins. **`trust-anchors/` will not
+   help you here**: it describes the SEV-SNP search lane and carries no `mrtd` or `rtmrs` at all. Then
+   report what the counters show — whether any ciphertext left, and whether any plaintext was sealed here —
+   rather than confirming that they do; and report any check whose `ok` is true but whose `why` does not
+   support it. Say plainly in your
    report which of this you verified and which you read.
 
 8. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
@@ -752,8 +761,8 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 
 ## How long this takes
 
-Ten to fifteen minutes of work, most of it yours to do rather than wait for. Two auditors have run this
-brief; the first attempt of one was stopped early at nine minutes and produced nothing at all. Let it finish.
+Most of this is work for you to do rather than wait for. Take the time the evidence warrants and stop when
+it is exhausted: do not pad a short answer, and do not cut a long one short.
 
 ## How to do it
 

@@ -172,18 +172,33 @@ def render_panel(r: Receipt, console: Console | None = None) -> None:
 
 
 def render_refusal(r: Receipt, console: Console | None = None) -> None:
+    """Every verdict that is not `confidential` lands here — including a session that ran normally and
+    then lost its footing. It used to open "Nothing was sent." unconditionally, which an audit of 23 Sep
+    printed over a receipt recording 12 sent requests and 468 KB sealed. The receipt is the document a
+    firm keeps; it and the panel must not disagree about whether the session happened."""
     console = console or Console()
+    sent = int((r.counters or {}).get("requests") or 0)
+    if sent:
+        headline = Text(f"This session STOPPED after {sent} request{'s' if sent != 1 else ''}.", style="bold red")
+        detail = Text("What was sent was sealed to an enclave this device had verified at the time. When that\n"
+                      "verification could no longer be confirmed, the session stopped rather than continue on\n"
+                      "stale evidence. Nothing was sent after that point.", style=DIM)
+        title = "[bold red]⛔ InferRoute · Confidential session stopped[/]"
+    else:
+        headline = Text("This session was NOT opened. Nothing was sent.", style="bold red")
+        detail = Text("The confidential lane refuses rather than degrades: if the enclave cannot be verified from\n"
+                      "this device, no request leaves it. Try again in a minute; if it persists, tell us.", style=DIM)
+        title = "[bold red]⛔ InferRoute · Confidential session refused[/]"
     body = Group(
-        Text("This session was NOT opened. Nothing was sent.", style="bold red"),
+        headline,
         Text(""),
         Text(f"Reason: {r.refusal or r.verdict}", style="bold"),
         Text(""),
-        Text("The confidential lane refuses rather than degrades: if the enclave cannot be verified from\n"
-             "this device, no request leaves it. Try again in a minute; if it persists, tell us.", style=DIM),
+        detail,
         Text(""),
         Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)),
     )
-    console.print(Panel(body, title="[bold red]⛔ InferRoute · Confidential session refused[/]",
+    console.print(Panel(body, title=title,
                         border_style="red", box=box.ROUNDED, width=_width(console), padding=(1, 2)))
 
 
@@ -199,7 +214,10 @@ def render_summary(r: Receipt, console: Console | None = None) -> None:
     if c.get("errors"):
         head.append(f"  ·  {c['errors']} error(s)", style="red")
     console.print(head, soft_wrap=True)
-    console.print(Text("   plaintext that left this device: 0 bytes", style=DIM), soft_wrap=True)
+    # Not a counter. Nothing measures it, because no code path exists that would make it non-zero --
+    # and a counter that can never increment is a control you always satisfy. Say what it is instead.
+    console.print(Text("   plaintext never reaches the carrier — that is how the code is written, not a count",
+                       style=DIM), soft_wrap=True)
     console.print(Text(f"   receipt: {_home(str(r.path))}", style=DIM), soft_wrap=True)
 
 

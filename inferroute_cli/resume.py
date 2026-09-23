@@ -331,7 +331,17 @@ def _fallback(passthrough: list[str]) -> int:
     return choose_mod.run(passthrough)
 
 
-def handle(passthrough: list[str], model_override: str | None = None) -> int:
+def _enclave_backed(model: str) -> bool:
+    """Whether this model runs in an enclave — the same test the fresh-launch path uses, imported late
+    because main imports this module."""
+    try:
+        from .main import _is_confidential_model
+        return bool(_is_confidential_model(model))
+    except Exception:
+        return False
+
+
+def handle(passthrough: list[str], model_override: str | None = None, plain: bool = False) -> int:
     """Resolve a resume target and launch it. `passthrough` is argv with `--model`
     already stripped; `model_override` is the model the user pinned, if any (it
     wins over the session's recorded model). Returns an exit code (won't return on
@@ -367,7 +377,17 @@ def handle(passthrough: list[str], model_override: str | None = None) -> int:
 
     # A session opened on the confidential lane resumes on it — its transcript must not
     # be replayed through the plaintext lane. (`--model` can switch enclave models.)
-    if (rec or {}).get("lane") == "confidential":
+    lane = (rec or {}).get("lane")
+    if lane is None and not plain and _enclave_backed(model):
+        # The index row is best-effort: `launch._record_launch` swallows its write errors, and the file
+        # is plain unsigned JSONL outside INFERROUTE_HOME. Losing it must not be what decides
+        # confidentiality. A FRESH launch of an enclave-backed model takes the confidential lane
+        # (main.py), so a resume with no record of its lane takes it too — and says why, because the
+        # one outcome a professional must never get unannounced is the lane InferRoute can read.
+        sys.stderr.write("  → this session's lane was not recorded; resuming on the confidential lane "
+                         "because this model is enclave-backed (--plain to override).\n")
+        lane = "confidential"
+    if lane == "confidential":
         from . import confidential as confidential_mod, models as models_mod
         short = models_mod.short_for_model_id(model) or model
         return confidential_mod.launch(["--model", short, *rest, "--resume", target])

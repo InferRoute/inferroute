@@ -232,16 +232,26 @@ def _print_corpora() -> None:
         return
     print("\n  Corpora (a delivery: matters that arrived together, and the documents describing them)")
     for c in rows:
-        who = c.get("from_name") or c.get("from") or "unknown sender"
-        mark = "" if c.get("known_contact") else "  ⚠ sender not a known contact"
-        print(f"    {c.get('name') or '(unnamed)'}  —  {c.get('id')}")
-        print(f"      from {who}{mark}")
+        sent = c.get("direction") == "sent"
+        if sent:
+            line = f"      sent to {c.get('to') or '?'} ({c.get('to_fingerprint') or '?'})"
+        else:
+            who = c.get("from_name") or c.get("from") or "unknown sender"
+            line = f"      from {who}" + ("" if c.get("known_contact") else "  ⚠ sender not a known contact")
+        print(f"    {c.get('name') or '(unnamed)'}  —  {c.get('id')}"
+              + ("   [sent]" if sent else "   [received]"))
+        print(line)
         if c.get("files"):
-            print(f"      documents: {', '.join(c['files'])}  (in Probant/{c.get('client')}/shared-corpus)")
+            # A sent corpus has no local shared-corpus directory — those documents live inside the sealed
+            # file, on the recipient's side once opened. Naming one here printed "Probant/None/…".
+            where = f"  (sealed in {c['sealed_to']})" if sent and c.get("sealed_to") \
+                else f"  (in Probant/{c.get('client')}/shared-corpus)" if c.get("client") else ""
+            print(f"      documents: {', '.join(c['files'])}{where}")
         if c.get("matters"):
             print(f"      matters:   {', '.join(c['matters'])}")
-        print(f"      a matter of your own, tied to it but not part of it:\n"
-              f"        ir probant new <client> <matter> --from-corpus {c.get('id')}")
+        if not sent:
+            print(f"      a matter of your own, tied to it but not part of it:\n"
+                  f"        ir probant new <client> <matter> --from-corpus {c.get('id')}")
 
 
 def disclosure_has_content(workspace: Path) -> bool:
@@ -694,6 +704,8 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portf
           f"signed as {me['fingerprint']}")
     for e in entries:
         print(f"      {e['matter']}" + (f"  date bound {e['date_bound']}" if e.get("date_bound") else ""))
+    # The sender keeps a record too: what went, to whom, when, with which documents.
+    SH.record_sent(payload, to, known[to]["fingerprint"], dest)
     print(f"  {dest}")
     print("  Only that fingerprint can open it" + (" — and you, since a copy is sealed to you as well."
                                                    if keep_copy else "."))

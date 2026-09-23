@@ -656,6 +656,31 @@
       button("Copy your card", "ghost small", () => navigator.clipboard
         .writeText(JSON.stringify(d.card, null, 1)).then(() => toast("Copied.", "info")).catch(() => {}))));
 
+    // Deliveries — what has actually gone out and come in. Without this the page can seal a corpus and
+    // open one while showing no sign that either happened.
+    p.append(el("h2", "section", "Deliveries"));
+    if (!(d.corpora || []).length) {
+      p.append(el("p", "sub", "Nothing sent or received yet. A delivery is matters sealed together with "
+        + "the documents that describe them; it keeps its own identity on both sides."));
+    }
+    for (const c of d.corpora || []) {
+      const sent = c.direction === "sent";
+      const who = sent ? `sent to ${c.to || "?"}` : `from ${c.from_name || c.from || "unknown sender"}`;
+      const warn = (!sent && !c.known_contact)
+        ? el("span", "warn", "sender not a known contact") : el("span", "");
+      p.append(el("div", "record-row",
+        el("span", "", c.name || "(unnamed)"),
+        el("span", "mono sub", c.id),
+        el("span", "sub", `${sent ? "sent" : "received"} · ${who}`),
+        warn));
+      if ((c.files || []).length) {
+        p.append(el("p", "sub", `documents: ${c.files.join(", ")}`));
+      }
+      if ((c.matters || []).length) {
+        p.append(el("p", "sub", `matters: ${c.matters.join(", ")}`));
+      }
+    }
+
     p.append(el("h2", "section", "People you can share with"));
     if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone with the card they sent you."));
     for (const c of d.contacts) {

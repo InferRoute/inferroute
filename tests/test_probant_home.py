@@ -415,6 +415,14 @@ def test_the_page_shares_a_corpus_and_never_shows_a_secret(home, tmp_path):
     assert S.main(["new", "Acme", "battery"]) == 0
     assert S.main(["new", "Acme", "swelling"]) == 0
     mine = c.get("/api/sharing").json()
+    # The page could seal a corpus and open one while showing no sign that either had happened.
+    # A populated list on purpose: asserting `== []` is satisfied just as well by an API that never
+    # carries deliveries at all, which is exactly what it was doing before.
+    from pathlib import Path as _P
+    SH.record_sent({"corpus": {"id": "cid-1", "name": "Acme portfolio", "files": [{"name": "M.txt"}]},
+                    "matters": [{"matter": "Acme/battery"}]}, "them", "ffff", _P("/tmp/x"))
+    got = c.get("/api/sharing").json().get("corpora")
+    assert got and got[0]["id"] == "cid-1" and got[0]["direction"] == "sent"
     assert mine["fingerprint"] and set(mine["card"]) == {"schema", "mlkem_pub", "ed_pub", "fingerprint"}
     body = json.dumps(mine)
     secrets = SH.identity()

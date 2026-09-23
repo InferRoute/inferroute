@@ -95,3 +95,90 @@ def _list_output(capsys) -> str:
     capsys.readouterr()
     S.cmd_list()
     return capsys.readouterr().out
+
+
+# ── the sender's own record ──────────────────────────────────────────────────────────────────────
+
+def _payload(cid="20260923T213234Z-3f5730"):
+    return {"note": "",
+            "corpus": {"id": cid, "name": "InferRoute portfolio", "made_at": "2026-09-23T21:32:34Z",
+                       "files": [{"name": "MATTERS.txt"}, {"name": "READING-GUIDE.txt"}]},
+            "matters": [{"matter": "InferRoute/attest-dynamics"},
+                        {"matter": "InferRoute/disclosure-diode"}]}
+
+
+def test_the_sender_records_what_they_sent(tmp_path):
+    """`write_corpus` ran only on the RECEIVING side, so making a delivery left no trace of itself: not
+    what went, not to whom, not when. For an attorney that is the audit trail of their own outbound
+    disclosure."""
+    dest = tmp_path / "corpus.probant-share"
+    SH.record_sent(_payload(), "betrancourt", "7d94-4f0d-f72d-e695", dest)
+    rows = SH.corpora()
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["direction"] == "sent" and r["to"] == "betrancourt"
+    assert r["to_fingerprint"] == "7d94-4f0d-f72d-e695"
+    assert r["sealed_to"] == str(dest)
+    assert r["files"] == ["MATTERS.txt", "READING-GUIDE.txt"]
+
+
+def test_a_sent_record_names_the_matters_without_doubling_the_client():
+    """A payload entry's `matter` already reads "client/matter"; prefixing client again printed
+    "None/InferRoute/attest-dynamics" the first time this reached a screen."""
+    SH.record_sent(_payload(), "betrancourt", "ffff", Path_stub())
+    assert SH.corpora()[0]["matters"] == ["InferRoute/attest-dynamics", "InferRoute/disclosure-diode"]
+    assert not any(m.startswith("None/") for m in SH.corpora()[0]["matters"])
+
+
+def Path_stub():
+    from pathlib import Path
+    return Path("/tmp/x.probant-share")
+
+
+def test_a_payload_with_no_corpus_id_records_nothing():
+    """Nothing to identify means nothing to record — a file with an empty id would be unaddressable."""
+    SH.record_sent({"corpus": {}, "matters": []}, "x", "y", Path_stub())
+    assert SH.corpora() == []
+
+
+def test_the_listing_separates_what_was_sent_from_what_arrived(capsys):
+    SH.record_sent(_payload(), "betrancourt", "7d94", Path_stub())
+    out = _list_output(capsys)
+    assert "[sent]" in out and "sent to betrancourt" in out
+    assert "from " not in out.split("Corpora")[1], "a sent delivery has no sender to name"
+    # the documents of a SENT corpus live in the sealed file, not in a local shared-corpus directory
+    assert "shared-corpus" not in out and "None" not in out
+    assert "--from-corpus" not in out, "that is advice for the recipient, not for the sender"
+
+
+def test_the_web_page_renders_the_deliveries_it_is_given():
+    """The API carrying them is half of it; a page that ignores the field shows the same blank Sharing
+    tab as before."""
+    js = (Path(__file__).resolve().parent.parent
+          / "inferroute_cli" / "probant_web" / "home.js").read_text(encoding="utf-8")
+    assert 'el("h2", "section", "Deliveries")' in js, "the heading, not the comment above it"
+    assert "d.corpora" in js, "it must read the field the API added"
+    assert "Nothing sent or received yet" in js, "an empty list needs a sentence, not a blank gap"
+    assert 'c.direction === "sent"' in js
+    assert "known_contact" in js, "an unknown sender must be marked on the page as on the command line"
+
+
+from pathlib import Path  # noqa: E402
+
+
+def test_the_share_COMMAND_records_the_delivery(tmp_path, monkeypatch):
+    """The seam. Testing `record_sent` in isolation passes whether or not `share` ever calls it — and
+    when that call was removed, every test still went green."""
+    monkeypatch.chdir(tmp_path)
+    assert S.main(["identity"]) == 0
+    card = next(tmp_path.glob("probant-contact-*.json"))
+    assert S.main(["identity", "--add", "them", "--card", str(card)]) == 0
+    assert S.main(["new", "Acme", "battery"]) == 0
+    doc = tmp_path / "MATTERS.txt"
+    doc.write_text("what this delivery holds\n", encoding="utf-8")
+    assert S.main(["share", "them", "--matter", "Acme/battery", "--file", str(doc),
+                   "--corpus-name", "Acme portfolio"]) == 0
+    rows = SH.corpora()
+    assert len(rows) == 1, "sharing left no record of itself"
+    assert rows[0]["direction"] == "sent" and rows[0]["to"] == "them"
+    assert rows[0]["matters"] == ["Acme/battery"] and rows[0]["files"] == ["MATTERS.txt"]

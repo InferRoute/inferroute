@@ -80,7 +80,7 @@ def checks_table(r: Receipt) -> Table:
         # A check can pass and still carry a caveat. Rendering only the static explanation in that
         # case showed a green tick beside "recorded by InferRoute" for a build that was nothing of
         # the sort — the one string that said so was never drawn.
-        caveat = ok and any(m in why for m in ("PENDING", "NEW BUILD"))
+        caveat = ok and any(m in why for m in ("PENDING", "NEW BUILD", "SWHardeningNeeded"))
         t.add_row(Text("✓" if ok else "✗", style=AMBER if caveat else (ACCENT if ok else "red")),
                   Text(label, style=("bold " + AMBER) if caveat else ("bold" if ok else "bold red")),
                   Text(why if caveat else (explain if ok else f"FAILED — {why or 'not checked'}"),
@@ -141,7 +141,7 @@ def facts_table(r: Receipt) -> Table:
     gpus = inst.get("gpu_count") or 0
     per = inst.get("gpus") or {}
     model = "/".join(sorted({str(g.get("hwmodel") or "") for g in per.values()} - {""})) if per else ""
-    t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA {model + ' ' if model else ''}GPU (confidential computing)")
+    t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA {model + ' ' if model else ''}GPU")
     t.add_row("Instance", "one enclave, verified, then pinned for this whole session")
     t.add_row("Build", "the enclave's measured image matches the provider's published measurements")
     t.add_row("Carrier", r.transport)

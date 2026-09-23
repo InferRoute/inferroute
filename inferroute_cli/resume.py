@@ -321,11 +321,22 @@ def _launch(model: str, extra_args: list[str], session_id: str | None) -> int:
     return 0  # never reached — exec replaces process
 
 
-def _fallback(passthrough: list[str]) -> int:
+def _fallback(passthrough: list[str], plain: bool = False) -> int:
     """Resume via plain `claude --resume` through inferroute on the last model
-    (non-cumulative), or drop to the model picker if no model is remembered."""
+    (non-cumulative), or drop to the model picker if no model is remembered.
+
+    This sits UPSTREAM of the lane reasoning in `handle`, and used to reach the plaintext lane without
+    consulting the model at all — so `ir -c` in a directory with no past sessions, or any resume with no
+    terminal (piped, redirected, CI, or run from inside another agent), silently took the lane InferRoute
+    can read. Found by an audit, 23 Sep, which reproduced all four cases."""
     model = launch.last_model()
     if model is not None:
+        if not plain and _enclave_backed(model):
+            from . import confidential as confidential_mod, models as models_mod
+            sys.stderr.write("  → no session to resume here; starting a fresh confidential session on "
+                             f"{model} (--plain for the standard lane).\n")
+            short = models_mod.short_for_model_id(model) or model
+            return confidential_mod.launch(["--model", short, *passthrough])
         return _launch(model, passthrough, session_id=None)
     from . import choose as choose_mod
     return choose_mod.run(passthrough)
@@ -354,7 +365,7 @@ def handle(passthrough: list[str], model_override: str | None = None, plain: boo
         target = newest(cwd)
     elif target is None:  # menu
         if not sys.stdout.isatty():
-            return _fallback(passthrough)  # no terminal → claude's own resume flow
+            return _fallback(passthrough, plain)  # no terminal → claude's own resume flow
         sessions = list_sessions(cwd)
         if not sessions:
             sys.stderr.write("\n  ir: no past sessions to resume in this directory.\n\n")
@@ -365,7 +376,7 @@ def handle(passthrough: list[str], model_override: str | None = None, plain: boo
 
     if not target:
         # `-c` with nothing to continue, or an unresolved target.
-        return _fallback(passthrough)
+        return _fallback(passthrough, plain)
 
     # Model: an explicit `--model` wins (resume but switch model); else the
     # session's own model — indexed inferroute model, else the transcript's —
@@ -373,7 +384,7 @@ def handle(passthrough: list[str], model_override: str | None = None, plain: boo
     rec = launch.launch_index().get(target)
     model = model_override or (rec or {}).get("model") or _transcript_model(target, cwd) or launch.last_model()
     if model is None:
-        return _fallback(passthrough)
+        return _fallback(passthrough, plain)
 
     # A session opened on the confidential lane resumes on it — its transcript must not
     # be replayed through the plaintext lane. (`--model` can switch enclave models.)

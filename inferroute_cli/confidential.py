@@ -162,7 +162,7 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
     rp = shlex.quote(receipt_path)
     cmd += (f"; b=$(grep -o '\"plaintext_bytes_sealed_here\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
             f"if [ -n \"$b\" ]; then if [ \"$b\" -ge 1048576 ]; then printf ' · %s.%s MB sealed here' $((b/1048576)) $(( (b%1048576)*10/1048576 )); "
-            f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · 0 B in the clear'; fi; "
+            f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · nothing in the clear (by construction, not a count)'; fi; "
             f"u=$(grep -o '\"estimated_cost_usd\": [0-9.]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9.]*$'); "
             f"[ -n \"$u\" ] && printf ' │ $%.2f' \"$u\" 2>/dev/null || true")
     settings["statusLine"]["command"] = cmd

@@ -26,8 +26,8 @@ from . import models
 # is empty, removing the lane is a deletion rather than an investigation.
 NO_ENCLAVE = "this model has no enclave, so there is nothing to seal to"
 USER_ASKED = "you asked for the standard lane with --plain"
-COWORK = ("ir goose-cowork launches the desktop app detached, and a sealed session's local endpoint cannot "
-          "outlive this command")
+COWORK = ("no confidential daemon is running, and the desktop app outlives this command, so it needs one "
+          "that does too — `ir confidential daemon start`")
 REASONS = (NO_ENCLAVE, USER_ASKED, COWORK)
 
 CONFIDENTIAL = "confidential"

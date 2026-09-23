@@ -84,6 +84,22 @@ def _default_model() -> str:
     return "kimi-k2.6"
 
 
+def _sealed_endpoint() -> tuple[str, str] | None:
+    """(base_url, key) of a running confidential daemon, or None.
+
+    This is what lets the desktop app be sealed at all: the daemon holds one verified session and
+    outlives this command, which the per-launch endpoint could not. If Goose is later pointed somewhere
+    else nothing reaches that endpoint — we cannot veto it the way the Pi extension can, because Goose's
+    extension surface is MCP and gets no pre-request hook. What we get instead is a signal: the daemon's
+    counters stay at zero, and since the claim now follows the counters, the receipt says so.
+    """
+    from . import confidential_daemon as daemon
+    st = daemon.running()
+    if not st or not st.get("serving"):
+        return None
+    return f"http://127.0.0.1:{st['port']}", st["token"]
+
+
 def _anthropic_host(creds: config.Credentials) -> str:
     """Route through the on-device recorder daemon when it's up (records + tags
     the session, then forwards to the cloud), else talk to the cloud directly."""
@@ -150,7 +166,8 @@ def configure(creds: config.Credentials, model: str | None = None) -> str:
     (no Anthropic↔OpenAI double-translation that mangles tool names).
     """
     model = model or _default_model()
-    host = _anthropic_host(creds)  # reuse the same routing logic (daemon or cloud)
+    sealed = _sealed_endpoint()
+    host = sealed[0] if sealed else _anthropic_host(creds)
 
     _write_merged(
         CONFIG_FILE,
@@ -172,8 +189,8 @@ def configure(creds: config.Credentials, model: str | None = None) -> str:
     _write_merged(
         SECRETS_FILE,
         {
-            "OPENAI_API_KEY": creds.api_key,
-            "ANTHROPIC_API_KEY": creds.api_key,  # keep for backward compat
+            "OPENAI_API_KEY": sealed[1] if sealed else creds.api_key,
+            "ANTHROPIC_API_KEY": sealed[1] if sealed else creds.api_key,  # keep for backward compat
             "ANTHROPIC_CUSTOM_HEADERS": {"x-inferroute-client": CLIENT_TAG},
         },
         secret=True,
@@ -288,7 +305,12 @@ def cmd_cowork(rest: list[str]) -> int:
     # is the real blocker, not a placeholder: a sealed session's local endpoint is bound to THIS process,
     # and the desktop app outlives it. Until that changes, everyday work here is on the readable lane.
     from . import lane as lane_mod
-    lane_mod.announce(lane_mod.Lane(lane_mod.STANDARD, model or _default_model(), lane_mod.COWORK))
+    if _sealed_endpoint():
+        print("  🔒 Sealed: goose is pointed at the confidential daemon on this machine.")
+        print("     `ir confidential daemon status` shows whether it has actually carried anything.")
+    else:
+        lane_mod.announce(lane_mod.Lane(lane_mod.STANDARD, model or _default_model(), lane_mod.COWORK))
+        print("  To seal it: `ir confidential daemon start`, then run this again.\n")
 
     if ns.configure_only:
         print(f"  ✓ goose wired to InferRoute ({host}).")

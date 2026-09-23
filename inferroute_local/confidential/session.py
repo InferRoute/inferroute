@@ -215,6 +215,24 @@ class ConfidentialSession:
         self.receipt.counters["instance_switches"] = self.receipt.counters.get("instance_switches", 0) + 1
         self.receipt.save()
 
+    async def heartbeat(self) -> bool:
+        """Re-verify if the evidence is due, and report whether this session may still be used.
+
+        The REQUEST path already re-verifies on arrival (see `_take_nonce`), which is what keeps anything
+        from being sealed to stale evidence — that invariant does not depend on this. This exists for a
+        session that can sit idle, i.e. one held by a daemon: without it an idle session reports itself
+        verified on evidence hours old, and a lapse is discovered only by the next request, at the worst
+        possible moment. Timer-driven rather than arrival-driven, deliberately.
+        """
+        if self.receipt.verdict != "confidential":
+            return False
+        if time.time() > self._verified_at + REVERIFY_EVERY_S:
+            try:
+                await self._reverify()
+            except Refused:
+                return False                      # _reverify has already written the verdict and reason
+        return self.receipt.is_confidential
+
     async def _reverify(self) -> None:
         try:
             e2 = await self.transport.instances(self.fleet_id)

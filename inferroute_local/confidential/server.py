@@ -38,6 +38,17 @@ def create_app(session: ConfidentialSession, token: str) -> FastAPI:
                                          "error": {"type": "authentication_error",
                                                    "message": "this endpoint belongs to one confidential "
                                                               "session on this machine"}})
+        # Serve only while the session is still confidential. A session can lose its footing mid-life
+        # (re-verification lapses, the pinned instance goes and nothing verified replaces it), and the
+        # endpoint must stop rather than keep answering on evidence that no longer holds. The receipt
+        # stays readable, because that is where the reason is.
+        if request.url.path != "/confidential/receipt" and not session.receipt.is_confidential:
+            return JSONResponse(status_code=503,
+                                content={"type": "error",
+                                         "error": {"type": "overloaded_error",
+                                                   "message": "this confidential session has stopped: "
+                                                              + (session.receipt.refusal
+                                                                 or session.receipt.verdict)}})
         return await call_next(request)
 
     @app.post("/v1/messages")

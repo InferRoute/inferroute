@@ -433,11 +433,24 @@ def run(rest: list[str]) -> int:
     c = sub.add_parser("card", help="Export the last session's panel as an SVG card.")
     c.add_argument("--svg", default=None, help="output path (default: next to the receipt)")
     sub.add_parser("models", help="Models that can run confidentially.")
+    d = sub.add_parser("daemon", help="A confidential session that outlives the command that started it.")
+    d.add_argument("op", choices=("start", "status", "stop", "serve"))
+    d.add_argument("--model", default=None)
     ns = ap.parse_args(rest)
     if not ns.action:
         ap.print_help()
         return 0
     _need_extra()
+    if ns.action == "daemon":
+        from . import confidential_daemon as daemon
+        if ns.op == "start":
+            return daemon.start(ns.model)
+        if ns.op == "status":
+            return daemon.status()
+        if ns.op == "stop":
+            return daemon.stop()
+        return daemon.serve(ns.model)      # `serve` is the body the detached child runs
+
     from inferroute_local.confidential import display, receipt as receipt_mod
     console = _console()
 

@@ -37,7 +37,7 @@ def test_every_stated_reason_is_one_of_the_enumerated_ones():
     """A free-text reason would let the backlog grow without anyone noticing."""
     assert lane.why_standard("Kimi-K2.6", _tee) in lane.REASONS
     assert lane.why_standard("anything-else", _tee) in lane.REASONS
-    assert lane.INTEGRATE in lane.REASONS and lane.COWORK in lane.REASONS
+    assert lane.COWORK in lane.REASONS
 
 
 def test_an_enclave_model_on_the_plaintext_lane_can_only_be_there_by_choice():
@@ -164,3 +164,61 @@ def test_the_cowork_reason_names_the_actual_blocker():
     """A placeholder reason ("not supported yet") would sit in the backlog forever with nobody knowing
     what would have to change. This one says what to fix."""
     assert "detached" in lane.COWORK and "outlive" in lane.COWORK
+
+
+def _creds():
+    from inferroute_cli.launch import Credentials
+    return Credentials(api_url="https://api.inferroute.ai", api_key="k")
+
+
+def test_integrate_runs_the_agent_on_the_sealed_lane(monkeypatch):
+    """It launches Claude Code inside the user's own repository — the content most worth sealing. It was
+    on the plaintext lane only because the call site had never been converted."""
+    from inferroute_cli import config, confidential, integrate, launch as launch_mod
+    monkeypatch.setattr(config, "load", _creds)
+    seen = {}
+    monkeypatch.setattr(confidential, "launch", lambda args, **k: (seen.__setitem__("conf", args), 0)[1])
+    monkeypatch.setattr(integrate, "launch_through_inferroute",
+                        lambda *a, **k: seen.__setitem__("plain", k.get("why")))
+    assert integrate.cmd_integrate([]) == 0
+    assert "plain" not in seen
+    args = seen["conf"]
+    assert args[:2] == ["--model", "kimi-k2.6"]
+    # plan mode must survive the move: the confidential path does not inject
+    # --dangerously-skip-permissions, but only if the caller still asks for plan mode.
+    assert "--permission-mode" in args and args[args.index("--permission-mode") + 1] == "plan"
+    assert "--disallowedTools" in args and "Task" in args
+    assert args.index("--allowedTools") > args.index("--permission-mode"), "--allowedTools is variadic"
+
+
+def test_integrate_on_a_model_with_no_enclave_says_so_instead(monkeypatch):
+    from inferroute_cli import config, confidential, integrate
+    monkeypatch.setattr(config, "load", _creds)
+    seen = {}
+    monkeypatch.setattr(confidential, "launch", lambda args, **k: seen.__setitem__("conf", args))
+    monkeypatch.setattr(integrate, "launch_through_inferroute",
+                        lambda *a, **k: seen.__setitem__("plain", k.get("why")))
+    assert integrate.cmd_integrate(["--model", "minimax-m3"]) == 0
+    assert "conf" not in seen and seen["plain"] == lane.NO_ENCLAVE
+
+
+def test_the_backlog_shrinks_when_a_reason_is_resolved():
+    """The lifecycle this list exists for: integrate was converted, so its reason is gone — not left
+    behind as a constant nothing cites."""
+    assert not hasattr(lane, "INTEGRATE")
+    assert len(lane.REASONS) == 3
+    assert lane.USER_ASKED in lane.REASONS, "the opt-out stays by design; it is not a blocker"
+
+
+def test_goose_cowork_is_the_name_and_cowork_still_answers(monkeypatch):
+    """Named after its agent like `ir pi` / `ir goose` / `ir opencode`. The old name keeps working: it is
+    in people's fingers and in help text they have already read."""
+    from inferroute_cli import cowork, help as help_mod, main as M
+    called = []
+    monkeypatch.setattr(cowork, "cmd_cowork", lambda rest: (called.append(rest), 0)[1])
+    assert M.main(["goose-cowork", "--configure-only"]) == 0
+    assert M.main(["cowork", "--configure-only"]) == 0
+    assert called == [["--configure-only"], ["--configure-only"]]
+    text = "\n".join(help_mod.lines() if hasattr(help_mod, "lines") else [])
+    if text:
+        assert "ir goose-cowork" in text and "  ir cowork " not in text

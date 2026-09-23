@@ -93,17 +93,21 @@ def cmd_integrate(args: list[str]) -> int:
     # nested session — also blocked by the CLAUDECODE guard in launch.py). The prompt
     # is the first positional; --allowedTools is variadic so it goes last.
     from . import lane as lane_mod
+    # Block subagent spawning — it's a tiny task; Explore/Task subagents burn minutes + tokens and bloat
+    # context (slows Kimi). Grep+read directly. `--allowedTools` is variadic, so it goes last.
+    agent_args = [prompt, *rest, "--disallowedTools", "Task",
+                  "--permission-mode", "plan", "--allowedTools", *_RESEARCH_TOOLS]
+    if lane_mod.enclave_backed(alias.short):
+        # This agent reads the user's own repository, which is exactly the content worth sealing. The
+        # confidential path builds its argv directly and does NOT inject --dangerously-skip-permissions
+        # (the plaintext launcher's _DEFAULT_FLAGS does), so plan mode survives the move — checked
+        # rather than assumed, because losing it would let this edit someone's repo unprompted.
+        from . import confidential as confidential_mod
+        return confidential_mod.launch(["--model", alias.short, *agent_args])
     launch_through_inferroute(
         alias.short, creds,
-        why=lane_mod.INTEGRATE,
-        extra_args=[
-            prompt, *rest,
-            # Block subagent spawning — it's a tiny task; Explore/Task subagents
-            # burn minutes + tokens and bloat context (slows Kimi). Grep+read directly.
-            "--disallowedTools", "Task",
-            "--allowedTools", *_RESEARCH_TOOLS,
-        ],
-        permission_mode="plan",
+        why=lane_mod.why_standard(alias.short),
+        extra_args=agent_args,
     )
     return 0
 

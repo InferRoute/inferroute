@@ -1,7 +1,7 @@
 """`ir cowork` — InferRoute's everyday-work surface, powered by goose.
 
 goose (https://github.com/block/goose, Apache-2.0) is an open-source agent with
-a desktop app *and* a CLI. `ir cowork` wires it to InferRoute and launches it:
+a desktop app *and* a CLI. `ir goose-cowork` wires it to InferRoute and launches it:
 
   • provider  → anthropic (goose speaks the Anthropic Messages API, like Claude Code)
   • routing   → the on-device recorder daemon when it's running, else the cloud
@@ -296,7 +296,7 @@ def cmd_cowork(rest: list[str]) -> int:
 
     desktop = _ensure_desktop(assume_yes=False)
     if not desktop:
-        print("\n  Cowork uses the Goose Desktop app — install it (above), then run `ir cowork` again.")
+        print("\n  Cowork uses the Goose Desktop app — install it (above), then run `ir goose-cowork` again.")
         return 1
 
     print(f"  Launching Goose Desktop (InferRoute · {host})…")

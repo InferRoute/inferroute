@@ -18,7 +18,7 @@ from typing import AsyncIterator, Callable
 import httpx
 
 from . import attest, e2ee, translate
-from .receipt import CLAIM_CONFIDENTIAL, Receipt, lane_preamble
+from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, lane_preamble
 from .transport import Transport
 
 logger = logging.getLogger("inferroute_local.confidential")
@@ -122,7 +122,7 @@ class ConfidentialSession:
                                 + (f" (failing checks: {failing})" if failing else " (verified set and e2ee set are disjoint)"))
         self._pin(eligible[0], "session opened")
         self.receipt.verdict = "confidential"
-        self.receipt.claim = CLAIM_CONFIDENTIAL
+        self._restate_claim()
         self.receipt.verified_at = self.receipt.started_at
         self.receipt.save()
         return self.receipt
@@ -137,6 +137,7 @@ class ConfidentialSession:
 
     def _refuse(self, why: str) -> Receipt:
         self.receipt.verdict, self.receipt.refusal = "refused", why
+        self._restate_claim()
         self.receipt.note("refused", why)
         self.receipt.save()
         return self.receipt
@@ -207,6 +208,7 @@ class ConfidentialSession:
             self.receipt.verdict = "degraded"
             self.receipt.refusal = ("the verified instance is gone and no verified alternative is available — "
                                     "refusing to continue unverified")
+            self._restate_claim()
             self.receipt.note("no-eligible-instance", "pinned instance gone and no verified alternative has nonces")
             self.receipt.save()
             raise Refused("the verified instance is gone and no verified alternative is available — refusing to continue unverified")
@@ -214,6 +216,21 @@ class ConfidentialSession:
                   else "the pinned instance failed re-verification; switched to one the re-check verified")
         self.receipt.counters["instance_switches"] = self.receipt.counters.get("instance_switches", 0) + 1
         self.receipt.save()
+
+    def _restate_claim(self) -> None:
+        """Write the claim where it becomes true, never in advance.
+
+        It used to be set once at open and never revisited, so a session that opened and sent nothing
+        still asserted "this session's requests were encrypted on this device" — and kept asserting it
+        after a refusal. It is the one field shaped to be quoted on its own, which is exactly why it must
+        not outrun the counters. Called wherever the verdict or the request count changes.
+        """
+        if self.receipt.counters.get("requests"):
+            self.receipt.claim = CLAIM_CONFIDENTIAL      # true of the requests that WERE sealed
+        elif self.receipt.verdict == "confidential":
+            self.receipt.claim = CLAIM_OPENED            # verified, nothing sent
+        else:
+            self.receipt.claim = ""                      # nothing verified and nothing sent: say nothing
 
     async def heartbeat(self) -> bool:
         """Re-verify if the evidence is due, and report whether this session may still be used.
@@ -255,6 +272,7 @@ class ConfidentialSession:
                 # above uses -- and carries its reason, so nothing downstream has to guess at one.
                 self.receipt.verdict = "degraded" if self.receipt.counters.get("requests") else "refused"
                 self.receipt.refusal = why
+                self._restate_claim()
                 self.receipt.save()
                 raise Refused(why)
             return
@@ -292,6 +310,7 @@ class ConfidentialSession:
                 c["requests"] += 1
             c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
             c["ciphertext_bytes_sent"] += len(sealed.blob)
+            self._restate_claim()          # the strong claim is earned here, by a request actually sealed
             try:
                 status, headers, raw = await self.transport.invoke(
                     fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)

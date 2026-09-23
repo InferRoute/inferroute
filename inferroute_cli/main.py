@@ -202,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         # override (resume but switch model).
         if _is_resume(passthrough):
             from . import resume as resume_mod
-            return resume_mod.handle(passthrough, model_override=user_model)
+            return resume_mod.handle(passthrough, model_override=user_model, plain=plain)
         if user_model is not None:
             # Premium Anthropic pins (sonnet/opus) auto-route to the NATIVE path
             # — the user's own Anthropic creds, no proxy routing. The proxy can't

@@ -205,6 +205,8 @@ class ConfidentialSession:
         if alt is None:
             self.pinned = None
             self.receipt.verdict = "degraded"
+            self.receipt.refusal = ("the verified instance is gone and no verified alternative is available — "
+                                    "refusing to continue unverified")
             self.receipt.note("no-eligible-instance", "pinned instance gone and no verified alternative has nonces")
             self.receipt.save()
             raise Refused("the verified instance is gone and no verified alternative is available — refusing to continue unverified")
@@ -228,10 +230,15 @@ class ConfidentialSession:
             self.receipt.note("reverify-failed", f"{public_reason(e)} ({self._reverify_failures} in a row)")
             self.receipt.save()
             if self._reverify_failures >= REVERIFY_FAILURES_ALLOWED:
-                self.receipt.verdict = "refused"
+                why = ("the enclave could not be re-verified "
+                       f"{self._reverify_failures} times in a row — refusing to continue on stale evidence")
+                # "refused" means the session never opened, and the panel says so in those words. A session
+                # that had already sealed and sent is "degraded" -- the same verdict the lost-instance path
+                # above uses -- and carries its reason, so nothing downstream has to guess at one.
+                self.receipt.verdict = "degraded" if self.receipt.counters.get("requests") else "refused"
+                self.receipt.refusal = why
                 self.receipt.save()
-                raise Refused("the enclave could not be re-verified "
-                              f"{self._reverify_failures} times in a row — refusing to continue on stale evidence")
+                raise Refused(why)
             return
         self._verified_at = time.time()
         self._reverify_failures = 0

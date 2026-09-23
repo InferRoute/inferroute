@@ -183,3 +183,41 @@ def test_confidential_status_line_names_the_lane_and_shows_live_privacy_figures(
     assert out.stdout == "X · 3.5 MB sealed here · 0 B in the clear │ $0.12"
     C._attach_counter(args := ["--settings", "{}"], r.path)   # malformed settings: untouched, no crash
     assert args[1] == "{}"
+
+
+def _resume_with_no_index(monkeypatch, model="Kimi-K2.6"):
+    """A resume whose launch-index row is gone — the file is best-effort (`_record_launch` swallows its
+    write errors), unsigned, and outside INFERROUTE_HOME, so this is an ordinary state, not an exotic one."""
+    from inferroute_cli import resume, launch, confidential
+    monkeypatch.setattr(launch, "launch_index", lambda: {})
+    monkeypatch.setattr(resume, "_transcript_model", lambda *a, **k: model)
+    seen = {}
+    monkeypatch.setattr(confidential, "launch", lambda args: (seen.__setitem__("confidential", args), 0)[1])
+    monkeypatch.setattr(resume, "_launch", lambda *a, **k: (seen.__setitem__("standard", True), 0)[1])
+    return resume, seen
+
+
+def test_a_resume_with_no_recorded_lane_does_not_silently_drop_to_plaintext(tmp_path, monkeypatch, capsys):
+    """An audit of 23 Sep: losing one line of an unprotected local file moved a session from the sealed
+    lane to the one InferRoute can read, with nothing printed. A FRESH launch of an enclave-backed model
+    takes the confidential lane, so a resume that cannot recall its lane takes it too — and says why."""
+    resume, seen = _resume_with_no_index(monkeypatch)
+    rc = resume.handle(["--resume", "sess-9"])
+    assert rc == 0
+    assert "standard" not in seen, "it fell to the plaintext lane with no record either way"
+    assert seen["confidential"][:2] == ["--model", "kimi-k2.6"]
+    assert "lane was not recorded" in capsys.readouterr().err
+
+
+def test_plain_still_wins_when_the_lane_is_unknown(tmp_path, monkeypatch):
+    """The default must not become a trap: someone who asked for the standard lane gets it."""
+    resume, seen = _resume_with_no_index(monkeypatch)
+    rc = resume.handle(["--resume", "sess-9"], plain=True)
+    assert rc == 0 and "confidential" not in seen and seen.get("standard")
+
+
+def test_a_model_that_is_not_enclave_backed_resumes_as_before(tmp_path, monkeypatch):
+    """There is no confidential lane to default to, so nothing changes."""
+    resume, seen = _resume_with_no_index(monkeypatch, model="claude-sonnet-5")
+    rc = resume.handle(["--resume", "sess-9"])
+    assert rc == 0 and "confidential" not in seen and seen.get("standard")

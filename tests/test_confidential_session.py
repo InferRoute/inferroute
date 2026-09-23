@@ -623,3 +623,42 @@ def test_an_upstream_payment_solicitation_never_reaches_the_client(world, caplog
     assert "the provider answered 402" in text and "out of capacity" in text
     # …and the raw body is NOT destroyed: it stays where it is diagnostic.
     assert "5FAKEADDR" in caplog.text, "the upstream body must still reach the log"
+
+
+def _stall_reverification(s, monkeypatch):
+    async def boom(fleet_id):
+        raise RuntimeError("the operator gateway is unreachable")
+    monkeypatch.setattr(s.transport, "instances", boom)
+
+
+def test_a_session_that_already_sent_is_degraded_not_refused_when_reverification_lapses(world, monkeypatch):
+    """"refused" means the session never opened, and the panel says so in those words. An audit of
+    23 Sep found `ir confidential show` printing "This session was NOT opened. Nothing was sent." over a
+    receipt whose own counters recorded 12 sent requests, because this branch set "refused" on a session
+    that had run. `degraded` is the verdict the lost-instance path above already uses for exactly this."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    s.receipt.counters["requests"] = 12
+    _stall_reverification(s, monkeypatch)
+    for _ in range(S.REVERIFY_FAILURES_ALLOWED - 1):
+        asyncio.run(s._reverify())
+        assert s.receipt.verdict == "confidential", "a tolerated failure must not change the verdict"
+    with pytest.raises(S.Refused):
+        asyncio.run(s._reverify())
+    assert s.receipt.verdict == "degraded"
+    assert "could not be re-verified" in (s.receipt.refusal or ""), "the panel prints refusal or verdict"
+
+
+def test_a_session_that_never_sent_is_still_refused(world, monkeypatch):
+    """The other side of the same branch: nothing was sent, so "refused" is exactly right and the
+    original wording stands."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    assert s.receipt.counters["requests"] == 0
+    _stall_reverification(s, monkeypatch)
+    for _ in range(S.REVERIFY_FAILURES_ALLOWED - 1):
+        asyncio.run(s._reverify())
+    with pytest.raises(S.Refused):
+        asyncio.run(s._reverify())
+    assert s.receipt.verdict == "refused"
+    assert s.receipt.refusal

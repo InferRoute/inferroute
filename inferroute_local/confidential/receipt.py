@@ -81,6 +81,16 @@ def latest() -> Receipt | None:
     return Receipt.load(files[-1]) if files else None
 
 
+# What is true of a session that verified and then sent nothing. 77 of the 712 receipts on the machine
+# this was found on asserted the paragraph below — in the past tense, about requests — over `requests: 0`.
+# The sentence was true of the LANE and was being read as a finding about the session it sat in.
+CLAIM_OPENED = (
+    "This device verified an Intel TDX hardware quote for this session against a fresh challenge, and "
+    "pinned the encryption key that quote commits to (ML-KEM-768 + ChaCha20-Poly1305). No request has been "
+    "sent in this session, so nothing has been sealed here and nothing has been carried. Stated limitations "
+    "are listed in this receipt."
+)
+
 CLAIM_CONFIDENTIAL = (
     "This session's requests were encrypted on this device (ML-KEM-768 + ChaCha20-Poly1305) to an "
     "encryption key that an Intel TDX hardware quote commits to. This device verified that quote against "

@@ -662,3 +662,71 @@ def test_a_session_that_never_sent_is_still_refused(world, monkeypatch):
         asyncio.run(s._reverify())
     assert s.receipt.verdict == "refused"
     assert s.receipt.refusal
+
+
+from inferroute_local.confidential.receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED   # noqa: E402
+
+
+def _body():
+    return {"model": "fake", "max_tokens": 5, "stream": False,
+            "messages": [{"role": "user", "content": "there"}]}
+
+
+def test_a_session_that_sent_nothing_does_not_claim_that_it_did(world):
+    """The claim was set once at open and never revisited, so a session that verified and then did
+    nothing still asserted "this session's requests were encrypted on this device". On the machine this
+    was found on, 77 of 712 confidential receipts were in exactly that state — and it is the one field
+    shaped to be quoted on its own."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    r = asyncio.run(s.open())
+    assert r.verdict == "confidential" and r.counters["requests"] == 0
+    assert r.claim == CLAIM_OPENED
+    assert "requests were encrypted" not in r.claim
+    assert "No request has been sent" in r.claim, "it must say what DID happen, not go silent"
+
+
+def test_the_strong_claim_is_earned_by_a_request(world):
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, _body()))
+    assert s.receipt.counters["requests"] == 1
+    assert s.receipt.claim == CLAIM_CONFIDENTIAL
+
+
+def test_a_refusal_leaves_no_claim_behind(world, monkeypatch):
+    """`_reverify` set the verdict and left the confidentiality paragraph attached."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    assert s.receipt.claim
+    _stall_reverification(s, monkeypatch)
+    for _ in range(S.REVERIFY_FAILURES_ALLOWED - 1):
+        asyncio.run(s._reverify())
+    with pytest.raises(S.Refused):
+        asyncio.run(s._reverify())
+    assert s.receipt.verdict == "refused"
+    assert s.receipt.claim == "", "nothing was verified-and-used, so there is nothing to claim"
+
+
+def test_a_session_that_ran_and_then_lapsed_keeps_the_claim_it_earned(world, monkeypatch):
+    """The paragraph is true of the requests that WERE sealed; deleting it would understate as badly as
+    the old behaviour overstated."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, _body()))
+    _stall_reverification(s, monkeypatch)
+    for _ in range(S.REVERIFY_FAILURES_ALLOWED - 1):
+        asyncio.run(s._reverify())
+    with pytest.raises(S.Refused):
+        asyncio.run(s._reverify())
+    assert s.receipt.verdict == "degraded"
+    assert s.receipt.claim == CLAIM_CONFIDENTIAL
+
+
+def test_the_claim_never_outruns_the_counter(world, monkeypatch):
+    """The invariant, stated once: the past-tense paragraph and a zero request count cannot coexist."""
+    s = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s.open())
+    for step in (lambda: None, lambda: asyncio.run(_msg(s, _body()))):
+        step()
+        if s.receipt.claim == CLAIM_CONFIDENTIAL:
+            assert s.receipt.counters["requests"] > 0

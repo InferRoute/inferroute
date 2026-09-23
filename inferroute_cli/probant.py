@@ -511,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     idy = sub.add_parser("identity", help="your sharing fingerprint, contact card, and who you can share with")
     idy.add_argument("--add", default="", help="record a contact under this name")
     idy.add_argument("--card", dest="card_file", default="", help="their contact card file")
+    idy.add_argument("--show", action="store_true",
+                     help="print your public key again (it is printed automatically the first time)")
     sh = sub.add_parser("share", help="seal a corpus of claims to another Probant user")
     sh.add_argument("to")
     sh.add_argument("--matter", action="append", default=[], help="a matter to include (repeatable)")
@@ -578,7 +580,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "list":
             return cmd_list()
         if a.cmd == "identity":
-            return cmd_identity(add=a.add, card_file=a.card_file)
+            return cmd_identity(add=a.add, card_file=a.card_file, show=a.show)
         if a.cmd == "share":
             return cmd_share(a.to, out=a.out, matters=a.matter, portfolios=a.portfolio,
                              every=a.every, note=a.note, keep_copy=a.keep_copy, files=a.file, corpus_name=a.corpus_name)
@@ -634,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def cmd_identity(add: str = "", card_file: str = "") -> int:
+def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
     """This installation's identity, and the people it can share with."""
     from . import probant_share as SH
     if add:
@@ -647,6 +649,10 @@ def cmd_identity(add: str = "", card_file: str = "") -> int:
         print("  CONFIRM that fingerprint with them by voice before you share anything: a card that reached")
         print("  you by the same channel as an impostor's is worth what the channel is worth.")
         return 0
+    # Whether this run MADE the key decides what the screen is for. On the first run the one thing the
+    # person has to do is send it back, and printing a path asks them to go and find a file first; every
+    # later run they want the fingerprint, and 1.7 KB of JSON on screen is noise.
+    first = not (SH.identity_dir() / "identity.json").exists()
     me = SH.identity()
     print(f"\n  Your Probant fingerprint:  {me['fingerprint']}")
     print("  Read it to whoever shares with you, and check theirs the same way.\n")
@@ -654,6 +660,11 @@ def cmd_identity(add: str = "", card_file: str = "") -> int:
     out = Path.home() / f"probant-contact-{me['fingerprint']}.json"
     out.write_text(json.dumps(card, indent=1))
     print(f"  Your contact card (public keys only, safe to send): {out}")
+    if first or show:
+        print("\n  ── your public key — copy everything between the lines and send it back ──\n")
+        print(json.dumps(card, indent=1))
+        print("\n  ── end ──")
+        print("\n  It holds public keys only. Anyone who reads it learns nothing and can decrypt nothing.")
     known = SH.contacts()
     if known:
         print("\n  You can share with:")

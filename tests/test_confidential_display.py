@@ -58,3 +58,24 @@ def test_the_summary_does_not_print_a_zero_nothing_measured():
     assert "0 bytes" not in out
     assert "not a count" in out, "if it is a property of the code, the screen has to say so"
     assert "3 request" in out                        # the things that ARE counted still show
+
+
+def test_the_panel_does_not_assert_gpu_confidential_computing_mode():
+    """The `gpu-binding` limitation says NVIDIA does not report a GPU's confidential-computing mode, "so
+    it cannot be checked here" — while the fact table asserted it in parentheses, on the same screen."""
+    from inferroute_local.confidential import attest
+    src = D.__file__
+    text = open(src).read()
+    assert "(confidential computing)" not in text
+    gpu = [t for i, t in attest.LIMITATIONS if i == "gpu-binding"]
+    assert gpu and "cannot be checked" in gpu[0], "the limitation this contradicted must still be stated"
+
+
+def test_a_tcb_status_that_is_not_up_to_date_is_not_drawn_as_a_plain_green_tick():
+    """`attest_intel` accepts SWHardeningNeeded — known vulnerabilities needing software mitigations.
+    The check's `why` says so; the panel showed `why` only for PENDING / NEW BUILD, so the professional
+    saw "Platform firmware current" in green and the advisory ids nowhere on screen."""
+    text = open(D.__file__).read()
+    assert '"SWHardeningNeeded"' in text
+    i = text.index("caveat = ")
+    assert "SWHardeningNeeded" in text[i:i + 200], "it must gate the CAVEAT, not merely appear somewhere"

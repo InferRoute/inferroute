@@ -176,11 +176,17 @@ def test_confidential_status_line_names_the_lane_and_shows_live_privacy_figures(
     C._attach_counter(args, r.path)
     cmd = json.loads(args[1])["statusLine"]["command"]
     out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    assert out.returncode == 0 and out.stdout == "X · 391 KB sealed here · 0 B in the clear │ $0.12"
+    # "0 B in the clear" was a constant printed beside a real counter — the same thing render_summary
+    # refuses to do forty lines away, with a comment explaining why. Nothing measures it.
+    assert out.returncode == 0
+    assert out.stdout == ("X · 391 KB sealed here · nothing in the clear (by construction, not a count)"
+                          " │ $0.12")
+    assert "0 B in the clear" not in out.stdout
     r.counters["plaintext_bytes_sealed_here"] = 3 * 1048576 + 524288
     r.save()
     out = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
-    assert out.stdout == "X · 3.5 MB sealed here · 0 B in the clear │ $0.12"
+    assert out.stdout == ("X · 3.5 MB sealed here · nothing in the clear (by construction, not a count)"
+                          " │ $0.12")
     C._attach_counter(args := ["--settings", "{}"], r.path)   # malformed settings: untouched, no crash
     assert args[1] == "{}"
 
@@ -221,3 +227,28 @@ def test_a_model_that_is_not_enclave_backed_resumes_as_before(tmp_path, monkeypa
     resume, seen = _resume_with_no_index(monkeypatch, model="claude-sonnet-5")
     rc = resume.handle(["--resume", "sess-9"])
     assert rc == 0 and "confidential" not in seen and seen.get("standard")
+
+
+def test_the_fallback_path_does_not_take_the_plaintext_lane_in_silence(tmp_path, monkeypatch, capsys):
+    """`_fallback` sits UPSTREAM of handle's lane reasoning and consulted no model at all, so `ir -c`
+    with nothing to resume — or any resume with no terminal (piped, CI, or run from inside another
+    agent) — silently took the lane InferRoute can read. An audit reproduced all four cases, 23 Sep."""
+    from inferroute_cli import resume, launch, confidential
+    monkeypatch.setattr(launch, "last_model", lambda: "Kimi-K2.6")
+    seen = {}
+    monkeypatch.setattr(confidential, "launch", lambda args: (seen.__setitem__("confidential", args), 0)[1])
+    monkeypatch.setattr(resume, "_launch", lambda *a, **k: (seen.__setitem__("standard", True), 0)[1])
+    assert resume._fallback(["--resume"]) == 0
+    assert "standard" not in seen and seen["confidential"][:2] == ["--model", "kimi-k2.6"]
+    assert "confidential session" in capsys.readouterr().err
+
+
+def test_the_fallback_still_honours_plain_and_non_enclave_models(tmp_path, monkeypatch):
+    from inferroute_cli import resume, launch, confidential
+    monkeypatch.setattr(confidential, "launch", lambda args: 0)
+    for model, plain in (("Kimi-K2.6", True), ("claude-sonnet-5", False)):
+        monkeypatch.setattr(launch, "last_model", lambda m=model: m)
+        seen = {}
+        monkeypatch.setattr(resume, "_launch", lambda *a, **k: (seen.__setitem__("standard", True), 0)[1])
+        assert resume._fallback(["--resume"], plain) == 0
+        assert seen.get("standard"), (model, plain)

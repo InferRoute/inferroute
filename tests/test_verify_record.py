@@ -863,3 +863,36 @@ def test_an_older_record_skips_rather_than_rots(V):
     # A filter neither requested nor reported says nothing at all — no row, no noise.
     bare = {k: v for k, v in st.items() if k not in ("offices", "offices_applied", "from_date", "from_date_applied")}
     assert "offices was applied" not in _filter_rows(V, bare)
+
+
+def test_a_record_with_only_a_sealed_session_reads_as_absence_not_failure(tmp_path, V, kms):
+    """23 Sep. Making zero-search packs producible (for AUDIT.md claim 7, the CONVERSATION) made this
+    branch reachable in normal use for the first time, and it told the auditor "RESULT: FAILED" about a
+    record whose only fact is that no search was run. A law firm reads that as the evidence failing.
+    It must still not pass — an empty record passed off as verified is the thing this guards — but the
+    wording and the verdict line have to separate an ABSENCE from a defect, and name what IS there."""
+    import hashlib, json as _json
+    d = _synthetic_bundle(tmp_path, V, kms, no_searches=True)
+    raw = _json.dumps({"session_id": "f8be46ff", "verdict": "confidential"}).encode()
+    name = "session-20260922T191817Z-f8be46ff.receipt.json"
+    (d / name).write_bytes(raw)
+    man = _json.loads((d / "MANIFEST.json").read_text())
+    man["files"][name] = hashlib.sha256(raw).hexdigest()
+    (d / "MANIFEST.json").write_text(_json.dumps(man, indent=1))
+    code, out = _run(d, "--reference", str(tmp_path / "reference.json"))
+    assert "ABSENCE" in out and "not a defect in the evidence" in out
+    assert name in out and "claim 7" in out           # the auditor is told what IS here
+    assert "RESULT: NOTHING VERIFIED" in out
+    assert "RESULT: FAILED" not in out
+    assert code == 1, "still not a pass"
+
+
+def test_a_record_with_neither_searches_nor_a_session_still_says_failed(tmp_path, V, kms):
+    """The other side of the same branch: nothing at all in the folder is not an 'absence', it is an
+    empty record, and the original wording stands."""
+    d = _synthetic_bundle(tmp_path, V, kms, no_searches=True)
+    code, out = _run(d, "--reference", str(tmp_path / "reference.json"))
+    assert "there is nothing to verify" in out
+    assert "RESULT: NOTHING VERIFIED" in out          # still an absence, but nothing to point the auditor at
+    assert "session receipt(s) present" not in out
+    assert code == 1

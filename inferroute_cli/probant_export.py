@@ -859,7 +859,8 @@ statement per search; with none in this folder, the only honest verdict on those
 reaching it should take you seconds rather than the fifteen minutes this brief asks for. What IS here to
 audit is claim 7, the sealed session with the AI machine. Report the others as not evidenced, and do not
 read their absence as a fault of the professional: a search machine may simply not have been set up on the
-device that made this record.
+device that made this record. `verify_record.py` will print **RESULT: NOTHING VERIFIED** and exit 1 here:
+that exit code means it was not a pass, NOT that a check found something wrong — report it that way.
 """
 
 

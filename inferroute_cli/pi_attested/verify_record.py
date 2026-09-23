@@ -1222,8 +1222,27 @@ def main(argv: Optional[List[str]] = None) -> int:
                     for product, levels in reference["min_tcb"].items() if isinstance(levels, dict)}
         min_tcb = {p: lv for p, lv in from_ref.items() if lv}
     listed = set((manifest.get("files") or {}).keys())
+    # A record can legitimately hold no search and still hold evidence: the sealed SESSION with the AI
+    # machine (AUDIT.md claim 7). Such a pack became producible on 23 Sep, which made this branch reachable
+    # in normal use for the first time. It must still not PASS -- an empty record must never be passed off
+    # as verified -- but "FAILED" is read as "the evidence is bad", and the truth is that no search was run.
+    absent_searches = False
+    try:
+        in_folder = sorted(n for n in os.listdir(a.bundle)
+                           if n.startswith("session-") and n.endswith(".receipt.json"))
+    except OSError:
+        in_folder = []
     if not searches:
-        print("  FAIL sealed searches: this record contains NO sealed search — there is nothing to verify")
+        absent_searches = True
+        if in_folder:
+            print("  FAIL sealed searches: this record contains NO sealed search, so this program verified "
+                  "nothing about searching. That is an ABSENCE -- no search was run for this matter -- not a "
+                  "defect in the evidence. It is still not a pass.")
+            print(f"  NOTE sealed session: {len(in_folder)} session receipt(s) present "
+                  f"({', '.join(in_folder)}). This program does NOT verify them: they are the professional's "
+                  "own device reporting on the AI machine. Audit them by hand -- see claim 7 in AUDIT.md.")
+        else:
+            print("  FAIL sealed searches: this record contains NO sealed search — there is nothing to verify")
         fails += 1
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
@@ -1280,7 +1299,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if a.extract:
         extract(a.bundle, a.extract, [r for r in searches if isinstance(r, dict)])
     print()
-    if fails:
+    if fails == 1 and absent_searches:
+        print("RESULT: NOTHING VERIFIED — this record contains no sealed search, so there was nothing for "
+              "this program to check. Not a pass, and not a finding against the evidence.")
+    elif fails:
         print(f"RESULT: FAILED — {fails} check(s) did not pass; see FAIL lines above")
     elif test_roots:
         print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")

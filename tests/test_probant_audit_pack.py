@@ -251,6 +251,9 @@ def test_a_pack_with_no_searches_tells_the_auditor_so_before_they_start(tmp_path
     banner = brief.split("\n\n")[1]
     assert "no prior-art searches" in banner and "COULD NOT CHECK" in banner
     assert "claim 7" in banner
+    # The brief asks the auditor to report the exit code. 1 here means "not a pass", not "a check found
+    # something wrong", and nothing else in the folder says so.
+    assert "NOTHING VERIFIED" in banner and "exit 1" in banner
     assert brief.startswith("# Audit brief: an independent check")   # banner sits under the title
     assert "1. **Sealed hardware.**" in brief          # and the whole brief still follows
 

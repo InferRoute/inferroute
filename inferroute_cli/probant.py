@@ -521,6 +521,9 @@ def main(argv: list[str] | None = None) -> int:
     hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
     pf.add_argument("matter")
+    ca = sub.add_parser("audit-client", help="a brief your OWN AI can use to audit this software itself, "
+                                             "with the hashes of every file it should read")
+    ca.add_argument("-o", "--out", default="", help="where to write it (default: beside your matters)")
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
@@ -564,6 +567,16 @@ def main(argv: list[str] | None = None) -> int:
             return probant_delete.cmd_delete(a.matter, yes=a.yes)
         if a.cmd == "proof":
             return cmd_proof(a.matter)
+        if a.cmd == "audit-client":
+            from . import probant_client_audit
+            dest = probant_client_audit.write_client_audit(a.out or None)
+            n = len(json.loads((dest / "INSTALLED.json").read_text())["files"])
+            print(f"\n  A brief for your own AI, about this software:\n")
+            print(f"      {dest}\n")
+            print(f"  It lists all {n} source files with their hashes and asks your AI six questions about")
+            print("  them — starting with whether anything can leave this computer unencrypted.")
+            print("  Give it the folder and say: read CLIENT-AUDIT.md and do what it asks.\n")
+            return 0
         if a.cmd == "home":
             from . import probant_home
             return probant_home.run(open_browser=not a.no_browser)

@@ -665,20 +665,20 @@
     }
     for (const c of d.corpora || []) {
       const sent = c.direction === "sent";
-      const who = sent ? `sent to ${c.to || "?"}` : `from ${c.from_name || c.from || "unknown sender"}`;
+      const who = sent ? `to ${c.to || "?"}` : `from ${c.from_name || c.from || "unknown sender"}`;
       const warn = (!sent && !c.known_contact)
         ? el("span", "warn", "sender not a known contact") : el("span", "");
+      // The detail lines go INSIDE the row: appended to the page they floated under the card, and with
+      // two deliveries listed there would be no way to tell which one they described.
+      const detail = el("div", "");
+      detail.append(el("div", "mono sub", c.id));
+      if ((c.files || []).length) detail.append(el("div", "sub", `documents: ${c.files.join(", ")}`));
+      if ((c.matters || []).length) detail.append(el("div", "sub", `matters: ${c.matters.join(", ")}`));
       p.append(el("div", "record-row",
         el("span", "", c.name || "(unnamed)"),
-        el("span", "mono sub", c.id),
+        detail,
         el("span", "sub", `${sent ? "sent" : "received"} · ${who}`),
         warn));
-      if ((c.files || []).length) {
-        p.append(el("p", "sub", `documents: ${c.files.join(", ")}`));
-      }
-      if ((c.matters || []).length) {
-        p.append(el("p", "sub", `matters: ${c.matters.join(", ")}`));
-      }
     }
 
     p.append(el("h2", "section", "People you can share with"));

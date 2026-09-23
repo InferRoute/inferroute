@@ -283,6 +283,13 @@ def cmd_cowork(rest: list[str]) -> int:
 
     host = configure(creds, model=model)
 
+    # cowork reaches neither plaintext launcher — it writes goose's config files and starts the desktop
+    # app detached — so the launcher-announces rule does not cover it and it says so itself. The reason
+    # is the real blocker, not a placeholder: a sealed session's local endpoint is bound to THIS process,
+    # and the desktop app outlives it. Until that changes, everyday work here is on the readable lane.
+    from . import lane as lane_mod
+    lane_mod.announce(lane_mod.Lane(lane_mod.STANDARD, model or _default_model(), lane_mod.COWORK))
+
     if ns.configure_only:
         print(f"  ✓ goose wired to InferRoute ({host}).")
         return 0

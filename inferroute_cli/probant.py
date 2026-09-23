@@ -210,12 +210,38 @@ def cmd_list() -> int:
                 r = json.loads(f.read_text())
             except (OSError, ValueError):
                 continue
-            print(f"  {r.get('client')}/{r.get('matter'):<20} date bound {r.get('date_bound')}  {r.get('workspace')}")
+            from . import probant_share as SH
+            origin = SH.origin_of(str(r.get("client") or ""), str(r.get("matter") or ""))
+            tail = f"  [{origin['corpus']}]" if origin.get("corpus") else ""
+            print(f"  {r.get('client')}/{r.get('matter'):<20} date bound {r.get('date_bound')}  "
+                  f"{r.get('workspace')}{tail}")
             shown += 1
     if not shown:
         # An emptied directory used to print nothing at all, which reads as a broken command.
         print("no matters yet — create one: ir probant new <client> <matter> --priority-date YYYY-MM-DD")
+    _print_corpora()
     return 0
+
+
+def _print_corpora() -> None:
+    """A delivery is an object in its own right, and until now it had nowhere to be seen: you could make
+    one, send it, receive it and open it, and no command would show you that it existed."""
+    from . import probant_share as SH
+    rows = SH.corpora()
+    if not rows:
+        return
+    print("\n  Corpora (a delivery: matters that arrived together, and the documents describing them)")
+    for c in rows:
+        who = c.get("from_name") or c.get("from") or "unknown sender"
+        mark = "" if c.get("known_contact") else "  ⚠ sender not a known contact"
+        print(f"    {c.get('name') or '(unnamed)'}  —  {c.get('id')}")
+        print(f"      from {who}{mark}")
+        if c.get("files"):
+            print(f"      documents: {', '.join(c['files'])}  (in Probant/{c.get('client')}/shared-corpus)")
+        if c.get("matters"):
+            print(f"      matters:   {', '.join(c['matters'])}")
+        print(f"      a matter of your own, tied to it but not part of it:\n"
+              f"        ir probant new <client> <matter> --from-corpus {c.get('id')}")
 
 
 def disclosure_has_content(workspace: Path) -> bool:

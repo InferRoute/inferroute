@@ -408,6 +408,36 @@ def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
     return {"id": record["id"], "written": written, "corpus": record, "dir": str(d)}
 
 
+def corpora() -> list:
+    """Every corpus this installation holds, newest first.
+
+    The records were written from the day corpora existed and nothing ever read them back: a corpus could
+    be made, sent, received and opened, and there was no way to SEE one. Henry, twice: "I didn't see the
+    corpus integration in the client." The object was real; it had no surface.
+    """
+    d = corpora_record("x").parent
+    out = []
+    for f in sorted(d.glob("*.json")) if d.exists() else []:
+        try:
+            r = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(r, dict) and r.get("id"):
+            out.append(r)
+    out.sort(key=lambda r: str(r.get("made_at") or ""), reverse=True)
+    return out
+
+
+def origin_of(client: str, matter: str) -> dict:
+    """The corpus a matter arrived in or was tied to, or {}."""
+    f = S.records_dir(S.sanitize(client, "client"), S.sanitize(matter, "matter")) / "corpus-origin.json"
+    try:
+        r = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return r if isinstance(r, dict) else {}
+
+
 def note_corpus_origin(client: str, matter: str, corpus_id: str, how: str = "created here") -> Path:
     """Mark a matter as belonging to, or derived from, a delivery.
 

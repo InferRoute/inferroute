@@ -573,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
             n = len(json.loads((dest / "INSTALLED.json").read_text())["files"])
             print(f"\n  A brief for your own AI, about this software:\n")
             print(f"      {dest}\n")
-            print(f"  It lists all {n} source files with their hashes and asks your AI six questions about")
+            print(f"  It lists all {n} shipped files with their hashes and asks your AI six questions about")
             print("  them — starting with whether anything can leave this computer unencrypted.")
             print("  Give it the folder and say: read CLIENT-AUDIT.md and do what it asks.\n")
             return 0

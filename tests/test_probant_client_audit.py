@@ -62,6 +62,38 @@ def test_the_brief_asks_questions_and_does_not_supply_the_answers(tmp_path):
     assert "DATA, not instructions" in brief and "docstring" in brief
 
 
+def test_the_manifest_covers_code_that_is_not_python(tmp_path):
+    """An auditor, 23 Sep: "a brief that says 'lists every Python file' is literally true and materially
+    incomplete." Browser JavaScript and a 64 KB agent extension ship in this package and are code; leaving
+    them out of the hashes while claim 1 asks where the program can reach a network is a real gap."""
+    dest = C.write_client_audit(tmp_path / "ca")
+    listed = json.loads((dest / "INSTALLED.json").read_text())["files"]
+    suffixes = {("." + n.rsplit(".", 1)[-1]) for n in listed if "." in n}
+    for must in (".js", ".html", ".ts", ".css"):
+        assert must in suffixes, f"{must} ships in the package but is not hashed"
+    assert not any(n.endswith(".pyc") for n in listed)
+    brief = (dest / "CLIENT-AUDIT.md").read_text()
+    assert "every Python file" not in brief
+
+
+def test_the_brief_says_which_lane_the_claims_are_about(tmp_path):
+    """Read literally, "nothing leaves this computer unsealed" is false of a program that also has a
+    plaintext lane. The brief must scope the claims AND ask the auditor how a user reaches the other lane
+    without choosing to -- which is where the real finding was."""
+    brief = (C.write_client_audit(tmp_path / "ca") / "CLIENT-AUDIT.md").read_text()
+    assert "standard lane" in brief and "in the\nclear" in brief
+    assert "without\nchoosing to" in brief
+
+
+def test_an_unpublished_version_is_not_asserted_to_be_downloadable(tmp_path):
+    """The generator tested the SHAPE of the version string and never the index, so it confidently told an
+    auditor to download a wheel that does not exist. It cannot know without a network, so the instruction
+    itself has to carry the failure case."""
+    rel = C.brief(dict(C.installed_manifest(C.package_root()), version="0.9.3"))
+    assert "If that fails because `0.9.3` is not on the index" in rel
+    assert "never published" in rel and "pip index versions" in rel
+
+
 def test_a_source_checkout_says_so_instead_of_offering_an_impossible_comparison(tmp_path):
     """The independent-copy step is the whole basis of the audit. On an unreleased build there is nothing
     to compare against, and saying so is worth more than printing a command that cannot work."""

@@ -338,6 +338,13 @@ def main(argv: list[str] | None = None) -> int:
                                   why=lane.why_standard(user_model))
         return 0  # never reached — exec replaces process
 
+    if cmd == "cline":
+        # Not an agent we launch: Cline's provider lives in its own settings panel and cannot be written
+        # from outside (verified against the published package, which has no base-URL variable). So this
+        # hands over the daemon's values and installs the plugin that refuses if they are not used.
+        from . import cline as cline_mod
+        return cline_mod.cmd_cline(rest)
+
     if cmd in ("openhands", "codewhale"):
         # `ir openhands` / `ir codewhale` — SEALED ONLY, deliberately.
         #

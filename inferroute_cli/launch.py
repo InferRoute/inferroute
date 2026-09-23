@@ -561,6 +561,8 @@ def launch_through_inferroute(
     extra_args: Iterable[str] = (),
     permission_mode: str | None = None,
     session_id: str | None = None,
+    *,
+    why: str,
 ) -> None:
     """Exec `claude` with inferroute env + --model pinned.
 
@@ -590,6 +592,11 @@ def launch_through_inferroute(
     (or anything that uses its own first-party-only auth path) can still
     use the user's real Anthropic key.
     """
+    from . import lane as _lane
+    # Said HERE, not by the callers: three silent drops to this lane were found on 23 Sep and
+    # each was a different call site forgetting. A launcher that announces itself cannot be
+    # forgotten by an entry point nobody has written yet.
+    _lane.announce(_lane.Lane(_lane.STANDARD, model_id, why))
     if not creds.is_valid:
         sys.stderr.write(
             "\n  ERROR: no inferroute API key found.\n"
@@ -806,12 +813,19 @@ def launch_goose(
     creds: Credentials,
     extra_args: Iterable[str] = (),
     session_id: str | None = None,
+    *,
+    why: str,
 ) -> None:
     """Exec `goose session` with OpenAI env pointing at inferroute.
 
     Uses the native OpenAI /v1/chat/completions endpoint (no Anthropic
     translation) so tool names round-trip correctly.
     """
+    from . import lane as _lane
+    # Said HERE, not by the callers: three silent drops to this lane were found on 23 Sep and
+    # each was a different call site forgetting. A launcher that announces itself cannot be
+    # forgotten by an entry point nobody has written yet.
+    _lane.announce(_lane.Lane(_lane.STANDARD, model_id, why))
     binary = shutil.which("goose")
     if not binary:
         sys.stderr.write(

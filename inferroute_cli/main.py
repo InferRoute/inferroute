@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from . import __version__, config, help as help_mod, launch, login as login_mod, models  # noqa: F401
+from . import __version__, config, help as help_mod, lane, launch, login as login_mod, models  # noqa: F401
 
 
 def _print_unknown(cmd: str) -> int:
@@ -188,12 +188,10 @@ def main(argv: list[str] | None = None) -> int:
                 and (user_model is None or _is_confidential_model(user_model)):
             from . import confidential as confidential_mod
             return confidential_mod.launch(passthrough if user_model is None else ["--model", user_model, *passthrough], agent=agent)
-        if user_model is not None and _is_confidential_model(user_model) and plain:
-            sys.stderr.write("  → standard lane (--plain): InferRoute can read this session's requests; "
-                             "drop --plain for the confidential lane.\n")
-        elif user_model is not None and not plain and not _is_premium_anthropic(user_model) and not _is_resume(passthrough):
-            sys.stderr.write(f"  → {user_model} is not enclave-backed: standard lane "
-                             "(`ir confidential models` lists the models that run confidentially).\n")
+        # The lane notice used to be written here, in two one-line variants, one of which excluded
+        # resumes — which is exactly where a silent drop to the readable lane was found on 23 Sep. It is
+        # now a block printed by the launcher itself, so it cannot be forgotten and cannot be skipped for
+        # one kind of launch. See inferroute_cli/lane.py.
         # Resume/continue → resume.py: its own menu (inferroute sessions, annotated
         # with model · lane · cost, shown apart from native ones) for bare
         # `--resume`, the newest session for `-c`, or an explicit id — all resumed
@@ -225,9 +223,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 return 2
             if agent == "goose":
-                launch.launch_goose(user_model, creds, extra_args=passthrough)
+                launch.launch_goose(user_model, creds, extra_args=passthrough,
+                                    why=lane.why_standard(user_model))
             else:
-                launch.launch_through_inferroute(user_model, creds, extra_args=passthrough)
+                launch.launch_through_inferroute(user_model, creds, extra_args=passthrough,
+                                                 why=lane.why_standard(user_model))
             return 0  # never reached — exec replaces process
         # No model specified → interactive picker so the user chooses one.
         from . import choose as choose_mod
@@ -353,7 +353,8 @@ def main(argv: list[str] | None = None) -> int:
                 "  Run `ir login` to set one up, or `ir help` for options.\n\n"
             )
             return 2
-        launch.launch_goose(user_model, creds, extra_args=passthrough)
+        launch.launch_goose(user_model, creds, extra_args=passthrough,
+                            why=lane.why_standard(user_model))
         return 0  # never reached — exec replaces process
 
     if cmd == "anthropic":

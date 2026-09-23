@@ -85,6 +85,19 @@ send an auditor chasing a function that is gone.
   exactly that program and report its exit code, so the delivery path ended in an attorney being told the
   evidence failed. It now says `NOTHING VERIFIED`, names the session receipts that *are* present, and
   points at claim 7. It still exits 1: an empty record must never be passed off as verified.
+- **The panel can no longer deny a session its own receipt records.** Any verdict that was not
+  `confidential` printed "This session was NOT opened. Nothing was sent." — including for a session that
+  ran normally and then lost re-verification. An audit printed that over a receipt recording 12 sent
+  requests. The panel now reads the counters, and a session that had already sent is `degraded` (with its
+  reason) rather than `refused`, which means never opened.
+- **A zero that nothing measured is gone.** `plaintext that left this device: 0 bytes` was a hard-coded
+  string among real counters. It now states that plaintext never reaches the carrier and that this is a
+  property of the code, not a count.
+- **Resuming no longer drops to the plaintext lane in silence.** `ir -c` took its lane from a best-effort,
+  unsigned local file; with that row lost it resumed on the standard lane with nothing printed, because the
+  lane warnings are suppressed for resumes. A resume that cannot recall its lane now takes the confidential
+  lane for an enclave-backed model — the same default a fresh launch uses — and says why. `--plain` still
+  wins.
 - **A killed reading job no longer counts as having read the document.** A retry cap turned an interrupted
   run into permanent data loss: the largest filing in a portfolio was marked read-and-empty and silently
   skipped on every later resume.

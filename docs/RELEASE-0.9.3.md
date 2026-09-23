@@ -71,6 +71,11 @@ and their folders and evidences nothing.
   yet the conversation was sealed and is auditable under claim 7. It now refuses only when there is neither
   a search nor a session, and when searches are absent it says so above the brief instead of letting the
   auditor spend the fifteen minutes it asks for to reach the same verdict.
+- **An absent search no longer reads as failed evidence.** `verify_record.py` printed `RESULT: FAILED`
+  for a record whose only fact was that no search had been run — and the brief sends the auditor to run
+  exactly that program and report its exit code, so the delivery path ended in an attorney being told the
+  evidence failed. It now says `NOTHING VERIFIED`, names the session receipts that *are* present, and
+  points at claim 7. It still exits 1: an empty record must never be passed off as verified.
 - **A killed reading job no longer counts as having read the document.** A retry cap turned an interrupted
   run into permanent data loss: the largest filing in a portfolio was marked read-and-empty and silently
   skipped on every later resume.

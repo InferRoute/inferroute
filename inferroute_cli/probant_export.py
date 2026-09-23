@@ -801,8 +801,12 @@ brief; the first attempt of one was stopped early at nine minutes and produced n
    — then check the chain and the report signature with your own tools. Recompute REPORT_DATA from the
    runtime data, and the statement signature from the signer key.
 
-   **Write nothing inside this folder.** Its integrity check lists every file, so a scratch file you leave
-   here is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about the evidence.
+   **Write nothing inside this folder.** Its integrity check lists every file AT THE TOP LEVEL, so a scratch
+   file you leave there is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about
+   the evidence. Note the limit, because it cuts both ways: the check does not descend into subdirectories,
+   so nothing in `trust-anchors/` is hashed or flagged by it. Those two files are deliberately outside the
+   sealed set — they are the professional's local configuration, not evidence — which is exactly why claim 3
+   sends you to the engagement letter for the key instead of to this folder.
    Extract and work one directory up.
 4. **The reference and key in `trust-anchors/` came from the professional's computer.** That's convenient but
    not independent. Tell the professional to compare the publication key's fingerprint against the one in their
@@ -854,13 +858,12 @@ folder.</p>
 
 
 NO_SEARCHES_BANNER = """
-**This record contains no prior-art searches.** Claims 1 to 6 and 8 below each rest on an enclave-signed
-statement per search; with none in this folder, the only honest verdict on those is COULD NOT CHECK, and
-reaching it should take you seconds rather than the fifteen minutes this brief asks for. What IS here to
-audit is claim 7, the sealed session with the AI machine. Report the others as not evidenced, and do not
-read their absence as a fault of the professional: a search machine may simply not have been set up on the
-device that made this record. `verify_record.py` will print **RESULT: NOTHING VERIFIED** and exit 1 here:
-that exit code means it was not a pass, NOT that a check found something wrong — report it that way.
+**Before you start, one fact about this folder: `searches.json` is empty — no prior-art search was recorded
+for this matter.** Work out for yourself what that leaves checkable; this brief is not going to tell you its
+own findings. Two things worth knowing rather than inferring: a search machine may simply never have been
+set up on the device that made this record, so absence here is not evidence of a fault by the professional;
+and `verify_record.py` will print **RESULT: NOTHING VERIFIED** and exit 1, which means it was not a pass,
+NOT that a check found something wrong — report the code that way.
 """
 
 

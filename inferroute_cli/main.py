@@ -338,6 +338,27 @@ def main(argv: list[str] | None = None) -> int:
                                   why=lane.why_standard(user_model))
         return 0  # never reached — exec replaces process
 
+    if cmd in ("openhands", "codewhale"):
+        # `ir openhands` / `ir codewhale` — SEALED ONLY, deliberately.
+        #
+        # Both speak OpenAI, which the sealed endpoint serves, so neither needs the Anthropic-dialect
+        # plaintext launcher that pi and opencode fall back to. Building them one would be extending the
+        # lane Henry has said he wants removed; a new agent that only works confidentially moves the
+        # count the other way. So a non-enclave model or `--plain` is refused here with the models that
+        # do work, rather than quietly routed somewhere readable.
+        plain, rest = _extract_plain(rest)
+        user_model, passthrough = _extract_model_override(rest)
+        if plain or (user_model is not None and not _is_confidential_model(user_model)):
+            sealed = ", ".join(sorted(lane.ENCLAVE_FLOOR))
+            why = "--plain" if plain else f"`{user_model}` has no enclave"
+            sys.stderr.write(f"\n  `ir {cmd}` runs on the confidential lane only, and {why}.\n"
+                             f"  Models it can run: {sealed}\n"
+                             "  (`ir confidential models` lists them with prices.)\n\n")
+            return 2
+        from . import confidential as confidential_mod
+        return confidential_mod.launch(passthrough if user_model is None else ["--model", user_model, *passthrough],
+                                       agent=cmd)
+
     if cmd == "goose":
         # `ir goose` — launch the Goose CLI agent through InferRoute.
         # Shorthand for `ir --agent goose`. Opens the model picker when no

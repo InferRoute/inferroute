@@ -134,7 +134,10 @@ def test_the_brief_tells_the_auditor_the_verifier_is_untrusted_and_how_to_check_
     assert "not step 2" in md
     # …and the report must separate what the auditor computed from what our program told them.
     assert "which of it you computed yourself" in md
-    assert "COULD NOT CHECK and the report should say" in md
+    # An empty folder gets a one-line report — but claim 7 is NOT empty just because no search ran, and
+    # the brief used to say "there is nothing here to audit", which dismissed the one thing that was.
+    assert "every claim EXCEPT 7 is COULD NOT CHECK" in md
+    assert "Claim 7 rests on the session receipt and not on any search" in md
 
 
 def test_the_empty_pack_refusal_names_what_is_actually_in_the_way(tmp_path, monkeypatch):
@@ -198,3 +201,71 @@ def test_the_bundle_carries_the_conversation_receipt_and_the_brief_asks_about_it
     assert "is NOT in this folder" in md                 # the limit is stated, not implied
     assert "which of this you verified and which you read" in md
     assert "claim (1 to 8)" in md
+
+
+def _bare_record(tmp_path, *, receipt=None):
+    """The smallest thing write_audit_pack will read: a record with no searches at all."""
+    rec = tmp_path / "record"
+    rec.mkdir()
+    (rec / "searches.json").write_text("[]")
+    (rec / "MANIFEST.json").write_text(json.dumps({"files": {}, "matter_cutoff": 20260814}))
+    (rec / "VERIFY.md").write_text("how to verify\n")
+    (rec / "verify_record.py").write_text("# verifier\n")
+    if receipt is not None:
+        (rec / "session-abc123.receipt.json").write_text(json.dumps(receipt))
+    return rec
+
+
+def test_a_sealed_session_with_no_searches_still_makes_a_pack(tmp_path, no_anchors):
+    """23 Sep: the audit gained claim 7 — the CONVERSATION — but the guard still refused on searches alone,
+    so the one case the feature was built for could not produce a pack at all. Henry's case exactly: no
+    search machine resolves from this device, yet the chat with the AI machine WAS sealed and is the thing
+    he asked to have checked."""
+    receipt = {"session_id": "abc123", "verdict": "confidential",
+               "checks": {"quote": {"ok": True, "why": "chains to AMD root"}},
+               "instance": {"mrtd": "aa" * 48}, "path": "/home/henry/.inferroute/x.json"}
+    pack = E.write_audit_pack(_bare_record(tmp_path, receipt=receipt), tmp_path / "pack")
+    carried = json.loads((pack / "session-abc123.receipt.json").read_text())
+    assert carried["instance"]["mrtd"] == "aa" * 48
+    assert carried["checks"]["quote"]["ok"] is True
+    # indexed like every other file, so the pack's own integrity check covers it
+    assert "session-abc123.receipt.json" in json.loads((pack / "MANIFEST.json").read_text())["files"]
+
+
+def test_the_pack_does_not_carry_the_professionals_own_filesystem_path(tmp_path, no_anchors):
+    """The receipt evidences the session; `path` evidences nothing and names the professional and their
+    folders to whoever receives the pack."""
+    receipt = {"session_id": "abc123", "path": "/home/henry/.inferroute/confidential/receipts/x.json"}
+    pack = E.write_audit_pack(_bare_record(tmp_path, receipt=receipt), tmp_path / "pack")
+    blob = (pack / "session-abc123.receipt.json").read_bytes()
+    assert b"/home/henry" not in blob
+    assert json.loads(blob)["withheld"] == ["path"]      # absence is stated, never silent
+
+
+def test_a_pack_with_no_searches_tells_the_auditor_so_before_they_start(tmp_path, no_anchors):
+    """Without it an auditor spends the fifteen minutes the brief asks for to reach COULD NOT CHECK on
+    everything that rests on a search."""
+    receipt = {"session_id": "abc123", "verdict": "confidential"}
+    pack = E.write_audit_pack(_bare_record(tmp_path, receipt=receipt), tmp_path / "pack")
+    brief = (pack / "AUDIT.md").read_text()
+    banner = brief.split("\n\n")[1]
+    assert "no prior-art searches" in banner and "COULD NOT CHECK" in banner
+    assert "claim 7" in banner
+    assert brief.startswith("# Audit brief: an independent check")   # banner sits under the title
+    assert "1. **Sealed hardware.**" in brief          # and the whole brief still follows
+
+
+def test_a_record_with_neither_searches_nor_a_session_is_still_refused(tmp_path):
+    """The original refusal stands where it was right: nothing in the folder can evidence anything."""
+    with pytest.raises(S.ProbantError, match="no searches"):
+        E.write_audit_pack(_bare_record(tmp_path), tmp_path / "pack")
+    assert not (tmp_path / "pack").exists(), "it must refuse BEFORE creating the folder"
+
+
+def test_the_pack_carries_the_receipt_alongside_searches_too(tmp_path, V, kms, no_anchors):
+    """Claim 7 is not conditional on there being no searches."""
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    (rec / "session-zz9.receipt.json").write_text(json.dumps({"session_id": "zz9", "verdict": "confidential"}))
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    assert json.loads((pack / "session-zz9.receipt.json").read_text())["verdict"] == "confidential"
+    assert "no prior-art searches" not in (pack / "AUDIT.md").read_text()   # no banner

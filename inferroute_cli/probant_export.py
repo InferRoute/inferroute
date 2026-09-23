@@ -835,9 +835,10 @@ value of this audit, so make it visible per claim rather than in a closing remar
 code; whether you could obtain an independent copy of the verifier and what the comparison showed; and
 anything in the code or the data that looked wrong. Keep it readable by a patent attorney.
 
-If this folder contains no searches, the answer to every claim is COULD NOT CHECK and the report should say
-so in one line rather than at length: there is nothing here to audit, and a long report about an empty
-folder reads as a finding about the evidence.
+If this folder contains no searches, every claim EXCEPT 7 is COULD NOT CHECK, and the report should say so
+in one line rather than at length: a long report about evidence that is not there reads as a finding about
+the evidence. Claim 7 rests on the session receipt and not on any search, so it is still yours to audit and
+to report. A pack is never made with neither.
 """
 
 PACK_RECORD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit pack</title></head>
@@ -852,6 +853,47 @@ folder.</p>
 """
 
 
+NO_SEARCHES_BANNER = """
+**This record contains no prior-art searches.** Claims 1 to 6 and 8 below each rest on an enclave-signed
+statement per search; with none in this folder, the only honest verdict on those is COULD NOT CHECK, and
+reaching it should take you seconds rather than the fifteen minutes this brief asks for. What IS here to
+audit is claim 7, the sealed session with the AI machine. Report the others as not evidenced, and do not
+read their absence as a fault of the professional: a search machine may simply not have been set up on the
+device that made this record.
+"""
+
+
+def _is_session_receipt(name: str) -> bool:
+    """The ONE place that decides what a session receipt is called. AUDIT.md claim 7 sends the auditor to
+    `session-*.receipt.json`, write_bundle writes that name, and the pack must carry that same set — three
+    readings of one fact, so it is spelled once."""
+    return name.startswith("session-") and name.endswith(".receipt.json")
+
+
+def _receipt_for_pack(raw: bytes) -> bytes:
+    """A receipt holds verdicts, measurements, counters and operational events — no prompt, no query, no
+    answer, no document text — so it travels whole. `path` is the exception: it is where the file sits on
+    the professional's own computer, which names them and their folders to whoever receives the pack, and
+    evidences nothing."""
+    try:
+        r = json.loads(raw)
+    except ValueError:
+        return raw
+    if isinstance(r, dict) and r.get("path"):
+        r = {k: v for k, v in r.items() if k != "path"}
+        r["withheld"] = ["path"]          # said in the file itself, so absence is never read as loss
+        return json.dumps(r, indent=1, ensure_ascii=False).encode("utf-8")
+    return raw
+
+
+def _brief(has_searches: bool) -> str:
+    """The brief, banner-first when nothing in the folder can evidence claims 1-6 and 8."""
+    if has_searches:
+        return AUDIT_MD
+    head, _, rest = AUDIT_MD.partition("\n")
+    return head + "\n\n" + NO_SEARCHES_BANNER.strip() + "\n" + rest
+
+
 def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = None) -> Path:
     """An evidence-only copy of an exported record, for the professional's own AI to audit. Written beside the
     record by default. Its name carries no matter name, because a matter name can say what the invention is."""
@@ -861,7 +903,8 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     src_manifest = json.loads((src / "MANIFEST.json").read_text(encoding="utf-8"))
     if not isinstance(rows, list):
         raise S.ProbantError("this record's searches.json is not a list; refusing to make an audit pack from it")
-    if not rows:
+    receipts = sorted(p.name for p in src.iterdir() if _is_session_receipt(p.name))
+    if not rows and not receipts:
         # 22 Sep: a pack was made from a matter with no searches and handed to an auditor, who spent ten
         # minutes reaching a verdict on claims that NOTHING in the folder could evidence. Every claim here
         # rests on an enclave-signed statement per search; with none, the pack is a folder of tooling and
@@ -880,8 +923,9 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                "No search machine is set up on this computer yet, so no search can be run: set one up "
                "first, and this computer will check it before anything is sent to it.")
         raise S.ProbantError(
-            "this record contains no searches, so there is nothing for an auditor to check: every claim in "
-            "the brief rests on a signed statement per search. " + why)
+            "this record contains no searches and no sealed session, so there is nothing for an auditor to "
+            "check: every claim in the brief rests either on a signed statement per search or on this "
+            "device's receipt for the session. " + why)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     dest = Path(out_dir) if out_dir else src.parent / f"audit-pack-{stamp}"
     sync = S._under_sync_root(dest)
@@ -901,12 +945,17 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "searches.json": json.dumps(stripped, indent=1, ensure_ascii=False).encode("utf-8"),
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
         "VERIFY.md": (src / "VERIFY.md").read_bytes(),
-        "AUDIT.md": AUDIT_MD.encode("utf-8"),
+        "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
         "verify_record.py": (src / "verify_record.py").read_bytes(),
     }
     for name in sorted(p.name for p in src.iterdir()):
         if name.endswith(".evidence.json") or name == "unanswered.json":
             files[name] = (src / name).read_bytes()
+    # 23 Sep: claim 7 told the auditor to read `session-*.receipt.json` and the pack did not carry it, so
+    # the brief named a file the folder did not contain — the same "our own word, nothing beside it" gap
+    # claim 7 was written to close, one layer further down.
+    for name in receipts:
+        files[name] = _receipt_for_pack((src / name).read_bytes())
     manifest = {"schema": "inferroute.prior-art-audit-pack/1",
                 "matter_cutoff": src_manifest.get("matter_cutoff"),
                 "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

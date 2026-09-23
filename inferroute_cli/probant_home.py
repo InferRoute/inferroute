@@ -602,7 +602,10 @@ class Home:
             return {"fingerprint": me["fingerprint"], "card": SH.public_card(me),
                     "contacts": [{"name": n, **c} for n, c in SH.contacts().items()],
                     # Offered by id; the page never sends a path back (see corpus_documents).
-                    "documents": [{k: v for k, v in x.items() if k != "path"} for x in corpus_documents()]}
+                    "documents": [{k: v for k, v in x.items() if k != "path"} for x in corpus_documents()],
+                    # The deliveries themselves. The page could send one and open one and never show you
+                    # that any existed — which is what "I don't see the corpus integration" was about.
+                    "corpora": SH.corpora()}
 
         @app.post("/api/sharing/contact")
         async def add_contact(request: Request):

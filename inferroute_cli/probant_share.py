@@ -408,6 +408,34 @@ def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
     return {"id": record["id"], "written": written, "corpus": record, "dir": str(d)}
 
 
+def record_sent(payload: dict, to: str, fingerprint: str, dest: Path) -> Path:
+    """Record a delivery on the SENDER's side.
+
+    Only the receiving path wrote a corpus record, so the person who MADE a delivery kept no trace of it:
+    what went, to whom, when, with which documents. For an attorney that is the audit trail of their own
+    outbound disclosure, and it is the first thing they would be asked to produce. Henry, on his own
+    machine after sealing a real corpus: "can I see it in the client" — and he could not, because nothing
+    had been written.
+    """
+    c = (payload.get("corpus") or {})
+    cid = str(c.get("id") or "")
+    if not cid:
+        return Path()
+    rec = {"schema": "inferroute.probant-corpus/1", "id": cid, "name": c.get("name") or "",
+           "direction": "sent", "to": to, "to_fingerprint": fingerprint,
+           "made_at": c.get("made_at") or "", "note": payload.get("note") or "",
+           "files": [f.get("name") for f in (c.get("files") or []) if f.get("name")],
+           # `matter` in a payload entry already reads "client/matter"; prefixing client again produced
+           # "None/InferRoute/attest-dynamics" the first time this printed.
+           "matters": [str(e.get("matter")) for e in (payload.get("matters") or []) if e.get("matter")],
+           "sealed_to": str(dest)}
+    out = corpora_record(cid)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(rec, indent=1) + "\n", encoding="utf-8")
+    os.chmod(out, 0o600)
+    return out
+
+
 def corpora() -> list:
     """Every corpus this installation holds, newest first.
 

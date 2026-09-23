@@ -298,9 +298,11 @@ def main(argv: list[str] | None = None) -> int:
         from . import verify as verify_mod
         return verify_mod.cmd_verify(rest)
 
-    if cmd == "cowork":
-        # `ir cowork` — wire goose (open-source agent desktop/CLI) to InferRoute
-        # and launch it. The point-and-click surface for everyday work.
+    if cmd in ("goose-cowork", "cowork"):
+        # `ir goose-cowork` — wire goose (open-source agent desktop/CLI) to InferRoute and launch it.
+        # The point-and-click surface for everyday work. Named after its agent like `ir pi`, `ir goose`
+        # and `ir opencode`; `ir cowork` stays as an alias because it is in people's fingers and in the
+        # help text they have already read.
         from . import cowork as cowork_mod
         return cowork_mod.cmd_cowork(rest)
 

@@ -26,10 +26,9 @@ from . import models
 # is empty, removing the lane is a deletion rather than an investigation.
 NO_ENCLAVE = "this model has no enclave, so there is nothing to seal to"
 USER_ASKED = "you asked for the standard lane with --plain"
-COWORK = ("ir cowork launches the desktop app detached, and a sealed session's local endpoint cannot "
+COWORK = ("ir goose-cowork launches the desktop app detached, and a sealed session's local endpoint cannot "
           "outlive this command")
-INTEGRATE = "ir integrate does not have a confidential lane yet"
-REASONS = (NO_ENCLAVE, USER_ASKED, COWORK, INTEGRATE)
+REASONS = (NO_ENCLAVE, USER_ASKED, COWORK)
 
 CONFIDENTIAL = "confidential"
 STANDARD = "standard"

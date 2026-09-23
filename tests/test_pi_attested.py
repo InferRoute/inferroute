@@ -42,8 +42,12 @@ def user_pi(tmp_path, monkeypatch):
     return user
 
 
+# The session endpoint now checks a credential, so the agent and the server must share one.
+LOCAL_KEY = "ir-test-local-session-key"
+
+
 def _argv(env: dict, passthrough=(), base_url="http://127.0.0.1:9") -> list[str]:
-    return PA.env_argv(PI or "pi", env, list(passthrough), base_url=base_url, api_key="ir-confidential-local",
+    return PA.env_argv(PI or "pi", env, list(passthrough), base_url=base_url, api_key=LOCAL_KEY,
                        alias=ALIAS, upstream_name="kimi-k2.6 [confidential]")
 
 
@@ -162,7 +166,7 @@ def _run_pi(tmp_path, receipt, *, env_extra=None, mutate=None):
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
+    server = uvicorn.Server(uvicorn.Config(create_app(session, LOCAL_KEY), host="127.0.0.1", port=port, log_level="critical"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.time() + 20

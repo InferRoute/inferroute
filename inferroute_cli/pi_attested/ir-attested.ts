@@ -19,6 +19,8 @@ import { join } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
 const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
+// The sealed endpoint belongs to one session and checks a credential; this is that session's key.
+const ENDPOINT_KEY = process.env.IR_ATTESTED_KEY ?? "";
 const PROVIDER = process.env.IR_ATTESTED_PROVIDER ?? "inferroute";
 const TOOLS = new Set((process.env.IR_ATTESTED_TOOLS ?? "").split(",").map((t) => t.trim()).filter(Boolean));
 const STATUS_KEY = "ir-model-enclave";
@@ -104,7 +106,10 @@ function verdictOf(r: Receipt): Verdict {
 async function readVerdict(): Promise<Verdict> {
 	if (!ENDPOINT) return unverified("this session was not given a local sealed endpoint");
 	try {
-		const res = await fetch(`${ENDPOINT}/confidential/receipt`, { signal: AbortSignal.timeout(5_000) });
+		const res = await fetch(`${ENDPOINT}/confidential/receipt`, {
+			headers: ENDPOINT_KEY ? { authorization: `Bearer ${ENDPOINT_KEY}` } : {},
+			signal: AbortSignal.timeout(5_000),
+		});
 		if (!res.ok) return unverified(`the local sealed endpoint answered ${res.status}`);
 		return verdictOf((await res.json()) as Receipt);
 	} catch {

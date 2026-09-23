@@ -6,6 +6,7 @@ translate); ``/v1/models`` answers with the pinned model so Claude Code never tr
 """
 from __future__ import annotations
 
+import hmac
 import json
 
 from fastapi import FastAPI, Request
@@ -14,8 +15,30 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .session import ConfidentialSession
 
 
-def create_app(session: ConfidentialSession) -> FastAPI:
+def create_app(session: ConfidentialSession, token: str) -> FastAPI:
+    """`token` is minted per session by the launcher and given only to the agent it starts.
+
+    Until 23 Sep this endpoint checked nothing. An audit put it plainly: any process on the machine that
+    found the port could send prompts through the professional's verified, billed session and read
+    `/confidential/receipt`. The launcher did set `ir-confidential-local` — a constant in public source,
+    so checking it would have proved nothing. The credential has to be a secret AND be checked.
+    """
     app = FastAPI(title="inferroute-confidential")
+
+    @app.middleware("http")
+    async def _require_token(request: Request, call_next):
+        # Claude Code sends ANTHROPIC_AUTH_TOKEN as `Authorization: Bearer`; the OpenAI-dialect agents
+        # (pi, opencode, goose) send the api_key the same way; the Anthropic dialect also allows
+        # `x-api-key`. Accept either header, compare in constant time, and say nothing about which.
+        auth = request.headers.get("authorization", "")
+        offered = auth[7:] if auth[:7].lower() == "bearer " else request.headers.get("x-api-key", "")
+        if not hmac.compare_digest(offered, token):
+            return JSONResponse(status_code=401,
+                                content={"type": "error",
+                                         "error": {"type": "authentication_error",
+                                                   "message": "this endpoint belongs to one confidential "
+                                                              "session on this machine"}})
+        return await call_next(request)
 
     @app.post("/v1/messages")
     async def messages(request: Request):

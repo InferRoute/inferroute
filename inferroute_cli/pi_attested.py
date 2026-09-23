@@ -251,6 +251,9 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     env["PI_SKIP_VERSION_CHECK"] = "1"
     env["PI_TELEMETRY"] = "0"
     env["IR_ATTESTED_ENDPOINT"] = base_url.rstrip("/")
+    # The endpoint checks a credential since 23 Sep, and the extension reads /confidential/receipt from
+    # it, so it needs the same per-session key the agent got.
+    env["IR_ATTESTED_KEY"] = api_key
     env["IR_ATTESTED_PROVIDER"] = PROVIDER
     env["IR_ATTESTED_TOOLS"] = ",".join(tools)
     if search_endpoint:

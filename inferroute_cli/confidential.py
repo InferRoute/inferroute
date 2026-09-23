@@ -271,7 +271,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 await _pause("Enter to start the assistant (or wait 20 s)" if probant is not None
                              else f"Enter to open {agent} · `ir confidential show` re-prints this proof any time")
             port = _free_port()
-            server = uvicorn.Server(uvicorn.Config(create_app(session), host="127.0.0.1", port=port, log_level="critical"))
+            # Minted here, handed only to the agent this launch starts. The old constant was in the
+            # published source, so it was a label rather than a credential.
+            import secrets as _secrets
+            local_key = "ir-" + _secrets.token_urlsafe(32)
+            server = uvicorn.Server(uvicorn.Config(create_app(session, local_key), host="127.0.0.1",
+                                                   port=port, log_level="critical"))
             server_task = asyncio.create_task(server.serve())
             while not server.started:
                 if server_task.done():
@@ -286,7 +291,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             session.shown_model = shown_model if agent == "claude" else alias.short
             if agent == "claude":
                 env["ANTHROPIC_BASE_URL"] = local
-                env["ANTHROPIC_AUTH_TOKEN"] = "ir-confidential-local"
+                env["ANTHROPIC_AUTH_TOKEN"] = local_key
                 env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = shown_model
                 env["ANTHROPIC_SMALL_FAST_MODEL"] = shown_model
                 env["ANTHROPIC_CUSTOM_HEADERS"] = "\n".join(
@@ -304,15 +309,15 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
                 from . import pi_attested
-                argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
+                argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
                                             alias=alias, upstream_name=f"{alias.model_id} [confidential]",
                                             search_endpoint=search_endpoint)
                 pi_confine_ports = [port] + ([int(search_endpoint.rsplit(":", 1)[1])] if search_endpoint else [])
             elif agent == "opencode":
-                argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local",
+                argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
                                                     alias=alias, upstream_name=f"{alias.model_id} [confidential]")
             elif agent == "goose":
-                argv = agents_mod.goose_env_argv(binary, env, passthrough, base_url=local, api_key="ir-confidential-local", alias=alias)
+                argv = agents_mod.goose_env_argv(binary, env, passthrough, base_url=local, api_key=local_key, alias=alias)
             else:
                 console.print(f"[red]unknown agent {agent}[/]")
                 return 2

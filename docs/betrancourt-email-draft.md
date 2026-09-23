@@ -154,9 +154,18 @@ Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans 
 ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
 vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
 
-Il me faut pour cela votre **carte publique** : deux commandes, je vous envoie les instructions exactes dès
-que la version est prête. Elle ne contient que des clés publiques et ne permet rien d'autre que de vous
-adresser l'envoi ; nous vérifierons l'empreinte de vive voix avant que quoi que ce soit ne parte.
+Il me faut pour cela votre **clé publique**. Le client est en pièce jointe ; trois commandes, et la
+dernière l'affiche :
+
+```
+python3 -m venv ~/probant
+~/probant/bin/pip install "inferroute-0.9.3-py3-none-any.whl[confidential]"
+~/probant/bin/ir probant identity
+```
+
+Vous me renvoyez ce qu'elle affiche. Cette clé ne contient que des clés publiques : elle ne permet rien
+d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
+ne parte. (Sous Windows les chemins diffèrent — dites-le-moi et je vous envoie l'équivalent.)
 
 Le même client vous servira pour l'essai, que je vous proposerai quand la prochaine version du moteur sera
 déployée — avec un chiffre à jour et une date.
@@ -267,7 +276,7 @@ InferRoute SASU
 - **"nos dépôts", not "vos"** (Henry, 23 Sep — the filings are his, Bétrancourt is counsel on them).
   Checked every second-person form in the body rather than only that one: 24 others, all correct — "votre
   diligence", "votre lecture", "au sens où vous les instruiriez", "votre poste", "vos propres dossiers"
-  (the matters he opens), "votre carte publique", "votre propre IA". Only the one was misattributed, and it
+  (the matters he opens), "votre clé publique", "votre propre IA". Only the one was misattributed, and it
   was in the sentence explaining why the delivery is sealed — the place where getting whose material it is
   wrong would read worst.
 - **No "si vous préférez me croire ou vérifier"** (Henry, 23 Sep). The opener presumed a doubt he has not

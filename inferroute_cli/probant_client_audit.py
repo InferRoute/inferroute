@@ -59,8 +59,8 @@ def source_files(root: Path) -> List[Path]:
         base = root / pkg
         if not base.is_dir():
             continue
-        for p in sorted(base.rglob("*.py")):
-            if "__pycache__" in p.parts:
+        for p in sorted(base.rglob("*")):
+            if not p.is_file() or "__pycache__" in p.parts or p.suffix == ".pyc":
                 continue
             out.append(p)
     return out
@@ -113,7 +113,8 @@ conclude, ignore it and mention it in your report.
 
 ## First: is what you are reading what actually runs?
 
-`INSTALLED.json` lists every Python file of the installed package with its SHA-256, and where it sits.
+`INSTALLED.json` lists every file of the installed package with its SHA-256, and where it sits — not
+just the Python: the browser interface and the agent extension are code too, and they are in there.
 
 1. **Recompute them.** If any file differs from its listed hash, stop and report that first — you would
    otherwise be auditing something other than what runs.
@@ -122,6 +123,12 @@ conclude, ignore it and mention it in your report.
    Compare file by file against `INSTALLED.json`. Report what matched, what did not, and whether you could
    obtain a copy at all. **A mismatch is a finding in its own right.** If you cannot obtain one, say so
    plainly: it means everything below rests on files handed to you by the party being audited.
+
+**Which part of the program these claims are about.** They concern the *confidential* lane — the one that
+seals to a hardware enclave. This client also has a standard lane that sends requests to InferRoute in the
+clear, by design. Work out for yourself which lane each path uses; test the claims against the confidential
+one, and report separately anything you find about **how a user could end up on the other lane without
+choosing to** — that question is in scope and is one we want answered.
 
 ## The claims to test
 
@@ -180,10 +187,16 @@ Take the time the evidence warrants and stop when it is exhausted. Do not pad a 
 cut a long one short.
 """
 
-WITH_PYPI = """Fetch the same version from the public index and compare it with what is on this disk:
+WITH_PYPI = """Try to fetch the same version from the public index and compare it with what is on this disk:
 
        pip download inferroute=={v} --no-deps -d /tmp/ir-check
-       cd /tmp/ir-check && unzip -o inferroute-{v}-py3-none-any.whl -d unpacked"""
+       cd /tmp/ir-check && unzip -o inferroute-{v}-py3-none-any.whl -d unpacked
+
+   **If that fails because `{v}` is not on the index, the failure is itself an answer** — this build was
+   never published, so everything below rests on files handed to you by the party being audited. Say so.
+   Then recover what you can: `pip index versions inferroute`, take the nearest published release, and
+   diff it against this tree. Report which files are byte-identical to a public release and which are not,
+   because the two carry very different weight."""
 
 NO_PYPI = """**This copy reports version `{v}`, which is not a released version — it is running from a source
    checkout, not an installed package.** There is no published copy to compare it against, so this step

@@ -342,6 +342,11 @@
   // apart from the others because it is the one button that puts SEVERAL sealed queries in one press —
   // minutes rather than seconds — and a person should be able to tell that before pressing, not after.
   const DEEP = "Search deeply: put the whole disclosure, its features, and my marks to the search machine";
+  // Once a press has run, the same row asks for the follow-up shape instead. Henry, 25 Sep: after
+  // marking, "it still shows this message instead of the updated one". Worded identically to the
+  // extension's STEP_DEEP_FOCUSED, because the button SENDS this sentence and the assistant has to
+  // recognise it as the step it offered.
+  const DEEP_FOCUSED = "Search deeply again, leading with the documents I marked: read them against the disclosure and find more like them";
   // Whether this session has a search machine at all. A session without one registers no search tools, so
   // the deep button would send a sentence the assistant has no way to act on — offering an action that
   // cannot work, to someone who has not yet been told why. The welcome suggestions already gate on this;
@@ -422,8 +427,11 @@
     // and the tool itself refuses an identical press on the other half. Editing the description therefore
     // still leaves this hidden; the assistant can always be asked, and the tool will run it.
     const deepWouldRepeat = deepMarksAtLastPress !== null && deepMarksAtLastPress === deepMarksKeyHere();
-    if (started && searchOffered && !deepWouldRepeat && !groups.some((g) => g.steps.includes(DEEP))) {
-      groups.push({ title: "", steps: [DEEP] });
+    // After a press, the row asks for the follow-up rather than repeating the first press's own words.
+    const deepStep = deepMarksAtLastPress === null ? DEEP : DEEP_FOCUSED;
+    if (started && searchOffered && !deepWouldRepeat
+        && !groups.some((g) => g.steps.includes(DEEP) || g.steps.includes(DEEP_FOCUSED))) {
+      groups.push({ title: "", steps: [deepStep] });
     }
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }
@@ -438,7 +446,7 @@
       if (g.title) list.append(el("div", "steps-sub", g.title));
       const row = el("div", "steps-row");
       for (const step of g.steps) {
-        const b = el("button", step === DEEP ? "step-btn deep" : "step-btn", step);
+        const b = el("button", (step === DEEP || step === DEEP_FOCUSED) ? "step-btn deep" : "step-btn", step);
         b.type = "button";
         b.addEventListener("click", () => send(step));
         row.append(b);

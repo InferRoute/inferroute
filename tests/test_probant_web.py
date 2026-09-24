@@ -218,22 +218,27 @@ def test_the_deep_row_stops_offering_a_press_that_would_repeat(tmp_path):
     assert r.returncode == 0, r.stderr[-800:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
 
-    assert out["beforeAnyPress"] is True, "a session that has never pressed must be offered it"
-    assert out["afterPress"] is False, "the row still offers a press that would put the same queries"
-    assert out["afterMarkingRelevant"] is True, "marking changes what the press would put; it must return"
-    assert out["afterSecondPress"] is False
+    # The sim reports WHICH sentence the row offers, or None when it offers nothing.
+    assert out["beforeAnyPress"] == "deep", "a session that has never pressed must be offered the first press"
+    assert out["afterPress"] is None, "the row still offers a press that would put the same queries"
+    # Marking changes what the press would put, so the row returns — and it returns asking for the
+    # FOLLOW-UP, not repeating the first press's own words. Henry, 25 Sep: after marking, "it still shows
+    # this message instead of the updated one".
+    assert out["afterMarkingRelevant"] == "focused"
+    assert out["afterSecondPress"] is None
     # A mark that is not a relevance mark does not change the queries, so it must not bring the row back.
-    assert out["afterMarkingKnown"] is False
+    assert out["afterMarkingKnown"] is None
     # Taking a relevance mark off IS a change — the press would walk outward from one document fewer.
-    assert out["afterClearingTheRelevantMark"] is True
-    # Neither a refusal nor a failure covered these marks, so neither may arm the suppression.
-    assert out["afterRefusedRepeat"] is True
-    assert out["afterFailedPress"] is True
+    assert out["afterClearingTheRelevantMark"] == "focused"
+    # Neither a refusal nor a failure covered these marks, so neither may arm the suppression — and with no
+    # press behind it, the row asks for a first press rather than a follow-up to one that never ran.
+    assert out["afterRefusedRepeat"] == "deep"
+    assert out["afterFailedPress"] == "deep"
     # Order is not a change: the planner walks outward from a SET, so the same two marks in either order
     # describe the same press. Without this the row returns for a press that puts identical queries.
-    assert out["afterTwoRelevant"] is False
-    assert out["sameTwoMarkedInTheOtherOrder"] is False
-    assert out["afterAThirdRelevant"] is True
+    assert out["afterTwoRelevant"] is None
+    assert out["sameTwoMarkedInTheOtherOrder"] is None
+    assert out["afterAThirdRelevant"] == "focused"
 
 
 def test_the_session_view_carries_no_disclosure_text(client):

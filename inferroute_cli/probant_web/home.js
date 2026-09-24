@@ -197,6 +197,79 @@
   const page = () => $("page");
   function stopWatching() { for (const t of watching.values()) clearInterval(t); watching.clear(); }
 
+  // ── is the search machine up, and when is it meant to be ──
+  //
+  // The sealed search machine is scheduled, not permanent, so "not answering" is usually the timetable
+  // rather than a fault — and saying "unavailable" flatly would read as breakage twenty-two hours a day.
+  // The window comes from the server as instants: the hours are named in Paris time, and anyone reading
+  // this from another timezone is told what that is where they are, because "13:00 Paris" is the kind of
+  // detail a person gets wrong once and then misses the window.
+  const hourAt = (iso, tz) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString([], tz ? { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz }
+                                       : { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+  function untilText(iso) {
+    const mins = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+    if (!Number.isFinite(mins) || mins <= 0) return "";
+    if (mins < 60) return `in ${mins} min`;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return m ? `in ${h} h ${m} min` : `in ${h} h`;
+  }
+  function searchStatusBar(d) {
+    // The window in Paris, and the same instant where the reader is — shown only when they differ.
+    const parisOpen = hourAt(d.opens_at, d.tz), parisClose = hourAt(d.closes_at, d.tz);
+    const hereOpen = hourAt(d.opens_at), hereClose = hourAt(d.closes_at);
+    const elsewhere = hereOpen !== parisOpen;
+    const timetable = `every day ${String(d.from_hour).padStart(2, "0")}:00–${String(d.to_hour).padStart(2, "0")}:00 Paris time`;
+    let dot = "closed", head = "", sub = "";
+    if (!d.configured) {
+      head = "Patent search is not set up on this computer";
+      sub = "Nothing can leave this computer until it is. You can still work on a disclosure.";
+    } else if (d.open_now && d.reachable) {
+      dot = "open";
+      head = `Search is open until ${parisClose} Paris time`;
+      sub = (elsewhere ? `That is ${hereClose} where you are. ` : "") + `Open ${timetable}.`;
+    } else if (d.found === false) {
+      // Not "closed until 13:00": this machine's address cannot be found at all, so an opening time would
+      // be an invention. A person told a comforting timetable waits; a person told this asks.
+      dot = "trouble";
+      head = "Search is not available from this computer";
+      sub = "The search machine cannot be found at the address this computer is set up to use. This is not "
+        + "the timetable — it needs looking at. Everything else on this page works as usual.";
+    } else if (d.open_now && !d.reachable) {
+      dot = "trouble";
+      head = "Search should be open now, but it is not answering";
+      sub = `It is scheduled ${timetable}. Try again in a few minutes; nothing is lost if a search cannot start.`;
+    } else if (d.reachable) {
+      dot = "open";
+      head = "Search is answering, outside its usual hours";
+      sub = `It normally runs ${timetable}.`;
+    } else {
+      head = `Search is closed — opens ${untilText(d.opens_at) || "shortly"}`;
+      sub = `Next at ${parisOpen} Paris time${elsewhere ? ` (${hereOpen} where you are)` : ""}, ${timetable}.`;
+    }
+    const bar = el("div", `search-status ${dot}`, el("span", "status-dot"),
+      el("div", "", el("div", "status-head", head), el("div", "sub", sub)));
+    // Availability is not verification, and a green line could be read as "checked and safe". The machine
+    // is verified against the signed reference when a search actually runs, not by this page.
+    if (d.reachable) bar.append(el("span", "sub status-aside", "Availability only — the machine is checked when a search runs."));
+    return bar;
+  }
+  async function mountSearchStatus(host) {
+    const slot = el("div", "");
+    host.append(slot);
+    const paint = async () => {
+      let d;
+      try { d = await api("/api/search-status"); } catch (_) { return; }
+      clear(slot);
+      slot.append(searchStatusBar(d));
+    };
+    await paint();
+    if (!watching.has("search-status")) watching.set("search-status", setInterval(paint, 60000));
+  }
+
   async function renderMatters() {
     const p = page();
     let data;
@@ -204,6 +277,7 @@
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Matters"),
       el("p", "sub", "Each matter is one invention: its disclosure, its sessions with the assistant, and the records you keep.")));
+    mountSearchStatus(p);
     // This page is the version the server started with. When a newer one is installed, say so rather than let
     // the difference show up as a button that fails.
     if (data.update_waiting) {
@@ -646,15 +720,27 @@
       el("p", "sub", "Send a corpus of matters to another Probant user — your lawyer, your co-counsel. "
         + "They open it as matters of their own and run their own searches, on their own account.")));
 
-    p.append(el("h2", "section", "You"));
+    // The public key used to be a wall of JSON sitting open on the page, with the button that actually does
+    // the job small and underneath it. That reads as something you are supposed to understand before you
+    // dare touch it. The order is inverted here: one obvious action, the reassurance beside it, and the raw
+    // text folded away for whoever wants to look. Nothing about what is sent changed.
+    p.append(el("h2", "section", "Your public key"));
+    const cardText = JSON.stringify(d.card, null, 1);
+    const raw = el("textarea", "card-box", cardText);
+    raw.readOnly = true;              // there is nothing here to edit, and an edit could only break it
+    raw.spellcheck = false;
     p.append(el("div", "fingerprint-card",
-      el("div", "sub", "Your fingerprint — read it to them, and check theirs the same way."),
+      el("div", "sub", "Your fingerprint — read these four groups aloud to them, and check theirs the same way."),
       el("div", "fingerprint", d.fingerprint),
-      el("p", "sub", "Send them your card below. It holds public keys only: anyone who reads it learns "
-        + "nothing and can decrypt nothing."),
-      el("textarea", "card-box", JSON.stringify(d.card, null, 1)),
-      button("Copy your card", "ghost small", () => navigator.clipboard
-        .writeText(JSON.stringify(d.card, null, 1)).then(() => toast("Copied.", "info")).catch(() => {}))));
+      el("div", "row",
+        button("Copy my public key", "primary", () => navigator.clipboard.writeText(cardText)
+          .then(() => toast("Copied — paste it into an email to them.", "info"))
+          // A copy that quietly fails is worse than one that refuses: the person emails nothing and does
+          // not find out until the other side says the key never arrived.
+          .catch(() => toast("Could not reach the clipboard. Open \u201cShow the raw text\u201d below and copy it by hand.", "error")))),
+      el("p", "sub", "Send it to them however you like — email is fine. It holds public keys only: anyone "
+        + "who reads it learns nothing and can decrypt nothing, and your private keys never leave this computer."),
+      el("details", "card-reveal", el("summary", "", "Show the raw text"), raw)));
 
     // Deliveries — what has actually gone out and come in. Without this the page can seal a corpus and
     // open one while showing no sign that either happened.
@@ -666,14 +752,20 @@
     for (const c of d.corpora || []) {
       const sent = c.direction === "sent";
       const who = sent ? `to ${c.to || "?"}` : `from ${c.from_name || c.from || "unknown sender"}`;
-      const warn = (!sent && !c.known_contact)
-        ? el("span", "warn", "sender not a known contact") : el("span", "");
+      // A delivery signed by a key that is not one of your contacts. That IS worth flagging — but the
+      // first delivery anyone receives is necessarily from someone they have not added yet, so phrasing it
+      // as an alarm makes the expected case look like an attack. It is stated calmly, with the thing to do.
+      const unknown = !sent && !c.known_contact;
+      const warn = unknown ? el("span", "sub soft-warn", "sender not saved yet") : el("span", "");
       // The detail lines go INSIDE the row: appended to the page they floated under the card, and with
       // two deliveries listed there would be no way to tell which one they described.
       const detail = el("div", "");
       detail.append(el("div", "mono sub", c.id));
       if ((c.files || []).length) detail.append(el("div", "sub", `documents: ${c.files.join(", ")}`));
       if ((c.matters || []).length) detail.append(el("div", "sub", `matters: ${c.matters.join(", ")}`));
+      if (unknown) detail.append(el("div", "sub", "The fingerprint beside this is the key that signed it. "
+        + "Check it with them by voice, then add them under \u201cPeople you can share with\u201d — you need "
+        + "their public key to send anything back."));
       p.append(el("div", "record-row",
         el("span", "", c.name || "(unnamed)"),
         detail,
@@ -682,17 +774,17 @@
     }
 
     p.append(el("h2", "section", "People you can share with"));
-    if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone with the card they sent you."));
+    if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone using the public key they sent you."));
     for (const c of d.contacts) {
       p.append(el("div", "record-row", el("span", "", c.name), el("span", "mono sub", c.fingerprint),
         el("span", "sub", `added ${localTime(c.added_at)}`), el("span", "")));
     }
     p.append(el("div", "row", button("Add someone", "ghost", () => addContactDialog(() => renderSharing())),
-      button("Open a share sent to you", "ghost", () => openShareDialog())));
+      button("Open a delivery sent to you", "ghost", () => openShareDialog())));
 
     p.append(el("h2", "section", "Send matters"));
     if (!d.contacts.length) {
-      p.append(el("p", "sub", "Add someone first: you seal a corpus to their key, so you need their card."));
+      p.append(el("p", "sub", "Add someone first: a corpus is sealed to their key, so you need their public key."));
       return;
     }
     let matters = [];
@@ -759,10 +851,18 @@
              el("div", "row", go), result);
   }
 
+  // Adding someone was an empty textarea under a paragraph warning about impostors: the one step in this
+  // product where a person is asked to handle a key by hand, presented at its least approachable. The box
+  // now takes a file or the clipboard as readily as a paste, and answers as soon as it has something — the
+  // fingerprint comes back from the server, derived by the same code that will record it, so the number
+  // read aloud here is the number stored. The warning has not gone; it moved to the moment it applies,
+  // beside a fingerprint the person can actually read out, instead of guarding an empty box.
   function addContactDialog(onAdded) {
     const name = input("text", "e.g. betrancourt");
-    const card = input("textarea", "Paste the card they sent you.");
-    card.rows = 6;
+    const card = input("textarea", "Paste their key here, or drop the file they sent you.");
+    card.rows = 5;
+    card.spellcheck = false;
+    const verdict = el("p", "card-verdict");
     const err = el("p", "form-error");
     const go = button("Add", "primary", async () => {
       err.textContent = "";
@@ -773,12 +873,63 @@
         onAdded();
       } catch (e) { err.textContent = e.message; }
     });
+    go.disabled = true;               // nothing to add until the box actually holds a key
+
+    // Each check is tagged, because a slow answer about earlier text must not overwrite a newer verdict.
+    let token = 0;
+    async function check() {
+      const mine = ++token;
+      const text = card.value.trim();
+      clear(verdict);
+      verdict.className = "card-verdict";
+      go.disabled = true;
+      if (!text) return;
+      let r;
+      try { r = await api("/api/sharing/contact/preview", { card: text }); } catch (_) { return; }
+      if (mine !== token) return;
+      if (r.ok) {
+        verdict.className = "card-verdict good";
+        verdict.append(el("b", "", `Fingerprint ${r.fingerprint}`),
+          " — confirm those four groups with them by voice before you send anything. A key that reached "
+          + "you the way an impostor's would is worth what that channel is worth.");
+        go.disabled = false;
+      } else if (r.reason) {
+        verdict.className = "card-verdict hint";
+        verdict.textContent = r.reason;
+      }
+    }
+    card.addEventListener("input", check);
+
+    function loadFile(f) {
+      if (!f) return;
+      const rd = new FileReader();
+      rd.addEventListener("load", () => { card.value = String(rd.result || ""); check(); });
+      rd.readAsText(f);
+    }
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = ".json,.txt,application/json,text/plain";
+    picker.addEventListener("change", () => loadFile(picker.files && picker.files[0]));
+    card.addEventListener("dragover", (e) => { e.preventDefault(); card.classList.add("dropping"); });
+    card.addEventListener("dragleave", () => card.classList.remove("dropping"));
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.classList.remove("dropping");
+      loadFile(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+
     dialog("Add someone to share with", [
-      el("p", "", "Paste the card they sent you. Probant works out the fingerprint from the keys in it — "
-        + "then CONFIRM that fingerprint with them by voice before you send anything. A card that reached "
-        + "you the same way an impostor's would is worth what that channel is worth."),
+      el("p", "", "They sent you a public key — a block of text, or a small file. Put it here and Probant "
+        + "will tell you whose it is."),
+      el("div", "row",
+        button("Paste from clipboard", "ghost small", async () => {
+          try { card.value = await navigator.clipboard.readText(); check(); }
+          catch (_) { toast("Could not read the clipboard — paste into the box with Ctrl+V.", "error"); card.focus(); }
+        }),
+        button("Choose a file\u2026", "ghost small", () => picker.click())),
+      field("Their key", card),
+      verdict,
       field("Name", name, "What you will call them here."),
-      field("Their card", card),
       err,
     ], [button("Cancel", "ghost", closeDialog), go]);
   }

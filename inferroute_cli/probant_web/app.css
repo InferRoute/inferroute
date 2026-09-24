@@ -471,3 +471,40 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .record-row.pick { grid-template-columns: 24px minmax(0, 1fr) 160px 110px; cursor: pointer; }
 .share-result { margin-top: 14px; padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--line); }
 .share-result .mono { display: block; word-break: break-all; margin: 6px 0; }
+
+/* ── search availability, at the top of the home page ──
+   The sealed search machine is scheduled rather than permanent, so a closed machine is the timetable and
+   not a fault: "closed" is drawn calm and grey, and only an hour when it SHOULD be up and is not gets the
+   warning colour. */
+.search-status { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.search-status .status-head { font-weight: 600; font-size: 14px; }
+.search-status .status-dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex: 0 0 auto;
+  background: var(--faint); }
+.search-status.open { border-color: var(--accent-soft); background: var(--accent-soft); }
+.search-status.open .status-dot { background: var(--accent); }
+.search-status.trouble { border-color: var(--warn-soft); background: var(--warn-soft); }
+.search-status.trouble .status-dot { background: var(--warn); }
+.search-status .status-aside { margin-left: auto; padding-left: 14px; text-align: right; align-self: center;
+  max-width: 230px; }
+@media (max-width: 620px) {
+  .search-status { flex-wrap: wrap; }
+  .search-status .status-aside { margin-left: 19px; padding-left: 0; text-align: left; max-width: none; }
+}
+
+/* ── sharing: the public key, and the box you put someone else's into ── */
+.card-reveal { margin-top: 10px; }
+.card-reveal > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style-position: outside; }
+.card-reveal > summary:hover { color: var(--ink); }
+.card-reveal .card-box { margin-top: 8px; }
+.fingerprint-card .row { margin: 4px 0 10px; }
+textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
+/* What the pasted key turned out to be. Silent until there is something to say. */
+.card-verdict { margin: 6px 0 2px; font-size: 13px; color: var(--muted); }
+.card-verdict:empty { display: none; }
+.card-verdict.good { color: var(--ink); background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; }
+.card-verdict.good b { font-family: var(--mono); }
+.card-verdict.hint { color: var(--muted); }
+/* A delivery from someone not yet in your contacts: a real thing to check, not an alarm. The first
+   delivery anyone receives is necessarily from an unsaved sender. */
+.soft-warn { color: var(--warn); }

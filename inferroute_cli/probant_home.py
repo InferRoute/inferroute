@@ -34,6 +34,69 @@ from fastapi import Request
 from . import probant as S
 from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
+# ── when the search machine is meant to be up ──────────────────────────────────────────────────────────
+# The search enclave is a sealed machine that costs money to keep running, so it is scheduled rather than
+# permanent: 13:00-15:00 Europe/Paris, every day. That is the ONE place the window is written; the page is
+# told the opening and closing instants and never re-derives them, so a page and a server cannot come to
+# different views of when search is open (and the page never has to get Paris's daylight saving right).
+SEARCH_WINDOW_TZ = "Europe/Paris"
+SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily
+SEARCH_PROBE_TIMEOUT = 2.5        # a page must not hang on a machine that is deliberately switched off
+SEARCH_PROBE_TTL = 30.0           # seconds a probe result stands for, so refreshing does not hammer it
+_search_probe: Dict[str, Any] = {"at": 0.0, "state": "unreachable"}
+_search_probe_lock = threading.Lock()
+
+
+def _search_window(now: Optional[dt.datetime] = None) -> Dict[str, Any]:
+    """The current or next opening, as instants. Returns UTC ISO stamps: the page formats them in whatever
+    timezone the reader is actually in, which is the only way a window named in Paris time is safe to show
+    to someone who is not in Paris."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(SEARCH_WINDOW_TZ)
+    now = (now or dt.datetime.now(dt.timezone.utc)).astimezone(tz)
+    opens = now.replace(hour=SEARCH_WINDOW[0], minute=0, second=0, microsecond=0)
+    closes = now.replace(hour=SEARCH_WINDOW[1], minute=0, second=0, microsecond=0)
+    if now >= closes:                                   # today's window is over; the next one is tomorrow
+        opens, closes = opens + dt.timedelta(days=1), closes + dt.timedelta(days=1)
+    open_now = opens <= now < closes
+    iso = lambda d: d.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"open_now": open_now, "opens_at": iso(opens), "closes_at": iso(closes),
+            "tz": SEARCH_WINDOW_TZ, "from_hour": SEARCH_WINDOW[0], "to_hour": SEARCH_WINDOW[1]}
+
+
+def _search_probe_state(enclave: str) -> str:
+    """"up", "unreachable", or "unknown-host".
+
+    This is LIVENESS ONLY and deliberately not a verification: /offer is the first step of the attested
+    handshake, and an answer to it says a server is listening, not that it is the sealed machine running
+    the software we expect. That verdict is reached per session, against the signed reference, before any
+    text is sent. The page must not blur the two.
+
+    The third state is the one that matters. A scheduled machine that is switched off REFUSES the
+    connection: its name still resolves, and "closed until 13:00" is then a true account of it. A machine
+    that has been taken away does not resolve at all — and on 24 Sep that is exactly what the configured
+    address did, the container having been deleted rather than stopped. Collapsing the two would have the
+    page promise an opening time for a machine that is not coming back, which is the failure where a
+    reassuring answer is worse than none: nobody investigates a timetable."""
+    import socket
+    import urllib.error
+    import urllib.request
+    with _search_probe_lock:
+        if (time.monotonic() - _search_probe["at"]) < SEARCH_PROBE_TTL:
+            return str(_search_probe["state"])
+    try:
+        with urllib.request.urlopen(enclave.rstrip("/") + "/offer", timeout=SEARCH_PROBE_TIMEOUT) as fh:
+            state = "up" if fh.status == 200 else "unreachable"
+    except urllib.error.HTTPError:
+        state = "unreachable"          # it answered, just not with an offer: something IS listening
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        cause = getattr(e, "reason", e)
+        state = "unknown-host" if isinstance(cause, socket.gaierror) else "unreachable"
+    with _search_probe_lock:
+        _search_probe.update({"at": time.monotonic(), "state": state})
+    return state
+
+
 SESSION_URL = re.compile(r"(http://127\.0\.0\.1:\d+/#k=[A-Za-z0-9_-]+)")
 SESSION_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -616,12 +679,52 @@ class Home:
                 try:
                     card = json.loads(card)
                 except ValueError:
-                    return problem("that is not a contact card: paste the JSON they sent you", 400)
+                    return problem("that is not a public key: paste the whole block they sent you", 400)
             try:
                 got = SH.add_contact(str(d.get("name") or ""), card or {})
             except S.ProbantError as e:
                 return problem(str(e), 400)
             return {"ok": True, "name": d.get("name"), "fingerprint": got["fingerprint"]}
+
+        @app.post("/api/sharing/contact/preview")
+        async def preview_contact(request: Request):
+            """The fingerprint a pasted card gives, without recording anything. This exists so the box a
+            person pastes into answers them — a blank textarea that stays blank is the part of this page
+            people do not finish. It adds no contact and writes no file."""
+            from . import probant_share as SH
+            d = await body(request)
+            card = d.get("card")
+            if isinstance(card, str):
+                if not card.strip():
+                    return {"ok": False, "reason": ""}
+                try:
+                    card = json.loads(card)
+                except ValueError:
+                    return {"ok": False, "reason": "that is not the whole key yet — paste the whole block, "
+                                                   "from the first { to the last }"}
+            try:
+                return {"ok": True, "fingerprint": SH.read_card(card or {})}
+            except S.ProbantError as e:
+                return {"ok": False, "reason": str(e)}
+
+        @app.get("/api/search-status")
+        async def search_status():
+            """Whether the search machine is up, and when it is meant to be. Never names the machine."""
+            import asyncio
+            from . import pi_attested
+            out: Dict[str, Any] = {"configured": False, **_search_window()}
+            try:
+                cfg = json.loads(pi_attested.search_config_path().read_text())
+            except (OSError, ValueError):
+                return out
+            enclave = str(cfg.get("enclave") or "")
+            if not enclave:
+                return out
+            out["configured"] = True
+            state = await asyncio.to_thread(_search_probe_state, enclave)
+            out["reachable"] = state == "up"
+            out["found"] = state != "unknown-host"
+            return out
 
         @app.post("/api/sharing/share")
         async def share(request: Request):

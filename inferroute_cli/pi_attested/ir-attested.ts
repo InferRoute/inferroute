@@ -1338,7 +1338,11 @@ export default function (pi: ExtensionAPI) {
 			const plan = deepPlan(text, relevant);
 			const legs = plan.legs;
 			const started = new Date().toISOString();
-			const results: { feature: string; about: string; status: string; hits: number; searchNo?: number; why?: string }[] = [];
+			// `docs` travels too: a leg is an ordinary sealed search and the professional is entitled to its
+			// results and its marking controls, not a count. Without them the outline entry for a leg had
+			// nowhere to arrive and nothing to mark.
+			const results: { feature: string; about: string; status: string; hits: number; searchNo?: number;
+			                 why?: string; docs?: unknown[] }[] = [];
 			const blocks: string[] = [];
 			const union = new Map<string, { title: string; first: number }>();
 			let sent = 0;
@@ -1365,7 +1369,7 @@ export default function (pi: ExtensionAPI) {
 				corpusId = corpusId || String(r.sp.index ?? "");
 				const n = r.sp.searchNo ?? 0;
 				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : "empty",
-				               hits: r.sp.docs.length, searchNo: n });
+				               hits: r.sp.docs.length, searchNo: n, docs: r.sp.docs });
 				for (const d of r.sp.docs) {
 					if (!union.has(d.key)) union.set(d.key, { title: d.title ?? "", first: n });
 				}

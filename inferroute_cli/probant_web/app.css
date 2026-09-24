@@ -516,10 +516,11 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 
 /* A deep survey's legs: what the press actually put, in the order it put them. Shown because being told
    only a count reads as the search having given up. */
-.deep-legs { margin: 8px 0 4px; }
-.deep-leg { font-size: 13px; color: var(--muted); padding: 1px 0; }
-.deep-leg.ok { color: var(--ink); }
-.deep-leg.failed { color: var(--bad); }
-.deep-leg { padding: 3px 0; }
-.deep-leg-head { font-size: 13px; }
-.deep-leg-about { font-size: 12px; color: var(--faint); margin-left: 14px; font-style: italic; }
+/* `.card-body` has no padding of its own: in a search card each child brings its own. These do too. */
+.deep-summary { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.deep-leg { border-top: 1px solid var(--line); }
+.deep-leg:first-of-type { border-top: 0; }
+.deep-leg-head { padding: 9px 14px 2px; font-size: 13px; }
+.deep-leg-about { padding: 0 14px 9px; font-size: 12px; color: var(--faint); font-style: italic; }
+.deep-leg.ok .deep-leg-head { color: var(--ink); }
+.deep-leg.failed .deep-leg-head { color: var(--bad); }

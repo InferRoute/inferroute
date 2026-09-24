@@ -860,3 +860,59 @@ def test_a_receipt_that_cannot_be_read_is_counted_as_supporting_nothing(tmp_path
     assert not E._receipt_has(none, "attestation")
     assert not E._receipt_has(broken, "attestation") and not E._receipt_has(broken, "checked_with")
     assert not E._receipt_has(tmp_path / "missing.json", "attestation")
+
+
+def test_the_pack_ships_a_report_skeleton_whose_headings_are_the_brief_s_claims(tmp_path, V, kms, no_anchors):
+    """The brief has asked auditors to quote each claim's title since 24 Sep, in increasingly explicit
+    prose — including a paragraph naming the exact symptom of getting it wrong. It has now failed on three
+    of five auditors, all of whom answered `verify_record.py`'s fifteen check names instead. One said why
+    in its own report: a mechanical requirement that creates no enforcement of its own gets dropped once
+    the work gets interesting.
+
+    An auditor completing a file whose headings are already numbered cannot renumber them. The point of
+    the test is that the headings come OUT of the brief: a second copy would let the brief be edited while
+    the template kept asking for the old claims, which is this same failure one level up."""
+    from inferroute_cli import probant_export as E
+
+    claims = E.audit_claims()
+    assert [n for n, _ in claims] == list(range(1, 9)), claims
+    assert claims[0][1] == "Sealed hardware"
+    assert claims[4][1] == "Nothing removed"
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    tmpl = (pack / "REPORT-TEMPLATE.md").read_text()
+
+    for n, title in claims:
+        assert f"## Claim {n} — {title}" in tmpl, (n, title)
+    # Every claim gets the same three prompts, so "could not reach" is a field rather than an omission.
+    assert tmpl.count("**Verdict:** ") == len(claims)
+    assert tmpl.count("**What I could not reach, and why:** ") == len(claims)
+
+    # The three verdicts, named here because a fourth one gets invented when the allowed set is elsewhere
+    # in a long document ("CONDITIONALLY VERIFIED", 25 Sep).
+    for v in ("**VERIFIED**", "**NOT VERIFIED**", "**COULD NOT CHECK**"):
+        assert v in tmpl, v
+    assert "There is no fourth" in tmpl
+    assert "VERIFIED is wrong while any part of the claim is unchecked" in tmpl
+    assert "give the sample size" in tmpl
+
+    # It is indexed like everything else in the folder.
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert m["files"]["REPORT-TEMPLATE.md"] == E._sha256_hex(tmpl.encode("utf-8"))
+
+    # And the brief sends the auditor to it.
+    assert "REPORT-TEMPLATE.md" in E.AUDIT_MD
+    assert "its headings are already the eight claims" in E.AUDIT_MD
+
+
+def test_the_template_refuses_to_be_built_from_a_brief_whose_claims_do_not_number(monkeypatch):
+    """If the claim list is ever edited into a state this cannot read, the template must fail loudly. A
+    skeleton silently missing claim 6 would be worse than no skeleton: every auditor who completed it
+    would return a report with a hole nobody asked about."""
+    from inferroute_cli import probant_export as E
+
+    broken = E.AUDIT_MD.replace("6. **Filters", "9. **Filters", 1)
+    monkeypatch.setattr(E, "AUDIT_MD", broken)
+    with pytest.raises(ValueError, match="not 1..n"):
+        E.audit_claims()

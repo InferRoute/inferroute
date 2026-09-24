@@ -985,10 +985,19 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    tells you what to expect and the signed statements in `searches.json` are what settle it. If they
    disagree, the statements win and the disagreement is itself a finding.
 
-## Quote each claim before you answer it
+## Write your report by completing `REPORT-TEMPLATE.md`
 
-Begin every verdict with the claim's own **bold title from the list above, copied exactly**, then your
-verdict, then the evidence. Not the name of a check in `verify_record.py`, and not a title of your own.
+**That file is in this folder and its headings are already the eight claims.** Copy it, fill it in, and
+hand that back. Do not compose a report of your own shape around it: the numbering below has been asked
+for in prose since 24 Sep and three of five auditors have still answered `verify_record.py`'s fifteen
+check names instead. One of them explained why in its own report — a mechanical requirement that creates
+no enforcement of its own is the kind of instruction that gets dropped once the work gets interesting. So
+it is a file now rather than a request, and completing it makes the mistake impossible instead of
+forbidden.
+
+If you write your own document anyway, begin every verdict with the claim's own **bold title from the list
+above, copied exactly**, then your verdict, then the evidence. Not the name of a check in
+`verify_record.py`, and not a title of your own.
 
 `verify_record.py`'s check names are NOT these claims, and they are the thing most likely to replace them:
 it prints fifteen of them, they are concrete, and the brief asks you to read the program first. **If your
@@ -1253,6 +1262,70 @@ def _row_kind(row: object) -> str:
     return str(st.get("kind") or "search")
 
 
+def audit_claims() -> "list[tuple[int, str]]":
+    """The eight claims, read OUT OF THE BRIEF rather than written down twice.
+
+    The list an auditor answers and the list they are handed must be the same list. Keeping a second copy
+    here would let the brief be edited and the template keep asking for the old claims, which is the exact
+    failure this template exists to stop, one level up."""
+    import re
+
+    start = AUDIT_MD.index("1. **Sealed hardware.**")
+    end = AUDIT_MD.index("\n## ", start)
+    found = re.findall(r"^(\d)\. \*\*(.+?)\*\*", AUDIT_MD[start:end], re.M)
+    claims = [(int(n), t.rstrip(".")) for n, t in found]
+    if [n for n, _ in claims] != list(range(1, len(claims) + 1)):
+        raise ValueError(f"the brief's claims are not 1..n: {[n for n, _ in claims]}")
+    return claims
+
+
+def report_template() -> str:
+    """A report SKELETON, shipped in the pack, with the eight headings already written.
+
+    The brief has asked auditors to quote each claim's title since 24 Sep, in increasingly explicit prose —
+    including a paragraph naming the exact symptom of getting it wrong. It has now failed on three of five
+    auditors, all of whom answered `verify_record.py`'s fifteen check names instead. One of them said in
+    its own report why: a mechanical requirement that creates no enforcement of its own is the kind of
+    instruction that gets dropped once the work gets interesting.
+
+    So this stops being a request. An auditor completing a file whose headings are already numbered cannot
+    renumber them, and the failure mode needs no discipline to avoid — it needs a different default. The
+    three verdicts are named under each heading for the same reason: a fourth one ("CONDITIONALLY
+    VERIFIED", 25 Sep) is invented when the allowed set is somewhere else in a long document."""
+    claims = audit_claims()
+    out = ["# Audit report — <pack folder name>",
+           "",
+           "Auditor: <who you are> · Date: <date> · Verifier exit code: <code>",
+           "",
+           "Complete this file. The headings are the claims; do not renumber them, retitle them, add one, or",
+           "leave one out. If a claim cannot be reached from this folder, its verdict is COULD NOT CHECK and",
+           "that is a real answer — a blank is not.",
+           "",
+           "Each verdict is one of exactly three words: **VERIFIED**, **NOT VERIFIED**, **COULD NOT CHECK**.",
+           "There is no fourth. VERIFIED is wrong while any part of the claim is unchecked; say what you did",
+           "reach, and name what you did not. If you verified on a sample, give the sample size.",
+           ""]
+    for n, title in claims:
+        out += [f"## Claim {n} — {title}",
+                "",
+                "**Verdict:** ",
+                "",
+                "**What I computed myself:** ",
+                "",
+                "**What I could not reach, and why:** ",
+                ""]
+    out += ["## The verifier, and an independent copy of it",
+            "",
+            "<its exit code; whether you obtained a copy of `verify_record.py` independent of this folder and",
+            "what the comparison showed; anything in the code or the data that looked wrong>",
+            "",
+            "## One plain statement about confidentiality",
+            "",
+            "<two or three plain sentences, written LAST, from the verdicts above and nothing else>",
+            ""]
+    return "\n".join(out)
+
+
 def _receipt_has(path: Path, field: str) -> bool:
     """Whether a receipt supports a given recomputation. An auditor on 24 Sep hand-built a six-row table of
     exactly this before it could score claim 7 at all; the pack knows it and was making them derive it.
@@ -1361,6 +1434,7 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
         "VERIFY.md": (src / "VERIFY.md").read_bytes(),
         "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
+        "REPORT-TEMPLATE.md": report_template().encode("utf-8"),
         "verify_record.py": (src / "verify_record.py").read_bytes(),
     }
     for name in sorted(p.name for p in src.iterdir()):

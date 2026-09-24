@@ -399,3 +399,25 @@ def test_the_brief_names_a_published_reference_without_calling_it_independent():
     # The ranking survives: the engagement letter still comes first, and this is named the weakest form.
     assert v.index("from your engagement letter") < v.index("https://inferroute.ai/reference/current.json")
     assert "the weakest form" in v
+
+
+def test_an_empty_field_is_not_a_passed_test_and_the_claims_must_be_quoted():
+    """Two auditors read the same nine-search pack on 24 Sep and diverged where it mattered most.
+
+    One marked claim 8 VERIFIED because `text_coverage` and `paper_coverage` were null in every search —
+    "the fields exist and are correctly null". Nothing was read, so nothing was checked; that is COULD NOT
+    CHECK. Turning an absence into a verified claim is the single worst outcome this pack can produce,
+    because it reads as "we looked, and it was fine".
+
+    The same report answered a list of its own invention: its "claim 3" was about query text matching a
+    hash, where claim 3 here is whether the software is InferRoute's — the claim the other auditor
+    declined, on grounds that never surfaced in this one. Substituting the verifier's check names for the
+    brief's claims left the hardest question unreached with no sign of the gap, so the brief now requires
+    each claim's own title to be quoted before its verdict."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "does not VERIFY this claim — it leaves it COULD NOT CHECK" in b
+    assert "an empty list is not a passed test" in b
+    assert "bold title from the list above, copied exactly" in b
+    assert "Not the name of a check in `verify_record.py`" in b

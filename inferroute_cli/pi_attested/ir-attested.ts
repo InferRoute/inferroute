@@ -1253,8 +1253,73 @@ export default function (pi: ExtensionAPI) {
 	function deepMarksKey(relevant: string[]): string {
 		return [...relevant].sort().join("\u0000");
 	}
+	function deepTextKey(text: string): string {
+		return text.replace(/\s+/g, " ").trim();
+	}
 	function deepInputsKey(text: string, relevant: string[]): string {
-		return JSON.stringify([text.replace(/\s+/g, " ").trim(), deepMarksKey(relevant)]);
+		return JSON.stringify([deepTextKey(text), deepMarksKey(relevant)]);
+	}
+	// The marks a press was made with, back out of what it recorded. Read through the same function that
+	// wrote it rather than by indexing into a stored structure — a positional read is a second way of
+	// computing the same thing, and it is how the two ends of this stopped agreeing once already.
+	function deepMarksOf(fanout: Record<string, unknown> | undefined): string[] {
+		const k = fanout && typeof fanout.marks_key === "string" ? fanout.marks_key : "";
+		return k ? k.split("\u0000") : [];
+	}
+
+	// A FOLLOW-UP press: one where a press already ran over this same description, and the only thing that
+	// has changed since is which documents the professional marked. Henry, 25 Sep: "lets make it focused on
+	// the relevant matters... the deep search would then reflect on everything looking at the full text and
+	// disclosure again and previous results to derive new smart searches".
+	//
+	// What changes is the WEIGHTING, not the mechanism. The whole disclosure, its windows and its features
+	// were already put by the earlier press — putting them again is the identical-queries case the repeat
+	// guard exists for, and their results are already in this matter's record, so leaving them out loses the
+	// professional nothing. What is NEW is the marks, so the marks lead: each marked document walked
+	// outward, and each one crossed with the disclosure's own subject so the search is "documents like this
+	// one, in my field" rather than "documents like this one" anywhere.
+	//
+	// It stays deterministic and it stays the professional's selection. A press that read the earlier
+	// RESULTS and chose for itself which to follow is a different thing, held behind the IP gate and behind
+	// a bench measurement; this is the human's choice given better queries, which needs neither.
+	function deepPlanFocused(text: string, relevant: string[], fresh: string[]): DeepPlan {
+		const legs: DeepLeg[] = [];
+		const notes: string[] = [];
+		const seen = new Set<string>();
+		const add = (t: string, feature: string, like?: string, about?: string) => {
+			const key = t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+			if (!key || t.trim().length < 20 || seen.has(key) || legs.length >= DEEP_MAX) return false;
+			seen.add(key);
+			legs.push({ text: t.trim(), feature, like, about });
+			return true;
+		};
+		// Newly marked documents first: they are the reason this press is happening at all.
+		const order = [...fresh, ...relevant.filter((k) => !fresh.includes(k))];
+		const anchor = deepAnchor(text);
+		const features = deepElements(text, 2);
+		let walked = 0;
+		let crossed = 0;
+		let unknown = 0;
+		for (const key of order) {
+			const known = docText.get(key) ?? priorDocs.get(key);
+			if (!known) { unknown += 1; continue; }
+			if (add(known, `like ${key}`, key)) walked += 1;
+			// The document read THROUGH the disclosure. Without the subject, "like US-1234567" searches the
+			// whole corpus for that document's own words, which is how a follow-up drifts off the invention.
+			for (const f of features) {
+				if (add(`${anchor ? anchor + " " : ""}${f} ${known}`.trim(), `${key} against one feature`, key, f)) crossed += 1;
+			}
+		}
+		notes.push(walked
+			? `${walked} marked document(s) walked outward from, newest mark first`
+			: "none of the marked documents has text in this matter, so none could be walked outward from");
+		if (crossed) notes.push(`${crossed} of those read against a feature of the disclosure, so the search stays on your subject`);
+		if (unknown) notes.push(`${unknown} marked document(s) have no text in this matter and were skipped`);
+		// SAY WHAT IS NOT BEING PUT, and why it costs nothing. Silence here reads as a smaller search.
+		notes.push("the disclosure as a whole, its parts and its features were put by the earlier press and "
+			+ "are not repeated — those results are already in this matter's record");
+		if (legs.length >= DEEP_MAX) notes.push(`stopped at the limit of ${DEEP_MAX} queries for one press`);
+		return { legs, notes };
 	}
 
 	function deepPlan(text: string, relevant: string[]): DeepPlan {
@@ -1365,7 +1430,8 @@ export default function (pi: ExtensionAPI) {
 			// the SAME documents. Saying so is the honest answer, and it is the only place the disclosure
 			// text is known — the suggestion list, which runs elsewhere, can see the marks but not the text.
 			const inputsKey = deepInputsKey(text, relevant);
-			const last = disclosure.fanouts[disclosure.fanouts.length - 1];
+			const last = disclosure.fanouts[disclosure.fanouts.length - 1] as
+				(Record<string, unknown> & { inputs_key?: string; marks_key?: string; text_key?: string }) | undefined;
 			if (last && last.inputs_key === inputsKey) {
 				return {
 					content: [{ type: "text", text: "Nothing was sent. This press would put exactly the queries the "
@@ -1377,7 +1443,14 @@ export default function (pi: ExtensionAPI) {
 					           cap: DEEP_MAX, documents: 0, legs: [], notes: [] },
 				};
 			}
-			const plan = deepPlan(text, relevant);
+			// A FOLLOW-UP press: same description, different marks. The earlier press already put the
+			// disclosure, its parts and its features, so this one leads with what is new — the marked
+			// documents — and reads them through the disclosure's own subject. Henry, 25 Sep.
+			const followUp = Boolean(last) && last.text_key === deepTextKey(text)
+				&& last.marks_key !== deepMarksKey(relevant) && relevant.length > 0;
+			const before = deepMarksOf(last);
+			const fresh = relevant.filter((k) => !before.includes(k));
+			const plan = followUp ? deepPlanFocused(text, relevant, fresh) : deepPlan(text, relevant);
 			const legs = plan.legs;
 			const started = new Date().toISOString();
 			// `docs` travels too: a leg is an ordinary sealed search and the professional is entitled to its
@@ -1425,7 +1498,10 @@ export default function (pi: ExtensionAPI) {
 			disclosure.fanouts.push({
 				// Not a hash: the record is the professional's, and a value they cannot interpret is worse
 				// than a long one they can. It is also what makes the repeat check auditable after the fact.
-				inputs_key: inputsKey, marks_key: deepMarksKey(relevant),
+				inputs_key: inputsKey, marks_key: deepMarksKey(relevant), text_key: deepTextKey(text),
+				// Which SHAPE of press this was, so the record does not have to be re-derived to know why a
+				// follow-up put six queries about two documents instead of the disclosure.
+				shape: followUp ? "focused on your marks" : "the whole disclosure",
 				at: started, planned: legs.length, cap: DEEP_MAX, sent,
 				legs: results, documents: union.size, notes: plan.notes,
 			});
@@ -1448,6 +1524,10 @@ export default function (pi: ExtensionAPI) {
 				// WHY it was this size, in the professional's terms. Henry, 24 Sep, on being told only that
 				// three queries ran: "why did it not search further… this can be improved to be clearer".
 				// The count alone reads as the search giving up; the reasons are the part they can act on.
+				followUp
+					? `This press is focused on your marks: the description has not changed since the last one, so `
+						+ `it leads with what you marked rather than putting the disclosure again.`
+					: "",
 				`It put ${legs.length} of a possible ${DEEP_MAX}: ${plan.notes.join("; ")}.`,
 				failed.length ? `${failed.length} did not complete (${failed.map((f) => f.feature).join("; ")}).` : "",
 				empty.length ? `${empty.length} returned nothing (${empty.map((f) => f.feature).join("; ")}).` : "",

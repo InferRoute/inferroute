@@ -741,3 +741,77 @@ def test_the_press_says_why_it_stopped_where_it_did():
     assert "feature" in joined
     assert "split" in joined or "one query" in joined
     assert "marked relevant" in joined
+
+
+def test_every_field_the_page_renders_is_in_the_tool_details():
+    """The card said "It put 5 of a possible undefined. ." — `cap` and `notes` had been added to the
+    SESSION RECORD and not to the tool's `details`, which is what the page reads. Two sinks for one fact,
+    and the one the screen uses was the one left out.
+
+    So: every field the page reads off a deep survey's details must be written into them. The page is the
+    authority for the list, because it is the side that breaks visibly and silently — an undefined renders
+    as the word "undefined" rather than as an error."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    js = (Path(PA.__file__).resolve().parent / "probant_web" / "app.js").read_text()
+    deep = js[js.index('if (ev.tool === "deep_prior_art_search") {', js.index("ev.details"))
+              :] if "ev.details" in js else js
+    # The details object the tool actually returns.
+    block = ts[ts.index("details: { deep: true"):]
+    block = block[:block.index("};")]
+    for field in ("planned", "cap", "sent", "documents", "legs", "notes"):
+        assert field in block, f"the tool does not send `{field}` the page renders"
+    # And each leg carries what it searched, not only its category.
+    assert "about: deepAbout(leg)" in ts
+    assert "leg.about" in js
+
+
+def test_a_leg_says_which_feature_not_only_that_it_was_one():
+    """A press showed "one feature on its own — 10 document(s)" twice and "part of the description" twice.
+    Those are CATEGORIES; they repeat by design. A trace where two entries are indistinguishable is not a
+    trace, and this one exists because the professional asked to see what the search actually did."""
+    out = _run_deep_plan(
+        "const legs = deepPlan('A wrist worn device measures blood glucose without piercing the skin. "
+        "An emitter directs infrared light through tissue at two wavelengths chosen to separate glucose "
+        "from water absorption. A detector samples returned intensity and determines a concentration by "
+        "comparing the bands.', []).legs;\n"
+        "console.log(JSON.stringify(legs.map(deepAbout)));")
+    assert len(out) == len(set(out)), f"two legs describe themselves identically: {out}"
+    assert all(a for a in out), "a leg has no description at all"
+
+
+def test_the_corpus_is_named_in_words_and_the_identifier_is_never_dropped():
+    """Henry, 24 Sep: the agent's answer said "ran over patent1m-epwo+usall@29595902". That string is what
+    the enclave signs and what an auditor checks, so it stays — but it is not a sentence anyone reads.
+
+    The name refuses rather than guesses: an identifier whose shape it does not recognise gets no friendly
+    name at all. A corpus described as covering territories it does not cover would be worse than one that
+    merely looks technical."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    block = ts[ts.index("function corpusName("):ts.index("function hitsText(")]
+    script = block + """
+const out = {};
+for (const id of ["patent1m-epwo+usall@29595902", "patent1m-usall@12000000", "", "garbage",
+                  "patent1m-zz@100", "patent1m-epwo+usall@0"]) out[id] = [corpusName(id), corpusPhrase(id)];
+console.log(JSON.stringify(out));
+"""
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", script],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-400:]
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    name, phrase = got["patent1m-epwo+usall@29595902"]
+    assert name == "29.6 million published patents from the United States, Europe and WIPO"
+    # The identifier survives in the phrase: it is what a statement commits to.
+    assert "patent1m-epwo+usall@29595902" in phrase
+    assert got["patent1m-usall@12000000"][0] == "12 million published patents from the United States"
+    # Unrecognised shapes get no invented description, and the phrase falls back to the raw identifier.
+    for bad in ("garbage", "patent1m-zz@100", "patent1m-epwo+usall@0"):
+        assert got[bad][0] == "", f"{bad} was given a name it did not earn"
+        assert got[bad][1] == bad
+    assert got[""][1] == "the index"

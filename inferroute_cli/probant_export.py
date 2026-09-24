@@ -131,6 +131,19 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
        ots --no-bitcoin verify trust-anchors/reference.json.ots   # `pip install opentimestamps-client`
        ots info                trust-anchors/reference.json.ots   # the sha256 it commits to
 
+   **If `pip install` refuses, that is PEP 668 and not a dead end.** A modern Linux marks its Python as
+   externally managed, and an auditor on 25 Sep reported the whole of claim 3 as COULD NOT CHECK for want
+   of the tool. Any of these work: `uv tool install opentimestamps-client`,
+   `pipx install opentimestamps-client`, or a virtualenv of your own. **And you do not need the tool at
+   all to get the date** — `MANIFEST.json` → `trust_anchors.reference_timestamp` carries the block height
+   and merkle root, read from the proof when the pack was made. Look that block up in any explorer. Read
+   the next paragraph before you credit it.
+
+   **Those two values are OURS.** They were written by the audited machine, and a block number we typed
+   proves nothing on its own: it saves you installing a client to learn WHEN, it does not bind that block
+   to this reference. The binding lives in the `.ots` file, which is in the folder, and checking it is
+   what the client is for. If the two disagree, the file wins and the disagreement is a finding.
+
    **Use `--no-bitcoin` unless you run a Bitcoin node.** Plain `ots verify` tries to reach one and fails
    with a connection error that looks like a failed proof and is not. Two auditors stopped here on 24 Sep,
    one reporting "I have no Bitcoin node and could not confirm blockchain inclusion". With the flag it
@@ -150,8 +163,13 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
      OTHER bytes is not a proof about this reference, and it will still say "Success".
    - **It settles the minted-here question if, and only if, the timestamp PRECEDES the searches.** The
      attack it defeats is a reference written after the fact to fit a record. A reference fixed by
-     outsiders before the record existed cannot have been written to fit it. Compare the timestamp with
+     outsiders before the record existed cannot have been written to fit it. Compare the block's time with
      each statement's `started_utc` and say which came first.
+     **Expect the answer to be "some of each", and report it that way.** A reference is timestamped when
+     it is published, and a matter searches whenever the professional works — so the anchor commonly lands
+     in the middle of a record. An auditor on 25 Sep found exactly that: the block was later than 33 of the
+     58 searches and earlier than 25. That is not a pass and not a failure; it means the proof covers the
+     searches after it and says nothing about the ones before. Give both counts.
    - `Pending confirmation in Bitcoin blockchain` means the calendars have committed to it but no block
      carries it yet — the date then rests on those servers rather than on Bitcoin. Run
      `ots upgrade trust-anchors/reference.json.ots` and re-verify; if it is still pending, say so and
@@ -1326,6 +1344,50 @@ def report_template() -> str:
     return "\n".join(out)
 
 
+def anchor_block(ots_path: Path) -> Dict[str, Any]:
+    """The Bitcoin block an OpenTimestamps proof is anchored in, read from the proof by `ots` at pack time.
+
+    Two auditors on 25 Sep had this proof in front of them and neither could use it. One had no Bitcoin
+    node, so `ots verify` failed with a connection error that reads exactly like a failed proof. The other
+    could not install the client at all — PEP 668 makes `pip install` refuse on a modern Linux — and
+    reported the whole of claim 3 as COULD NOT CHECK for want of a tool.
+
+    So the pack carries the answer: the block height and the merkle root the proof commits into. Note
+    exactly what that is worth, because it is easy to over-read and VERIFY.md says it in the auditor's own
+    terms: THIS IS OUR CLAIM ABOUT THE PROOF, written by the audited machine, and a block number we typed
+    proves nothing by itself. What it does is let an auditor with no tooling at all look that block up in
+    any explorer and read its TIME. The binding between the reference and that block still lives in the
+    .ots file, which is in the folder, and checking it is what the client is for.
+
+    Returns {} when there is no proof, no client, or the proof is not anchored yet — an absence, never a
+    guess. A pending proof has no block, and inventing one would be the worst line in the folder."""
+    import re
+
+    if not ots_path.is_file():
+        return {}
+    exe = shutil.which("ots")
+    if not exe:
+        return {"note": "this computer has no `ots` client, so the block could not be read from the proof here"}
+    try:
+        r = subprocess.run([exe, "--no-bitcoin", "verify", str(ots_path)],
+                           capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:                      # noqa: BLE001
+        return {"note": f"reading the proof failed here ({type(e).__name__})"}
+    text = (r.stdout or "") + (r.stderr or "")
+    m = re.search(r"check that Bitcoin block (\d+) has merkleroot ([0-9a-f]{64})", text)
+    if not m:
+        if "Pending" in text or "not complete" in text:
+            return {"note": "the proof is not anchored in a block yet; the calendars have it and it needs "
+                            "`ots upgrade`. Until then its date rests on those servers, not on Bitcoin."}
+        return {"note": "the block could not be read from the proof on this computer"}
+    return {"bitcoin_block": int(m.group(1)), "merkle_root": m.group(2),
+            "how_to_check": "look this block up in any block explorer and read its time; that time is not "
+                            "InferRoute's. These two values are OUR reading of the proof beside them — the "
+                            "proof itself is trust-anchors/reference.json.ots and it is what binds the "
+                            "reference to that block.",
+            "read_with": "ots --no-bitcoin verify trust-anchors/reference.json.ots"}
+
+
 def _receipt_has(path: Path, field: str) -> bool:
     """Whether a receipt supports a given recomputation. An auditor on 24 Sep hand-built a six-row table of
     exactly this before it could score claim 7 at all; the pack knows it and was making them derive it.
@@ -1485,7 +1547,9 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
             anchor_files["trust-anchors/reference.json.ots"] = ots.read_bytes()
     if key:
         anchor_files["trust-anchors/publication-key.txt"] = (str(key).strip() + "\n").encode("utf-8")
+    block = anchor_block(Path(str(ref) + ".ots")) if ref else {}
     manifest["trust_anchors"] = {
+        **({"reference_timestamp": block} if block else {}),
         "note": "this computer's own configuration, listed so the folder is fully accounted for — NOT "
                 "evidence, and agreement with them proves nothing on its own. reference.json.ots is the "
                 "exception: it is evidence, and it is checked against reference.json, not against this list.",

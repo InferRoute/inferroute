@@ -349,3 +349,24 @@ def test_a_receipt_says_which_client_wrote_it_and_the_brief_uses_that():
     assert "do not assume the older one describes today's software" in E.AUDIT_MD
     # And it must not be dressed up as attestation: the device is naming itself.
     assert "self-reported" in E.AUDIT_MD
+
+
+def test_the_brief_says_the_two_lanes_are_different_hardware():
+    """Two auditors read this pack on 24 Sep. One concluded "the AUDIT.md template mentions AMD SEV-SNP,
+    but the session receipts show Intel TDX v4 — the template appears generic". It is not generic: claims
+    1-6 and 8 are about the SEARCH machine (SEV-SNP) and claim 7 is about the AI machine (TDX). But the
+    brief never said so, and a document whose whole job is precision had just been called boilerplate by
+    the reader it exists to convince.
+
+    The same run explained rtmr0's variation as a nonce. Our own builds.py says it measures the host's
+    boot and is deliberately excluded from identity. That auditor reached the right verdict by a route
+    that is not true, which on a different field would have excused a real difference."""
+    from inferroute_cli import probant_export as E
+    brief = E.AUDIT_MD
+    assert "Two different machines, two different technologies" in brief
+    assert "Intel TDX" in brief and "AMD SEV-SNP" in brief
+    assert "not a generic template" in brief
+    assert "Neither machine's evidence can be used to check the other." in brief
+    # And rtmr0 explained where the auditor meets it, rather than left to be guessed at.
+    assert "It does\n   not carry a nonce" in brief or "does not carry a nonce" in brief.replace("\n   ", " ")
+    assert "measures the HOST's" in brief

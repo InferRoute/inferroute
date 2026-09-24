@@ -756,7 +756,21 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 
 7. **The CONVERSATION, not only the searches.** A matter's work happens in a sealed session with an AI
    machine, and `session-*.receipt.json` is this device's record of checking that machine before anything
-   was sent to it: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), and the
+   was sent to it.
+
+   **Two different machines, two different technologies, and the difference is real rather than a slip in
+   this document.** Claims 1-6 and 8 are about the SEARCH machine: AMD SEV-SNP, attested with a VCEK
+   chaining to AMD's root. This claim is about the AI machine: **Intel TDX**, attested with a quote
+   carrying `mrtd` and `rtmr0`-`rtmr3`. A receipt here naming Intel TDX while claim 1 names AMD SEV-SNP is
+   the system working, not a generic template — an auditor reported exactly that suspicion on 24 Sep, and
+   it is worth a sentence to prevent. Neither machine's evidence can be used to check the other.
+
+   `rtmr0` differs between two sessions on the same build and that is expected: it measures the HOST's
+   boot configuration, not the image, and is deliberately excluded from what identifies a build. It does
+   not carry a nonce — a second auditor read it that way the same day, reached the right conclusion by the
+   wrong route, and would have reported a real difference as benign for a reason that is not true.
+
+   The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), and the
    hash of the encryption key the session sealed to. **Read it for exactly what it is.** The raw
    attestation evidence behind those fifteen verdicts is NOT in this folder, so you cannot re-verify the
    quote the way you can for a search — the verdicts are the professional's own device speaking. What you

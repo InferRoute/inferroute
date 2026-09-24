@@ -195,7 +195,18 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         details = (ev.get("partialResult") or {}).get("details") if isinstance(ev.get("partialResult"), dict) else None
         phase = (details or {}).get("phase") if isinstance(details, dict) else None
         if phase in TOOL_PHASES:
-            return [{"kind": "tool_progress", "call": ev.get("toolCallId"), "phase": phase}]
+            out = {"kind": "tool_progress", "call": ev.get("toolCallId"), "phase": phase}
+            # A fan-out is several sealed searches and takes minutes; with only a phase name the card
+            # repeats the same three words and looks stalled. Position crosses as two INTEGERS and nothing
+            # else — the page composes the words — so this stays a channel that cannot carry content, which
+            # is what the rule above is protecting.
+            for k in ("step", "steps"):
+                v = (details or {}).get(k)
+                if isinstance(v, bool) or not isinstance(v, int):
+                    continue
+                if 0 <= v <= 99:
+                    out[k] = v
+            return [out]
         return []
     if t == "tool_execution_end":
         res = ev.get("result") or {}

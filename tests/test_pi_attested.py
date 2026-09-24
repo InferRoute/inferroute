@@ -815,3 +815,42 @@ console.log(JSON.stringify(out));
         assert got[bad][0] == "", f"{bad} was given a name it did not earn"
         assert got[bad][1] == bad
     assert got[""][1] == "the index"
+
+
+def test_a_short_feature_is_searched_with_its_subject_attached():
+    """A real press on 24 Sep put "Pool bound commitment & epoch pinning" as a query and the sealed search
+    returned literal swimming-pool art. The feature was not wrong — it was a HEADING, and a heading torn
+    out of its document means whatever its words mean in general English.
+
+    So a short feature is searched with the disclosure's subject attached. Deterministic, no model, and it
+    is the difference between asking about an entitlement pool and asking about swimming."""
+    disclosure = (
+        "# Attest Dynamics & Issuance Interlock\n"
+        "Enclave-computed issuance interlock governing entitlement pool consumption, so that a pool bound "
+        "commitment is pinned to an epoch and cannot be replayed.\n\n"
+        "1. Pool bound commitment & epoch pinning\n"
+        "2. Measurement reference verification as issuance precondition\n")
+    out = _run_deep_plan(
+        f"const p = deepPlan({json.dumps(disclosure)}, []);\n"
+        "console.log(JSON.stringify(p.legs));")
+    feats = [l for l in out if l["feature"] == "one feature on its own"]
+    assert feats, "no feature was searched on its own"
+    bare = [f for f in feats if f["text"].strip().lower().startswith("pool bound")]
+    assert not bare, "a heading was searched without the subject that disambiguates it"
+    anchored = [f for f in feats if "entitlement pool consumption" in f["text"] and "Pool bound" in f["text"]]
+    assert anchored, f"the feature lost its subject: {[f['text'][:70] for f in feats]}"
+
+
+def test_a_long_feature_is_not_padded_with_the_subject():
+    """Anchoring is for features too short to say what they are about. A feature that already carries its
+    own context would only be diluted by repeating the subject in front of it."""
+    long_feature = ("An emitter directs infrared light through the wearer's tissue at two distinct "
+                    "wavelengths chosen to separate glucose absorption from water absorption, and the "
+                    "detector rejects samples taken during movement before any concentration is computed.")
+    disclosure = f"A wrist worn device measures blood glucose without piercing the skin at all.\n\n- {long_feature}\n"
+    out = _run_deep_plan(
+        f"const p = deepPlan({json.dumps(disclosure)}, []);\n"
+        "console.log(JSON.stringify(p.legs));")
+    feats = [l for l in out if l["feature"] == "one feature on its own"]
+    assert any(f["text"].startswith("An emitter directs") for f in feats), \
+        f"a long feature was padded with the subject: {[f['text'][:60] for f in feats]}"

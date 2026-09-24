@@ -1155,7 +1155,26 @@ export default function (pi: ExtensionAPI) {
 		return [...new Set(picked)];
 	}
 
-	interface DeepLeg { text: string; feature: string; like?: string }
+	// The subject of the disclosure, for anchoring short feature queries.
+	//
+	// A press on 24 Sep put "Pool bound commitment & epoch pinning" as a query on its own and the search
+	// returned literal swimming pools. The feature was not wrong — it was a HEADING, and a heading torn out
+	// of its document means whatever its words mean in general English. The fix is not cleverness: it is to
+	// keep the subject attached, so "pool" is read in the sentence that says what this invention is.
+	function deepAnchor(text: string): string {
+		for (const raw of text.split(/\n+/)) {
+			const line = raw.replace(/^[#>\s*-]+/, "").replace(/\s+/g, " ").trim();
+			// The first line that is prose rather than a title: long enough to carry the subject, and not
+			// itself a bare heading.
+			if (line.length >= 40 && /[a-z]/.test(line)) return line.length > 180 ? `${line.slice(0, 179).trimEnd()}…` : line;
+		}
+		return "";
+	}
+
+	// `about` is what DISTINGUISHES this leg, which is not the same as the start of its query: once short
+	// features carry the subject, every anchored query begins with the same sentence and a summary taken
+	// from the front makes them all look identical — the very thing anchoring was added beside a fix for.
+	interface DeepLeg { text: string; feature: string; like?: string; about?: string }
 
 	// Which marks seed the walk. Only "relevant" — a document the professional set aside as known art or as
 	// not relevant is not a seed, because walking outward from it would be the system quietly overruling the
@@ -1179,7 +1198,7 @@ export default function (pi: ExtensionAPI) {
 	// that looks like a trace and carries none of one.
 	function deepAbout(leg: DeepLeg): string {
 		if (leg.like) return `documents like ${leg.like}`;
-		const t = leg.text.replace(/\s+/g, " ").trim();
+		const t = (leg.about || leg.text).replace(/\s+/g, " ").trim();
 		return t.length > 72 ? `${t.slice(0, 71).trimEnd()}…` : t;
 	}
 
@@ -1187,25 +1206,30 @@ export default function (pi: ExtensionAPI) {
 		const legs: DeepLeg[] = [];
 		const notes: string[] = [];
 		const seen = new Set<string>();
-		const add = (t: string, feature: string, like?: string) => {
+		const add = (t: string, feature: string, like?: string, about?: string) => {
 			const key = t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
 			if (!key || t.trim().length < 20 || seen.has(key) || legs.length >= DEEP_MAX) return false;
 			seen.add(key);
-			legs.push({ text: t.trim(), feature, like });
+			legs.push({ text: t.trim(), feature, like, about });
 			return true;
 		};
 		// The whole description first: it is the query a single search would have made, so the deep search
 		// can never return less than the plain one would have.
 		add(text, "the disclosure as a whole");
 
+		// Short features carry the subject with them; long ones already say what they are about. Without
+		// this a heading like "Pool bound commitment" is searched as general English.
+		const anchor = deepAnchor(text);
+		const anchored = (f: string) => (anchor && f.length < 120 && !f.includes(anchor) ? `${anchor} ${f}` : f);
+
 		const listed = deepElements(text, 3);
 		let features = 0;
-		for (const el of listed) if (add(el, "one feature on its own")) features += 1;
+		for (const el of listed) if (add(anchored(el), "one feature on its own", undefined, el)) features += 1;
 		if (!listed.length) {
 			// Prose, not a numbered list. Sentences carrying a distinct technical assertion are searched on
 			// their own instead — the same leg by another route, because an unnumbered disclosure is the
 			// common case and was getting none of this.
-			for (const st of deepSentences(text, 3)) if (add(st, "one feature on its own")) features += 1;
+			for (const st of deepSentences(text, 3)) if (add(anchored(st), "one feature on its own", undefined, st)) features += 1;
 			notes.push(features
 				? `${features} feature(s) taken from the text itself — it has no numbered or bulleted list, so they were read out of its sentences`
 				: "no separable feature could be taken from the text: numbering the distinct features would let each be searched on its own");
@@ -1260,9 +1284,13 @@ export default function (pi: ExtensionAPI) {
 			if (!ctx.hasUI) {
 				throw new Error("deep_prior_art_search needs the user at this machine to approve sealed queries; refused without sending anything");
 			}
+			// Position travels with the phase so a press that takes minutes does not look stalled: the page
+			// repeats three phase names per sub-search otherwise, with nothing to say which one is running.
+			let step = 0;
+			let steps = 0;
 			const phase = (name: string) => {
 				try {
-					onUpdate?.({ content: [], details: { phase: name } });
+					onUpdate?.({ content: [], details: { phase: name, step, steps } });
 				} catch {
 					/* progress is decoration; it must never break a search */
 				}
@@ -1287,7 +1315,9 @@ export default function (pi: ExtensionAPI) {
 			let sent = 0;
 			let corpusId = "";
 
+			steps = legs.length;
 			for (const leg of legs) {
+				step += 1;
 				// Each sub-search re-emits the ordinary phases, so the page never goes quiet for two minutes
 				// in the middle of a press. A phase name outside the fixed list is dropped before it reaches
 				// the page, which would be progress reporting that reports nothing.

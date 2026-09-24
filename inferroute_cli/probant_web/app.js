@@ -758,6 +758,22 @@
     if (ev.tool === "suggest_next_steps") {
       return;
     }
+    if (ev.tool === "deep_prior_art_search") {
+      // One press, several sealed searches. It gets its own card because it is not one search and saying
+      // "Sealed patent search" over a fan-out would misdescribe what is happening — and because the
+      // professional asked to SEE what it did, rather than be told a number afterwards.
+      const a = ev.args || {};
+      const card = el("div", "card");
+      const sub = el("span", "sub", "planning the queries…");
+      const title = el("span", "title", "🔍🔍 Deep prior-art survey");
+      const qline = String(a.text || "").replace(/\s+/g, " ").trim();
+      const what = el("span", "what", `“${qline.length > 110 ? `${qline.slice(0, 109).trimEnd()}…` : qline}”`);
+      const notes = el("span", "notes", "");
+      card.append(el("div", "card-head", title, what, notes), el("div", "card-body", sub));
+      cards.set(ev.toolCallId, { card, sub, notes, deep: true });
+      log.append(card);
+      return;
+    }
     if (ev.tool === "prior_art_search") {
       const a = ev.args || {};
       const card = el("div", "card");
@@ -857,6 +873,36 @@
       const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];
       assistantSteps = steps.map(String).filter((t) => t && !/^[\/!]/.test(t)).slice(0, 4);
       renderSteps();
+      return;
+    }
+    if (ev.tool === "deep_prior_art_search") {
+      const e = cards.get(ev.call);
+      if (!e) return;
+      e.done = true;
+      e.sub.classList.remove("slow");
+      const d = ev.details || {};
+      const keep = stick();
+      clear(e.sub);
+      if (!ev.ok) {
+        e.sub.append(el("div", "warn", String(ev.text || "the deep survey did not complete")));
+      } else {
+        e.notes.textContent = `${d.sent} of ${d.planned} queries · ${d.documents} documents`;
+        // WHY it was this size, on screen rather than only in the answer's prose: the count on its own
+        // reads as the search having given up, and the reasons are the part the professional can change.
+        e.sub.append(el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`));
+        e.sub.append(el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`));
+        const list = el("div", "deep-legs");
+        for (const leg of d.legs || []) {
+          const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
+          list.append(el("div", `deep-leg ${leg.status}`,
+            `${mark} ${leg.feature}` + (leg.status === "ok" ? ` — ${leg.hits} document(s)`
+              : leg.status === "empty" ? " — nothing returned" : ` — ${leg.why || "did not complete"}`)));
+        }
+        e.sub.append(list);
+        e.sub.append(el("p", "sub", "These are the combined results of separate queries, not a merged "
+          + "ranking: the same invention can appear more than once under different publication numbers."));
+      }
+      keep();
       return;
     }
     if (ev.tool !== "prior_art_search") return;

@@ -1439,3 +1439,62 @@ def test_the_page_claims_contribution_and_not_family_collapsing():
     for forbidden in ("family", "families", "saturat"):
         assert forbidden not in shown.lower(), f"the rendered text claims {forbidden!r}, which is not computed here"
     assert "family" in body.lower(), "the reason for not claiming families is no longer recorded beside the code"
+
+
+def test_a_deep_survey_s_legs_fold_and_start_folded():
+    """Henry, 25 Sep: "the deep search view should also have inner search collapsable within it, and they
+    should stay collapsed in the beginning and only expand when clicked".
+
+    A press puts up to eight searches, each with ten documents and its own marking controls. Opened all at
+    once that is most of a screen per leg, and the SHAPE of the survey — which parts of the description
+    were reached, and by what — is buried somewhere inside it. Folded, the card opens as a readable list
+    of what was put.
+
+    The fold is exercised through the page's own toggle rather than asserted on classes in the source: a
+    class set at build time and never changed by the handler would pass a source check and be a dead
+    control on the screen."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "deep_leg_fold_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert out["initial"] == {"folded": True, "expanded": "false"}, "a leg does not start folded"
+    assert out["afterFirstClick"] == {"folded": False, "expanded": "true"}
+    assert out["afterSecondClick"] == {"folded": True, "expanded": "false"}, "the head does not fold it again"
+    # The left index must OPEN a folded leg. Being sent to a closed box is not arriving — the same symptom
+    # Henry reported on 24 Sep for folded cards, one level further in.
+    assert out["afterOutlineClick"] == {"folded": False, "expanded": "true"}
+    assert out["afterOpeningTwice"] == {"folded": False, "expanded": "true"}, "opening an open leg closed it"
+
+
+def test_what_a_folded_leg_hides_is_its_documents_and_not_its_headline():
+    """Folding must hide the leg's CONTENTS and keep the line that says what the leg was — the feature, the
+    count, and what it contributed. That line is the survey's shape and it is the reason to fold at all."""
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    start = js.index('const block = el("div", `deep-leg ${leg.status} folded`);')
+    block = js[start:js.index("e.body.append(block);", start)]
+
+    # The head is a real control, and it is NOT inside the part that gets hidden.
+    assert 'const head = el("button", "deep-leg-head",' in block
+    assert 'head.setAttribute("aria-expanded", "false")' in block
+    assert "block.append(head, legBody)" in block
+
+    # Everything else goes into the body: the quoted text of what was searched, and the documents.
+    assert 'legBody.append(el("div", "deep-leg-about"' in block
+    assert "legBody.append(list);" in block
+    assert "block.append(list);" not in block, "the documents are still a direct child and would stay visible"
+
+    css = (root / "inferroute_cli" / "probant_web" / "app.css").read_text()
+    assert ".deep-leg.folded > .deep-leg-body { display: none; }" in css
+    # A caret that says which way it goes, both ways round.
+    assert '.deep-leg-head::before { content: "▾ "; }'.replace('{ content', '{ content') in css or \
+           '.deep-leg-head::before' in css
+    assert '.deep-leg.folded > .deep-leg-head::before { content: "▸ "; }' in css

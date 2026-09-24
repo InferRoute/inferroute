@@ -625,6 +625,8 @@
     link.addEventListener("click", () => {
       // Jumping to a folded search opens it: being sent to a closed box is not arriving.
       if (item.entry && item.entry.collapsed) setCollapsed(item.entry, false, true);
+      // ...and anything folded INSIDE the card it lives in. A deep survey's legs fold on their own.
+      if (item.open) item.open();
       item.el.scrollIntoView({ behavior: "smooth", block: "start" });
       for (const r of outlineRows) r.row.classList.toggle("here", r === rec);
     });
@@ -1012,10 +1014,24 @@
             ? (added === 0 ? ", none new" : ` (${added} new)`) : "";
           const count = leg.status === "ok" ? `${leg.hits} document(s)${contributed}`
             : leg.status === "empty" ? "nothing returned" : (leg.why || "did not complete");
-          const block = el("div", `deep-leg ${leg.status}`);
-          block.append(el("div", "deep-leg-head",
-            `${mark} ${leg.searchNo ? `Search ${leg.searchNo} · ` : ""}${leg.feature} — ${count}`));
-          if (leg.about) block.append(el("div", "deep-leg-about", `“${leg.about}”`));
+          // A press puts up to eight searches, each with ten documents and its own marking controls. Opened
+          // all at once that is most of a screen per leg and the SHAPE of the survey — which parts of the
+          // description were reached, and by what — is somewhere inside it. So a leg folds, and starts
+          // folded: the card opens as a readable list of what was put, and a leg opens when it is asked
+          // for. Henry, 25 Sep: "they should stay collapsed in the beginning and only expand when clicked".
+          const block = el("div", `deep-leg ${leg.status} folded`);
+          const legBody = el("div", "deep-leg-body");
+          const head = el("button", "deep-leg-head",
+            `${mark} ${leg.searchNo ? `Search ${leg.searchNo} · ` : ""}${leg.feature} — ${count}`);
+          head.type = "button";
+          head.setAttribute("aria-expanded", "false");
+          const setLeg = (open) => {
+            block.classList.toggle("folded", !open);
+            head.setAttribute("aria-expanded", String(open));
+          };
+          head.addEventListener("click", () => setLeg(block.classList.contains("folded")));
+          block.append(head, legBody);
+          if (leg.about) legBody.append(el("div", "deep-leg-about", `“${leg.about}”`));
           // A leg IS an ordinary sealed search, so it gets what one gets: its documents, and the controls
           // to mark them. Listing a count and calling that a trace gave the outline nowhere to arrive.
           const docs = leg.docs || [];
@@ -1032,13 +1048,16 @@
               title.addEventListener("click", () => row.classList.toggle("open"));
               list.append(row);
             });
-            block.append(list);
+            legBody.append(list);
           }
           e.body.append(block);
           // The outline points at THIS leg, not at the card: being sent to the top of a six-search card is
           // not arriving at search 5.
           if (leg.about) {
-            outlineAdd({ kind: "search", el: block, entry: e,
+            // The outline must OPEN the leg, not only scroll to it. Being sent to a folded block is the
+            // same nothing-happened as being sent to a folded card, which this already handles one level
+            // up — and Henry reported exactly that symptom on 24 Sep, before legs could fold at all.
+            outlineAdd({ kind: "search", el: block, entry: e, open: () => setLeg(true),
                          label: leg.searchNo ? `Search ${leg.searchNo}` : "Search",
                          detail: `${leg.about.slice(0, 54)}${leg.about.length > 54 ? "…" : ""}` });
           }

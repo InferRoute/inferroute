@@ -117,17 +117,23 @@ def test_a_record_with_no_searches_cannot_become_an_audit_pack(tmp_path):
 
 
 def test_the_brief_tells_the_auditor_the_verifier_is_untrusted_and_how_to_check_it(tmp_path):
-    """Henry, 22 Sep: make this stronger — point the agent at our public client source. The instruction is
-    right and, when written, could not be carried out: verify_record.py is in neither the published wheel
-    nor the public repository. So the brief asks for the comparison AND tells the auditor to report not
-    being able to make it, rather than implying a check that silently does not happen."""
+    """Henry, 22 Sep: make this stronger — point the agent at our public client source.
+
+    That instruction named one source and could not be carried out: verify_record.py was in neither the
+    published wheel nor the public repository. Two things have changed since. The wheel we distribute DOES
+    carry it now, and on 24 Sep an auditor ran the brief, fetched 42 releases from the index, found it in
+    none, and reported the brief's claim as unfounded — correctly.
+
+    So the brief names three sources and separates what each one proves. The index is not us; the wheel is
+    us and therefore shows a targeted substitution has not happened rather than corroborating anything; the
+    installed copy shares an origin with the folder. Collapsing them would make three checks read as
+    agreement between independent parties, which is the failure this whole pack exists to avoid."""
     md = E.AUDIT_MD
     assert "Treat `verify_record.py` as untrusted code" in md
-    assert "Get your own copy and compare, before you run anything" in md
+    assert "Get other copies and compare, before you run anything" in md
     assert "pip download inferroute" in md          # executable, not an aspiration
-    assert "Report the two hashes and whether they match" in md
-    assert "A MISMATCH is a finding in its own right" in md
-    assert "If you cannot obtain it independently" in md
+    assert "Report every hash you obtained" in md
+    assert "A MISMATCH against (a) or (b) is a" in md
     # The self-reference that makes reading it insufficient is stated, not left for the auditor to notice.
     assert "the manifest that lists it is in the same folder" in md
     # Redoing the checks is named as the part that carries the audit, above running our program.

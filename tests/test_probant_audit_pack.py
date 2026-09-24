@@ -332,3 +332,20 @@ def test_verify_md_does_not_name_a_reference_file_that_is_in_neither_folder():
     assert "--reference reference.json" not in text
     assert "trust-anchors/reference.json" in text
     assert "not inside this folder" in text
+
+
+def test_a_receipt_says_which_client_wrote_it_and_the_brief_uses_that():
+    """24 Sep: an auditor read a 22 Sep receipt asserting "this session's requests were encrypted" beside a
+    zero request counter, and reported it — correctly. `_restate_claim` had already fixed that months of
+    client-versions ago, and the 24 Sep receipt sitting next to it in the same pack was worded correctly.
+    Nothing in either said why they differed, so a fossil defect and a live one look identical.
+
+    They will keep being audited: nothing rewrites an old receipt, and nothing should. What the pack can do
+    is say which client wrote each, and tell the auditor what that does and does not license."""
+    from inferroute_local.confidential.receipt import Receipt
+    r = Receipt(session_id="s", model_short="m", upstream_model="u", fleet_id="f", transport="t")
+    assert r.written_by, "a receipt cannot say which client wrote it"
+    assert "written_by" in E.AUDIT_MD
+    assert "do not assume the older one describes today's software" in E.AUDIT_MD
+    # And it must not be dressed up as attestation: the device is naming itself.
+    assert "self-reported" in E.AUDIT_MD

@@ -24,6 +24,14 @@ def _now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _client_version() -> str:
+    try:
+        from inferroute_cli import __version__
+        return f"ir {__version__}"
+    except Exception:                                       # noqa: BLE001
+        return ""
+
+
 @dataclass
 class Receipt:
     session_id: str
@@ -44,6 +52,13 @@ class Receipt:
         "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0})
     events: list = field(default_factory=list)          # [{ts, kind, detail}] — pins, switches, re-verifications
     verified_at: str = ""
+    # Which client wrote this receipt. An auditor reading an OLD receipt cannot otherwise tell a defect
+    # that was real and has since been fixed from one that is live — and it will keep reporting the fossil
+    # as a finding, correctly, forever. Found on 24 Sep: an auditor flagged a 22 Sep receipt asserting
+    # "this session's requests were encrypted" with a zero request counter, which `_restate_claim` had
+    # already fixed; the 24 Sep receipt beside it was correct, and nothing in either said why they differed.
+    # Self-reported, like everything else a receipt says about the device that wrote it.
+    written_by: str = field(default_factory=lambda: _client_version())
     claim: str = ""
     verdict: str = "unopened"                           # unopened | confidential | refused | degraded
     refusal: str = ""

@@ -770,6 +770,14 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
    support it. Say plainly in your
    report which of this you verified and which you read.
 
+   **A matter can carry receipts from several sessions, written months apart by different versions of the
+   client.** Each receipt names its own in `written_by`. When two receipts disagree — the same zero
+   counters described in different words, a check whose wording changed — say which version wrote each,
+   and do not assume the older one describes today's software. A defect that was real and has since been
+   corrected is still a defect in that record and worth reporting as one; it is not evidence about the
+   client the professional is running now, and reporting it as though it were would misdirect whoever acts
+   on your report. `written_by` is self-reported, like everything else the device says about itself.
+
 8. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
    (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the
    document" and "the enclave returned a fifth of one" are different claims, and only this field

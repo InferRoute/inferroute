@@ -871,3 +871,39 @@ def test_the_client_side_planner_is_marked_as_the_engine_s_to_own():
     # The marker must sit with the thing it governs, not in a comment elsewhere in the file.
     assert ts.index("⚠ PROVISIONAL") < ts.index("function deepWindows")
     assert ts.index("function deepSentences") > ts.index("⚠ PROVISIONAL")
+
+
+def test_the_extension_measures_what_each_leg_contributed_not_what_it_returned():
+    """The number that matters is what a leg ADDED to the union, not its hit count: a leg returning ten
+    documents the earlier legs already returned looks like the strongest in the press.
+
+    This is the client half of the ruling with sealed-research on 24 Sep — report the gap, do not close it
+    autonomously. So the pin is on the measurement being taken from the union at the moment the leg lands,
+    and on the page receiving it: a field added to the session record only arrives at the page as undefined,
+    which has caught this same object twice."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    # There is an earlier renderResult on the plain search tool, so cut AFTER the deep tool, not from the
+    # first occurrence in the file — slicing the other way round silently yields an empty string, and every
+    # assertion below then passes or fails for a reason that has nothing to do with the code.
+    start = ts.index('name: "deep_prior_art_search"')
+    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+    assert len(body) > 2000, "the deep tool body did not slice; the markers moved"
+
+    # Measured from the union, around the insert — not from `docs.length`, which cannot see overlap.
+    assert "const before = union.size;" in body
+    assert "added: union.size - before" in body
+    assert body.index("const before = union.size;") < body.index("for (const d of r.sp.docs)"), \
+        "the union is read after it is updated, so every leg would measure as having added nothing"
+
+    # "Added nothing new" is the claim; a family claim would need the family map, which is not here.
+    assert 'results.filter((x) => x.status === "ok" && (x.added ?? 0) === 0)' in body
+    # A leg that FAILED is not a coverage gap. It is a failure, and it is already reported as one.
+    assert '"failed"' in body and 'x.status === "ok" &&' in body
+
+    # It must reach the page, which reads `details` and nothing else.
+    details = body[body.index("details: { deep: true"):]
+    assert "coverage: { empty: empty.length, added_nothing: spent.length }" in details
+    assert "legs: results" in details, "the per-leg `added` travels inside results; the page needs it there"
+
+    # And the professional is told what to do with it, since the tool will not act on it by itself.
+    assert "Marking a document relevant makes the next deep search walk outward from it" in body

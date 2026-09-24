@@ -749,6 +749,34 @@
     if (!about) return `search ${no}`;
     return `‘${about.length > max ? `${about.slice(0, max - 1).trimEnd()}…` : about}’`;
   }
+  // Where the press did NOT reach, said plainly, from facts the record already holds. This is the
+  // deliberate alternative to a second autonomous turn: ruled with sealed-research on 24 Sep, an adaptive
+  // turn is gated on counsel AND on a change in the shape of the approval — a press-time approval cannot
+  // cover queries that do not exist yet. Reporting the gap makes the professional the second turn, so no
+  // query is ever sent that they could not see coming.
+  function deepCoverage(d) {
+    const legs = d.legs || [];
+    const empty = legs.filter((l) => l.status === "empty");
+    // "Added nothing new", NOT "one family": collapsing siblings needs the family map, which lives on the
+    // search side. Guessing family from publication numbers misses the cross-jurisdiction siblings that are
+    // most of the duplication, so claim the weaker thing that is actually computed.
+    const spent = legs.filter((l) => l.status === "ok" && l.added === 0);
+    if (!empty.length && !spent.length) return null;
+    const box = el("div", "deep-coverage");
+    if (empty.length) {
+      box.append(el("div", "", `${empty.length} ${empty.length === 1 ? "query" : "queries"} found nothing: `
+        + empty.map((l) => l.feature).join("; ") + "."));
+    }
+    if (spent.length) {
+      box.append(el("div", "", `${spent.length} found only documents the other queries had already returned: `
+        + spent.map((l) => l.feature).join("; ")
+        + " — that part of the description is covered by what you already have, not unsearched."));
+    }
+    box.append(el("div", "sub", "Marking a document relevant makes the next deep search walk outward from "
+      + "it, so pressing again after marking searches differently rather than repeating this."));
+    return box;
+  }
+
   function seenIn(no) {
     const e = searchesByNo.get(no);
     const tag = el("span", "seen", `also in ${shortAbout(no)}`);
@@ -932,10 +960,17 @@
           el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`),
           // WHY it was this size: the count alone reads as the search having given up, and the reasons are
           // the part the professional can act on.
-          el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`)));
+          el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`),
+          deepCoverage(d)));
         for (const leg of d.legs || []) {
           const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
-          const count = leg.status === "ok" ? `${leg.hits} document(s)`
+          // A leg that returns ten documents the other legs already returned looks like the strongest leg
+          // in the press when only the hit count is shown. What it ADDED is the number that says whether
+          // this part of the description was reached by anything else.
+          const added = leg.added;
+          const contributed = typeof added === "number"
+            ? (added === 0 ? ", none new" : ` (${added} new)`) : "";
+          const count = leg.status === "ok" ? `${leg.hits} document(s)${contributed}`
             : leg.status === "empty" ? "nothing returned" : (leg.why || "did not complete");
           const block = el("div", `deep-leg ${leg.status}`);
           block.append(el("div", "deep-leg-head",

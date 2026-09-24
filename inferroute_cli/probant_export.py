@@ -102,12 +102,21 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
 
    Be exact about what agreement there proves, because it is narrower than it looks. Both copies are
    InferRoute's, so this is NOT independent of InferRoute and does not make claim 3 checkable on its own;
-   it is the weakest form named above. What it DOES defeat is the other reading — that the reference was
-   minted on the machine being audited, in order to make that machine's records verify. An auditor on
-   24 Sep declined claim 3 for exactly that reason, noting the reference was published nine minutes after
-   the enclave was attested and fifty-seven seconds before the session began. A published copy that
-   predates the record, and that the professional did not write, answers that and nothing more. Report
-   which copy you used and say which of the two questions you were able to close.
+   it is the weakest form named above. It is sometimes said to defeat the other reading — that the
+   reference was minted on the machine being audited, to make that machine's records verify. **It defeats
+   that reading only if the machine that publishes the page is not the machine that made the records**, and
+   that is a fact to establish, not assume. Where one party runs both — a sole practitioner's setup often
+   does — the hands that produced the records could have pushed the reference minutes earlier, and fetching
+   it proves only that it is there now. So ask who can publish to that page, and from where. If the answer
+   is the same operator and the same machine, the published copy settles nothing and claim 3 stays open on
+   this ground too.
+
+   An auditor on 24 Sep declined claim 3 noting the reference was published nine minutes after the enclave
+   was attested and fifty-seven seconds before the session began. That ordering is equally consistent with
+   an honest release and with a minted one, which is why the ordering by itself does not decide it. What
+   would decide it is a copy whose date is fixed by someone who is not InferRoute: the value recorded in an
+   engagement letter the client holds, or a third-party timestamp over the published file. Report which of
+   those you had, and if you had neither, say so rather than crediting the fetch.
 4. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
    values with `=`: a pasted value that begins with `-` is otherwise read as another flag, and the error
    ("expected one argument") does not say so. Later
@@ -797,8 +806,9 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    ranks the ways to obtain one. The best is the value recorded from an engagement letter at first use. If
    there is none, fetch `https://inferroute.ai/reference/current.json` and compare. Be exact in the report
    about which you used: a published copy is still InferRoute's, so agreement with it is **NOT independent
-   of InferRoute** — it answers only whether the reference was minted on the audited machine, which is a
-   different question from whether InferRoute's own statement is true.
+   of InferRoute**. It bears on whether the reference was minted on the audited machine — a different
+   question from whether InferRoute's statement is true — and it bears on that only when the publishing
+   machine is not the audited one. Establish that before crediting the fetch; VERIFY.md §3 says how.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
    record (except one removed from the very end, which no counter can reveal).

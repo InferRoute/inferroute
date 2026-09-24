@@ -956,7 +956,7 @@ def test_the_two_places_that_decide_a_repeat_share_one_predicate():
     start = ts.index('name: "deep_prior_art_search"')
     body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
     # The refusal happens BEFORE the plan is built and before anything is sent.
-    assert body.index("last.inputs_key === inputsKey") < body.index("const plan = deepPlan(text, relevant);")
+    assert body.index("last.inputs_key === inputsKey") < body.index("const plan = followUp ?")
     assert "Nothing was sent." in body
     # It must say what WOULD make a press different, or it is a dead end rather than a step.
     # The source wraps this sentence, so match the halves rather than the rendered line.
@@ -998,3 +998,79 @@ def test_the_approval_says_what_it_actually_grants():
 
     # The old question implied the scope was the previewed sentence. It must not come back.
     assert "You won't be asked again for it." not in prompt
+
+
+def test_a_follow_up_press_leads_with_the_marks_instead_of_the_disclosure():
+    """Henry, 25 Sep: "lets make it focused on the relevant matters, that case being when the deep search
+    was already ran and only relevant/non relevant selections have been added".
+
+    What changes is the WEIGHTING, not the mechanism. The whole disclosure, its windows and its features
+    were already put by the earlier press, and putting them again is the identical-queries case the repeat
+    guard exists for — their results are already in the matter's record, so leaving them out costs nothing.
+    What is new is the marks, so the marks lead.
+
+    Each marked document is also read THROUGH the disclosure: without the subject, "like US-1234567"
+    searches the corpus for that document's own words, which is how a follow-up drifts off the invention."""
+    out = _run_deep_plan(
+        "docText.set('US-A1','A wrist strap holding an infrared emitter against the skin surface.');\n"
+        "docText.set('US-B2','A photodiode array reading reflected light through living tissue.');\n"
+        "const text = '1. A wrist worn device measuring blood glucose.\\n"
+        "2. An infrared emitter under the strap.\\n3. A photodiode reading the reflection.';\n"
+        "const full = deepPlan(text, ['US-A1']);\n"
+        "const foc = deepPlanFocused(text, ['US-A1','US-B2'], ['US-B2']);\n"
+        "const none = deepPlanFocused(text, ['US-NOTSEEN'], ['US-NOTSEEN']);\n"
+        "console.log(JSON.stringify({\n"
+        "  fullHasWhole: full.legs.some(l => l.feature === 'the disclosure as a whole'),\n"
+        "  focHasWhole: foc.legs.some(l => l.feature === 'the disclosure as a whole'),\n"
+        "  focFeatures: foc.legs.map(l => l.feature),\n"
+        "  focFirstLike: (foc.legs[0]||{}).like,\n"
+        "  focCrossHasSubject: foc.legs.filter(l => /against one feature/.test(l.feature))\n"
+        "                         .every(l => /wrist|glucose/i.test(l.text)),\n"
+        "  focNotes: foc.notes,\n"
+        "  noneLegs: none.legs.length, noneNotes: none.notes,\n"
+        "}));\n")
+
+    # The ordinary press still leads with the whole disclosure; the follow-up must not.
+    assert out["fullHasWhole"] is True
+    assert out["focHasWhole"] is False, "a follow-up re-put the disclosure the earlier press already put"
+
+    # Newly marked first: it is the reason the press is happening.
+    assert out["focFirstLike"] == "US-B2"
+    assert out["focFeatures"][0] == "like US-B2"
+    # Every marked document is walked outward AND crossed with the disclosure's features.
+    assert "like US-A1" in out["focFeatures"]
+    assert sum(1 for f in out["focFeatures"] if "against one feature" in f) >= 2
+    # The crossing carries the disclosure's own subject, or the follow-up drifts off the invention.
+    assert out["focCrossHasSubject"] is True
+
+    # What is NOT being put has to be said, or a shorter list reads as a smaller search.
+    assert any("are not repeated" in n and "already in this matter's record" in n for n in out["focNotes"])
+    assert any("newest mark first" in n for n in out["focNotes"])
+
+    # A marked document this matter has never seen the text of cannot be walked outward from, and the
+    # press must say that rather than quietly putting nothing.
+    assert out["noneLegs"] == 0
+    assert any("none could be walked outward from" in n for n in out["noneNotes"])
+
+
+def test_the_follow_up_shape_is_chosen_from_the_text_and_marks_of_the_last_press():
+    """A follow-up is "same description, different marks" — and BOTH halves matter. Same text and same
+    marks is the repeat the tool refuses outright; a changed description is an ordinary press again,
+    because the disclosure's own queries have not been put in their new form."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index('name: "deep_prior_art_search"')
+    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+
+    assert "last.text_key === deepTextKey(text)" in body
+    assert "last.marks_key !== deepMarksKey(relevant)" in body
+    assert "relevant.length > 0" in body, "a follow-up with nothing marked would plan no queries at all"
+    assert "deepPlanFocused(text, relevant, fresh) : deepPlan(text, relevant)" in body
+
+    # The record says which shape ran, so nobody has to re-derive why a press put six queries about two
+    # documents instead of the disclosure.
+    assert 'shape: followUp ? "focused on your marks" : "the whole disclosure"' in body
+    assert "text_key: deepTextKey(text)" in body
+
+    # The earlier marks are read back through the function that wrote them, not by indexing a structure.
+    assert "function deepMarksOf(" in ts
+    assert "deepMarksOf(last)" in body

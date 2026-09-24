@@ -117,3 +117,105 @@ def test_the_folder_is_private(tmp_path):
     dest = C.write_client_audit(tmp_path / "ca")
     assert stat.S_IMODE(dest.stat().st_mode) == 0o700
     assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in dest.iterdir() if p.is_file())
+
+
+# ── auditing an artifact instead of the running copy (24 Sep) ──
+
+def _wheel(tmp_path, *, files=None, version="9.9.9", name="thing-9.9.9-py3-none-any.whl"):
+    """A minimal wheel carrying the anchors the brief names, so these tests exercise the real writer."""
+    import zipfile
+    from inferroute_cli import probant_client_audit as A
+    whl = tmp_path / name
+    body = dict(files or {})
+    # Two anchors can name the SAME file (session.py carries _send_sealed and _refuse). Append rather than
+    # setdefault, or the second symbol of each pair is missing and the writer rightly refuses.
+    for rel, symbol in A.ANCHORS:
+        body[rel] = body.get(rel, "") + f"def {symbol}():\n    pass\n"
+    with zipfile.ZipFile(whl, "w") as z:
+        for rel, text in body.items():
+            z.writestr(rel, text)
+        z.writestr("thing-9.9.9.dist-info/METADATA", f"Metadata-Version: 2.1\nName: inferroute\nVersion: {version}\n")
+    return whl
+
+
+def test_a_wheel_audit_says_it_covered_the_file_and_not_what_runs(tmp_path, monkeypatch):
+    """The point of auditing the package file is that it can be read BEFORE it is installed or run. That
+    only helps if the brief is exact about it: a reader who takes an audit of a downloaded file for an
+    audit of what is on their path has been told something untrue by omission."""
+    from inferroute_cli import probant_client_audit as A
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "probant"))
+    whl = _wheel(tmp_path)
+    dest = A.write_client_audit(tmp_path / "out", wheel=whl)
+    m = json.loads((dest / "INSTALLED.json").read_text())
+
+    assert m["audited"] == "wheel"
+    assert m["version"] == "9.9.9"                         # the WHEEL's version, not the running package's
+    assert m["artifact_sha256"] == hashlib.sha256(whl.read_bytes()).hexdigest()
+    # An installed copy's interpreter says what runs it; a wheel has not been installed anywhere, so
+    # reporting the auditing machine here would invite it to be read as the audited one.
+    assert "python" not in m and "platform" not in m
+
+    brief = (dest / "CLIENT-AUDIT.md").read_text()
+    assert "before installing it" in brief
+    assert "It is **not** what will run" in brief
+    assert "is what you are reading what actually runs?" not in brief   # the installed-copy framing
+
+
+def test_the_installed_audit_still_describes_the_running_copy(tmp_path, monkeypatch):
+    from inferroute_cli import probant_client_audit as A
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "probant"))
+    m = json.loads((A.write_client_audit(tmp_path / "out") / "INSTALLED.json").read_text())
+    assert m["audited"] == "installed" and m["python"] and "artifact_sha256" not in m
+
+
+def test_a_wheel_that_would_write_outside_the_folder_is_refused(tmp_path):
+    """A wheel from a link is untrusted input, and a zip entry may name a path outside the directory it is
+    unpacked into. Checked before anything is written, not after."""
+    import zipfile
+    from inferroute_cli import probant as S
+    from inferroute_cli import probant_client_audit as A
+    whl = tmp_path / "evil-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(whl, "w") as z:
+        z.writestr("../escaped.py", "x = 1\n")
+    out = tmp_path / "unpack"
+    out.mkdir()
+    with pytest.raises(S.ProbantError) as e:
+        A.extract_wheel(whl, out)
+    assert "outside the folder" in str(e.value)
+    assert not (tmp_path / "escaped.py").exists()          # and nothing was written on the way to refusing
+
+
+def test_a_missing_anchor_in_a_delivered_file_is_not_called_our_bug(tmp_path, monkeypatch):
+    """In the copy we ship, a missing anchor is our mistake. In a file that arrived from somewhere it is a
+    fact about that file — an old version, or not our software at all — and telling the person it is our
+    bug would talk them out of the more serious reading."""
+    import zipfile
+    from inferroute_cli import probant as S
+    from inferroute_cli import probant_client_audit as A
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "probant"))
+    whl = tmp_path / "hollow-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(whl, "w") as z:
+        z.writestr("inferroute_cli/__init__.py", "")
+        z.writestr("hollow-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: inferroute\nVersion: 1.0\n")
+    with pytest.raises(S.ProbantError) as e:
+        A.write_client_audit(tmp_path / "out", wheel=whl)
+    msg = str(e.value)
+    assert "Do NOT read this as a bug in InferRoute" in msg
+    assert "do not install it" in msg
+    assert "bug in InferRoute, not in your installation" not in msg
+
+
+def test_only_https_and_only_a_wheel_can_be_fetched(tmp_path):
+    from inferroute_cli import probant as S
+    from inferroute_cli import probant_client_audit as A
+    for bad, why in (("http://example.invalid/x.whl", "https"), ("https://example.invalid/x.tar.gz", ".whl")):
+        with pytest.raises(S.ProbantError) as e:
+            A.fetch_wheel(bad, tmp_path)
+        assert why in str(e.value)
+
+
+def test_a_file_and_a_link_cannot_both_be_audited(tmp_path):
+    from inferroute_cli import probant as S
+    from inferroute_cli import probant_client_audit as A
+    with pytest.raises(S.ProbantError):
+        A.write_client_audit(tmp_path / "out", wheel=tmp_path / "x.whl", url="https://example.invalid/x.whl")

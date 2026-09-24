@@ -562,6 +562,8 @@ def main(argv: list[str] | None = None) -> int:
     ca = sub.add_parser("audit-client", help="a brief your OWN AI can use to audit this software itself, "
                                              "with the hashes of every file it should read")
     ca.add_argument("-o", "--out", default="", help="where to write it (default: beside your matters)")
+    ca.add_argument("--wheel", default="", help="audit a .whl FILE instead of the installed copy — before you install it")
+    ca.add_argument("--url", default="", help="download the client from a link and audit that file, without installing it")
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
@@ -607,7 +609,7 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_proof(a.matter)
         if a.cmd == "audit-client":
             from . import probant_client_audit
-            dest = probant_client_audit.write_client_audit(a.out or None)
+            dest = probant_client_audit.write_client_audit(a.out or None, wheel=a.wheel or None, url=a.url)
             n = len(json.loads((dest / "INSTALLED.json").read_text())["files"])
             print(f"\n  A brief for your own AI, about this software:\n")
             print(f"      {dest}\n")

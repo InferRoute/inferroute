@@ -690,7 +690,23 @@ def verify_bundle(bundle_dir: str, extra_args: Optional[List[str]] = None) -> in
 WITHHELD_FIELDS = ("query_text", "result", "text")
 
 AUDIT_PROMPT = "Read AUDIT.md in this folder and do what it says."
-AUDIT_IR_MODEL = "kimi-k2.6"       # enclave-backed: the confidential lane by default
+AUDIT_IR_MODEL = "kimi-k2.6"
+
+
+def audit_command(agent: str) -> str:
+    """The exact command for the audit, composed in ONE place: the panel shows it and the launcher runs it,
+    and two constructions of it would let the shown text and the run text drift apart.
+
+    `--plain` is deliberate, not an oversight. The confidential lane exists to keep a client's unfiled
+    invention out of the clear, and this pack has none of it: the query, result and document text are
+    withheld from every row, the evidence files carry hardware reports and check steps, and the folder name
+    carries no matter name — because a matter name can say what the invention is. With nothing to seal, the
+    lane buys the auditor nothing and costs them a proof card and a wait on a keypress before any work
+    starts. If the pack ever carries the professional's words again, this goes back to the sealed lane."""
+    import shlex
+    if agent == "claude":
+        return f"claude {shlex.quote(AUDIT_PROMPT)}"
+    return f"ir --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
 
 AUDIT_MD = """# Audit brief: an independent check of a sealed prior-art search record
 

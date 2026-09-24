@@ -344,9 +344,12 @@ InferRoute SASU
   whether Henry objects to Santarelli using Claude Team and ChatGPT Business. The letter now invites him to
   point that exact tooling at our evidence.
 - **Note for when he does it:** the audit brief tells the auditor to treat the shipped verifier as
-  untrusted and to compare it against the published package. That instruction only works once 0.9.3 is
-  released — it is the version that carries verify_record.py. Releasing and inviting the audit are one
-  decision, not two.
+  untrusted and to compare it against the published package. That comparison now has something to compare
+  against — 0.9.14 is served at the link above, and its sha256 is beside it — but note the limit the brief
+  itself states: the published copy is InferRoute's too, and it is published from the same machine the
+  records are made on. It answers "was this minted here?" only for someone who can rule that out, which
+  today nobody can. The value he records from THIS letter at first use is the copy that carries weight;
+  that is why the publication key fingerprint is in the letter rather than only on the page.
 - **The question asks about LEGAL VALIDITY, not about value** (Henry, 23 Sep). "Est-ce que le certificat
   vaut ce que je crois qu'il vaut ?" asked him to rate our self-assessment — vague, and it invites a polite
   answer. "Est-ce qu'une telle pièce a une valeur juridique ?" is a question inside his competence that has
@@ -364,5 +367,7 @@ InferRoute SASU
   argued: unless it is obtained another way — a call, or the trial at Build 2 — the next engine version
   gets built without the one input the recall session calls its principal unknown. Worth raising by voice
   when he replies.
-- **Blocked on:** 0.9.3 release (he cannot install today) and IP clearance. The email promises instructions
-  "dès que la version est prête", which commits you to nothing.
+- **Blocked on:** IP clearance only. The install blocker is gone — 0.9.14 is live at the link and installs
+  with the two commands above, verified by fetching it back and comparing hashes on 24 Sep. The email's
+  "dès que la version est prête" can therefore be dropped or kept; keeping it commits you to nothing, and
+  dropping it removes a hedge that no longer describes the state.

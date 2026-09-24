@@ -959,7 +959,7 @@ def test_the_two_places_that_decide_a_repeat_share_one_predicate():
     start = ts.index('name: "deep_prior_art_search"')
     body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
     # The refusal happens BEFORE the plan is built and before anything is sent.
-    assert body.index("last.inputs_key === inputsKey") < body.index("const plan = followUp ?")
+    assert body.index("last.inputs_key === inputsKey") < body.index("const plan = composed.length ?")
     assert "Nothing was sent." in body
     # It must say what WOULD make a press different, or it is a dead end rather than a step.
     # The source wraps this sentence, so match the halves rather than the rendered line.
@@ -1068,12 +1068,81 @@ def test_the_follow_up_shape_is_chosen_from_the_text_and_marks_of_the_last_press
     assert "last.marks_key !== deepMarksKey(relevant)" in body
     assert "relevant.length > 0" in body, "a follow-up with nothing marked would plan no queries at all"
     assert "deepPlanFocused(text, relevant, fresh) : deepPlan(text, relevant)" in body
+    # A COMPOSED generation is not derived from the description and the marks, so it is chosen first and
+    # the repeat guard must not apply to it — or round two would be refused as a duplicate of round one.
+    assert "const plan = composed.length ? deepPlanComposed(" in body
+    assert "if (!composed.length && last && last.inputs_key === inputsKey)" in body
 
     # The record says which shape ran, so nobody has to re-derive why a press put six queries about two
     # documents instead of the disclosure.
-    assert 'shape: followUp ? "focused on your marks" : "the whole disclosure"' in body
+    assert 'shape: composed.length ? "composed from the last round"' in body
+    assert 'followUp ? "focused on your marks" : "the whole disclosure"' in body
     assert "text_key: deepTextKey(text)" in body
 
     # The earlier marks are read back through the function that wrote them, not by indexing a structure.
     assert "function deepMarksOf(" in ts
     assert "deepMarksOf(last)" in body
+
+
+def test_round_two_is_composed_by_the_assistant_because_a_tool_cannot_call_a_model():
+    """Henry, 25 Sep: "round two should be agentic with everything that could be relevant as context from
+    the previous results to derive a new search generation".
+
+    The extension API has no sampling call — `sendMessage` injects, it does not return — so nothing inside
+    one press can ask a model what to search next. But the assistant that called this tool IS a model and
+    it already holds every hit the press returned, because they came back into the conversation. So the
+    press ends by handing it a brief, and it calls the tool again with the queries it composed. The loop
+    runs in the trace, where the professional can watch it and cannot steer it."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index('name: "deep_prior_art_search"')
+    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+
+    # The way in: queries the assistant composed, and its reason for them.
+    assert "queries: Type.Optional(Type.Array(Type.String()" in body
+    assert "because: Type.Optional(Type.String(" in body
+
+    # The way round: the brief that asks for the next generation, and what it forbids.
+    assert "NEXT ROUND — for you, the assistant, not for the professional to answer" in body
+    assert "call deep_prior_art_search again with " in body
+    assert "Do NOT ask permission: the professional approved sealed " in body
+    assert "say so " in body and "instead of putting queries to have put them" in body
+    # It is IN the ledger the assistant reads, not only in a comment.
+    assert "\n\t\t\t\tnextRound," in body
+
+    # A round is asked for only when something went unreached. Every leg contributing is a survey that did
+    # its job, and asking for more then is an agent finding work rather than finding art.
+    assert "const nextRound = (gaps.length && roundsLeft > 0 && sent > 0)" in body
+    assert "const roundsLeft = DEEP_GENERATIONS - generation;" in body
+
+    # A cap that is enforced where the queries arrive, not only advertised in the brief.
+    assert "if (composed.length && generation > DEEP_GENERATIONS)" in body
+    assert "which is the limit for one " in body
+    assert "const DEEP_GENERATIONS = 3;" in ts
+
+    # And the professional sees which round it was and why — these are the queries nobody read before they
+    # were sent, so an account of them is the one thing owed.
+    assert "generation, of: DEEP_GENERATIONS, because:" in body
+
+
+def test_a_composed_round_puts_the_queries_it_was_given_and_says_whose_they_were():
+    """The composed planner must not rewrite what the model chose: the record has to show the model's own
+    queries, not our improvement of them. It still deduplicates and obeys the per-press cap, because those
+    are limits on the machine rather than edits to the choice."""
+    out = _run_deep_plan(
+        "const p = deepPlanComposed(['a wrist strap with an infrared emitter against skin',\n"
+        "  'a wrist strap with an infrared emitter against skin',\n"
+        "  'photodiode array reading reflected light through tissue',\n"
+        "  'too short'], 'leg 3 found nothing, so both rewordings go at it');\n"
+        "const none = deepPlanComposed(['photodiode array reading reflected light through tissue'], '');\n"
+        "console.log(JSON.stringify({ texts: p.legs.map(l => l.text), features: p.legs.map(l => l.feature),\n"
+        "  notes: p.notes, noReason: none.notes }));\n")
+
+    # Put verbatim, deduplicated, and the too-short one dropped by the caller's own filter (not here).
+    assert out["texts"] == ["a wrist strap with an infrared emitter against skin",
+                            "photodiode array reading reflected light through tissue",
+                            "too short"]
+    assert set(out["features"]) == {"composed from the last round"}
+    assert any("composed from what the last round returned" in n for n in out["notes"])
+    assert any("leg 3 found nothing" in n for n in out["notes"]), "the model's reason is not in the ledger"
+    # A round with no reason given is itself worth reporting, not quietly accepted.
+    assert any("no reason was given for this round" in n for n in out["noReason"])

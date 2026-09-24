@@ -1002,7 +1002,11 @@
         e.sub.textContent = "";
         e.notes.hidden = false;
         e.notes.textContent = `${d.sent}/${d.planned} queries · ${d.documents} documents`;
-        e.title.textContent = `🔍 Deep prior-art survey`;
+        // WHICH ROUND. A second press that looks identical to the first is how an autonomous survey reads
+        // as a repeat; the round, and the reason the assistant gave for it, are what make it legible.
+        e.title.textContent = d.generation > 1
+          ? `🔍 Deep prior-art survey · round ${d.generation} of ${d.of || d.generation}`
+          : `🔍 Deep prior-art survey`;
         clear(e.body);
         // `.card-body` carries no padding of its own — in an ordinary search card every child brings its
         // own (`.card-query`, `.doc`, `.card-foot`). Bare divs appended here sat flush against the border.
@@ -1011,6 +1015,10 @@
           // WHY it was this size: the count alone reads as the search having given up, and the reasons are
           // the part the professional can act on.
           el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`),
+          // The assistant's own reason for a composed round, shown to the professional rather than kept in
+          // the record: these are the queries nobody read before they were sent, so the one thing owed is
+          // an account of why they were.
+          d.because ? el("div", "deep-because", `Why this round: ${d.because}`) : null,
           deepCoverage(d)));
         for (const leg of d.legs || []) {
           const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";

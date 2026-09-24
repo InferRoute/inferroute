@@ -538,6 +538,10 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .deep-leg.failed .deep-leg-head { color: var(--bad); }
 /* Where the press did not reach. Inside `.deep-summary`, which already carries the padding — a block of
    its own here would sit flush against the card border, the defect this file was corrected for once. */
+/* The assistant's reason for a round it composed. Set apart because it is the machine's account of its
+   own choice, not a fact about the search. */
+.deep-because { margin-top: 8px; padding: 6px 9px; border-left: 2px solid var(--accent); background: var(--accent-soft);
+                font-size: 13px; }
 .deep-coverage { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 13px; }
 .deep-coverage div + div { margin-top: 4px; }
 .deep-coverage .sub { color: var(--faint); font-size: 12px; }

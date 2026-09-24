@@ -154,18 +154,30 @@ Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans 
 ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
 vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
 
-Il me faut pour cela votre **clé publique**. Le client est en pièce jointe ; quatre commandes, et la
-dernière l'affiche :
+Il me faut pour cela votre **clé publique**. Quatre commandes dans un terminal, et la dernière l'affiche :
 
 ```
-cd ~/Downloads
+curl -LO https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.3-py3-none-any.whl
 python3 -m venv ~/probant
 ~/probant/bin/pip install "./inferroute-0.9.3-py3-none-any.whl[confidential]"
 ~/probant/bin/ir probant identity
 ```
 
-(La première ligne suppose que la pièce jointe a été enregistrée dans « Téléchargements » ; sinon,
-remplacez-la par le dossier où elle se trouve.)
+Un lien plutôt qu'une pièce jointe : les passerelles de messagerie rejettent volontiers ce type de fichier,
+et un lien peut être retiré, ce qu'une pièce jointe dans une boîte aux lettres ne peut plus être. L'adresse
+n'est publiée nulle part et ne mène qu'à ce fichier.
+
+Le programme est du Python en clair sur votre disque : il se lit entièrement, sans avoir à nous croire.
+Si vous souhaitez le faire examiner, deux commandes produisent le dossier à remettre tel quel à votre
+propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
+
+```
+~/probant/bin/ir probant audit-client          # la copie installée, celle qui s'exécute chez vous
+~/probant/bin/ir probant audit-client --url …  # le fichier publié, tel qu'il est distribué
+```
+
+Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
+qui a été publié. Les questions sont de nous ; les conclusions seront de lui, pas de nous.
 
 Vous me renvoyez ce qu'elle affiche. Cette clé ne contient que des clés publiques : elle ne permet rien
 d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit

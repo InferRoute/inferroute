@@ -940,6 +940,14 @@
           list.append(row);
         }
         e.body.append(list);
+        // Each leg in the outline, so a press is navigable rather than one entry covering six searches.
+        // The card stays collapsible in the conversation; the index is how you get INTO it.
+        for (const leg of d.legs || []) {
+          if (!leg.about) continue;
+          outlineAdd({ kind: "search", el: e.card, entry: e,
+                       label: leg.searchNo ? `Search ${leg.searchNo}` : "Search",
+                       detail: `${leg.about.slice(0, 54)}${leg.about.length > 54 ? "…" : ""}` });
+        }
         e.body.append(el("p", "sub", "These are the combined results of separate queries, not a merged "
           + "ranking: the same invention can appear more than once under different publication numbers."));
       }
@@ -1262,7 +1270,18 @@
       case "assistant_end": assistantEnd(ev); break;
       case "tool_start": toolStart(ev); break;
       case "tool_end": toolEnd(ev); break;
-      case "tool_progress": setPhase(cards.get(ev.call), ev.phase, ev.at); break;
+      case "tool_progress": {
+        const e = cards.get(ev.call);
+        // A survey's position, so a press that runs for minutes shows movement rather than the same three
+        // phase names. The page composes the words; only integers crossed.
+        if (e && e.deep && Number.isInteger(ev.steps) && Number.isInteger(ev.step)) {
+          e.step = ev.step;
+          e.steps = ev.steps;
+          if (!e.done) e.sub.textContent = `search ${ev.step} of ${ev.steps} — ${PHASE_TEXT[ev.phase] || "working"}…`;
+        }
+        setPhase(e, ev.phase, ev.at);
+        break;
+      }
       case "search_timing": searchTiming = ev.stats || null; break;
       case "dialog": queueDialog(ev); break;
       case "dialog_closed": dropDialog(ev.id); break;

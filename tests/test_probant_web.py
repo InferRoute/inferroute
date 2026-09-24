@@ -1194,3 +1194,35 @@ def test_a_deep_survey_card_folds_and_reaches_the_outline_like_a_search():
     # The head holds the counts you read folded; the body holds what you open it for.
     end = js[js.index('if (ev.tool === "deep_prior_art_search") {', js.index("function toolEnd") if "function toolEnd" in js else 0):]
     assert "e.notes.textContent" in end and "e.body.append" in end
+
+
+def test_a_survey_reports_its_position_and_the_channel_carries_only_integers():
+    """A press is several sealed searches and takes minutes. With only a phase name the card repeats the
+    same three words and reads as stalled — Henry, 24 Sep: "it would be nice if it didn't stall for that
+    long… instead showed more of the steps."
+
+    Position crosses as two integers and nothing else. The rule it sits under exists because a partial
+    result "for another tool could carry anything", and a channel that admits only bounded ints cannot
+    become a content channel by accident later. The page composes the words."""
+    ev = {"type": "tool_execution_update", "toolCallId": "c1",
+          "partialResult": {"details": {"phase": "searching", "step": 3, "steps": 6}}}
+    out = W.normalize(ev)
+    assert out and out[0]["step"] == 3 and out[0]["steps"] == 6
+
+    # Anything that is not a small int is dropped, including bools and out-of-range values.
+    for bad in ({"phase": "searching", "step": "3", "steps": 6},
+                {"phase": "searching", "step": True, "steps": 6},
+                {"phase": "searching", "step": 400, "steps": 6},
+                {"phase": "searching", "step": {"n": 1}, "steps": 6}):
+        got = W.normalize({"type": "tool_execution_update", "toolCallId": "c1",
+                           "partialResult": {"details": bad}})[0]
+        assert "step" not in got, f"{bad['step']!r} reached the page"
+
+    # And no free text rides along, whatever the tool puts there.
+    got = W.normalize({"type": "tool_execution_update", "toolCallId": "c1", "partialResult": {"details": {
+        "phase": "searching", "step": 1, "steps": 2, "about": "a document's text", "result": "leak"}}})[0]
+    assert set(got) == {"kind", "call", "phase", "step", "steps"}
+
+    # The page turns them into words rather than being sent words.
+    js = (STATIC / "app.js").read_text()
+    assert "search ${ev.step} of ${ev.steps}" in js

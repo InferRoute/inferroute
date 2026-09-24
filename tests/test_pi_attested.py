@@ -1146,3 +1146,49 @@ def test_a_composed_round_puts_the_queries_it_was_given_and_says_whose_they_were
     assert any("leg 3 found nothing" in n for n in out["notes"]), "the model's reason is not in the ledger"
     # A round with no reason given is itself worth reporting, not quietly accepted.
     assert any("no reason was given for this round" in n for n in out["noReason"])
+
+
+def test_the_record_says_whether_the_assistant_acted_on_the_next_round_brief():
+    """The NEXT ROUND brief is an instruction with no enforcement of its own, and instructions of that
+    shape have failed here three times in five — the claim-numbering one, written more firmly twice and
+    still ignored. I will not assume this one binds because I wrote it more carefully.
+
+    So the question is answered by ordinary use rather than by my opinion. Check design from
+    sealed-research, 25 Sep: record (brief_emitted, generation) per press and read the conditional rate.
+    A press that asked and was not followed is the signal, and it is only visible if both halves are
+    written down.
+
+    The count is computed FROM the rows every time it is read, never stored beside them: a second copy of
+    a count drifts from what it counts, and this number exists to be trusted."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(PA.__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "brief_follow_sim.ts")],
+                       cwd=root, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "strip-types" in r.stderr:
+        pytest.skip("this node cannot strip TypeScript")
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert out["noBriefs"] == {"briefs_emitted": 0, "briefs_followed": 0,
+                               "note": "no press asked for another round in this sitting"}
+    assert (out["followed"]["briefs_emitted"], out["followed"]["briefs_followed"]) == (1, 1)
+    # The signal this exists to catch.
+    assert (out["ignored"]["briefs_emitted"], out["ignored"]["briefs_followed"]) == (1, 0)
+    # A professional pressing the button again is NOT the assistant obeying: two first presses are two
+    # briefs and no follow-through. Without this the number would flatter itself on ordinary use.
+    assert (out["anotherFirstPress"]["briefs_emitted"], out["anotherFirstPress"]["briefs_followed"]) == (2, 0)
+    assert (out["twoRounds"]["briefs_emitted"], out["twoRounds"]["briefs_followed"]) == (2, 2)
+    # A press written before generations existed counts as the first, not as a gap.
+    assert (out["legacy"]["briefs_emitted"], out["legacy"]["briefs_followed"]) == (1, 1)
+
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    # Both halves are recorded, and the summary is derived rather than kept beside the rows.
+    assert "brief_emitted: Boolean(nextRound)," in ts
+    assert "deep_brief_follow_through: this.briefFollowThrough()" in ts
+    assert "brief_follow_through:" not in ts.replace("deep_brief_follow_through:", ""), \
+        "a stored copy of the count would drift from the rows it counts"

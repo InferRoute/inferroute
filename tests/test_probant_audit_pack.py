@@ -6,6 +6,7 @@ the only check lines allowed to differ are the ones that need the withheld text,
 SKIP, never PASS.
 """
 import json
+from types import SimpleNamespace
 import re
 import stat
 
@@ -491,3 +492,34 @@ def test_the_receipt_carries_the_evidence_its_verdicts_were_computed_from():
     # And the brief tells the auditor it is there and what to do with it, or the bytes sit unread.
     for must in ("`attestation`", "Recompute the verdicts from it", "attested_body", "GPU report"):
         assert must in E.AUDIT_MD.replace("\n   ", " "), must
+
+
+def test_an_unreadable_session_record_keeps_its_searches_and_says_so(tmp_path, monkeypatch):
+    """24 Sep, the most expensive finding of the day. An Opus audit returned NOT VERIFIED on "nothing
+    removed": the enclave-wide signed counter jumped 9 → 15 and the record did not account for operations
+    10-14. Nothing had been removed. One session's record file was corrupt — two concurrent writers, one
+    shared .tmp — and `_sessions()` caught ValueError and `continue`d, taking that session's five searches
+    out of the export with it.
+
+    So a write race became, to a careful reader, evidence of tampering. The searches are a separate file,
+    intact and individually signed; they stay, and the record says the session's own description is missing
+    rather than letting the gap speak for itself. A silent omission is indistinguishable from removal."""
+    from inferroute_cli import probant_export as E
+    rdir = tmp_path / "recs"
+    rdir.mkdir()
+    (rdir / "s1.json").write_text('{"session_id": "s1"}')
+    (rdir / "s1.searches.jsonl").write_text('{"statement": {"seq": 1}}\n')
+    # A complete record followed by a fragment: exactly the shape the shared-tmp race leaves behind.
+    (rdir / "s2.json").write_text('{"session_id": "s2"}\n  "search_enclave": "saw 5 query(ies)"\n}\n')
+    (rdir / "s2.searches.jsonl").write_text('{"statement": {"seq": 2}}\n{"statement": {"seq": 3}}\n')
+    got = E._load_sessions(SimpleNamespace(records_dir=lambda c, m: rdir), "C", "m")
+    ids = [s["session_id"] for s in got]
+    assert ids == ["s1", "s2"], f"a session vanished from the export: {ids}"
+    bad = [s for s in got if s["session_id"] == "s2"][0]
+    assert bad["record"].get("unreadable") is True
+    assert "could not be read" in bad["record"]["why"]
+    # The evidence survives: its searches are intact and signed independently of the record file.
+    assert [r["statement"]["seq"] for r in bad["searches"]] == [2, 3]
+    # And the sequence across the export has no hole to misread.
+    seqs = [r["statement"]["seq"] for s in got for r in s["searches"]]
+    assert seqs == [1, 2, 3]

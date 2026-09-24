@@ -224,12 +224,26 @@ def _load_sessions(S, client: str, matter: str) -> list:
         for f in sorted(rdir.glob("*.json")):
             if f.name.endswith(".tmp"):
                 continue
+            sid = f.stem
+            searches = _read_jsonl(rdir / f"{sid}.searches.jsonl")
             try:
                 rec = json.loads(f.read_text())
-            except (OSError, ValueError):
-                continue
-            sid = f.stem
-            sessions.append({"session_id": sid, "record": rec, "searches": _read_jsonl(rdir / f"{sid}.searches.jsonl")})
+            except (OSError, ValueError) as e:
+                # A session whose own metadata cannot be read used to be SKIPPED, silently, taking its
+                # searches with it. On 24 Sep that produced a record whose enclave-wide counter jumped from
+                # 9 to 15, and an auditor correctly returned NOT VERIFIED on "nothing removed" — operations
+                # were missing and nothing accounted for them. They had not been removed: one record file
+                # was corrupt and the export said nothing.
+                #
+                # The searches themselves are a separate, intact, signed file. They stay. What is lost is
+                # the session's own description, and the record now says so where the reader will meet the
+                # gap, because a silent omission is indistinguishable from evidence being taken out.
+                rec = {"session_id": sid, "unreadable": True,
+                       "why": f"this session's record file could not be read ({type(e).__name__}); its "
+                              "searches below are intact and still signed, but nothing here describes the "
+                              "session itself",
+                       "searches_kept": len(searches)}
+            sessions.append({"session_id": sid, "record": rec, "searches": searches})
     return sessions
 
 

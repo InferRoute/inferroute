@@ -896,3 +896,51 @@ def test_a_record_with_neither_searches_nor_a_session_still_says_failed(tmp_path
     assert "RESULT: NOTHING VERIFIED" in out          # still an absence, but nothing to point the auditor at
     assert "session receipt(s) present" not in out
     assert code == 1
+
+
+def test_the_verifier_compiles_on_every_python_it_claims_to_support():
+    """It says "It needs Python 3.9+"; on 24 Sep it did not compile on 3.11 at all, failing at line 836.
+
+    This is the one file we hand a third party and ask them to RUN. It was written and only ever tried on
+    3.12, where two constructs are legal that are syntax errors before it: a backslash inside an f-string
+    expression, and an f-string expression spanning two lines. Debian 12 ships 3.11 and Ubuntu 22.04 ships
+    3.10, so the audit this whole pack exists to invite would have died at the first command on a typical
+    firm's laptop — and never on ours.
+
+    The static scan always runs. The real compile runs wherever an older interpreter can be found, because
+    a scan for two known shapes cannot promise there is no third."""
+    import re
+    import shutil
+    import subprocess
+    src = (Path(V.__file__).resolve() if hasattr(V, "__file__")
+           else Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "verify_record.py")
+    if src.is_dir() or not src.name.endswith(".py"):
+        src = Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "verify_record.py"
+    text = src.read_text()
+
+    # (1) No backslash inside an f-string expression.
+    for n, line in enumerate(text.split("\n"), 1):
+        for m in re.finditer(r'f"[^"\n]*?\{([^{}\n]*)\}', line):
+            assert "\\" not in m.group(1), f"line {n}: backslash in an f-string expression"
+
+    # (2) The claimed floor, stated in the file, is what we test against.
+    claimed = re.search(r"needs Python (\d)\.(\d+)\+", text)
+    assert claimed, "the file no longer states which Python it needs"
+
+    # (3) A real compile on the oldest interpreter this machine can produce.
+    older = []
+    for name in ("python3.9", "python3.10", "python3.11"):
+        found = shutil.which(name)
+        if found:
+            older.append(found)
+    if not older:
+        for name in ("3.9", "3.10", "3.11"):
+            r = subprocess.run(["uv", "python", "find", name], capture_output=True, text=True)
+            if r.returncode == 0 and r.stdout.strip():
+                older.append(r.stdout.strip())
+    if not older:
+        pytest.skip("no interpreter older than this one is available to compile against")
+    for exe in older:
+        r = subprocess.run([exe, "-c", f"compile(open({str(src)!r}).read(), 'v', 'exec')"],
+                           capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, f"{exe} cannot compile the verifier:\n{r.stderr[-400:]}"

@@ -523,3 +523,42 @@ def test_an_unreadable_session_record_keeps_its_searches_and_says_so(tmp_path, m
     # And the sequence across the export has no hole to misread.
     seqs = [r["statement"]["seq"] for s in got for r in s["searches"]]
     assert seqs == [1, 2, 3]
+
+
+def test_the_brief_asks_for_one_plain_statement_about_confidentiality():
+    """Henry, 24 Sep: "it would be nice to ask the audit agent to produce at the end a simple sentence
+    stating what is true in terms of what privacy is achieved/proven."
+
+    Four audits produced tables of eight verdicts and no sentence a professional could read to a client.
+    The table is the working; this is the answer. It is also the line most likely to be quoted on its own,
+    which is why the brief bounds what it may assert rather than only asking for it: the tempting sentence
+    — "the invention was never exposed" — is stronger than anything attestation can establish, because no
+    hardware evidence says what software did with a text after decrypting it."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "Last: one plain statement about confidentiality" in b
+    assert "Write it LAST, from the verdicts you reached" in b
+    # The forbidden claims are named, not left to judgement.
+    for phrase in ('"was never exposed"', '"could not have been read"', '"remained confidential"'):
+        assert phrase in b, phrase
+    assert "what software did with a text after decrypting it" in b
+    # And the claim-3 constraint: no calling it InferRoute's machine on hardware evidence alone.
+    assert "you may not call the machine InferRoute's" in b
+
+
+def test_the_brief_names_the_substitution_by_its_symptom():
+    """Two auditors answered `verify_record.py`'s check names instead of these claims, on a pack that
+    ALREADY carried the instruction to quote each claim's title — I checked the pack rather than assuming.
+    One of the two had predicted it: "a mechanical requirement that doesn't create its own enforcement is
+    exactly the kind of instruction that gets dropped once the work gets interesting."
+
+    So the brief now names the symptom rather than restating the rule. An auditor cannot check whether it
+    obeyed an instruction it has forgotten, but it can notice that its own report has a claim 4 about query
+    text — which is a check name, and a claim this list does not contain."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert 'a "claim 4" about query text matching a hash' in b
+    assert "you are answering the verifier's list and not this one" in b
+    assert "Claim 4 here is whether the statements are untampered" in b

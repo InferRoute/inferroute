@@ -1287,6 +1287,37 @@ export default function (pi: ExtensionAPI) {
 	// It stays deterministic and it stays the professional's selection. A press that read the earlier
 	// RESULTS and chose for itself which to follow is a different thing, held behind the IP gate and behind
 	// a bench measurement; this is the human's choice given better queries, which needs neither.
+	// How many rounds one sitting may run. A cap, not a target: each round is real money and real queries
+	// to a sealed machine, and an agent that can always justify one more round will.
+	const DEEP_GENERATIONS = 3;
+
+	function lastGeneration(fanout: { generation?: number } | undefined): number {
+		const n = fanout && typeof fanout.generation === "number" ? fanout.generation : 0;
+		return Number.isFinite(n) && n > 0 ? n : 1;
+	}
+
+	// A generation the ASSISTANT composed from what the previous round returned. The queries are put as
+	// given: this planner does not rewrite them, because the whole point is that a model chose them and the
+	// record has to show what the model chose rather than what we made of it.
+	function deepPlanComposed(queries: string[], because: string): DeepPlan {
+		const legs: DeepLeg[] = [];
+		const seen = new Set<string>();
+		for (const q of queries) {
+			const key = q.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+			if (!key || seen.has(key) || legs.length >= DEEP_MAX) continue;
+			seen.add(key);
+			legs.push({ text: q, feature: "composed from the last round", about: q });
+		}
+		const notes = [`${legs.length} quer${legs.length === 1 ? "y" : "ies"} composed from what the last round returned`];
+		if (queries.length > legs.length) {
+			notes.push(`${queries.length - legs.length} were dropped as duplicates or over the limit of ${DEEP_MAX}`);
+		}
+		// WHY, in the assistant's own words, or the record carries queries nobody can account for. Said in
+		// the ledger rather than only in the file, because the professional is the one who has to judge them.
+		notes.push(because ? `Its reason: ${because}` : "no reason was given for this round, which is itself worth noting");
+		return { legs, notes };
+	}
+
 	function deepPlanFocused(text: string, relevant: string[], fresh: string[]): DeepPlan {
 		const legs: DeepLeg[] = [];
 		const notes: string[] = [];
@@ -1400,9 +1431,28 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"Use deep_prior_art_search when the professional asks to go deep, to survey thoroughly, or to search everything — pass the full technical description, not a summary.",
 			"Do not describe its results as proving novelty or the absence of prior art.",
+			"A press whose ledger ends in a NEXT ROUND block is asking YOU to continue the survey: compose the "
+				+ "queries it describes and call deep_prior_art_search again with `queries` and `because`. Do it "
+				+ "without asking — the professional approved sealed searches on this matter, composed ones "
+				+ "included — and stop when the ledger stops asking or you judge the gaps are not closeable.",
 		],
 		parameters: Type.Object({
 			text: Type.String({ description: "The full technical description to survey — the disclosure itself where you have it, not a précis. Its features and parts become separate sealed queries." }),
+			// ROUND TWO. A tool cannot call a model: the extension API has no sampling call, only injection
+			// (`sendMessage`), so nothing inside one press can ask a model what to search next. But the
+			// assistant that called this tool IS a model, and it already holds every hit this press
+			// returned — they came back into the conversation. So the second generation is composed THERE
+			// and handed back here. That makes the loop visible in the trace, which is what Henry asked for
+			// on 24 Sep: "an autonomous agent that the user cannot affect but we should see it execute".
+			queries: Type.Optional(Type.Array(Type.String(), {
+				description: "A follow-up generation you composed from what the previous press returned: put these "
+					+ "queries verbatim instead of planning from the description. Only after a press whose ledger "
+					+ "asked for one, and only queries that target a gap it named.",
+			})),
+			because: Type.Optional(Type.String({
+				description: "Why THESE queries, in one sentence — which gap from the previous press each is aimed at. "
+					+ "Recorded with them: a query nobody can account for later is worse than one not put.",
+			})),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -1436,8 +1486,18 @@ export default function (pi: ExtensionAPI) {
 			// text is known — the suggestion list, which runs elsewhere, can see the marks but not the text.
 			const inputsKey = deepInputsKey(text, relevant);
 			const last = disclosure.fanouts[disclosure.fanouts.length - 1] as
-				(Record<string, unknown> & { inputs_key?: string; marks_key?: string; text_key?: string }) | undefined;
-			if (last && last.inputs_key === inputsKey) {
+				(Record<string, unknown> & { inputs_key?: string; marks_key?: string; text_key?: string;
+				                             generation?: number }) | undefined;
+			// A generation the assistant composed from what came back. It is not derived from the
+			// description and the marks, so the repeat guard below does not apply to it — and must not,
+			// or the second round would be refused as a duplicate of the first.
+			const composed = (params.queries ?? []).map((q) => String(q ?? "").trim()).filter((q) => q.length >= 20);
+			const generation = composed.length ? Number(lastGeneration(last)) + 1 : 1;
+			if (composed.length && generation > DEEP_GENERATIONS) {
+				throw new Error(`this survey has already run ${DEEP_GENERATIONS} generations, which is the limit for one `
+					+ "sitting; nothing was sent. Tell the professional what the rounds found and let them decide.");
+			}
+			if (!composed.length && last && last.inputs_key === inputsKey) {
 				return {
 					content: [{ type: "text", text: "Nothing was sent. This press would put exactly the queries the "
 						+ "last deep search already put: the description it was given has not changed and neither "
@@ -1455,7 +1515,8 @@ export default function (pi: ExtensionAPI) {
 				&& last.marks_key !== deepMarksKey(relevant) && relevant.length > 0;
 			const before = deepMarksOf(last);
 			const fresh = relevant.filter((k) => !before.includes(k));
-			const plan = followUp ? deepPlanFocused(text, relevant, fresh) : deepPlan(text, relevant);
+			const plan = composed.length ? deepPlanComposed(composed, String(params.because ?? "").trim())
+				: followUp ? deepPlanFocused(text, relevant, fresh) : deepPlan(text, relevant);
 			const legs = plan.legs;
 			const started = new Date().toISOString();
 			// `docs` travels too: a leg is an ordinary sealed search and the professional is entitled to its
@@ -1504,9 +1565,13 @@ export default function (pi: ExtensionAPI) {
 				// Not a hash: the record is the professional's, and a value they cannot interpret is worse
 				// than a long one they can. It is also what makes the repeat check auditable after the fact.
 				inputs_key: inputsKey, marks_key: deepMarksKey(relevant), text_key: deepTextKey(text),
+				// WHICH ROUND, and why these queries. A composed generation is not re-derivable from the
+				// disclosure — the record has to carry the reason or nobody can account for it later.
+				generation, because: composed.length ? String(params.because ?? "").trim() : "",
 				// Which SHAPE of press this was, so the record does not have to be re-derived to know why a
 				// follow-up put six queries about two documents instead of the disclosure.
-				shape: followUp ? "focused on your marks" : "the whole disclosure",
+				shape: composed.length ? "composed from the last round"
+					: followUp ? "focused on your marks" : "the whole disclosure",
 				at: started, planned: legs.length, cap: DEEP_MAX, sent,
 				legs: results, documents: union.size, notes: plan.notes,
 			});
@@ -1523,6 +1588,25 @@ export default function (pi: ExtensionAPI) {
 			// cross-jurisdiction siblings that are most of the duplication. Claim the weaker thing we can
 			// actually compute. A leg that returned hits but raised the union by zero is the whole test.
 			const spent = results.filter((x) => x.status === "ok" && (x.added ?? 0) === 0);
+			// The gaps, and whether another round is allowed. A round is worth asking for only when something
+			// went unreached: every leg contributing something is a survey that did its job, and asking for
+			// more then is an agent finding work rather than finding art.
+			const gaps = [...empty.map((x) => `${x.feature} (found nothing)`),
+			              ...spent.map((x) => `${x.feature} (only documents the other queries already had)`)];
+			const roundsLeft = DEEP_GENERATIONS - generation;
+			const nextRound = (gaps.length && roundsLeft > 0 && sent > 0)
+				? `NEXT ROUND — for you, the assistant, not for the professional to answer. ${gaps.length} of `
+					+ `${legs.length} queries reached nothing new: ${gaps.join("; ")}. You can see every document `
+					+ `above. Compose up to ${Math.min(DEEP_MAX, gaps.length + 2)} NEW sealed queries that go at `
+					+ `those gaps specifically — reword what found nothing, and go outward from the documents that `
+					+ `did come back rather than repeating them — then call deep_prior_art_search again with `
+					+ `queries=[...] and because="<one sentence: which gap each query is aimed at>". Put the `
+					+ `description in text as before. Do NOT ask permission: the professional approved sealed `
+					+ `searches on this matter, including ones you compose. ${roundsLeft} round(s) remain. If the `
+					+ `gaps are not closeable by rewording — a feature genuinely absent from the corpus — say so `
+					+ `instead of putting queries to have put them.`
+				: "";
+
 			const ledger = [
 				`Deep search over ${corpusPhrase(corpusId)}: ${sent} of ${legs.length} sealed queries completed, `
 					+ `${union.size} distinct documents.`,
@@ -1548,6 +1632,14 @@ export default function (pi: ExtensionAPI) {
 					? "Marking a document relevant makes the next deep search walk outward from it, so pressing "
 						+ "again after marking searches differently rather than repeating this."
 					: "",
+				// THE LOOP. A tool cannot call a model, so the round that reads these results and decides what
+				// to ask next happens in the assistant — which already holds every hit above, because they
+				// came back into this conversation. This block is the brief it acts on: what was reached,
+				// what was not, and an instruction to compose the next generation and call this tool again
+				// with it. The professional watches it happen in the trace and cannot steer it, which is
+				// what Henry asked for; the approval they gave already covers queries composed this way,
+				// and it says so in those words.
+				nextRound,
 				// Permanent, not a placeholder: the family map that would collapse siblings lives on the
 				// search side, and guessing family from publication numbers misses the cross-jurisdiction
 				// siblings that are most of the duplication. Say it rather than let it look merged.
@@ -1560,6 +1652,9 @@ export default function (pi: ExtensionAPI) {
 				// which reads `details` — rendered "a possible undefined" and an empty list of reasons.
 				details: { deep: true, at: started, planned: legs.length, cap: DEEP_MAX, sent,
 				           documents: union.size, legs: results, notes: plan.notes,
+				           generation, of: DEEP_GENERATIONS, because: composed.length ? String(params.because ?? "").trim() : "",
+				           shape: composed.length ? "composed from the last round"
+				               : followUp ? "focused on your marks" : "the whole disclosure",
 				           // The page renders `details`; a field added only to the session record arrives
 				           // as undefined there, which has caught me twice on this same object.
 				           coverage: { empty: empty.length, added_nothing: spent.length } },

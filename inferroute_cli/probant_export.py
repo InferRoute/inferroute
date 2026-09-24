@@ -790,20 +790,49 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
    - Read it completely before running it. It has no dependencies beyond Python and `cryptography` 42+.
      Report anything that would let a check pass without being done: a comparison that cannot fail, an
      exception swallowed, a verdict written before the work, a branch that returns OK when data is absent.
-   - **Get your own copy and compare, before you run anything.** InferRoute publishes this verifier inside
-     its client package. Fetch it yourself — from a machine and a network the professional does not
-     control, if you can:
+   - **Get other copies and compare, before you run anything.** There are three places this file can come
+     from, they prove DIFFERENT things, and conflating them would make three checks look like one when they
+     are not. Take them in this order and report what each one gave you.
+
+     Compute the local hash first, to compare everything against:
+
+         sha256sum <this folder>/verify_record.py
+
+     **(a) The public package index.** The strongest, because the index is not InferRoute and publishes its
+     own digests:
 
          pip download inferroute --no-deps -d /tmp/ir-check
          cd /tmp/ir-check && python3 -c "import zipfile,glob,hashlib; z=zipfile.ZipFile(glob.glob('*.whl')[0]); \
-           n=[x for x in z.namelist() if x.endswith('verify_record.py')][0]; \
-           print(hashlib.sha256(z.read(n)).hexdigest())"
-         sha256sum <this folder>/verify_record.py
+           n=[x for x in z.namelist() if x.endswith('verify_record.py')]; \
+           print(hashlib.sha256(z.read(n[0])).hexdigest() if n else 'NOT IN THIS RELEASE')"
 
-     Report the two hashes and whether they match. A match means you audited the program InferRoute stands
-     behind publicly, not the one this folder happens to contain — and that is a materially stronger
-     statement than "I read it and it looked fine". A MISMATCH is a finding in its own right: report it
-     prominently and do not treat the local copy's output as evidence of anything.
+     As of this writing the released versions on the index do **not** contain this file — it ships in the
+     client the professional was given, which is ahead of the index. If your fetch says NOT IN THIS
+     RELEASE, that is the expected answer today and is itself worth reporting: it means no copy
+     independent of InferRoute exists to compare against, and everything below rests on copies InferRoute
+     controls. Do not report it as a match or as a failure of the record.
+
+     **(b) The published client wheel** — the .whl the professional downloaded, or its link.
+     `MANIFEST.json` here records `client_version`, which is the version to ask for; treat that as the
+     audited party naming itself, useful for finding the right file and evidence of nothing. The file's
+     name and SHA-256 are published beside it:
+
+         python3 -c "import zipfile,hashlib,sys; z=zipfile.ZipFile(sys.argv[1]); \
+           n=[x for x in z.namelist() if x.endswith('verify_record.py')][0]; \
+           print(hashlib.sha256(z.read(n)).hexdigest())" <the .whl>
+
+     Be exact about what a match here proves. Both copies come from InferRoute, so this is **not**
+     independent corroboration — a checksum published beside a file by whoever published the file is one
+     source, not two. What it does prove is that the verifier in this folder is the one shipped to every
+     recipient, rather than one produced for this professional alone. That defeats a targeted substitution,
+     which is a real and different thing from defeating InferRoute.
+
+     **(c) The professional's installed copy**, the weakest of the three: it shares an origin with this
+     folder, so it only shows the pack was not altered after it was written.
+
+     Report every hash you obtained and which sources you could reach. A MISMATCH against (a) or (b) is a
+     finding in its own right: report it prominently and do not treat this folder's verifier output as
+     evidence of anything.
 
    - **If you cannot obtain it independently** — no network, the package unavailable, the file not in the
      version you can reach — **say so in your report as a named limitation** and rely on step 3: the checks
@@ -923,6 +952,14 @@ def _brief(has_searches: bool) -> str:
     return head + "\n\n" + NO_SEARCHES_BANNER.strip() + "\n" + rest
 
 
+def _client_version() -> str:
+    try:
+        from inferroute_cli import __version__
+        return str(__version__)
+    except Exception:                                   # noqa: BLE001
+        return ""
+
+
 def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = None) -> Path:
     """An evidence-only copy of an exported record, for the professional's own AI to audit. Written beside the
     record by default. Its name carries no matter name, because a matter name can say what the invention is."""
@@ -991,6 +1028,10 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 "note": "an evidence-only copy of a record: query, result and document text withheld; an unsigned "
                         "index of this folder, not a seal; the enclave-signed statements in searches.json are the seal",
                 "derived_from_manifest_sha256": _sha256_hex((src / "MANIFEST.json").read_bytes()),
+                # Which client wrote this, so an auditor comparing the verifier against a published wheel
+                # knows WHICH wheel to fetch. Self-reported — this is the audited party naming itself — and
+                # the brief says so. It saves the auditor a guess, and proves nothing on its own.
+                "client_version": _client_version(),
                 "reference_hint": src_manifest.get("reference_hint"),
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")

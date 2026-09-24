@@ -121,18 +121,28 @@ def contacts() -> Dict[str, Dict[str, str]]:
         return {}
 
 
-def add_contact(name: str, card: Dict[str, str]) -> Dict[str, str]:
-    """Record someone you can share with. Their fingerprint is computed HERE from the keys they sent, never
-    taken from the card: the number you confirm by phone must be one this machine derived."""
-    name = S.sanitize(name, "contact name")
+def read_card(card: Dict[str, str]) -> str:
+    """Derive a card's fingerprint from the keys IN it, refusing anything that is not a card.
+
+    The number is computed here and never taken from the card, because the number a person confirms by
+    voice must be one this machine derived. Adding a contact and merely previewing one both come through
+    here: a preview that computed the fingerprint its own way could show a number the add step would not
+    agree with, and the one being confirmed aloud would be the weaker of the two."""
     try:
         mlkem_pub, ed_pub = _unb64(card["mlkem_pub"]), _unb64(card["ed_pub"])
     except (KeyError, ValueError, TypeError):
-        raise S.ProbantError("that is not a Probant contact card: it needs mlkem_pub and ed_pub")
+        raise S.ProbantError("that is not a Probant public key: it needs mlkem_pub and ed_pub")
     got = fingerprint(mlkem_pub, ed_pub)
     if card.get("fingerprint") and card["fingerprint"] != got:
         raise S.ProbantError(f"the card's fingerprint {card['fingerprint']} is not the one its keys give "
                               f"({got}) — do not use it")
+    return got
+
+
+def add_contact(name: str, card: Dict[str, str]) -> Dict[str, str]:
+    """Record someone you can share with."""
+    name = S.sanitize(name, "contact name")
+    got = read_card(card)
     known = contacts()
     known[name] = {"mlkem_pub": card["mlkem_pub"], "ed_pub": card["ed_pub"], "fingerprint": got,
                    "added_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}

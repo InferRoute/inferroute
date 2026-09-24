@@ -73,7 +73,11 @@ def test_no_route_beyond_what_the_page_needs(home):
                      # reading a document and proposing matters from it (20 Sep)
                      "/api/intake", "/api/intakes", "/api/intake/create",
                      # sharing a corpus of matters with another Probant user (20 Sep)
-                     "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open"}
+                     "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open",
+                     # telling a pasted key apart from a typo before anything is recorded (24 Sep)
+                     "/api/sharing/contact/preview",
+                     # whether the scheduled search machine is up (24 Sep)
+                     "/api/search-status"}
 
 
 # ── matters ──
@@ -540,3 +544,139 @@ def test_the_page_offers_corpus_documents_by_id_and_never_takes_a_path(home, tmp
     assert r.json()["documents"] == ["MATTERS.txt"], r.json()
     sealed = Path(r.json()["path"]).read_bytes()
     assert b"never offered" not in sealed and b"root:" not in sealed
+
+
+# ── the scheduled search machine (24 Sep) ──
+
+def test_the_search_window_is_named_in_paris_hours_whatever_the_season():
+    """The machine is scheduled 13:00-15:00 Europe/Paris. The window is derived once, server-side, and
+    handed to the page as instants — so the page never has to get Paris's daylight saving right, and a
+    reader in another timezone is told the same moment in their own. Both boundaries are checked: 13:00
+    is open and 15:00 is already closed, which is where an off-by-one would live.
+
+    Note for anyone mutating _search_window to check this test bites: the close boundary is guarded TWICE
+    (the rollover's `now >= closes` and the final `now < closes`), so relaxing either one alone leaves 15:00
+    correctly closed and this test correctly green. That is the code being doubly safe, not the test being
+    toothless — it fails on the mutations that can actually move the answer: deriving the window in the
+    server's timezone instead of Paris, dropping the rollover, or relaxing both close guards together."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    paris = ZoneInfo("Europe/Paris")
+
+    def at(y, m, d, hh, mm=0):
+        return H._search_window(dt.datetime(y, m, d, hh, mm, tzinfo=paris).astimezone(dt.timezone.utc))
+
+    def local(iso):
+        return dt.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(paris)
+
+    # Inside, in both halves of the year: the hours named are the Paris hours, not a fixed UTC offset.
+    for month, day in ((7, 1), (1, 15)):
+        w = at(2026, month, day, 14)
+        assert w["open_now"] is True
+        assert (local(w["opens_at"]).hour, local(w["closes_at"]).hour) == (13, 15)
+
+    assert at(2026, 7, 1, 13, 0)["open_now"] is True          # the moment it opens
+    assert at(2026, 7, 1, 14, 59)["open_now"] is True
+    assert at(2026, 7, 1, 15, 0)["open_now"] is False         # closed ON the hour, not a minute later
+    assert at(2026, 7, 1, 9, 0)["open_now"] is False
+
+    # Before today's window the next opening is today; after it, tomorrow.
+    assert local(at(2026, 7, 1, 9, 0)["opens_at"]).date() == dt.date(2026, 7, 1)
+    assert local(at(2026, 7, 1, 20, 0)["opens_at"]).date() == dt.date(2026, 7, 2)
+
+
+def test_search_status_says_closed_without_naming_the_machine(home, monkeypatch):
+    """A page that is told the search machine is off must not be told WHICH machine, and must not hang on
+    it either. With no search.json there is nothing configured; with one, an unreachable machine reports
+    closed rather than raising."""
+    h, c, tmp = home
+    r = c.get("/api/search-status")
+    assert r.status_code == 200 and r.json()["configured"] is False
+    assert "reachable" not in r.json()                  # nothing was probed, so nothing is claimed
+
+    cfg = tmp / "ir" / "confidential"
+    cfg.mkdir(parents=True, exist_ok=True)
+    # Port 1 on loopback: refuses at once, so this asserts the closed path without waiting for a timeout.
+    (cfg / "search.json").write_text(json.dumps({"enclave": "http://127.0.0.1:1", "python": "python3"}))
+    H._search_probe.update({"at": 0.0, "reachable": False})
+    body = c.get("/api/search-status").json()
+    assert body["configured"] is True and body["reachable"] is False
+    assert body["found"] is True                       # it refused us, so something is there to refuse
+    assert body["from_hour"] == 13 and body["to_hour"] == 15 and body["tz"] == "Europe/Paris"
+    # The one thing this endpoint must never do is publish the address of the sealed machine.
+    assert "127.0.0.1:1" not in json.dumps(body)
+
+
+def test_a_pasted_key_is_previewed_by_the_same_code_that_records_it(home):
+    """The box a person pastes a key into answers before they commit, and the fingerprint it shows is the
+    one that will be stored: preview and add share read_card(), because a number confirmed aloud from the
+    preview and a different number recorded by the add step would make the voice check worthless."""
+    h, c, _ = home
+    mine = c.get("/api/sharing").json()
+
+    good = c.post("/api/sharing/contact/preview", json={"card": json.dumps(mine["card"])}).json()
+    assert good["ok"] is True and good["fingerprint"] == mine["fingerprint"]
+
+    # Previewing records nothing: the contact list is untouched until Add is pressed.
+    assert c.get("/api/sharing").json()["contacts"] == []
+
+    added = c.post("/api/sharing/contact", json={"name": "them", "card": mine["card"]}).json()
+    assert added["fingerprint"] == good["fingerprint"]          # the same predicate, the same number
+
+    # Half-typed and wrong-shaped input is a hint, not an error page — and never a fingerprint.
+    for bad, expect in (("{\"mlkem", "paste the whole block"), ("{}", "mlkem_pub and ed_pub")):
+        r = c.post("/api/sharing/contact/preview", json={"card": bad}).json()
+        assert r["ok"] is False and expect in r["reason"] and "fingerprint" not in r
+    assert c.post("/api/sharing/contact/preview", json={"card": "  "}).json() == {"ok": False, "reason": ""}
+
+    # A card whose stated fingerprint disagrees with its keys is refused, in the preview as in the add.
+    lying = dict(mine["card"], fingerprint="0000-0000-0000-0000")
+    r = c.post("/api/sharing/contact/preview", json={"card": json.dumps(lying)}).json()
+    assert r["ok"] is False and "do not use it" in r["reason"]
+
+
+def test_a_machine_that_cannot_be_found_is_not_reported_as_merely_closed(home, monkeypatch):
+    """A scheduled machine that is switched off refuses the connection and "closed until 13:00" describes
+    it truthfully. A machine that has been taken away does not resolve at all, and on 24 Sep the configured
+    address did exactly that — the container deleted rather than stopped. The two must not look alike: a
+    person shown an opening time for a machine that is never coming back waits instead of asking, which is
+    the failure mode where a reassuring answer is worse than no answer."""
+    h, c, tmp = home
+    cfg = tmp / "ir" / "confidential"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "search.json").write_text(json.dumps({"enclave": "http://nx.invalid:8000", "python": "python3"}))
+
+    H._search_probe.update({"at": 0.0, "state": "unreachable"})
+    body = c.get("/api/search-status").json()          # .invalid never resolves, by RFC 2606
+    assert body["configured"] is True and body["reachable"] is False
+    assert body["found"] is False                      # the page must be able to tell the difference
+    assert "nx.invalid" not in json.dumps(body)
+
+    # The states are distinguished at the probe, not only at the page.
+    H._search_probe.update({"at": 0.0, "state": "unreachable"})
+    assert H._search_probe_state("http://nx.invalid:8000") == "unknown-host"
+    H._search_probe.update({"at": 0.0, "state": "unreachable"})
+    assert H._search_probe_state("http://127.0.0.1:1") == "unreachable"
+
+
+def test_the_probe_is_cached_so_a_page_refresh_does_not_hammer_the_machine(home):
+    """The bar repaints every minute and any reload asks again; without a cache that is a connection
+    attempt per view."""
+    h, c, _ = home
+    H._search_probe.update({"at": 0.0, "state": "unreachable"})
+    calls = []
+
+    import urllib.request
+    real = urllib.request.urlopen
+
+    def counted(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    urllib.request.urlopen = counted
+    try:
+        for _ in range(4):
+            H._search_probe_state("http://127.0.0.1:1")
+    finally:
+        urllib.request.urlopen = real
+    assert len(calls) == 1, f"probed {len(calls)} times; the cache is not holding"

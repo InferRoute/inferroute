@@ -347,6 +347,15 @@
   // cannot work, to someone who has not yet been told why. The welcome suggestions already gate on this;
   // the guaranteed row must too. It is the first thing a client installed without search would meet.
   let searchOffered = false;
+  // The relevant marks as they stood when the last deep search completed, or null if none has. The press is
+  // deterministic — the same description and the same marks put the same queries — so offering it again over
+  // unchanged inputs invites the professional to pay for questions the enclave has already answered.
+  // Henry, 25 Sep: "this recommendation is still showing right after i just did the deep search and changed
+  // nothing". The extension already declined to suggest it; the page was adding it back unconditionally one
+  // line below, which is the whole bug — each side was checked and the seam between them was not.
+  let deepMarksAtLastPress = null;
+  // Worded to match deepMarksKey() in ir-attested.ts. Order is not a change, so it sorts.
+  const deepMarksKeyHere = () => relevantOrdered().slice().sort().join("\u0000");
   const IDEAS = [SURVEY,
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
@@ -408,7 +417,14 @@
     // The deep search is offered on its own row and does not compete for the five places. It is the one
     // action the page guarantees is reachable: leaving it to the assistant to remember would make the
     // headline feature of this client appear or not depending on how an answer happened to end.
-    if (started && searchOffered && !groups.some((g) => g.steps.includes(DEEP))) groups.push({ title: "", steps: [DEEP] });
+    // ...unless pressing it now would put exactly the queries the last press put. The page can see the marks
+    // but NOT the disclosure text — nothing here reads the matter's files — so it decides the half it can,
+    // and the tool itself refuses an identical press on the other half. Editing the description therefore
+    // still leaves this hidden; the assistant can always be asked, and the tool will run it.
+    const deepWouldRepeat = deepMarksAtLastPress !== null && deepMarksAtLastPress === deepMarksKeyHere();
+    if (started && searchOffered && !deepWouldRepeat && !groups.some((g) => g.steps.includes(DEEP))) {
+      groups.push({ title: "", steps: [DEEP] });
+    }
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }
     // In the conversation, right after the latest answer — part of what the assistant said, not page furniture
@@ -440,22 +456,35 @@
 
   function markButtons(keyNo, card, register = true) {
     const wrap = el("div", "marks");
-    const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"]];
+    const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"],
+                  // Taking the mark back off. Henry, 25 Sep: "there is no way to just remove the selection
+                  // and not keep something selected". Whichever of the three you pressed first, the
+                  // document stayed marked as SOMETHING, and "not relevant" is a judgement, not the
+                  // absence of one — so there was no way to say "I have no opinion on this after all".
+                  // Not a delete: the store is append-only because a changed mind is signal, so this
+                  // appends a human row saying the opinion was withdrawn, and the record keeps both.
+                  ["cleared", "Clear"]];
     const buttons = opts.map(([value, label]) => {
+      const clearing = value === "cleared";
       const b = el("button", `m-${value}`, label);
       b.type = "button";
-      b.setAttribute("aria-pressed", String(marks.get(keyNo) === value));
-      b.title = `Mark ${keyNo} as ${label.toLowerCase()} (your judgement, kept with the matter)`;
+      b.setAttribute("aria-pressed", String(!clearing && marks.get(keyNo) === value));
+      b.title = clearing
+        ? `Remove your mark on ${keyNo} — the matter keeps that you made one and then took it off`
+        : `Mark ${keyNo} as ${label.toLowerCase()} (your judgement, kept with the matter)`;
+      // Nothing to clear when nothing is marked: an always-present Clear reads as a fourth judgement.
+      if (clearing) b.hidden = !marks.get(keyNo);
       b.addEventListener("click", async () => {
         try {
           await api("/api/mark", { key: keyNo, mark: value });
-          marks.set(keyNo, value);
+          if (clearing) marks.delete(keyNo); else marks.set(keyNo, value);
           noteMarked(keyNo);
           refreshMarks(keyNo);
           renderMarkSteps();
           renderMarksPanel();
           for (const e of cards.values()) if (e.keys && e.keys.includes(keyNo)) refreshCardSummary(e);
-          toast(`Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
+          toast(clearing ? `Cleared: ${keyNo} is no longer marked.`
+                         : `Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
           if (value === "relevant") offerDeeper(card);
         } catch (e) { toast(`Couldn't record the mark: ${e.message}`, "error"); }
       });
@@ -509,8 +538,15 @@
   }
 
   function refreshMarks(keyNo) {
+    const now = marks.get(keyNo);
     for (const group of docRows.get(keyNo) || []) {
-      for (const [value, b] of group) b.setAttribute("aria-pressed", String(marks.get(keyNo) === value));
+      for (const [value, b] of group) {
+        // Clear is an action on an existing mark, never a fourth judgement: it is never "pressed", and it
+        // is absent while there is nothing to clear. Every row for this document is updated, so the same
+        // document in two cards and in the marks panel never disagrees about what it is marked.
+        if (value === "cleared") { b.setAttribute("aria-pressed", "false"); b.hidden = !now; continue; }
+        b.setAttribute("aria-pressed", String(now === value));
+      }
     }
   }
 
@@ -938,6 +974,10 @@
       e.done = true;
       e.sub.classList.remove("slow");
       const d = ev.details || {};
+      // Remember what this press was made from, so the guaranteed row below stops offering a press that
+      // would put the same queries. A press that FAILED, or that the tool refused as an identical repeat,
+      // must not arm this: the first did not cover these marks, and the second did not happen at all.
+      if (ev.ok && !d.repeat && d.sent) deepMarksAtLastPress = deepMarksKeyHere();
       const keep = stick();
       // The head carries what you read while it is FOLDED; the body carries what you open it for. Putting
       // the whole result in `sub` — which lives in the head — meant a folded card either said nothing or
@@ -1007,6 +1047,11 @@
           + "merged ranking: the same invention can appear more than once under different publication "
           + "numbers. Mark what matters — the next deep search walks outward from what you marked."));
       }
+      // The guaranteed deep row is decided from what the last press was made from, which has just changed.
+      // Without this the flag moves and nothing repaints: the row would keep offering a repeat until some
+      // unrelated event happened to redraw it, which is how this looked correct in the code and wrong on
+      // the screen.
+      renderSteps();
       keep();
       return;
     }

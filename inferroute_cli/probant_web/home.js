@@ -387,7 +387,10 @@
     if (!m.sessions.length) p.append(el("p", "sub", "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
     else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false));
 
-    const markEntries = Object.entries(m.marks || {});
+    // A cleared mark is a row in the store's history, not a mark: the professional asked for NO opinion on
+    // that document. Counted here it would show as a fourth kind ("US-X · cleared") and inflate the total,
+    // which is the shape of bug where an unknown value is treated as a judgement.
+    const markEntries = Object.entries(m.marks || {}).filter(([, v]) => v && v !== "cleared");
     p.append(el("h2", "section", "Your marks"));
     if (!markEntries.length) p.append(el("p", "sub", "No marks yet. Mark documents in a session as relevant, not relevant, or known."));
     else {

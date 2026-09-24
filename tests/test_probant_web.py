@@ -132,15 +132,108 @@ def test_a_confirm_is_allowed_only_by_an_explicit_true(client):
     assert b.proc.stdin.lines[-1]["confirmed"] is False
 
 
+def _store(state):
+    """A host verifier that records the mark and answers with the state, as the real one does."""
+    calls = []
+
+    def call(ep, path, body=None, timeout=60.0):
+        calls.append((path, body))
+        if path == "/matter/mark" and body and body.get("mark") in W.MARKS:
+            state.setdefault("marks", {})[body["key"]] = {"latest": {"value": body["mark"]}}
+        return state
+    return calls, call
+
+
 def test_marks_are_validated_and_go_to_the_host_verifier(client, monkeypatch):
     b, c = client
-    calls = []
-    monkeypatch.setattr(W, "_search_call", lambda ep, path, body=None, timeout=60.0: calls.append((path, body)) or {})
+    state = {"marks": {}}
+    calls, call = _store(state)
+    monkeypatch.setattr(W, "_search_call", call)
     assert c.post("/api/mark", json={"key": "US-7000-B2; rm -rf", "mark": "relevant"}).status_code == 400
     assert c.post("/api/mark", json={"key": "US-7000-B2", "mark": "novel"}).status_code == 400
     assert c.post("/api/mark", json={"key": "us-7000-b2", "mark": "relevant"}).json()["key"] == "US-7000-B2"
     assert calls == [("/matter/mark", {"key": "US-7000-B2", "mark": "relevant"})]
     assert b.proc.stdin.lines == []                       # a mark never passes through the agent
+
+
+def test_a_mark_can_be_taken_back_off(client, monkeypatch):
+    """Henry, 25 Sep: "there is no way to just remove the selection and not keep something selected".
+    Whichever of the three you pressed first, the document stayed marked as SOMETHING — and "not relevant"
+    is a judgement, not the absence of one.
+
+    Clearing is not a delete. The store is append-only because a changed mind is signal, so this records a
+    new human row saying the opinion was withdrawn; what the PAGE must show is no mark at all."""
+    b, c = client
+    state = {"marks": {}}
+    calls, call = _store(state)
+    monkeypatch.setattr(W, "_search_call", call)
+
+    assert c.post("/api/mark", json={"key": "US-7000-B2", "mark": "relevant"}).status_code == 200
+    assert c.get("/api/marks").json()["marks"] == {"US-7000-B2": "relevant"}
+
+    r = c.post("/api/mark", json={"key": "US-7000-B2", "mark": "cleared"})
+    assert r.status_code == 200 and r.json()["cleared"] is True
+    # The store keeps the row; the page must not show it as a mark of any kind.
+    assert state["marks"]["US-7000-B2"]["latest"]["value"] == "cleared"
+    assert c.get("/api/marks").json()["marks"] == {}
+
+
+def test_the_page_refuses_to_report_a_mark_the_store_did_not_take(client, monkeypatch):
+    """The verifier used to ignore a value it did not recognise and still answer 200 with the unchanged
+    state. A client that trusted the status code would report a judgement the store never took — the page
+    lying about a human judgement, which is the one thing this layer must never do.
+
+    sealed-research now answers 400 on an unknown value (25 Sep, at my request). This read-back is the
+    second instrument, and it is the one that survives a professional running an older verifier."""
+    b, c = client
+    state = {"marks": {"US-7000-B2": {"latest": {"value": "relevant"}}}}
+
+    def deaf(ep, path, body=None, timeout=60.0):
+        return state                                       # accepts nothing, answers 200 — the old shape
+    monkeypatch.setattr(W, "_search_call", deaf)
+
+    r = c.post("/api/mark", json={"key": "US-7000-B2", "mark": "cleared"})
+    assert r.status_code == 409, r.text
+    assert "did not accept" in r.json()["error"] and "still 'relevant'" in r.json()["error"]
+    # And it must not claim success for a mark that never landed on a document with no mark at all.
+    assert c.post("/api/mark", json={"key": "US-9999-B2", "mark": "relevant"}).status_code == 409
+
+
+def test_the_deep_row_stops_offering_a_press_that_would_repeat(tmp_path):
+    """Henry, 25 Sep: "this recommendation is still showing right after i just did the deep search and
+    changed nothing about the relevant selections".
+
+    The extension had already stopped SUGGESTING it — and the page added it back one line later, because
+    the deep row is the one action the page guarantees is reachable. Each side was checked and the seam
+    between them was not, so the fix that shipped did nothing where it shows."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "deep_step_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert out["beforeAnyPress"] is True, "a session that has never pressed must be offered it"
+    assert out["afterPress"] is False, "the row still offers a press that would put the same queries"
+    assert out["afterMarkingRelevant"] is True, "marking changes what the press would put; it must return"
+    assert out["afterSecondPress"] is False
+    # A mark that is not a relevance mark does not change the queries, so it must not bring the row back.
+    assert out["afterMarkingKnown"] is False
+    # Taking a relevance mark off IS a change — the press would walk outward from one document fewer.
+    assert out["afterClearingTheRelevantMark"] is True
+    # Neither a refusal nor a failure covered these marks, so neither may arm the suppression.
+    assert out["afterRefusedRepeat"] is True
+    assert out["afterFailedPress"] is True
+    # Order is not a change: the planner walks outward from a SET, so the same two marks in either order
+    # describe the same press. Without this the row returns for a press that puts identical queries.
+    assert out["afterTwoRelevant"] is False
+    assert out["sameTwoMarkedInTheOtherOrder"] is False
+    assert out["afterAThirdRelevant"] is True
 
 
 def test_the_session_view_carries_no_disclosure_text(client):

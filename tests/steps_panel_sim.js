@@ -26,6 +26,7 @@ const groups = () => dom["mark-steps"].hidden ? null : (() => { const out = []; 
     else { if (!cur) { cur = { title: "", steps: [] }; out.push(cur); } cur.steps.push(...k.kids.map((b) => b.text)); cur = null; } }
   return out; })();
 const R = {};
+searchOffered = true;                     // an ordinary attested session: a search machine is configured
 mark("US-A1", "relevant"); renderSteps(); R.s1 = groups();
 cards.set("c0", {}); renderSteps(); R.s1b = groups(); cards.clear();      // this session has searched
 marksAtTurn = new Map(marks);
@@ -36,4 +37,7 @@ assistantSteps = [...assistantSteps, "Search the admission gate on its own"]; re
 busy = true; clearNext(); R.s5 = groups();
 busy = false; marks.clear(); markOrder.length = 0; assistantSteps = []; renderSteps(); R.s6 = groups();
 $("empty").hidden = false; renderSteps(); R.s7 = groups();
+// A client installed with no search machine — which is every client on its first day. The deep button must
+// not be offered: nothing would answer it.
+$("empty").hidden = true; searchOffered = false; mark("US-A1", "relevant"); renderSteps(); R.s8 = groups();
 console.log(JSON.stringify(R));

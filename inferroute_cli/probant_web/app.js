@@ -342,6 +342,11 @@
   // apart from the others because it is the one button that puts SEVERAL sealed queries in one press —
   // minutes rather than seconds — and a person should be able to tell that before pressing, not after.
   const DEEP = "Search deeply: put the whole disclosure, its features, and my marks to the search machine";
+  // Whether this session has a search machine at all. A session without one registers no search tools, so
+  // the deep button would send a sentence the assistant has no way to act on — offering an action that
+  // cannot work, to someone who has not yet been told why. The welcome suggestions already gate on this;
+  // the guaranteed row must too. It is the first thing a client installed without search would meet.
+  let searchOffered = false;
   const IDEAS = [SURVEY,
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
@@ -403,7 +408,7 @@
     // The deep search is offered on its own row and does not compete for the five places. It is the one
     // action the page guarantees is reachable: leaving it to the assistant to remember would make the
     // headline feature of this client appear or not depending on how an answer happened to end.
-    if (started && !groups.some((g) => g.steps.includes(DEEP))) groups.push({ title: "", steps: [DEEP] });
+    if (started && searchOffered && !groups.some((g) => g.steps.includes(DEEP))) groups.push({ title: "", steps: [DEEP] });
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }
     // In the conversation, right after the latest answer — part of what the assistant said, not page furniture
@@ -1244,6 +1249,7 @@
     try { s = await api("/api/session"); } catch (e) { showNoKey(); return; }
     clockSkew = (Number(s.now) || Date.now()) - Date.now();
     searchTiming = s.search_timing || null;
+    searchOffered = Boolean(s.search);
     $("layout").hidden = false;
     document.title = `Probant · ${s.matter}`;
     $("matter").textContent = String(s.matter || "").replace("/", " / ");

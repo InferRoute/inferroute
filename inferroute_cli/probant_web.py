@@ -43,7 +43,14 @@ from . import pi_attested
 STATIC = Path(__file__).resolve().parent / "probant_web"
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
-MARKS = ("relevant", "not-relevant", "known")
+# The three judgements, and taking one back off. "cleared" is NOT a delete: the store is append-only
+# because a changed mind is signal, so clearing a mark appends a new human row whose latest value says the
+# professional no longer wants an opinion on this document. Every consumer here tests the value POSITIVELY
+# (== "relevant", `in MARK_LABEL`), so a cleared document falls out of relevance, out of the model's marks
+# note and out of the deep search's outward-walk by construction rather than by a rule someone must
+# remember. Henry, 25 Sep: "there is no way to just remove the selection".
+MARKS = ("relevant", "not-relevant", "known", "cleared")
+CLEARED = "cleared"
 HISTORY_CAP = 5000
 # Printed by a session once its assistant has ended and only its page stays up (for exporting). The home page
 # reads it to stop offering "Open the session" for a session that is over — one line, one definition.
@@ -849,7 +856,10 @@ class Bridge:
                 state = await asyncio.to_thread(_search_call, bridge.search_endpoint, "/matter/state")
             except Exception:                                   # noqa: BLE001
                 return {"marks": {}}
-            marks_now = {k: (v.get("latest") or {}).get("value") for k, v in (state.get("marks") or {}).items()}
+            # A cleared mark is a row in the store's history and NOT a mark on the page: the professional
+            # asked for no opinion on that document, so it must not appear in any count, chip or group.
+            marks_now = {k: val for k, v in (state.get("marks") or {}).items()
+                         if (val := ((v.get("latest") or {}).get("value"))) and val != CLEARED}
             # What each marked document is about, from every search recorded on this matter — so a mark made in
             # an EARLIER session still says what it marks, although its results are not on this page.
             titles = await asyncio.to_thread(pi_attested.matter_titles, bridge.records_dir, set(marks_now))
@@ -862,10 +872,22 @@ class Bridge:
             if not PUB_RE.match(key) or value not in MARKS:
                 return JSONResponse({"error": "not a publication number or mark"}, status_code=400)
             try:
-                await asyncio.to_thread(_search_call, bridge.search_endpoint, "/matter/mark", {"key": key, "mark": value})
+                state = await asyncio.to_thread(_search_call, bridge.search_endpoint, "/matter/mark",
+                                                {"key": key, "mark": value})
             except Exception:                                   # noqa: BLE001
                 return JSONResponse({"error": "the search verifier did not record the mark"}, status_code=502)
-            return {"ok": True, "key": key, "mark": value}
+            # READ BACK WHAT THE STORE NOW SAYS. The verifier ignores a value it does not recognise and
+            # still answers 200 with the unchanged state, so a version of it that predates a mark value
+            # would leave this page reporting a judgement the store never took — the page lying about a
+            # human judgement, which is the one thing it must never do. Cheap, because the endpoint
+            # already returns the whole state.
+            landed = ((state.get("marks") or {}).get(key) or {}).get("latest") or {}
+            if not isinstance(state, dict) or landed.get("value") != value:
+                return JSONResponse(
+                    {"error": f"this matter's search verifier did not accept '{value}'; the mark is "
+                              f"unchanged" + (f" (still '{landed.get('value')}')" if landed.get("value") else "")},
+                    status_code=409)
+            return {"ok": True, "key": key, "mark": value, "cleared": value == CLEARED}
 
         @app.post("/api/recheck")
         async def recheck():

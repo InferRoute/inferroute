@@ -597,8 +597,13 @@ def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
     if n_searches:
         items.append(f"<li><b>Date bound {_e(rec.get('date_bound'))}</b>: only documents published before it were searched. "
                      "<span class=who>Each search's signed statement carries it.</span></li>")
-    if marks:
-        items.append(f"<li><b>{len(marks)} relevance mark{'s' if len(marks) != 1 else ''}</b>, the user's own "
+    # A document whose mark was taken back off is NOT a relevance mark here. The marks table below still
+    # shows it with its full history — that is the audit trail and it should read exactly as it happened —
+    # but the at-a-glance line counts opinions currently held, and a withdrawn one is not one.
+    standing = {k: v for k, v in marks.items()
+                if ((v or {}).get("latest") or {}).get("value") not in (None, "cleared")}
+    if standing:
+        items.append(f"<li><b>{len(standing)} relevance mark{'s' if len(standing) != 1 else ''}</b>, the user's own "
                      "judgements; the assistant cannot make or change one. <span class=who>As recorded by this computer."
                      "</span></li>")
     items.append("<li><b>Not claimed</b>: novelty, patentability, or that no other prior art exists.</li>")

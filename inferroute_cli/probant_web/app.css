@@ -167,6 +167,12 @@ button.brand:hover { background: var(--user); }
 .marks button[aria-pressed="true"].m-relevant { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .marks button[aria-pressed="true"].m-not-relevant { background: var(--user); color: var(--ink); border-color: var(--faint); }
 .marks button[aria-pressed="true"].m-known { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+/* Clear is an action on an existing mark, not a fourth judgement — so it never takes a pressed state and
+   it sits apart from the three, which are a choice between each other. `hidden` on a flex child does not
+   hide it without this: display wins over the attribute. */
+.marks button.m-cleared { border-color: transparent; color: var(--faint); margin-left: 4px; }
+.marks button.m-cleared:hover { color: var(--ink); border-color: var(--line); }
+.marks button.m-cleared[hidden] { display: none; }
 .card-foot { padding: 8px 14px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--line); }
 .card-head { flex-wrap: wrap; }
 .card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }

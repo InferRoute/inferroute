@@ -179,8 +179,24 @@ class ConfidentialSession:
         self.receipt.checks = {k: {"ok": c.ok, "why": c.why, "label": attest.LABELS[k][0], "explain": attest.LABELS[k][1]}
                                for k, c in r.checks.items()}
         # The bytes behind those verdicts, so a reader can recompute them instead of taking our word.
-        self.receipt.attestation = next(
-            (row for row in (self._raw_evidence or []) if str(row.get("instance_id") or "") == iid), {})
+        row = next((e for e in (self._raw_evidence or []) if str(e.get("instance_id") or "") == iid), {})
+        # Two of the five recomputations the audit brief asks for need OUR side of the exchange, and the
+        # receipt did not carry it: "does our challenge appear verbatim in attested_body" and "does the
+        # quote commit to SHA-256(challenge ‖ the key this session sealed to)". We kept only a hash of the
+        # key and no challenge at all, so both were unrepeatable — the brief asked auditors for work the
+        # file made impossible. Neither value is a secret: the challenge is a nonce we chose, and the key
+        # is the instance's PUBLIC ML-KEM key. Recorded under `checked_with` because they are ours, not the
+        # operator's: everything beside them in this dict came from the machine being audited, and an
+        # auditor must be able to tell the two apart without asking.
+        self.receipt.attestation = dict(row)
+        self.receipt.attestation["checked_with"] = {
+            "note": "OUR side of the exchange, written by this device — not supplied by the enclave. "
+                    "The rest of this object is the operator's evidence, verbatim.",
+            "challenge": (self.fleet.nonce if self.fleet else ""),
+            "e2e_pubkey": p.pubkey_b64,
+            "e2e_pubkey_sha256": _sha256_b64(p.pubkey_b64),
+            "recompute": "sha256((challenge + e2e_pubkey).encode()) == the quote's report_data[0:32]",
+        }
         # Session-specific caveats first: they are the ones a reader most needs, and they are the
         # ones that used to exist only on screen.
         self.receipt.limitations = [{"id": k, "text": t} for k, t in

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -59,6 +60,8 @@ class Receipt:
         "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0})
     events: list = field(default_factory=list)          # [{ts, kind, detail}] — pins, switches, re-verifications
     verified_at: str = ""
+    # Stamped on every save, so a receipt dates itself even when nothing closes it. See save().
+    last_activity_at: str = ""
     # Which client wrote this receipt. An auditor reading an OLD receipt cannot otherwise tell a defect
     # that was real and has since been fixed from one that is live — and it will keep reporting the fossil
     # as a finding, correctly, forever. Found on 24 Sep: an auditor flagged a 22 Sep receipt asserting
@@ -84,9 +87,29 @@ class Receipt:
             stamp = self.started_at.replace(":", "-")
             self.path = str(receipts_dir() / f"{stamp}-{self.session_id[:8]}.json")
         p = Path(self.path)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(asdict(self), indent=1, ensure_ascii=False) + "\n")
-        os.replace(tmp, p)
+        # Every save stamps this, so a receipt whose session was killed still dates itself. `ended_at` is
+        # written by close(), and close() does not run when the process is killed — which left `ended_at`
+        # empty on a receipt that was otherwise complete, and an auditor with no way to tell "still running"
+        # from "died at some unknown time". This is the last moment the session is known to have been alive.
+        self.last_activity_at = _now()
+        # A UNIQUE temporary name, and fsync before the rename. A shared ".tmp" is safe only while exactly
+        # one writer exists; two savers of the same receipt interleave their bytes and the rename publishes
+        # the mixture. That is not hypothetical here: the same shape, in the disclosure record's writer,
+        # produced a file that would not parse on 24 Sep, and the session it described vanished from the
+        # audit pack with its five signed searches — which reads to an auditor as evidence removed.
+        tmp = p.with_name(f"{p.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(asdict(self), indent=1, ensure_ascii=False) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, p)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return p
 
     @classmethod

@@ -595,3 +595,146 @@ def test_both_briefs_condition_the_published_reference_on_who_publishes():
     # And the brief carries the condition too, since an auditor may read only that.
     assert "only when the publishing machine is not the audited one" in brief
     assert "Establish that before crediting the fetch" in brief
+
+
+def test_the_census_classifies_rows_the_way_the_verifier_does():
+    """The pack states how many rows are searches and how many are document reads, so that a zero is a
+    stated zero rather than an empty field an auditor has to interpret — one did interpret it, on 24 Sep,
+    and reported claim 8 VERIFIED because the coverage fields were null in every search.
+
+    The rule for what a row IS lives in two files: here, and in verify_record.py's dispatch. That file is
+    standalone by design and cannot be imported, so the copies cannot be shared — they can only be pinned.
+    If either moves, the census and the verifier will disagree about the same folder, and the pack's own
+    index will contradict the program it ships."""
+    from inferroute_cli import probant_export as E
+    import pathlib
+    import re
+
+    src = (pathlib.Path(E.__file__).parent / "pi_attested" / "verify_record.py").read_text()
+    # The verifier's rule, verbatim. Written as a regex only to tolerate whitespace, not wording.
+    assert re.search(r'str\(st\.get\("kind"\) or "search"\) == "document"', src), \
+        "verify_record.py no longer classifies a document read this way; the census below is now wrong"
+
+    doc = {"statement": {"kind": "document"}}
+    search = {"statement": {"kind": "search"}}
+    default = {"statement": {}}                 # no kind at all: the verifier reads this as a search
+    unsigned_only = {"kind": "document"}        # a kind OUTSIDE the statement is unsigned and must not count
+
+    c = E._census([doc, search, default, unsigned_only, doc])
+    assert c == {"searches": 2, "document_reads": 2, "unknown_kind": 1}, c
+
+    # The row's own `kind` is the record's unsigned claim about itself. Counting it would let the index
+    # assert document reads that no enclave ever signed for.
+    assert E._row_kind(unsigned_only) == "unknown"
+    assert E._row_kind({"kind": "search", "statement": {"kind": "document"}}) == "document"
+
+
+def test_the_brief_states_the_count_rather_than_leaving_it_to_be_inferred():
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "`document_reads: 0` says this matter did no document reads" in b
+    assert "It does NOT say document reads go unrecorded" in b
+    # And the count must not be allowed to outrank the signatures.
+    assert "the statements win and the disagreement is itself a finding" in b
+
+
+def test_the_census_reaches_the_manifest_of_a_real_pack(tmp_path, V, kms, no_anchors):
+    """Adding a field and the field arriving in the artifact are two claims. Three times today I asserted
+    only the first and the test passed over code that never wrote it."""
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    m = json.loads((pack / "MANIFEST.json").read_text())
+
+    assert "contents" in m, "the pack's manifest does not state what it contains"
+    c = m["contents"]
+    rows = json.loads((pack / "searches.json").read_text())
+    assert c["searches"] + c["document_reads"] + c["unknown_kind"] == len(rows), \
+        "the census does not account for every row in the folder"
+    assert c["session_receipts"] == len([p for p in pack.iterdir() if E._is_session_receipt(p.name)])
+    # The zero that started this: stated, not inferred from an empty field.
+    assert c["document_reads"] == 0 and isinstance(c["document_reads"], int)
+
+    # And it is indexed like everything else, so altering it breaks the folder's own checksum file.
+    sums = (pack / "SHA256SUMS").read_text()
+    assert "MANIFEST.json" not in sums, "the manifest indexes the folder; it cannot index itself"
+
+
+def test_the_reference_timestamp_travels_with_the_pack_and_the_brief_bounds_it(tmp_path, V, kms, monkeypatch):
+    """The only date in an audit pack that InferRoute does not write. Everything else — the record, the
+    receipts, the reference itself — is dated by the party under audit, which is why an auditor on 24 Sep
+    could decline claim 3 on timing alone and be right to.
+
+    The brief has to bound it in the same breath as offering it, because an OpenTimestamps proof is easy to
+    over-read: `ots verify` prints Success for a proof over ANY bytes, a pending proof rests on calendar
+    servers rather than Bitcoin, and no timestamp says a word about whether the file's contents are true."""
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant_check
+    import re
+
+    ref = tmp_path / "ref.json"
+    ref.write_text('{"schema": "inferroute.enclave-reference/1"}')
+    (tmp_path / "ref.json.ots").write_bytes(b"\x00OTS-PROOF-BYTES")
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (str(ref), "ab" * 32))
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    got = pack / "trust-anchors" / "reference.json.ots"
+    assert got.is_file(), "the reference's timestamp did not travel with the pack"
+    assert got.read_bytes() == b"\x00OTS-PROOF-BYTES"
+
+    v = re.sub(r"\s+", " ", E.VERIFY_MD)
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    # The commands, so the auditor does not have to know the tool.
+    assert "ots verify trust-anchors/reference.json.ots" in v
+    assert "ots info trust-anchors/reference.json.ots" in v
+    # The three ways to over-read it, each named.
+    assert "A proof over some OTHER bytes is not a proof about this reference" in v
+    assert "Pending confirmation in Bitcoin blockchain" in v
+    assert "It says nothing whatever about whether the reference's CONTENTS are true" in v
+    # The direction that decides it — a timestamp AFTER the searches proves nothing.
+    assert "if, and only if, the timestamp PRECEDES the searches" in v
+    assert "A timestamp later than the searches settles nothing" in b
+
+
+def test_a_pack_without_a_reference_timestamp_says_absence_not_failure(tmp_path, V, kms, no_anchors):
+    """A missing .ots must not read as a failed check. Most installations will not have one."""
+    from inferroute_cli import probant_export as E
+    import re
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    assert not (pack / "trust-anchors" / "reference.json.ots").exists()
+    assert "an absence, not a failure" in re.sub(r"\s+", " ", E.VERIFY_MD)
+
+
+def test_the_brief_gives_the_quote_offsets_that_the_client_actually_uses():
+    """The brief asks the auditor to parse a TDX quote. Offsets stated wrong, or not stated at all, turn a
+    three-line recomputation into research most auditors will skip — and a wrong offset produces a
+    confident FAIL against software that is fine.
+
+    So the numbers in the brief are pinned to the ones the client parses with. They were also checked
+    against a real quote by hand: body[136:184] reproduced that receipt's `mrtd` exactly."""
+    from inferroute_cli import probant_export as E
+    from inferroute_local.confidential import attest
+    import re
+
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    hdr, body = attest._HDR, attest._BODY
+    assert f"{hdr}-byte header followed by a {body}-byte TD report body" in b
+
+    for name, (lo, hi) in attest._OFF.items():
+        if name == "td_attributes":
+            continue
+        assert f"[{lo}:{hi}]" in b, f"the brief does not give the offset the client uses for {name}"
+
+    # The snippet must slice the same places, not merely mention them in prose.
+    assert f'base64.b64decode(a["quote"])[{hdr}:{hdr} + {body}]' in E.AUDIT_MD
+    assert f'body[{attest._OFF["mrtd"][0]}:{attest._OFF["mrtd"][1]}].hex() == r["instance"]["mrtd"]' in E.AUDIT_MD
+    rd = attest._OFF["report_data"]
+    assert f"body[{rd[0]}:{rd[1]}][:32] == want" in E.AUDIT_MD
+
+    # And the equation itself has to match the check the client runs (attest.check_e2e_key_bound).
+    assert 'hashlib.sha256((mine["challenge"] + mine["e2e_pubkey"]).encode()).digest()' in E.AUDIT_MD
+    assert "sha256((nonce + e2e_pubkey).encode())" in attest.__doc__, \
+        "the client's own documented binding moved; the brief's snippet is now wrong"

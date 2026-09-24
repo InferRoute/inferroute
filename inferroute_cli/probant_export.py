@@ -747,6 +747,29 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 
 ## The claims to test
 
+**What `verify_record.py` settles, and what it leaves to you.** Read this before you run it, because its
+check names are more numerous and more concrete than these eight claims, and if you meet them first they
+become the frame you think in. An auditor on 24 Sep read the program, ran it, and then answered a list of
+its check names instead of this list — its "claim 3" was about a hash matching, and the claim actually
+numbered 3 here was never reached.
+
+  - Claims 1, 2, 4, 5 and 6 are the verifier's territory: it checks them cryptographically and a PASS is
+    strong evidence, subject to the program itself being what it claims.
+  - **Claim 3 is NOT.** The verifier checks that the record's values match the reference and that the
+    reference's signature is valid. It cannot check where the reference came from, and a PASS on
+    "reference signature" does not establish claim 3. That question is yours, and it is the one most
+    often got wrong by treating the tool's PASS as the answer.
+  - Claims 7 and 8 the verifier barely touches. Claim 7 rests on a receipt it does not parse; claim 8 on
+    fields it reports but cannot corroborate.
+
+**Three verdicts, and the difference between two of them matters.** VERIFIED, NOT VERIFIED, COULD NOT
+CHECK. *Could not check* means the evidence for it is absent from this folder. *Not verified* means the
+evidence is here and it does not support the claim, or it supports it only on an assumption you are not
+willing to make. They are not interchangeable and the second is a finding: an auditor who only ever writes
+VERIFIED or COULD NOT CHECK will file a real objection as an absence of information, and a professional
+reading "could not check" concludes there was no data rather than that something is wrong. If the
+reference came from the machine whose records it validates, that is NOT VERIFIED on provenance, not a gap.
+
 1. **Sealed hardware.** Each search ran inside an AMD SEV-SNP confidential machine with debugging
    disabled. The report is signed by a chip key (VCEK) that chains to AMD's root.
 2. **The signing key belongs to that machine.** The key that signed each statement is the key the hardware
@@ -947,7 +970,13 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
 ## Your report
 
-One line per claim (1 to 8): VERIFIED, NOT VERIFIED or COULD NOT CHECK, then the evidence you used, and
+Write each claim's verdict with its own title as the heading, so a claim you did not reach cannot be
+filled in by a heading you wrote yourself:
+
+    ### Claim N — <paste the claim's bold title from above, exactly>
+    VERDICT: VERIFIED | NOT VERIFIED | COULD NOT CHECK
+
+Then the evidence you used, and
 **which of it you computed yourself rather than taking from `verify_record.py`** — that distinction is the
 value of this audit, so make it visible per claim rather than in a closing remark. Then: the verifier's exit
 code; whether you could obtain an independent copy of the verifier and what the comparison showed; and

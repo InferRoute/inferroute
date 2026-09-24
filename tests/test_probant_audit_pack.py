@@ -210,7 +210,11 @@ def test_the_bundle_carries_the_conversation_receipt_and_the_brief_asks_about_it
     assert "session-*.receipt.json" in md
     assert "is NOT in this folder" in md                 # the limit is stated, not implied
     assert "which of this you verified and which you read" in md
-    assert "claim (1 to 8)" in md
+    # The report is per-claim. Since 24 Sep the heading carries the claim's own title, so a claim that was
+    # never reached cannot be papered over by a heading the auditor wrote themselves — one answered a list
+    # of the verifier's check names and its report gave no sign that claim 3 had gone unexamined.
+    assert "### Claim N —" in md
+    assert "paste the claim's bold title from above, exactly" in md
 
 
 def _bare_record(tmp_path, *, receipt=None):
@@ -421,3 +425,38 @@ def test_an_empty_field_is_not_a_passed_test_and_the_claims_must_be_quoted():
     assert "an empty list is not a passed test" in b
     assert "bold title from the list above, copied exactly" in b
     assert "Not the name of a check in `verify_record.py`" in b
+
+
+def test_the_brief_says_which_claims_the_verifier_does_not_settle():
+    """The auditor that answered the wrong list explained why, and it was not carelessness: "verify_record's
+    claim taxonomy is more present and granular than AUDIT.md's, and the brief does not explicitly map
+    them… I assumed PASS on the verifier's 'reference signature' check meant Claim 3 was covered. It is
+    not." The brief read the program first by its own instruction, so the program's frame arrived first and
+    the eight claims had to be held against it unaided.
+
+    So the mapping is stated before the claims: which the verifier settles, which it barely touches, and
+    the one where a PASS answers a different question than the claim asks."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "What `verify_record.py` settles, and what it leaves to you" in b
+    assert "Claim 3 is NOT." in b
+    assert 'does not establish claim 3' in b
+
+
+def test_not_verified_and_could_not_check_are_taught_apart():
+    """Same auditor: "my original report never DECLINED anything. Everything was either VERIFIED or COULD
+    NOT CHECK… The brief's three-outcome system may be structurally biased toward optimistic verdicts."
+
+    NOT VERIFIED was already in the vocabulary — but only in the output-format section at the end, while
+    the guidance where verdicts are actually formed said only that what you could not check is "could not
+    check, never fine". So the one negative verdict available was never reached for. A real objection filed
+    as an absence reads to a professional as no data rather than as something wrong."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "Three verdicts, and the difference between two of them matters" in b
+    assert "the evidence is here and it does not support the claim" in b
+    assert "that is NOT VERIFIED on provenance, not a gap" in b
+    # And it is taught BEFORE the claims, not only in the report format at the end.
+    assert b.index("Three verdicts") < b.index("**Sealed hardware.**")

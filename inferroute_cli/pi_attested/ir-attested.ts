@@ -512,6 +512,27 @@ class SessionRecord {
 	// and — the part a list of successes cannot say — which sub-queries failed or came back empty.
 	fanouts: Record<string, unknown>[] = [];
 
+	// Did the assistant act on the NEXT ROUND briefs this sitting emitted? Computed FROM `fanouts` every
+	// time it is read, never stored beside them: a second copy of a count drifts from the rows it counts,
+	// and this number exists to be trusted.
+	briefFollowThrough() {
+		const gen = (f: Record<string, unknown>) => (typeof f.generation === "number" ? f.generation : 1);
+		let emitted = 0;
+		let followed = 0;
+		this.fanouts.forEach((f, i) => {
+			if (!f.brief_emitted) return;
+			emitted += 1;
+			// Followed means a LATER press in this sitting was the next generation — not merely that
+			// another press happened, which a professional pressing the button again would also produce.
+			if (this.fanouts.slice(i + 1).some((g) => gen(g) === gen(f) + 1)) followed += 1;
+		});
+		return { briefs_emitted: emitted, briefs_followed: followed,
+		         note: emitted
+		           ? "how often a press that asked for another round got one, in this sitting. A brief that "
+		             + "is emitted and not followed means the assistant did not act on it."
+		           : "no press asked for another round in this sitting" };
+	}
+
 	surfaces() {
 		return {
 			this_device: "opened everything: the conversation, the model's replies, and the sealed search results",
@@ -549,7 +570,8 @@ class SessionRecord {
 				verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt,
 				check_list: this.modelCheckList, limitations: this.modelLimitations, ...this.modelDetail,
 			},
-			search_lane: { offered: this.searchOffered, searches: this.searches, deep_searches: this.fanouts },
+			search_lane: { offered: this.searchOffered, searches: this.searches, deep_searches: this.fanouts,
+			               deep_brief_follow_through: this.briefFollowThrough() },
 			which_surface_saw_what: this.surfaces(),
 			note: "A per-surface disclosure record for one attested session. Each line is a checked fact, not a promise.",
 		};
@@ -1568,6 +1590,13 @@ export default function (pi: ExtensionAPI) {
 				// WHICH ROUND, and why these queries. A composed generation is not re-derivable from the
 				// disclosure — the record has to carry the reason or nobody can account for it later.
 				generation, because: composed.length ? String(params.because ?? "").trim() : "",
+				// WHETHER THIS PRESS ASKED FOR ANOTHER ROUND. The brief is an instruction with no
+				// enforcement of its own, and instructions of that shape have failed here three times in
+				// five — I will not assume this one binds because I wrote it more carefully. Recorded so
+				// the question is answered by ordinary use rather than by my opinion: a press that asked
+				// and was not followed is the signal, and it is only visible if both halves are written
+				// down. Check design from sealed-research, 25 Sep.
+				brief_emitted: Boolean(nextRound),
 				// Which SHAPE of press this was, so the record does not have to be re-derived to know why a
 				// follow-up put six queries about two documents instead of the disclosure.
 				shape: composed.length ? "composed from the last round"

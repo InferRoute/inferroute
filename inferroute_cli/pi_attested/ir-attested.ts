@@ -1231,6 +1231,18 @@ export default function (pi: ExtensionAPI) {
 		return t.length > 72 ? `${t.slice(0, 71).trimEnd()}…` : t;
 	}
 
+	// WHAT A PRESS IS MADE FROM. The planner is deterministic: the same disclosure text and the same
+	// relevance marks produce the same queries, byte for byte. So a second press over unchanged inputs sends
+	// the enclave questions it has already answered — it costs money, it adds duplicate signed statements to
+	// the record, and it tells the professional nothing. Defined ONCE and used in both places that need it
+	// (the suggestion, and the press itself), because two copies of this predicate would drift.
+	function deepMarksKey(relevant: string[]): string {
+		return [...relevant].sort().join("\u0000");
+	}
+	function deepInputsKey(text: string, relevant: string[]): string {
+		return JSON.stringify([text.replace(/\s+/g, " ").trim(), deepMarksKey(relevant)]);
+	}
+
 	function deepPlan(text: string, relevant: string[]): DeepPlan {
 		const legs: DeepLeg[] = [];
 		const notes: string[] = [];
@@ -1335,6 +1347,22 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				relevant = [];
 			}
+			// An identical repeat is not refused to be difficult: it would send the SAME queries and return
+			// the SAME documents. Saying so is the honest answer, and it is the only place the disclosure
+			// text is known — the suggestion list, which runs elsewhere, can see the marks but not the text.
+			const inputsKey = deepInputsKey(text, relevant);
+			const last = disclosure.fanouts[disclosure.fanouts.length - 1];
+			if (last && last.inputs_key === inputsKey) {
+				return {
+					content: [{ type: "text", text: "Nothing was sent. This press would put exactly the queries the "
+						+ "last deep search already put: the description it was given has not changed and neither "
+						+ "have your marks, and the queries are derived from those two things alone. Mark a "
+						+ "document relevant — the next press walks outward from it — or change the description, "
+						+ "and press again." }],
+					details: { deep: true, repeat: true, at: new Date().toISOString(), planned: 0, sent: 0,
+					           cap: DEEP_MAX, documents: 0, legs: [], notes: [] },
+				};
+			}
 			const plan = deepPlan(text, relevant);
 			const legs = plan.legs;
 			const started = new Date().toISOString();
@@ -1381,6 +1409,9 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			disclosure.fanouts.push({
+				// Not a hash: the record is the professional's, and a value they cannot interpret is worse
+				// than a long one they can. It is also what makes the repeat check auditable after the fact.
+				inputs_key: inputsKey, marks_key: deepMarksKey(relevant),
 				at: started, planned: legs.length, cap: DEEP_MAX, sent,
 				legs: results, documents: union.size, notes: plan.notes,
 			});
@@ -1577,9 +1608,18 @@ export default function (pi: ExtensionAPI) {
 		const group = (v: string) => entries.filter(([, x]) => x === v).map(([k]) => `${k}${about(k)}`).join("; ");
 		const relevant = entries.filter(([, v]) => v === "relevant").map(([k]) => k);
 		// A new session is its own sitting: until it has run a search, running one is a candidate too.
+		// Offer a deep search only when pressing it could do something. After a press, the queries depend on
+		// the disclosure text and these marks; the text is not readable from here, so what CAN be decided
+		// here is the marks half: same marks as the last press means the only way this press differs is a
+		// changed description, and then the tool itself is the one that can tell. Henry, 24 Sep: it should
+		// show up only if it has not been done, or if what the deep search is built from has changed.
+		const lastFanout = disclosure.fanouts[disclosure.fanouts.length - 1];
+		const marksCoveredByLastPress = Boolean(lastFanout)
+			&& typeof lastFanout.marks_key === "string"
+			&& lastFanout.marks_key === deepMarksKey(relevant);
 		const candidates = [
 			...(searchNo === 0 ? [STEP_SURVEY] : []),
-			STEP_DEEP,
+			...(marksCoveredByLastPress ? [] : [STEP_DEEP]),
 			...(relevant.length ? [STEP_DEEPER] : []),
 			...relevant.slice(0, 2).map(stepLike),
 			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),

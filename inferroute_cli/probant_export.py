@@ -879,11 +879,43 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
 Begin every verdict with the claim's own **bold title from the list above, copied exactly**, then your
 verdict, then the evidence. Not the name of a check in `verify_record.py`, and not a title of your own.
 
+`verify_record.py`'s check names are NOT these claims, and they are the thing most likely to replace them:
+it prints fifteen of them, they are concrete, and the brief asks you to read the program first. **If your
+report has a "claim 4" about query text matching a hash, or a "claim 5" about the result, you are
+answering the verifier's list and not this one** — those are check names. Claim 4 here is whether the
+statements are untampered; claim 5 is whether anything was removed. Two auditors on 24 Sep made exactly
+that substitution, on a pack that already carried this instruction.
+
 This is not bookkeeping. On 24 Sep two auditors read the same pack and one of them answered a different
 list: its "claim 3" was about query text matching a hash, where claim 3 here is whether the software is
 InferRoute's. It substituted the verifier's check names for these claims, and the consequence was not a
 mislabel — the claim that most needed judgement was never reached, and its report gave no sign of the
 gap. Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
+
+## Last: one plain statement about confidentiality
+
+Finish with two or three sentences, in the words a patent professional would use to a client, saying what
+this record establishes about confidentiality and what it does not. Write it LAST, from the verdicts you
+reached, and let them constrain it — this is the line most likely to be quoted on its own, so it must be
+the line you would defend on its own.
+
+What it may and may not say:
+
+  - Say who could read the invention IN TRANSIT and where it went. That is what the evidence covers.
+  - Do NOT say the invention "was never exposed", "could not have been read", or "remained confidential".
+    No attestation establishes what software did with a text after decrypting it. The operator holds the
+    disk key; the receipt's own limitations say so.
+  - If claim 3 is not VERIFIED, you may not call the machine InferRoute's. You may say it was a genuine
+    sealed machine of the stated kind — which is what the hardware evidence supports on its own.
+  - If the record is an evidence-only pack, say that you did not see the queries or results, and that the
+    hashes commit to texts you could not open.
+  - Name the one thing a reader would otherwise assume and should not.
+
+The shape, not a form of words to copy: *"The invention text was encrypted on the professional's own
+computer to a key that a genuine AMD SEV-SNP machine's hardware report commits to, so no relay between
+them could read it; I verified that chain myself against AMD. I could not establish that the machine was
+InferRoute's rather than another party's, and nothing here shows what the software inside it did with the
+text after decrypting it."*
 
 ## How long this takes
 

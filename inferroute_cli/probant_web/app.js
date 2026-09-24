@@ -929,9 +929,15 @@
         const list = el("div", "deep-legs");
         for (const leg of d.legs || []) {
           const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
-          list.append(el("div", `deep-leg ${leg.status}`,
-            `${mark} ${leg.feature}` + (leg.status === "ok" ? ` — ${leg.hits} document(s)`
-              : leg.status === "empty" ? " — nothing returned" : ` — ${leg.why || "did not complete"}`)));
+          const count = leg.status === "ok" ? `${leg.hits} document(s)`
+            : leg.status === "empty" ? "nothing returned" : (leg.why || "did not complete");
+          // Two lines: the category and the count, then WHAT was put. The category repeats across legs —
+          // two "one feature on its own" told you nothing about which feature.
+          const row = el("div", `deep-leg ${leg.status}`);
+          row.append(el("div", "deep-leg-head",
+            `${mark} ${leg.searchNo ? `Search ${leg.searchNo} · ` : ""}${leg.feature} — ${count}`));
+          if (leg.about) row.append(el("div", "deep-leg-about", `“${leg.about}”`));
+          list.append(row);
         }
         e.body.append(list);
         e.body.append(el("p", "sub", "These are the combined results of separate queries, not a merged "

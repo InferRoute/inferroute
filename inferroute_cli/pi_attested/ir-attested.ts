@@ -359,7 +359,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	line(theme.fg("dim", "Checked by this computer, not by the AI, and never shown to the AI."));
 	if (p.measurement) line(`${theme.fg("muted", "utility VM ")} ${p.measurement.slice(0, 24)}…`);
 	if (p.policy) line(`${theme.fg("muted", "policy     ")} ${p.policy.slice(0, 24)}…`);
-	if (p.index) line(`${theme.fg("muted", "index      ")} ${p.index}`);
+	if (p.index) line(`${theme.fg("muted", "index      ")} ${corpusPhrase(p.index)}`);
 	if (p.enclaveKey) line(`${theme.fg("muted", "sealed to  ")} ${p.enclaveKey}…`);
 	line(`${theme.fg("muted", "checks     ")} ${passed}/${p.steps.length} passed${expanded ? "" : " (expand for the technical list)"}`);
 	for (const s of p.steps) {
@@ -383,10 +383,39 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	return box;
 }
 
+// The corpus, said in a way a patent attorney reads rather than decodes. "patent1m-epwo+usall@29595902"
+// is the signed identifier and stays exactly that everywhere it is verified; this is the sentence beside
+// it. Henry, 24 Sep, on seeing the agent repeat the raw string in its answer.
+//
+// It refuses rather than guesses. An identifier it does not recognise gets no friendly name at all — a
+// corpus described as covering territories it does not cover would be worse than one that looks technical.
+function corpusName(id: string): string {
+	const m = /^[a-z0-9]+-([a-z+]+)@(\d+)$/i.exec(String(id || "").trim());
+	if (!m) return "";
+	const where: string[] = [];
+	const scope = m[1].toLowerCase();
+	if (scope.includes("us")) where.push("the United States");
+	if (scope.includes("ep")) where.push("Europe");
+	if (scope.includes("wo")) where.push("WIPO");
+	if (!where.length) return "";
+	const n = Number(m[2]);
+	if (!Number.isFinite(n) || n <= 0) return "";
+	const count = n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")} million` : n.toLocaleString("en");
+	const places = where.length > 1 ? `${where.slice(0, -1).join(", ")} and ${where[where.length - 1]}` : where[0];
+	return `${count} published patents from ${places}`;
+}
+
+// Name first, identifier second and never dropped: the name is for reading, the identifier is what a
+// statement commits to and what an auditor checks.
+function corpusPhrase(id: string): string {
+	const name = corpusName(id);
+	return name ? `${name} (${id})` : (id || "the index");
+}
+
 function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number>): string {
 	const hits = out.result?.hits ?? [];
 	const lines = [
-		`${label}: ${hits.length} references surfaced by a sealed search over ${out.enclave?.index_snapshot ?? "the index"}. ` +
+		`${label}: ${hits.length} references surfaced by a sealed search over ${corpusPhrase(String(out.enclave?.index_snapshot ?? ""))}. ` +
 		`${out.result?.claim_boundary ?? "It surfaces related art; it does not certify completeness or absence."}`,
 		"The professional's screen already lists these documents with their numbers, years and titles, and the " +
 		"controls to mark them. Do NOT retype the list. Say what is worth saying about it — which part of the " +
@@ -1145,6 +1174,15 @@ export default function (pi: ExtensionAPI) {
 	// only the count invites the reading that the search gave up.
 	interface DeepPlan { legs: DeepLeg[]; notes: string[] }
 
+	// What a leg was actually about. `feature` is the CATEGORY and repeats — a press showed "one feature on
+	// its own" twice and "part of the description" twice, with nothing to tell them apart, which is a list
+	// that looks like a trace and carries none of one.
+	function deepAbout(leg: DeepLeg): string {
+		if (leg.like) return `documents like ${leg.like}`;
+		const t = leg.text.replace(/\s+/g, " ").trim();
+		return t.length > 72 ? `${t.slice(0, 71).trimEnd()}…` : t;
+	}
+
 	function deepPlan(text: string, relevant: string[]): DeepPlan {
 		const legs: DeepLeg[] = [];
 		const notes: string[] = [];
@@ -1243,10 +1281,11 @@ export default function (pi: ExtensionAPI) {
 			const plan = deepPlan(text, relevant);
 			const legs = plan.legs;
 			const started = new Date().toISOString();
-			const results: { feature: string; status: string; hits: number; searchNo?: number; why?: string }[] = [];
+			const results: { feature: string; about: string; status: string; hits: number; searchNo?: number; why?: string }[] = [];
 			const blocks: string[] = [];
 			const union = new Map<string, { title: string; first: number }>();
 			let sent = 0;
+			let corpusId = "";
 
 			for (const leg of legs) {
 				// Each sub-search re-emits the ordinary phases, so the page never goes quiet for two minutes
@@ -1257,15 +1296,17 @@ export default function (pi: ExtensionAPI) {
 					r = await sealedSearch({ text: leg.text, k: 10, feature: leg.feature, like: leg.like, ctx, signal, phase });
 				} catch (err) {
 					const why = err instanceof Error ? err.message : String(err);
-					results.push({ feature: leg.feature, status: "failed", hits: 0, why });
+					results.push({ feature: leg.feature, about: deepAbout(leg), status: "failed", hits: 0, why });
 					// A declined approval or an unverifiable machine stops the whole press: every remaining
 					// sub-query would ask the same machine the same question and fail the same way.
 					if (/declined|did not verify|verifier did not answer/.test(why)) break;
 					continue;
 				}
 				sent += 1;
+				corpusId = corpusId || String(r.sp.index ?? "");
 				const n = r.sp.searchNo ?? 0;
-				results.push({ feature: leg.feature, status: r.sp.docs.length ? "ok" : "empty", hits: r.sp.docs.length, searchNo: n });
+				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : "empty",
+				               hits: r.sp.docs.length, searchNo: n });
 				for (const d of r.sp.docs) {
 					if (!union.has(d.key)) union.set(d.key, { title: d.title ?? "", first: n });
 				}
@@ -1285,7 +1326,8 @@ export default function (pi: ExtensionAPI) {
 			const failed = results.filter((x) => x.status === "failed");
 			const empty = results.filter((x) => x.status === "empty");
 			const ledger = [
-				`Deep search: ${sent} of ${legs.length} sealed queries completed, ${union.size} distinct documents.`,
+				`Deep search over ${corpusPhrase(corpusId)}: ${sent} of ${legs.length} sealed queries completed, `
+					+ `${union.size} distinct documents.`,
 				// WHY it was this size, in the professional's terms. Henry, 24 Sep, on being told only that
 				// three queries ran: "why did it not search further… this can be improved to be clearer".
 				// The count alone reads as the search giving up; the reasons are the part they can act on.
@@ -1300,7 +1342,10 @@ export default function (pi: ExtensionAPI) {
 
 			return {
 				content: [{ type: "text", text: `${ledger}\n\n${blocks.join("\n\n")}` }],
-				details: { deep: true, at: started, planned: legs.length, sent, documents: union.size, legs: results },
+				// cap and notes travel HERE too. They were added to the session record only, so the page —
+				// which reads `details` — rendered "a possible undefined" and an empty list of reasons.
+				details: { deep: true, at: started, planned: legs.length, cap: DEEP_MAX, sent,
+				           documents: union.size, legs: results, notes: plan.notes },
 			};
 		},
 

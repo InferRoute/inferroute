@@ -255,3 +255,34 @@ def test_the_record_makes_no_comparative_claim_about_reading_more(matter):
     assert "we cannot tell you whether reading more" in html
     assert "we cannot tell you that reading more" not in html
     assert "the title and the opening of the abstract" in html
+
+
+def test_the_brief_does_not_claim_the_index_carries_the_verifier():
+    """An auditor ran `pip download inferroute` on 24 Sep, checked 42 releases, and found verify_record.py
+    in none of them — while the brief asserted InferRoute publishes it there. A brief that names what is
+    not there spends the auditor's time and buys our doubt, which is the opposite of what it is for.
+
+    It now names three sources and what each one proves, because they prove different things and treating
+    them alike would make three checks look like corroboration when two of them share an origin with the
+    folder being audited."""
+    from inferroute_cli import probant_export as E
+    brief = E.AUDIT_MD
+    assert "InferRoute publishes this verifier inside\n     its client package" not in brief
+    assert "NOT IN THIS RELEASE" in brief, "the fetch that comes back empty has no expected answer"
+    assert "do **not** contain this file" in brief
+    # The wheel is offered, and is NOT dressed up as independent corroboration.
+    assert "not**\n     independent corroboration" in brief or "not** independent corroboration" in brief
+    assert "targeted substitution" in brief
+    # Three sources, ordered by what they establish.
+    for marker in ("**(a) The public package index.**", "**(b) The published client wheel**",
+                   "**(c) The professional's installed copy**"):
+        assert marker in brief, marker
+
+
+def test_the_pack_says_which_client_wrote_it_and_calls_that_self_reported():
+    """The auditor's hardest step was knowing WHICH published wheel to compare against. The pack states it.
+    It is the audited party naming itself, so the brief says that in the same breath."""
+    from inferroute_cli import probant_export as E
+    assert "client_version" in E.AUDIT_MD
+    assert "audited party naming itself" in E.AUDIT_MD
+    assert E._client_version()          # and it is actually populated

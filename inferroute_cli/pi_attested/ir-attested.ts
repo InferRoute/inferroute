@@ -1098,6 +1098,23 @@ export default function (pi: ExtensionAPI) {
 	// The fan-out is bounded (DEEP_MAX) for two reasons that are not about cost: the sealed machine runs on
 	// a schedule, and the page stops claiming the assistant is working after two minutes of complete
 	// silence, so every sub-search must report and the whole press must stay inside the window.
+	// ⚠ PROVISIONAL — this planning belongs to the search engine, not to this file.
+	//
+	// Henry, 24 Sep: the agentic deep search must be the SAME object sealed-research optimises through its
+	// R&D. Everything below that decides WHAT TO ASK — deepElements, deepSentences and its keyword regex,
+	// deepWindows, deepAnchor, the marks-walk, this cap — is a retrieval decision, and every one of them
+	// is unmeasured and invisible to the benchmarks that are supposed to govern them. They live here only
+	// because the engine work was blocked when Henry needed something to test.
+	//
+	// The seam we are converging on: the engine owns what to ask (decomposition, expansion, windowing,
+	// repair, the union and its ranking, family collapse) behind a survey mode on /search; this file owns
+	// when to ask, the trust and approval flow, the visible trace, the outline and the certificate. When
+	// that mode lands, this whole block is DELETED rather than maintained.
+	//
+	// So: do not tune these heuristics, do not treat their behaviour as a specification, and do not add a
+	// new one here. A ranking stack optimised on one side of a regex written on the other is two
+	// implementations of one problem, which is the failure this product exists to avoid in its evidence
+	// and has no better excuse for in its retrieval.
 	const DEEP_MAX = 8;
 	const DEEP_WINDOW = 700;          // characters per window: long enough to be self-contained
 

@@ -854,3 +854,20 @@ def test_a_long_feature_is_not_padded_with_the_subject():
     feats = [l for l in out if l["feature"] == "one feature on its own"]
     assert any(f["text"].startswith("An emitter directs") for f in feats), \
         f"a long feature was padded with the subject: {[f['text'][:60] for f in feats]}"
+
+
+def test_the_client_side_planner_is_marked_as_the_engine_s_to_own():
+    """Henry, 24 Sep: the agentic deep search must be the same object sealed-research optimises.
+
+    Everything in this file that decides WHAT TO ASK is a retrieval decision taken in TypeScript, unmeasured
+    and invisible to the benchmarks meant to govern it. It is here because the engine work was blocked when
+    he needed something to test. This test exists so that fact cannot quietly become the architecture: a
+    later reader tuning these heuristics, or adding one, is doing engine work in the wrong repository."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    block = ts[ts.index("⚠ PROVISIONAL"):ts.index("const DEEP_MAX")]
+    assert "belongs to the search engine" in block
+    assert "DELETED rather than maintained" in block
+    assert "do not add a" in block
+    # The marker must sit with the thing it governs, not in a comment elsewhere in the file.
+    assert ts.index("⚠ PROVISIONAL") < ts.index("function deepWindows")
+    assert ts.index("function deepSentences") > ts.index("⚠ PROVISIONAL")

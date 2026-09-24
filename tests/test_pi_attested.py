@@ -526,6 +526,9 @@ def test_the_page_and_the_extension_word_the_mark_steps_identically():
     assert grab(ts, "const STEP_DEEPER") == grab(js, "const DEEPER")
     assert grab(ts, "const STEP_LEAVE_OUT") == grab(js, "const LEAVE_OUT")
     assert grab(ts, "const STEP_SURVEY") == grab(js, "const SURVEY")
+    # The deep search is offered from BOTH sides — the assistant may suggest it, and the page guarantees it
+    # — so the two wordings must be the same sentence or the page cannot tell it has already been offered.
+    assert grab(ts, "const STEP_DEEP") == grab(js, "const DEEP")
     assert "`Find documents like ${key}`" in ts and "`Find documents like ${k}`" in js
 
 
@@ -584,3 +587,108 @@ def test_the_launcher_hands_the_matters_earlier_documents_to_the_extension(tmp_p
     PA.env_argv("pi", env2, [], base_url="http://127.0.0.1:1", api_key="k", alias=alias, upstream_name="u",
                 search_endpoint="http://127.0.0.1:2")
     assert "IR_MATTER_DOCS" not in env2
+
+
+# ── the deep search's plan (24 Sep) ──
+
+def _run_deep_plan(script_tail):
+    """Run the extension's own fan-out planner in node, with the document store stubbed."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    block = ts[ts.index("\tconst DEEP_MAX ="):ts.index("\tpi.registerTool({\n\t\tname: \"deep_prior_art_search\"")]
+    harness = ("const docText = new Map();\nconst priorDocs = new Map();\n"
+               + block.replace("\t", "") + "\n" + script_tail)
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", harness],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-800:]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_the_deep_search_always_puts_the_whole_description_first():
+    """A press must never return less than the plain single search would have. The whole description is the
+    query that search would have made, so it is always the first leg — the widening is additional, never a
+    substitution of clever fragments for the obvious query."""
+    out = _run_deep_plan(
+        "const legs = deepPlan('A wrist worn device measuring blood glucose by infrared light absorption.', []);\n"
+        "console.log(JSON.stringify({ first: legs[0], n: legs.length }));")
+    assert out["first"]["feature"] == "the disclosure as a whole"
+    assert out["first"]["text"].startswith("A wrist worn device")
+
+
+def test_features_and_the_tail_of_a_long_description_each_get_their_own_query():
+    """Two reaching failures a single query has: an enumerated feature is diluted by the rest of the text, and
+    a long description is truncated upstream so its tail — where the distinguishing features usually are — is
+    never searched at all. Both become their own sealed queries."""
+    text = ("A wrist worn device measuring blood glucose by infrared absorption.\n"
+            "1. an emitter directing infrared light through the wearer's skin at two distinct wavelengths\n"
+            "2. a detector sampling returned intensity and rejecting motion artefacts by correlation\n")
+    tail = " ".join(f"Sentence number {i} describing a further distinguishing element of the apparatus." for i in range(40))
+    out = _run_deep_plan(
+        f"const legs = deepPlan({json.dumps(text + tail)}, []);\n"
+        "console.log(JSON.stringify(legs));")
+    feats = [l for l in out if l["feature"] == "one feature on its own"]
+    assert any("two distinct wavelengths" in f["text"] for f in feats)
+    assert any("motion artefacts" in f["text"] for f in feats)
+    # The enumerated line is searched WITHOUT its list marker: "1. " is not part of the invention.
+    assert not any(f["text"].startswith("1.") or f["text"].startswith("2.") for f in feats)
+    windows = [l for l in out if l["feature"] == "part of the description"]
+    assert windows, "a long description was not split, so its tail is never searched"
+    assert any("Sentence number 39" in w["text"] for w in windows), "the tail of the text reached no query"
+
+
+def test_only_documents_the_professional_marked_relevant_are_walked():
+    """The marks-seeded leg is the attorney in the loop: it walks outward from documents THEY judged
+    relevant. A document they marked not-relevant or known is not a seed — using it would be the system
+    overruling the judgement it asked for. And only text an earlier search already returned is used, so the
+    walk sends nothing new out of this computer."""
+    out = _run_deep_plan(
+        "docText.set('US-A1', 'Replaying recorded agent traces to improve a sealed model');\n"
+        "docText.set('US-B2', 'Something the attorney set aside as not relevant');\n"
+        "const legs = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-A1']);\n"
+        "const unknown = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-NOTSEEN']);\n"
+        "console.log(JSON.stringify({ legs, unknown }));")
+    likes = [l for l in out["legs"] if l.get("like")]
+    assert [l["like"] for l in likes] == ["US-A1"]
+    assert "Replaying recorded agent traces" in likes[0]["text"]
+    # A marked document this matter never surfaced has no text here, so there is nothing to walk from — and
+    # the extension must not invent a query out of the publication number.
+    assert not [l for l in out["unknown"] if l.get("like")]
+
+
+def test_a_mark_that_is_not_relevant_is_not_a_seed():
+    """Which marks seed the walk is decided by relevantMarks(), and it is the whole attorney-in-the-loop
+    claim: a document set aside as known art or as not relevant must not pull the search towards it. This
+    test exists because the filter first lived inside the tool body where nothing could reach it — a test of
+    the planner passed unchanged while that filter said `true`."""
+    out = _run_deep_plan(
+        "const st = { marks: { 'US-A1': { latest: { value: 'relevant' } },\n"
+        "                      'US-B2': { latest: { value: 'not-relevant' } },\n"
+        "                      'US-C3': { latest: { value: 'known' } },\n"
+        "                      'US-D4': { latest: {} },\n"
+        "                      'US-E5': {} } };\n"
+        "console.log(JSON.stringify({ seeds: relevantMarks(st), none: relevantMarks({}) }));")
+    assert out["seeds"] == ["US-A1"]
+    assert out["none"] == []
+
+
+def test_a_press_is_bounded_and_never_puts_the_same_query_twice():
+    """The fan-out is capped because the sealed machine runs on a schedule and the page stops claiming work
+    after two minutes of silence. Duplicates are dropped as well: on a short description the whole text and
+    its single window are the same query, and paying for it twice buys nothing."""
+    long_text = " ".join(f"Sentence {i} describing an element of the apparatus in some detail." for i in range(60))
+    marks = ", ".join(f"'US-{i}'" for i in range(12))
+    out = _run_deep_plan(
+        "".join(f"docText.set('US-{i}', 'A prior document about element number {i} of an apparatus');\n" for i in range(12))
+        + f"const many = deepPlan({json.dumps(long_text)}, [{marks}]);\n"
+        "const short = deepPlan('A wrist worn device measuring blood glucose by light.', []);\n"
+        "console.log(JSON.stringify({ n: many.length, cap: DEEP_MAX, short: short.length,\n"
+        "  uniq: new Set(many.map(l => l.text)).size }));")
+    assert out["n"] == out["cap"], f"a press planned {out['n']} queries against a cap of {out['cap']}"
+    assert out["uniq"] == out["n"], "the same query was planned twice in one press"
+    assert out["short"] == 1, "a short description was searched more than once for the same text"

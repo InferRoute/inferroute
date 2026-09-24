@@ -338,6 +338,10 @@
   // Every button shows exactly the message it sends.
   const SUMMARISE_IDEA = "Summarise what the searches have surfaced so far";
   const SURVEY = "Run a prior-art survey of the disclosure";       // worded as the extension words it
+  // The deep search, worded identically in ir-attested.ts (a test holds the two together). It is drawn
+  // apart from the others because it is the one button that puts SEVERAL sealed queries in one press —
+  // minutes rather than seconds — and a person should be able to tell that before pressing, not after.
+  const DEEP = "Search deeply: put the whole disclosure, its features, and my marks to the search machine";
   const IDEAS = [SURVEY,
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
@@ -396,6 +400,10 @@
       // and nothing presumes what has not happened — no summary before a search.
       else if (started) groups.push({ title: "Ideas", steps: IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0) });
     }
+    // The deep search is offered on its own row and does not compete for the five places. It is the one
+    // action the page guarantees is reachable: leaving it to the assistant to remember would make the
+    // headline feature of this client appear or not depending on how an answer happened to end.
+    if (started && !groups.some((g) => g.steps.includes(DEEP))) groups.push({ title: "", steps: [DEEP] });
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }
     // In the conversation, right after the latest answer — part of what the assistant said, not page furniture
@@ -409,7 +417,7 @@
       if (g.title) list.append(el("div", "steps-sub", g.title));
       const row = el("div", "steps-row");
       for (const step of g.steps) {
-        const b = el("button", "step-btn", step);
+        const b = el("button", step === DEEP ? "step-btn deep" : "step-btn", step);
         b.type = "button";
         b.addEventListener("click", () => send(step));
         row.append(b);

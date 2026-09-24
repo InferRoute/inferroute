@@ -125,7 +125,7 @@ def test_a_reading_session_gets_the_proposal_tool_and_no_search_tool(home, monke
                        upstream_name="u", search_endpoint="http://127.0.0.1:2")   # offered, and still not used
     tools = argv[argv.index("--tools") + 1].split(",")
     assert "propose_matter" in tools
-    assert not {"prior_art_search", "matter_marks", "suggest_next_steps"} & set(tools)
+    assert not {"prior_art_search", "deep_prior_art_search", "matter_marks", "suggest_next_steps"} & set(tools)
     assert env["IR_INTAKE_OUT"] == str(I.path_of(ident) / "proposals.jsonl")
     assert env["IR_ATTESTED_TOOLS"] == ",".join(tools)
     prompt = Path(argv[argv.index("--system-prompt") + 1]).read_text()
@@ -184,7 +184,8 @@ def test_the_proposal_tool_is_registered_before_the_search_only_guard():
     guard = ts.index("\tif (!SEARCH) return;")
     assert ts.index('name: "propose_matter"') < guard
     # And the search tools stay below it, where a session without a search machine cannot see them.
-    for search_only in ('name: "prior_art_search"', 'name: "matter_marks"', 'name: "suggest_next_steps"'):
+    for search_only in ('name: "prior_art_search"', 'name: "deep_prior_art_search"',
+                        'name: "matter_marks"', 'name: "suggest_next_steps"'):
         assert ts.index(search_only) > guard, search_only
 
 

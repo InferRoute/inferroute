@@ -165,7 +165,7 @@
   const log = $("log");
   let current = null;       // the assistant message being streamed: {node, text}
   let renderQueued = false;
-  const cards = new Map();  // toolCallId → card elements
+  const cards = new Map();  // ev.call (the bridge's wire name for a tool call) → card elements
   const marks = new Map();  // publication number → mark value
   const docRows = new Map(); // publication number → [row button groups]
   let busy = false;
@@ -759,19 +759,44 @@
       return;
     }
     if (ev.tool === "deep_prior_art_search") {
-      // One press, several sealed searches. It gets its own card because it is not one search and saying
-      // "Sealed patent search" over a fan-out would misdescribe what is happening — and because the
-      // professional asked to SEE what it did, rather than be told a number afterwards.
+      // One press, several sealed searches. Built like a search card and NOT a special case: it folds, it
+      // is keyed the way the bridge keys events, and it goes in the outline. The first version keyed it on
+      // `ev.toolCallId`, which the bridge does not send — so the card was stored under `undefined`, never
+      // found again, and sat on "planning the queries…" while six queries ran and finished behind it.
       const a = ev.args || {};
       const card = el("div", "card");
       const sub = el("span", "sub", "planning the queries…");
-      const title = el("span", "title", "🔍🔍 Deep prior-art survey");
+      const title = el("span", "title", "🔍 Deep prior-art survey");
       const qline = String(a.text || "").replace(/\s+/g, " ").trim();
       const what = el("span", "what", `“${qline.length > 110 ? `${qline.slice(0, 109).trimEnd()}…` : qline}”`);
       const notes = el("span", "notes", "");
-      card.append(el("div", "card-head", title, what, notes), el("div", "card-body", sub));
-      cards.set(ev.toolCallId, { card, sub, notes, deep: true });
+      notes.hidden = true;
+      const toggle = el("button", "card-toggle", "▾");
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", "true");
+      toggle.setAttribute("aria-label", "Collapse this survey");
+      const head = el("div", "card-head", toggle, title, what, sub, notes);
+      card.append(head);
+      const body = el("div", "card-body");
+      if (qline) body.append(el("div", "card-query", qline.length > 320 ? `${qline.slice(0, 320)}…` : qline));
+      card.append(body);
+      const t0 = ev.at || serverNow();
+      const entry = { card, sub, title, body, toggle, head, notes, keys: [], collapsed: false, byUser: false,
+                      startedAt: t0, phase: "verifying", phaseAt: t0, approvalMs: 0, done: false, deep: true };
+      const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
+      toggle.addEventListener("click", flip);
+      head.addEventListener("click", (e) => {
+        const sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed && head.contains(sel.anchorNode)) return;
+        flip(e);
+      });
+      autoCollapse();
       log.append(card);
+      cards.set(ev.call, entry);
+      setCollapsed(entry, true);
+      entry.about = "deep survey";
+      outlineAdd({ kind: "search", el: card, label: "Deep survey",
+                   detail: qline.slice(0, 60), entry });
       return;
     }
     if (ev.tool === "prior_art_search") {
@@ -882,15 +907,25 @@
       e.sub.classList.remove("slow");
       const d = ev.details || {};
       const keep = stick();
-      clear(e.sub);
+      // The head carries what you read while it is FOLDED; the body carries what you open it for. Putting
+      // the whole result in `sub` — which lives in the head — meant a folded card either said nothing or
+      // spilled the lot into its own title bar.
       if (!ev.ok) {
-        e.sub.append(el("div", "warn", String(ev.text || "the deep survey did not complete")));
+        e.sub.textContent = "the survey did not complete";
+        e.sub.classList.add("warn");
+        clear(e.body);
+        e.body.append(el("div", "warn", String(ev.text || "the deep survey did not complete")));
+        setCollapsed(e, false, false);          // a refusal opens itself, as a search's does
       } else {
-        e.notes.textContent = `${d.sent} of ${d.planned} queries · ${d.documents} documents`;
-        // WHY it was this size, on screen rather than only in the answer's prose: the count on its own
-        // reads as the search having given up, and the reasons are the part the professional can change.
-        e.sub.append(el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`));
-        e.sub.append(el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`));
+        e.sub.textContent = "";
+        e.notes.hidden = false;
+        e.notes.textContent = `${d.sent}/${d.planned} queries · ${d.documents} documents`;
+        e.title.textContent = `🔍 Deep prior-art survey`;
+        clear(e.body);
+        e.body.append(el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`));
+        // WHY it was this size. The count on its own reads as the search having given up, and the reasons
+        // are the part the professional can act on.
+        e.body.append(el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`));
         const list = el("div", "deep-legs");
         for (const leg of d.legs || []) {
           const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
@@ -898,8 +933,8 @@
             `${mark} ${leg.feature}` + (leg.status === "ok" ? ` — ${leg.hits} document(s)`
               : leg.status === "empty" ? " — nothing returned" : ` — ${leg.why || "did not complete"}`)));
         }
-        e.sub.append(list);
-        e.sub.append(el("p", "sub", "These are the combined results of separate queries, not a merged "
+        e.body.append(list);
+        e.body.append(el("p", "sub", "These are the combined results of separate queries, not a merged "
           + "ranking: the same invention can appear more than once under different publication numbers."));
       }
       keep();

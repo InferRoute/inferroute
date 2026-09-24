@@ -10,16 +10,19 @@ const grab = (from, to) => {
 };
 const keyLine = grab("const deepMarksKeyHere =", "\n");
 const gateLine = grab("const deepWouldRepeat =", "\n");
-const addLine = grab("if (started && searchOffered && !deepWouldRepeat", "steps: [DEEP] });") + "steps: [DEEP] });\n}";
+const stepLine = grab("const deepStep = deepMarksAtLastPress === null", "\n");
+const addLine = grab("if (started && searchOffered && !deepWouldRepeat", "steps: [deepStep] });") + "steps: [deepStep] });\n}";
 const armLine = grab("if (ev.ok && !d.repeat && d.sent)", "\n");
 
 const body = `
   const marks = new Map(); const markOrder = []; const DEEP = "deep";
   const started = true, searchOffered = true;
   const relevantOrdered = () => markOrder.filter((k) => marks.get(k) === "relevant");
+  const DEEP_FOCUSED = "focused";
   let deepMarksAtLastPress = null;
   ${keyLine}
-  const offered = () => { const groups = []; ${gateLine} ${addLine} return groups.length > 0; };
+  const offered = () => { const groups = []; ${gateLine} ${stepLine} ${addLine}
+                          return groups.length ? groups[0].steps[0] : null; };
   const press = (ev, d) => { ${armLine} };
   const mark = (k, v) => { marks.set(k, v); markOrder.push(k); };
   const out = {};

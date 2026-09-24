@@ -443,6 +443,11 @@ const STEP_SURVEY = "Run a prior-art survey of the disclosure";
 // The deep search. Worded as the professional would ask for it, like every other step: the button SENDS
 // this sentence, and the assistant answers it by calling deep_prior_art_search.
 const STEP_DEEP = "Search deeply: put the whole disclosure, its features, and my marks to the search machine";
+// The SAME action once a press has already run over this description: the disclosure and its parts
+// were put then, so what is new is the marks and the press leads with them. It says what the
+// professional is asking for, not what the tool will build — if the description has ALSO changed the
+// tool plans an ordinary press instead, which is a superset, and the ledger reports which shape ran.
+const STEP_DEEP_FOCUSED = "Search deeply again, leading with the documents I marked: read them against the disclosure and find more like them";
 const stepLike = (key: string) => `Find documents like ${key}`;
 const NEXT_MAX = 4;
 // A button sends EXACTLY its text, so a suggestion is never cut: a cut one sends a broken half-instruction
@@ -1713,7 +1718,7 @@ export default function (pi: ExtensionAPI) {
 			&& lastFanout.marks_key === deepMarksKey(relevant);
 		const candidates = [
 			...(searchNo === 0 ? [STEP_SURVEY] : []),
-			...(marksCoveredByLastPress ? [] : [STEP_DEEP]),
+			...(marksCoveredByLastPress ? [] : [lastFanout ? STEP_DEEP_FOCUSED : STEP_DEEP]),
 			...(relevant.length ? [STEP_DEEPER] : []),
 			...relevant.slice(0, 2).map(stepLike),
 			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),

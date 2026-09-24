@@ -533,6 +533,9 @@ def test_the_page_and_the_extension_word_the_mark_steps_identically():
     # The deep search is offered from BOTH sides — the assistant may suggest it, and the page guarantees it
     # — so the two wordings must be the same sentence or the page cannot tell it has already been offered.
     assert grab(ts, "const STEP_DEEP") == grab(js, "const DEEP")
+    # And the follow-up wording, which replaces it once a press has run. Same reason, same risk.
+    assert grab(ts, "const STEP_DEEP_FOCUSED") == grab(js, "const DEEP_FOCUSED")
+    assert grab(ts, "const STEP_DEEP_FOCUSED") != grab(ts, "const STEP_DEEP")
     assert "`Find documents like ${key}`" in ts and "`Find documents like ${k}`" in js
 
 
@@ -966,8 +969,8 @@ def test_the_two_places_that_decide_a_repeat_share_one_predicate():
 def test_the_deep_step_is_not_offered_when_the_marks_have_not_moved_since_the_last_press():
     ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
     block = ts[ts.index("const candidates = ["):ts.index("const candidates = [") + 600]
-    assert "...(marksCoveredByLastPress ? [] : [STEP_DEEP])" in block, \
-        "the deep search is still offered unconditionally"
+    assert "...(marksCoveredByLastPress ? [] : [lastFanout ? STEP_DEEP_FOCUSED : STEP_DEEP])" in block, \
+        "the deep search is still offered unconditionally, or with one wording for both cases"
     # A session that has never pressed must still be offered it.
     assert "Boolean(lastFanout)" in ts, "with no press at all the step would be suppressed"
 

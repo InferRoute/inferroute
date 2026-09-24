@@ -959,7 +959,21 @@ export default function (pi: ExtensionAPI) {
 							`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
 							"This text is encrypted here and only that machine can open it. ",
 							`Only documents ${bound} come back.\n\n`,
-							"Allow searches to this machine for this matter? You won't be asked again for it.\n",
+							// SAY WHAT IS BEING GRANTED, not only what is being sent now. This one answer covers
+							// every later sealed search on this matter, and the queries after it are not all
+							// sentences the professional will have read first: a deep press puts the description
+							// split several ways, and walks outward from documents that came BACK from the
+							// machine. Showing one preview and asking a question that sounds about that preview
+							// gets a yes to something narrower than what is actually granted. Henry, 25 Sep,
+							// ruling the consent shape: "one request for any search to be ran during that
+							// session". It is broader still — it holds for this matter, not just this sitting —
+							// and the sentence has to say so or the breadth is ours rather than theirs.
+							"This is the only time you will be asked. Saying yes allows every sealed search on ",
+							"this matter to this machine — including queries the assistant composes itself, from ",
+							"your description split into features and from documents earlier searches returned, ",
+							"which you will not read before they are sent. Every one of them is recorded, and the ",
+							"record shows you what was put.\n\n",
+							"Allow sealed searches on this matter?\n",
 							`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
 						].join(""),
 					);

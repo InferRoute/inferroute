@@ -6,6 +6,7 @@ from becoming the agent's way out, or another site's way in.
 import datetime as dt
 import asyncio
 import json
+import os
 import stat
 import re
 from pathlib import Path
@@ -108,7 +109,11 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
     assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
-                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack", "/api/close", "/api/end"}
+                     "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack",
+                     # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
+                     # it takes a choice from two agents — never a command. See the launcher's own test.
+                     "/api/audit-launch",
+                     "/api/close", "/api/end"}
 
 
 def test_a_dialog_can_only_be_answered_if_the_agent_opened_it_and_only_once(client):
@@ -1066,3 +1071,59 @@ def test_the_page_learns_about_the_search_machine_from_the_session_payload():
     # The page reads THAT key into the flag the steps panel gates on.
     assert "searchOffered = Boolean(s.search);" in js
     assert "started && searchOffered &&" in js, "the guaranteed deep row is no longer gated on it"
+
+
+# ── launching the audit in a terminal (24 Sep) ──
+
+def test_the_page_picks_an_agent_and_never_a_command():
+    """This is the one endpoint on this page that starts a program, so what the page may say is the whole
+    security question. It sends a choice from two; the command is composed server-side from the same
+    constants the copyable text uses. If a command string from the page could reach the launcher, anything
+    that reached the page could run anything on this computer."""
+    py = Path(W.__file__).resolve().read_text()
+    launcher = py[py.index('@app.post("/api/audit-launch")'):py.index('@app.post("/api/close")')]
+    assert 'agent not in ("claude", "ir")' in launcher          # a closed set, rejected otherwise
+    assert "AUDIT_PROMPT" in launcher and "AUDIT_IR_MODEL" in launcher
+    # Nothing from the request body may become part of what runs: `agent` is compared, never interpolated.
+    for forbidden in ('d.get("command"', 'd.get("cmd"', 'd.get("path"', "shell=True"):
+        assert forbidden not in launcher, forbidden
+    assert "shlex.quote(prompt)" in launcher                     # and the prompt is quoted, not concatenated raw
+
+
+def test_no_terminal_means_the_offer_falls_back_to_copying(monkeypatch):
+    """A machine with no desktop has no terminal to open. The page is told so and keeps the copyable
+    command, rather than showing a button that cannot work — the same rule as the deep-search button."""
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(W.sys, "platform", "linux")
+    assert W.terminal_argv(Path("/tmp/x.sh")) is None
+    js = (STATIC / "app.js").read_text()
+    assert "r.can_launch" in js and "Copy (goes to the folder too)" in js
+
+
+def test_each_terminal_gets_its_own_separator(monkeypatch):
+    """They disagree, and the wrong flag opens a window that flashes and closes — which reads as the
+    feature being broken rather than the flag being wrong. xfce4-terminal's -e takes ONE string and would
+    mangle an argv, so it must get -x; kitty and foot take the command with no flag at all."""
+    monkeypatch.setattr(W.sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+    seen = {}
+    for name, sep in W._TERMINALS:
+        seen[name] = sep
+    assert seen["gnome-terminal"] == ["--"]
+    assert seen["xfce4-terminal"] == ["-x"], "xfce4-terminal -e takes one string, not an argv"
+    assert seen["kitty"] == [] and seen["foot"] == []
+
+
+def test_the_launch_script_runs_in_the_pack_and_is_not_written_into_it(tmp_path):
+    """The script goes to a private temp dir. The audit pack is evidence a third party will hash, and a
+    script we dropped into it afterwards is one more thing they have to account for."""
+    pack = tmp_path / "audit-pack"
+    pack.mkdir()
+    sh = W.audit_launch_script(pack, "claude 'do the thing'")
+    body = sh.read_text()
+    assert str(pack) in body and "claude 'do the thing'" in body
+    assert sh.parent != pack and not list(pack.iterdir()), "the launcher wrote into the audit pack"
+    assert os.access(sh, os.X_OK)
+    # The window stays open after the agent exits: a terminal that vanishes takes the verdict with it.
+    assert "exec bash" in body

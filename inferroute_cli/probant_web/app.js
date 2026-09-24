@@ -1348,12 +1348,39 @@
         const r = await api("/api/audit-pack", {});
         clear(box);
         box.className = "audit-offer ready";
+        // A launch button rather than a command to copy: the pack is ready, the folder is known, and asking
+        // someone to copy a line, find a terminal and paste it is three steps between them and the second
+        // opinion this whole panel exists to get. The command stays on screen — it is what they are being
+        // asked to trust — and copying stays available where there is no terminal to open.
+        const launch = (agent, label) => {
+          const b = el("button", "small primary", label);
+          b.type = "button";
+          b.addEventListener("click", async () => {
+            b.disabled = true;
+            const was = b.textContent;
+            b.textContent = "Opening a terminal…";
+            try {
+              const got = await api("/api/audit-launch", { agent });
+              toast(`Opened in ${got.terminal}. The audit runs there and keeps going if you close this page.`, "info");
+              b.textContent = "Opened";
+            } catch (e) {
+              b.disabled = false;
+              b.textContent = was;
+              toast(e.message, "error");
+            }
+          });
+          return b;
+        };
+        const offer = (agent, cmd) => (r.can_launch
+          ? [el("span", "mono", cmd), el("div", "row", launch(agent, "Run it in a terminal"),
+                                          copyButton(`cd "${r.path}" && ${cmd}`, "Copy instead"))]
+          : [el("span", "mono", cmd), copyButton(`cd "${r.path}" && ${cmd}`, "Copy (goes to the folder too)")]);
         box.append(el("div", "audit-title", "Audit pack ready"),
           el("span", "mono", r.path),
-          el("p", "", el("b", "", "With your Claude subscription"), ", in that folder run:"),
-          el("span", "mono", r.claude), copyButton(`cd "${r.path}" && ${r.claude}`, "Copy (goes to the folder too)"),
+          el("p", "", el("b", "", "With your Claude subscription"), r.can_launch ? ":" : ", in that folder run:"),
+          ...offer("claude", r.claude),
           el("p", "", el("b", "", "No Claude subscription?"), " Use your InferRoute account instead:"),
-          el("span", "mono", r.ir), copyButton(`cd "${r.path}" && ${r.ir}`, "Copy (goes to the folder too)"),
+          ...offer("ir", r.ir),
           el("p", "sub", "The brief (AUDIT.md) asks for a verdict on each claim and has it redo the key checks with "
             + "its own tools, not only run ours. It takes ten to fifteen minutes — let it finish. Two checks need "
             + "your client's words, so it will report those as not checked; the check on this computer covers them."));

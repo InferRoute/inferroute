@@ -25,9 +25,11 @@ import asyncio
 import datetime as dt
 import hmac
 import json
+import shlex
 import os
 import re
 import secrets
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -250,6 +252,67 @@ def disclosure_info(workspace: Path) -> Dict[str, Any]:
     except OSError:
         pass
     return {"folder": str(workspace), "files": files, "disclosure_words": words}
+
+
+# ── opening a terminal for the audit ───────────────────────────────────────────────────────────────────
+#
+# The audit runs an interactive agent, which needs a terminal; a browser page cannot open one, so the
+# server does it. That makes this the one endpoint here that starts a program, and it is built so the page
+# cannot say WHICH: it sends a choice from a fixed set, and the command is composed here from the same
+# constants the copyable text is made from. A page that could hand over a command string would be a way to
+# run anything on this computer, reachable by anything that reached the page.
+#
+# The terminal is NOT tied to this server's lifetime. An audit takes ten to fifteen minutes and the person
+# may well close Probant while it runs; killing their agent because they closed a window it did not belong
+# to would lose the work and look like a crash.
+_TERMINALS = (
+    ("x-terminal-emulator", ["-e"]), ("gnome-terminal", ["--"]), ("konsole", ["-e"]),
+    ("xfce4-terminal", ["-x"]), ("alacritty", ["-e"]), ("wezterm", ["start", "--"]),
+    ("kitty", []), ("foot", []), ("xterm", ["-e"]),
+)
+
+
+def terminal_argv(script: Path) -> Optional[List[str]]:
+    """How to open a terminal running `script`, or None when there is no terminal to open.
+
+    Each entry carries its OWN separator because they disagree: gnome-terminal wants `--`, xfce4-terminal
+    wants `-x` (its `-e` takes one string and would mangle an argv), kitty and foot take the command with
+    no flag at all. Getting this wrong opens a terminal that flashes and closes, which reads as the feature
+    being broken rather than the flag being wrong."""
+    import shutil
+    if sys.platform == "darwin":
+        return ["open", "-a", "Terminal", str(script)]
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        return None                                     # no desktop: nothing to open a window on
+    for name, sep in _TERMINALS:
+        found = shutil.which(name)
+        if found:
+            return [found, *sep, "/bin/bash", str(script)]
+    return None
+
+
+def can_open_terminal() -> bool:
+    """Whether this computer has a terminal to open. The page asks before offering the button, for the same
+    reason the deep-search button asks about the search machine: an action that cannot work should not be
+    offered, and the copyable command is a perfectly good answer where it cannot."""
+    return terminal_argv(Path(os.devnull)) is not None
+
+
+def audit_launch_script(pack: Path, command: str) -> Path:
+    """A one-line script in a private temp dir, so every terminal needs the same shape: run bash on one
+    file. Not written into the audit pack — that folder is evidence a third party will hash, and a script
+    we dropped in it afterwards is one more thing they have to account for."""
+    import stat
+    import tempfile
+    d = Path(tempfile.mkdtemp(prefix="probant-audit-"))
+    sh = d / "run-audit.sh"
+    sh.write_text("#!/bin/bash\n"
+                  f"cd {shlex.quote(str(pack))} || exit 1\n"
+                  f"{command}\n"
+                  'printf "\\n[the audit session has ended — this window can be closed]\\n"\n'
+                  "exec bash\n")
+    sh.chmod(sh.stat().st_mode | stat.S_IXUSR)
+    return sh
 
 
 class Bridge:
@@ -820,10 +883,42 @@ class Bridge:
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"the audit pack could not be written: {e}"}, status_code=500)
             prompt = probant_export.AUDIT_PROMPT
+            proved["pack"] = str(pack)              # the folder a launch opens, so it never prepares a second
             return {"ok": True, "path": str(pack), "prompt": prompt,
+                    "can_launch": can_open_terminal(),
                     # `ir` needs a flag first (a bare word is read as a subcommand); an enclave-backed model runs
                     # on the confidential lane by default, so even this fallback keeps the pack sealed in transit.
                     "claude": f'claude "{prompt}"', "ir": f'ir --model {probant_export.AUDIT_IR_MODEL} "{prompt}"'}
+
+        @app.post("/api/audit-launch")
+        async def audit_launch(request: Request):
+            """Open a terminal on the prepared audit pack, running the chosen agent.
+
+            The page sends WHICH agent, from two, and never a command. The command is built here from the
+            same constants the copyable text uses, so the two can never say different things, and there is
+            no string from the page anywhere in what gets run."""
+            import subprocess
+            from . import probant_export
+            d = await body(request)
+            agent = str(d.get("agent") or "")
+            if agent not in ("claude", "ir"):
+                return JSONResponse({"error": "unknown agent"}, status_code=400)
+            pack = proved.get("pack")
+            if not pack or not Path(pack).is_dir():
+                return JSONResponse({"error": "prepare the audit pack first"}, status_code=409)
+            prompt = probant_export.AUDIT_PROMPT
+            command = (f"claude {shlex.quote(prompt)}" if agent == "claude"
+                       else f"ir --model {probant_export.AUDIT_IR_MODEL} {shlex.quote(prompt)}")
+            argv = terminal_argv(audit_launch_script(Path(pack), command))
+            if argv is None:
+                return JSONResponse({"error": "no terminal to open on this computer"}, status_code=501)
+            try:
+                # Detached on purpose: the audit outlives this page (see terminal_argv).
+                subprocess.Popen(argv, start_new_session=True,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError as e:
+                return JSONResponse({"error": f"the terminal did not open: {e}"}, status_code=500)
+            return {"ok": True, "terminal": Path(argv[0]).name, "agent": agent}
 
         @app.post("/api/close")
         async def close_page():

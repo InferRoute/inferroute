@@ -970,3 +970,31 @@ def test_the_deep_step_is_not_offered_when_the_marks_have_not_moved_since_the_la
         "the deep search is still offered unconditionally"
     # A session that has never pressed must still be offered it.
     assert "Boolean(lastFanout)" in ts, "with no press at all the step would be suppressed"
+
+
+def test_the_approval_says_what_it_actually_grants():
+    """Henry, 25 Sep, ruling the consent shape: "one request for any search to be ran during that session".
+
+    The mechanism already did more than that — `matter.approved` holds machine measurements per MATTER, so
+    one yes covers later sittings too. What it did not do was say so. It showed one query preview and then
+    asked a question that reads as being about that preview, so a professional could reasonably believe
+    they were approving that sentence.
+
+    The gap matters because later queries are not all sentences they will have read: a deep press splits
+    the description into features and walks outward from documents the machine returned. Asking narrowly
+    and granting broadly is how consent becomes ours rather than theirs — and it is the thing that has to
+    be right BEFORE any query the professional cannot see coming is ever composed."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index('"Allow a sealed patent search?"')
+    prompt = ts[start:start + ts[start:].index("if (ok) {")]
+
+    assert "This is the only time you will be asked" in prompt
+    # The breadth, in the three ways it is actually broad.
+    assert "every sealed search on " in prompt and "this matter to this machine" in prompt
+    assert "queries the assistant composes itself" in prompt
+    assert "which you will not read before they are sent" in prompt
+    # And the thing that makes the breadth acceptable: it is all recorded.
+    assert "Every one of them is recorded" in prompt
+
+    # The old question implied the scope was the previewed sentence. It must not come back.
+    assert "You won't be asked again for it." not in prompt

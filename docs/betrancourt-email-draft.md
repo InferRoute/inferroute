@@ -154,14 +154,18 @@ Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans 
 ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
 vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
 
-Il me faut pour cela votre **clé publique**. Le client est en pièce jointe ; trois commandes, et la
+Il me faut pour cela votre **clé publique**. Le client est en pièce jointe ; quatre commandes, et la
 dernière l'affiche :
 
 ```
+cd ~/Downloads
 python3 -m venv ~/probant
-~/probant/bin/pip install "inferroute-0.9.3-py3-none-any.whl[confidential]"
+~/probant/bin/pip install "./inferroute-0.9.3-py3-none-any.whl[confidential]"
 ~/probant/bin/ir probant identity
 ```
+
+(La première ligne suppose que la pièce jointe a été enregistrée dans « Téléchargements » ; sinon,
+remplacez-la par le dossier où elle se trouve.)
 
 Vous me renvoyez ce qu'elle affiche. Cette clé ne contient que des clés publiques : elle ne permet rien
 d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit

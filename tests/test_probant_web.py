@@ -1156,3 +1156,41 @@ def test_the_launch_script_runs_in_the_pack_and_is_not_written_into_it(tmp_path)
     assert os.access(sh, os.X_OK)
     # The window stays open after the agent exits: a terminal that vanishes takes the verdict with it.
     assert "exec bash" in body
+
+
+def test_the_page_keys_cards_on_the_field_the_bridge_actually_sends():
+    """The deep-survey card sat on "planning the queries…" while six sealed queries ran, finished and were
+    reported. It was stored under `ev.toolCallId` — a name the bridge does not send — so the key was
+    `undefined`, the result lookup found nothing, and the card never learned it was done.
+
+    `toolCallId` is the bridge's INTERNAL name for that field; on the wire it is `call`. Any use of it in
+    the page is a lookup that silently never matches, and nothing about it looks wrong on the screen except
+    a card that waits forever."""
+    py = Path(W.__file__).resolve().read_text()
+    js = (STATIC / "app.js").read_text()
+    # The bridge's wire name, at both ends of a tool's life.
+    assert '"kind": "tool_start", "call": ev.get("toolCallId")' in py
+    assert '"kind": "tool_end", "call": ev.get("toolCallId")' in py
+    # The page must never key off the internal name.
+    # Comments are stripped first: the line explaining this bug naturally quotes the wrong name, and a
+    # guard that trips on its own explanation teaches people to delete the explanation.
+    import re as _re
+    code = _re.sub(r"^\s*//.*$", "", js, flags=_re.M)
+    assert "ev.toolCallId" not in code, "the page reads a field the bridge does not send"
+    # And the deep card is stored and found under the same one.
+    deep = js[js.index('if (ev.tool === "deep_prior_art_search") {'):]
+    assert "cards.set(ev.call, entry)" in deep
+
+
+def test_a_deep_survey_card_folds_and_reaches_the_outline_like_a_search():
+    """It is not a special case. It folds, so a finished survey does not hold the conversation open; and it
+    is in the left index, because a press is the largest single thing that happens in a session and was the
+    one thing there with no way to jump to it."""
+    js = (STATIC / "app.js").read_text()
+    deep = js[js.index('if (ev.tool === "deep_prior_art_search") {'):]
+    deep = deep[:deep.index("if (ev.tool === \"prior_art_search\")")]
+    for must in ("card-toggle", "setCollapsed(entry, true)", "outlineAdd(", "autoCollapse()"):
+        assert must in deep, must
+    # The head holds the counts you read folded; the body holds what you open it for.
+    end = js[js.index('if (ev.tool === "deep_prior_art_search") {', js.index("function toolEnd") if "function toolEnd" in js else 0):]
+    assert "e.notes.textContent" in end and "e.body.append" in end

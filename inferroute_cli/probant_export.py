@@ -817,6 +817,23 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
    (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the
    document" and "the enclave returned a fifth of one" are different claims, and only this field
    distinguishes them. Report the coverage with the verdict, never as a footnote.
+   **A record with no document reads does not VERIFY this claim — it leaves it COULD NOT CHECK.** On
+   24 Sep an auditor reported it verified because `text_coverage` and `paper_coverage` were null in every
+   search, reasoning that the fields exist and are correctly empty. A field that is null because nothing
+   happened is an absence of evidence, and calling that a verified claim is the one mistake this brief
+   most needs you not to make: it turns "we cannot tell" into "we checked, and it was fine". The same
+   applies anywhere else here — an empty list is not a passed test.
+
+## Quote each claim before you answer it
+
+Begin every verdict with the claim's own **bold title from the list above, copied exactly**, then your
+verdict, then the evidence. Not the name of a check in `verify_record.py`, and not a title of your own.
+
+This is not bookkeeping. On 24 Sep two auditors read the same pack and one of them answered a different
+list: its "claim 3" was about query text matching a hash, where claim 3 here is whether the software is
+InferRoute's. It substituted the verifier's check names for these claims, and the consequence was not a
+mislabel — the claim that most needed judgement was never reached, and its report gave no sign of the
+gap. Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
 
 ## How long this takes
 

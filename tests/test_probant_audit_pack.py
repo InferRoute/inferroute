@@ -562,3 +562,36 @@ def test_the_brief_names_the_substitution_by_its_symptom():
     assert 'a "claim 4" about query text matching a hash' in b
     assert "you are answering the verifier's list and not this one" in b
     assert "Claim 4 here is whether the statements are untampered" in b
+
+
+def test_both_briefs_condition_the_published_reference_on_who_publishes():
+    """An auditor on 24 Sep found the defence we offered for claim 3 to be unsound as written.
+
+    Both documents said that fetching InferRoute's published reference and finding it equal to the one in
+    the pack "answers whether the reference was minted on the audited machine". It does not — not when the
+    machine that publishes the page is the machine that made the records. That is our own situation today:
+    the reference went up from the same host the sessions ran on, nine minutes before them. A fetch then
+    proves only that the value is on the page now, which the operator could have arranged in either order.
+
+    So the condition has to travel with the claim, in both places an auditor reads it, and the brief has to
+    say what WOULD settle it — a date fixed by someone who is not InferRoute."""
+    from inferroute_cli import probant_export as E
+    import re
+
+    verify = re.sub(r"\s+", " ", E.VERIFY_MD)
+    brief = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    # The condition itself, stated where the fetch is recommended.
+    assert (
+        "only if the machine that publishes the page is not the machine that made the records" in verify
+    )
+    assert "who can publish to that page, and from where" in verify
+    assert "the published copy settles nothing and claim 3 stays open" in verify
+
+    # The ordering argument is withdrawn rather than left standing as evidence.
+    assert "equally consistent with an honest release and with a minted one" in verify
+    assert "a copy whose date is fixed by someone who is not InferRoute" in verify
+
+    # And the brief carries the condition too, since an auditor may read only that.
+    assert "only when the publishing machine is not the audited one" in brief
+    assert "Establish that before crediting the fetch" in brief

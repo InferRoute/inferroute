@@ -422,7 +422,7 @@ def record_sent(payload: dict, to: str, fingerprint: str, dest: Path) -> Path:
     """Record a delivery on the SENDER's side.
 
     Only the receiving path wrote a corpus record, so the person who MADE a delivery kept no trace of it:
-    what went, to whom, when, with which documents. For an attorney that is the audit trail of their own
+    what went, to whom, when, with which documents. For the user that is the audit trail of their own
     outbound disclosure, and it is the first thing they would be asked to produce. Henry, on his own
     machine after sealing a real corpus: "can I see it in the client" — and he could not, because nothing
     had been written.

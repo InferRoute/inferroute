@@ -260,7 +260,7 @@ or ran to decide; and **which parts you established yourself rather than taking 
 Verdict per claim, each with the evidence you used and what you established yourself. Then: anything in the
 code that looked wrong, unsafe or simply unclear, whether or not it bears on a claim above; whether you
 could obtain an independent copy and what the comparison showed; and what you could not check and why.
-Keep it readable by a patent attorney.
+Keep it readable by the professional who commissioned it, who is not a programmer.
 
 Take the time the evidence warrants and stop when it is exhausted. Do not pad a short answer, and do not
 cut a long one short.

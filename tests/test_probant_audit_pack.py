@@ -686,8 +686,12 @@ def test_the_reference_timestamp_travels_with_the_pack_and_the_brief_bounds_it(t
     v = re.sub(r"\s+", " ", E.VERIFY_MD)
     b = re.sub(r"\s+", " ", E.AUDIT_MD)
     # The commands, so the auditor does not have to know the tool.
-    assert "ots verify trust-anchors/reference.json.ots" in v
+    # --no-bitcoin is the point: plain `ots verify` reaches for a node and fails with a connection error
+    # that looks exactly like a failed proof. Both auditors on 24 Sep stopped there.
+    assert "ots --no-bitcoin verify trust-anchors/reference.json.ots" in v
     assert "ots info trust-anchors/reference.json.ots" in v
+    assert "Use `--no-bitcoin` unless you run a Bitcoin node" in v
+    assert "check that Bitcoin block <height> has merkleroot <hash>" in v
     # The three ways to over-read it, each named.
     assert "A proof over some OTHER bytes is not a proof about this reference" in v
     assert "Pending confirmation in Bitcoin blockchain" in v
@@ -738,3 +742,121 @@ def test_the_brief_gives_the_quote_offsets_that_the_client_actually_uses():
     assert 'hashlib.sha256((mine["challenge"] + mine["e2e_pubkey"]).encode()).digest()' in E.AUDIT_MD
     assert "sha256((nonce + e2e_pubkey).encode())" in attest.__doc__, \
         "the client's own documented binding moved; the brief's snippet is now wrong"
+
+
+def test_the_product_does_not_tell_the_user_what_their_profession_is():
+    """Henry, 24 Sep: "we shouldn't talk about this attorney in the product code right? it's just the user".
+
+    Probant is built for patent work, but the person at the keyboard may be in-house counsel, a paralegal,
+    an agent or an inventor, and several of these strings were read by the CLIENT rather than the user.
+    Where the word named a person it is now the user; where what actually mattered was the machine that
+    made the record, it says that, which is both person-neutral and more precise than a job title.
+
+    The two survivors are deliberate and are not about the reader: they tell the MODEL what standard of
+    practice defines a matter ("one invention a patent attorney would prosecute as a unit"). That is a
+    professional standard, not a claim about who is using the software."""
+    import pathlib
+    import subprocess
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    r = subprocess.run(["grep", "-rn", "attorney", "--include=*.py", "--include=*.ts", "--include=*.js",
+                        "inferroute_cli/", "inferroute_local/"], cwd=root, capture_output=True, text=True)
+    hits = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    assert len(hits) == 2, "unexpected uses of 'attorney':\n" + "\n".join(hits)
+    assert all("probant_portfolio.py" in h for h in hits), hits
+    assert all("a patent attorney could act on" in h or "a patent attorney would prosecute" in h for h in hits), hits
+
+    # And the two documents an outside reader is handed must not presume it either.
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant_client_audit as C
+    for name, text in (("AUDIT.md", E.AUDIT_MD), ("VERIFY.md", E.VERIFY_MD), ("audit-client", C.__doc__ or "")):
+        assert "attorney" not in text.lower(), name
+    assert "the machine which made this record was confined" in E.VERIFY_MD
+
+
+def test_the_manifest_accounts_for_every_file_in_the_folder(tmp_path, V, kms, monkeypatch):
+    """An auditor on 24 Sep counted 50 files listed against 56 on disk and had to decide for itself
+    whether the gap was deliberate. It was — the anchors are this computer's configuration, not evidence —
+    and it stopped being right the day the OpenTimestamps proof moved into that folder. That file IS
+    evidence, and it was the one piece of evidence nothing accounted for.
+
+    SHA256SUMS stays the evidence list, in the shape `sha256sum -c` expects. The anchors are indexed under
+    their own heading, with what indexing them does NOT mean written beside them."""
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant_check
+
+    ref = tmp_path / "ref.json"
+    ref.write_text('{"schema": "inferroute.enclave-reference/1"}')
+    (tmp_path / "ref.json.ots").write_bytes(b"\x00OTS")
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (str(ref), "ab" * 32))
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    m = json.loads((pack / "MANIFEST.json").read_text())
+
+    anchors = m["trust_anchors"]["files"]
+    assert set(anchors) == {"trust-anchors/reference.json", "trust-anchors/reference.json.ots",
+                            "trust-anchors/publication-key.txt"}, anchors
+    for name, sha in anchors.items():
+        assert E._sha256_hex((pack / name).read_bytes()) == sha, name
+
+    # Nothing on disk is unaccounted for: every file is in one list or the other.
+    on_disk = {str(p.relative_to(pack)) for p in pack.rglob("*") if p.is_file()}
+    # MANIFEST.json indexes the folder and cannot index itself; SHA256SUMS is DERIVED from the manifest,
+    # so listing it inside would be circular too. Both are named here rather than silently tolerated.
+    accounted = set(m["files"]) | set(anchors) | {"MANIFEST.json", "SHA256SUMS"}
+    assert on_disk == accounted, on_disk ^ accounted
+
+    # Listing them must not be mistaken for vouching for them.
+    note = m["trust_anchors"]["note"]
+    assert "NOT " in note and "proves nothing on its own" in note
+    assert "reference.json.ots is the" in note, "the one anchor that IS evidence is not called out"
+    # And SHA256SUMS is unchanged in shape — it is the evidence list a reader checks the record with.
+    assert "trust-anchors" not in (pack / "SHA256SUMS").read_text()
+
+
+def test_the_pack_counts_the_filter_reports_and_what_each_receipt_supports(tmp_path, V, kms, no_anchors):
+    """Two auditors read the SAME 39 statements and described them differently — one reported every
+    statement carried `cutoff_applied`, the other wrote that statements lacking it were correctly SKIPPED,
+    a branch that never fired on this record. Both said VERIFIED, so the disagreement was invisible. One
+    was describing the verifier's code rather than the folder's data.
+
+    And one of them hand-built a six-row table of which receipts carry `attestation` and `checked_with`
+    before it could score claim 7 at all. The pack knows both; it was making them derive it."""
+    from inferroute_cli import probant_export as E
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    c = json.loads((pack / "MANIFEST.json").read_text())["contents"]
+
+    rows = json.loads((pack / "searches.json").read_text())
+    assert c["statements"] == len(rows)
+    for f in ("cutoff_applied", "from_date_applied", "offices_applied"):
+        assert f in c and isinstance(c[f], int), f
+        assert c[f] == sum(1 for r in rows if (r.get("statement") or {}).get(f) is not None), f
+
+    for f in ("receipts_with_attestation", "receipts_with_checked_with"):
+        assert f in c and isinstance(c[f], int), f
+        assert c[f] <= c["session_receipts"]
+
+
+def test_a_receipt_that_cannot_be_read_is_counted_as_supporting_nothing(tmp_path):
+    """The census says what each receipt lets an auditor redo. An unreadable file lets them redo nothing,
+    and counting it as support is the one direction that misleads — it would promise a recomputation the
+    auditor then cannot perform, and they would report our software as broken, correctly."""
+    from inferroute_cli import probant_export as E
+
+    good = tmp_path / "a.json"
+    good.write_text(json.dumps({"attestation": {"quote": "q", "checked_with": {"challenge": "n"}}}))
+    thin = tmp_path / "b.json"
+    thin.write_text(json.dumps({"attestation": {"quote": "q"}}))
+    none = tmp_path / "c.json"
+    none.write_text(json.dumps({"attestation": {}}))
+    broken = tmp_path / "d.json"
+    broken.write_text("{not json")
+
+    assert E._receipt_has(good, "attestation") and E._receipt_has(good, "checked_with")
+    assert E._receipt_has(thin, "attestation") and not E._receipt_has(thin, "checked_with")
+    assert not E._receipt_has(none, "attestation")
+    assert not E._receipt_has(broken, "attestation") and not E._receipt_has(broken, "checked_with")
+    assert not E._receipt_has(tmp_path / "missing.json", "attestation")

@@ -6,7 +6,7 @@ say which part of the record a failure touches. A second opinion that could disa
 be worse than none — so when the two could differ, the exit code wins and this module says so.
 
 What this adds is the sentence the exit code does not carry. A red `FAIL completeness` told a patent
-attorney nothing about whether he could still put the record in front of a client; every failure here says
+user nothing about whether they could still put the record in front of a client; every failure here says
 what it means for that decision, and what to do about it.
 """
 from __future__ import annotations

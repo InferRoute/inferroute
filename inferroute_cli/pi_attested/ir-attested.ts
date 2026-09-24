@@ -117,7 +117,7 @@ async function readVerdict(): Promise<Verdict> {
 	}
 }
 
-// Local wall-clock HH:MM — the attorney's clock, not UTC.
+// Local wall-clock HH:MM — the user's clock, not UTC.
 function hhmm(iso: string): string {
 	const d = new Date(iso);
 	return Number.isNaN(d.getTime()) ? iso.slice(11, 16) : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -282,7 +282,7 @@ interface LifecycleStatus {
 }
 
 // The enclave lifecycle is host-managed by the verifier. The extension reads it back only to show the
-// attorney the budget and to keep the container warm while they read; it never manages Azure itself.
+// user the budget and to keep the container warm while they read; it never manages Azure itself.
 async function lifecycleCall(path: string, post: boolean): Promise<LifecycleStatus | null> {
 	if (!SEARCH) return null;
 	try {
@@ -387,7 +387,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 	return box;
 }
 
-// The corpus, said in a way a patent attorney reads rather than decodes. "patent1m-epwo+usall@29595902"
+// The corpus, said in a way a patent professional reads rather than decodes. "patent1m-epwo+usall@29595902"
 // is the signed identifier and stays exactly that everywhere it is verified; this is the sentence beside
 // it. Henry, 24 Sep, on seeing the agent repeat the raw string in its answer.
 //
@@ -565,7 +565,7 @@ class SessionRecord {
 			return `${SEARCH}/record (host-written)`;
 		}
 		// No search enclave (developer model-only session): fall back to a local file, agent-writable —
-		// there is no host verifier to own it. Not the attorney path.
+		// there is no host verifier to own it. Not the path a Probant matter takes.
 		if (!RECORD_DIR || !this.sessionId) return null;
 		try {
 			mkdirSync(RECORD_DIR, { recursive: true });
@@ -636,7 +636,7 @@ export default function (pi: ExtensionAPI) {
 			const text = "Search: checking the sealed machine…";
 			ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg("dim", text) : text);
 			// A real check now, so the footer never implies a search machine that isn't there. Not awaited:
-			// the offer fetch can take seconds and the attorney should be able to type meanwhile.
+			// the offer fetch can take seconds and the user should be able to type meanwhile.
 			searchCall("/enclave", undefined, undefined)
 				.then((v) => searchStatus(ctx, searchProofOf(v, "verify")))
 				.catch(() => searchStatus(ctx, searchProofOf({ ok: false, refusal: "the local search verifier did not answer", steps: [] }, "verify")));
@@ -1485,7 +1485,7 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// Relevance marks. A mark is a human judgement on a document, typed by the attorney — the model has no
+	// Relevance marks. A mark is a human judgement on a document, typed by the user — the model has no
 	// way to reach the /matter/mark endpoint, so every mark is a human row. It is stored by the host verifier
 	// in the matter state under confidential/ (write-denied to the agent), stamped there with actor=human and
 	// the time; it is never written from the workspace. These become labels later, and only human marks are used.

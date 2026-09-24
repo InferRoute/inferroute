@@ -143,7 +143,7 @@ def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: 
     doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None)
     (d / "models.json").write_text(json.dumps(doc, indent=1))
     # `quiet`: a Probant session hides Pi's developer start-up header (key bindings, "! bash", resource
-    # paths) and the model's thinking; the attorney has been shown what matters on the card, and reads the answer.
+    # paths) and the model's thinking; the user has been shown what matters on the card, and reads the answer.
     (d / "settings.json").write_text(json.dumps({"enableInstallTelemetry": False, "defaultProjectTrust": "never",
                                                  **({"quietStartup": True, "hideThinkingBlock": True} if quiet else {})}, indent=1))
     (d / "sessions").mkdir(exist_ok=True)     # real dir, writable under confinement (was a symlink to ~/.pi)

@@ -1,4 +1,4 @@
-"""`ir probant export` — the one-directory record an attorney hands a client, built so that its claims can
+"""`ir probant export` — the one-directory record a user hands a client, built so that its claims can
 be RE-DERIVED by a stranger from the bundle alone, with no InferRoute code and no trust in this machine.
 
     <matter>-prior-art-record-<stamp>/
@@ -36,7 +36,7 @@ _EXPOSURE_WORD = {
 
 VERIFY_MD = """# How to verify this record
 
-This bundle is self-contained: nothing below needs InferRoute, this attorney's machine, or the internet,
+This bundle is self-contained: nothing below needs InferRoute, the machine that made this record, or the internet,
 except the ONE thing that establishes identity (step 3), which by design must come from outside the bundle.
 The `verify_record.py` and `sha256sum` commands below are run, in the exporter's own test suite, on a
 bundle the exporter produced; `ots` needs the opentimestamps-client and is not exercised there. `python3`
@@ -111,6 +111,12 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
    is the same operator and the same machine, the published copy settles nothing and claim 3 stays open on
    this ground too.
 
+   **`published_at` inside the reference is not a date.** It is a field InferRoute wrote, in a file
+   InferRoute signed; the signature proves who wrote it, never when. An auditor on 24 Sep stated that
+   correctly and then, three paragraphs later, wrote that "the evidence does support that the reference
+   predates the searches" on the strength of that same field. It does not. The only date here that is not
+   ours is the timestamp proof below, and the only ordering worth reporting is the one it fixes.
+
    An auditor on 24 Sep declined claim 3 noting the reference was published nine minutes after the enclave
    was attested and fifty-seven seconds before the session began. That ordering is equally consistent with
    an honest release and with a minted one, which is why the ordering by itself does not decide it. What
@@ -122,8 +128,21 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
    is an OpenTimestamps proof over the reference: independent calendar servers, and in time a Bitcoin
    block, attest that these exact bytes existed no later than that moment. Check it:
 
-       ots verify trust-anchors/reference.json.ots        # needs `pip install opentimestamps-client`
-       ots info   trust-anchors/reference.json.ots        # prints the sha256 it commits to
+       ots --no-bitcoin verify trust-anchors/reference.json.ots   # `pip install opentimestamps-client`
+       ots info                trust-anchors/reference.json.ots   # the sha256 it commits to
+
+   **Use `--no-bitcoin` unless you run a Bitcoin node.** Plain `ots verify` tries to reach one and fails
+   with a connection error that looks like a failed proof and is not. Two auditors stopped here on 24 Sep,
+   one reporting "I have no Bitcoin node and could not confirm blockchain inclusion". With the flag it
+   prints what you actually need:
+
+       To verify manually, check that Bitcoin block <height> has merkleroot <hash>
+
+   Look that block up in any block explorer and read its time. That time, and only that time, is a date
+   for this reference that InferRoute did not write. If instead you see `Pending confirmation in Bitcoin
+   blockchain`, or `Failed! Timestamp not complete`, the proof has not been anchored yet — run
+   `ots upgrade trust-anchors/reference.json.ots` and try again, and if it is still pending, say so and
+   treat it as the weaker thing it is.
 
    Read the result precisely, because this is the one place in the folder where an over-reading is easy:
 
@@ -186,8 +205,12 @@ exact command lines, only that the extracted files are their inputs.
 
 ## 6. What this bundle cannot prove
 
-* That this attorney's own machine was confined while the session ran (the device's self-report, stated per
-  session in `record.html`).
+* That the machine which made this record was confined while the session ran. In a full record the device states
+  this per session in `record.html`. **An evidence-only audit pack does not carry it**: that pack's
+  `record.html` is a short notice about the pack, and the self-report is not in it. From a pack this is
+  COULD NOT CHECK — do not read the notice as the report, and do not report its absence as a denial. An
+  auditor on 24 Sep looked for it there and correctly found nothing; the sentence that sent them is the one
+  you are reading, now corrected.
 * Anything about the model lane beyond the receipt's own listed checks and limitations, reproduced verbatim.
 * That the record is COMPLETE beyond what it shows: each statement carries a per-enclave sequence number, so
   a search dropped from the middle (or the start) of an enclave's lifetime leaves a visible gap the verifier
@@ -372,7 +395,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
               f"<td>{_e(_EXPOSURE_WORD.get(latest.get('surfaced'), latest.get('surfaced')))}{rank}</td>"
               f"<td>{_e(latest.get('actor'))}</td><td>{_e(latest.get('at'))}</td><td class=note>{hist_s}</td></tr>")
         A("</table>")
-        A("<p class=note>Marks are the attorney's own judgements, typed at this machine; the model cannot make one. "
+        A("<p class=note>Marks are human judgements, typed at this machine; the model cannot make one. "
           "'Exposure' records whether this matter's search actually returned the document.</p>")
 
     A("<h2>Attested sessions</h2>")
@@ -528,7 +551,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     reach = [f"{s['session_id']}: {_reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
     if reach:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")
-    A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the attorney's machine.</p>")
+    A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the machine that made this record.</p>")
     A("</body></html>")
     return {"html": "".join(out), "searches": searches, "evidence": evidence, "matter_cutoff": matter_cutoff,
             "unanswered": unanswered,
@@ -575,7 +598,7 @@ def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
         items.append(f"<li><b>Date bound {_e(rec.get('date_bound'))}</b>: only documents published before it were searched. "
                      "<span class=who>Each search's signed statement carries it.</span></li>")
     if marks:
-        items.append(f"<li><b>{len(marks)} relevance mark{'s' if len(marks) != 1 else ''}</b>, the attorney's own "
+        items.append(f"<li><b>{len(marks)} relevance mark{'s' if len(marks) != 1 else ''}</b>, the user's own "
                      "judgements; the assistant cannot make or change one. <span class=who>As recorded by this computer."
                      "</span></li>")
     items.append("<li><b>Not claimed</b>: novelty, patentability, or that no other prior art exists.</li>")
@@ -975,6 +998,24 @@ InferRoute's. It substituted the verifier's check names for these claims, and th
 mislabel — the claim that most needed judgement was never reached, and its report gave no sign of the
 gap. Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
 
+## A verdict may not be VERIFIED while part of the claim is unchecked
+
+If a claim has parts you could not check, VERIFIED is the wrong word for it — whatever the parts you DID
+check came back as. Report it as verified in the parts you name, and say which parts you could not reach
+and why. The reader is deciding whether to rely on this, and "VERIFIED" with an unstated gap is the one
+outcome that moves them to rely on something nobody tested.
+
+This is not hypothetical. On 24 Sep two auditors read the same pack. Claim 7 has fifteen checks, two of
+which need Intel's and NVIDIA's own services and cannot be done from the folder. One auditor wrote
+"Mixed", listed every receipt, and said plainly which steps it had not redone. The other wrote VERIFIED
+and never mentioned the online checks — having done the offline ones correctly, and having been told in
+this brief that the online ones were out of reach. Both were careful; only one verdict tells the reader
+what they are relying on.
+
+The same applies to a claim you verified on a SAMPLE. Two auditors recomputed claims 1, 2 and 4 by hand on
+two of thirty-nine searches, and took the other thirty-seven from `verify_record.py`. That is good work
+and the right method — say so in those words. "VERIFIED" without the sample size reads as thirty-nine.
+
 ## Last: one plain statement about confidentiality
 
 Finish with two or three sentences, in the words a patent professional would use to a client, saying what
@@ -1122,7 +1163,7 @@ Then the evidence you used, and
 **which of it you computed yourself rather than taking from `verify_record.py`** — that distinction is the
 value of this audit, so make it visible per claim rather than in a closing remark. Then: the verifier's exit
 code; whether you could obtain an independent copy of the verifier and what the comparison showed; and
-anything in the code or the data that looked wrong. Keep it readable by a patent attorney.
+anything in the code or the data that looked wrong. Keep it readable by the professional who commissioned it, who is not a programmer.
 
 If this folder contains no searches, every claim EXCEPT 7 is COULD NOT CHECK, and the report should say so
 in one line rather than at length: a long report about evidence that is not there reads as a finding about
@@ -1205,6 +1246,43 @@ def _row_kind(row: object) -> str:
     if not isinstance(st, dict):
         return "unknown"
     return str(st.get("kind") or "search")
+
+
+def _receipt_has(path: Path, field: str) -> bool:
+    """Whether a receipt supports a given recomputation. An auditor on 24 Sep hand-built a six-row table of
+    exactly this before it could score claim 7 at all; the pack knows it and was making them derive it.
+
+    `attestation` is the evidence the offline checks are computed FROM; `checked_with` is our side of the
+    exchange, without which the replay and key-binding steps cannot be redone. Unreadable counts as absent:
+    a file we cannot parse supports nothing, and saying otherwise would be the one direction that misleads."""
+    try:
+        rec = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    att = rec.get("attestation")
+    if field == "attestation":
+        return isinstance(att, dict) and bool(att)
+    return isinstance(att, dict) and bool(att.get(field))
+
+
+def _filter_census(rows: list) -> Dict[str, int]:
+    """How many statements carry each filter report.
+
+    On 24 Sep two auditors read the SAME 39 statements and described them differently: one reported that
+    every statement carried `cutoff_applied`, the other wrote that statements without it were correctly
+    SKIPPED — a branch that never fired on this record. Both verdicts were VERIFIED, so the disagreement
+    was invisible; one of them was describing the verifier's code rather than this folder's data. A count
+    removes the need to eyeball it, the same way the document-read count did for claim 8."""
+    out = {"cutoff_applied": 0, "from_date_applied": 0, "offices_applied": 0, "statements": 0}
+    for r in rows:
+        st = r.get("statement") if isinstance(r, dict) else None
+        if not isinstance(st, dict):
+            continue
+        out["statements"] += 1
+        for f in ("cutoff_applied", "from_date_applied", "offices_applied"):
+            if st.get(f) is not None:
+                out[f] += 1
+    return out
 
 
 def _census(rows: list) -> Dict[str, int]:
@@ -1302,34 +1380,53 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # A stated count per kind, so that nothing here has to be inferred from an empty field.
                 # `document_reads: 0` means this matter did no document reads — it does not mean they went
                 # unrecorded, and claim 8 is COULD NOT CHECK rather than verified when it is zero.
-                "contents": dict(_census(rows), session_receipts=len(receipts)),
+                "contents": dict(_census(rows), session_receipts=len(receipts),
+                                 receipts_with_attestation=sum(1 for n in receipts if _receipt_has(src / n, "attestation")),
+                                 receipts_with_checked_with=sum(1 for n in receipts if _receipt_has(src / n, "checked_with")),
+                                 **_filter_census(rows)),
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
+
+    # The trust anchors this computer uses. Gathered BEFORE the manifest is written, because they have to
+    # be in it: an auditor on 24 Sep counted 50 files listed against 56 on disk and had to decide for
+    # itself whether the gap was deliberate. It WAS deliberate, and it stopped being right the day the
+    # OpenTimestamps proof moved in here — that file is evidence, and it was the one piece of evidence in
+    # the folder that nothing accounted for.
+    from . import probant_check
+    ref, key = probant_check.published_reference()
+    anchor_files: Dict[str, bytes] = {}
+    if ref:
+        anchor_files["trust-anchors/reference.json"] = Path(ref).read_bytes()
+        # The only artefact here whose date does NOT come from InferRoute: calendar servers, and then a
+        # Bitcoin block, fix when these exact bytes existed. Copied rather than made — stamping publishes a
+        # hash to public servers, which is the operator's decision and not something an export does behind
+        # them. Note what indexing it is NOT: the proof commits to the reference's own sha256, so it
+        # defends itself; the listing is so that nothing in the folder is unaccounted for.
+        ots = Path(str(ref) + ".ots")
+        if ots.is_file():
+            anchor_files["trust-anchors/reference.json.ots"] = ots.read_bytes()
+    if key:
+        anchor_files["trust-anchors/publication-key.txt"] = (str(key).strip() + "\n").encode("utf-8")
+    manifest["trust_anchors"] = {
+        "note": "this computer's own configuration, listed so the folder is fully accounted for — NOT "
+                "evidence, and agreement with them proves nothing on its own. reference.json.ots is the "
+                "exception: it is evidence, and it is checked against reference.json, not against this list.",
+        "files": {name: _sha256_hex(data) for name, data in sorted(anchor_files.items())},
+    }
+
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
+    # SHA256SUMS stays the EVIDENCE list, in the shape `sha256sum -c` expects from the folder root. The
+    # anchors are in MANIFEST.json under their own heading rather than mixed in here, because a reader
+    # running `sha256sum -c SHA256SUMS` is checking the record, and the anchors are not part of it.
     files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
     for name, data in files.items():
         (dest / name).write_bytes(data)
         os.chmod(dest / name, 0o600)
 
-    # The trust anchors this computer uses, in a subfolder (the manifest indexes the folder's own files).
-    # AUDIT.md tells the auditor these came from here and must be compared with the engagement letter.
-    from . import probant_check
-    ref, key = probant_check.published_reference()
     anchors = dest / "trust-anchors"
     anchors.mkdir()
     os.chmod(anchors, 0o700)
-    if ref:
-        shutil.copyfile(ref, anchors / "reference.json")
-        os.chmod(anchors / "reference.json", 0o600)
-        # An OpenTimestamps proof of the reference, when this computer has one beside it. This is the only
-        # artefact in the folder whose date does NOT come from InferRoute: the calendars, and later a
-        # Bitcoin block, fix when this exact reference existed. Everything else here is dated by the party
-        # being audited. Copied rather than made, because making one publishes a hash to public servers and
-        # that is the operator's decision, not something an export should do behind them.
-        ots = Path(str(ref) + ".ots")
-        if ots.is_file():
-            shutil.copyfile(ots, anchors / "reference.json.ots")
-            os.chmod(anchors / "reference.json.ots", 0o600)
-    if key:
-        (anchors / "publication-key.txt").write_text(str(key).strip() + "\n")
-        os.chmod(anchors / "publication-key.txt", 0o600)
+    for name, data in anchor_files.items():
+        out = dest / name
+        out.write_bytes(data)
+        os.chmod(out, 0o600)
     return dest

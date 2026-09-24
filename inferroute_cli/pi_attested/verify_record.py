@@ -45,7 +45,7 @@ What it does NOT do:
     Microsoft COSE chain's are not (endorsements outlive their signing certificates; Microsoft's own
     reference verifier behaves the same). No revocation checking; no basicConstraints / keyUsage / path
     length validation — trust is two root pins plus signature links, nothing more.
-  * It cannot verify the attorney's OWN machine was confined — that is the device's self-report.
+  * It cannot verify that the machine which made this record was confined — that is the device's self-report.
   * Completeness: each statement carries a per-enclave sequence number; the record is checked for gaps and
     duplicates per enclave lifetime, so a dropped search is visible — except one dropped from the very END
     of a lifetime, and except an ENTIRE lifetime dropped from the record (the check is per enclave shown;
@@ -603,7 +603,7 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
         return
     if sig_present and not schema:
         # Every reference the issuer produces stamps its kind. A SIGNED document without one is either not
-        # ours or not meant as a reference; an UNSIGNED one may simply be three hashes an attorney typed
+        # ours or not meant as a reference; an UNSIGNED one may simply be three hashes someone typed
         # out of an engagement letter, and that case is honest — it just carries no authority to confuse.
         c.add(False, "reference document kind",
               f"this file is signed but carries no schema; a reference issued by InferRoute says "
@@ -981,7 +981,7 @@ def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
 
 
 def check_recipient(c: Checks, st: Dict[str, Any], row: Dict[str, Any]) -> None:
-    """WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the attorney's own proxy recorded the key
+    """WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the user's own proxy recorded the key
     it made. Equal, and the answer went to that one address: a copy sealed to anyone else would have a
     different signed recipient. This is the difference between "only you can open it" as our word and as your
     arithmetic. Statements from before the field existed get a SKIP that says what is therefore unchecked —
@@ -1323,7 +1323,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
     print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
           "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
-    print("Not redone here: the attorney's own machine confinement (self-reported); fetching anything; certificate revocation.")
+    print("Not redone here: confinement of the machine that made this record (self-reported); fetching anything; certificate revocation.")
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

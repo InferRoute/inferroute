@@ -370,3 +370,32 @@ def test_the_brief_says_the_two_lanes_are_different_hardware():
     # And rtmr0 explained where the auditor meets it, rather than left to be guessed at.
     assert "It does\n   not carry a nonce" in brief or "does not carry a nonce" in brief.replace("\n   ", " ")
     assert "measures the HOST's" in brief
+
+
+def test_the_brief_names_a_published_reference_without_calling_it_independent():
+    """An Opus 5.5 audit of a nine-search pack verified claims 1, 2, 4 and 5 against AMD's own KDS with
+    openssl, and declined claim 3: the reference and the key both came from the professional's machine,
+    published nine minutes after the enclave was attested and fifty-seven seconds before the session.
+
+    The site was already serving a reference that would have answered the narrow version of that — but the
+    superseded one, so the only value fetchable from anywhere other than that laptop was the wrong value.
+    It is published now, and the brief says what agreement with it does and does not prove: both copies are
+    InferRoute's, so it is not independence; it defeats the reference having been minted where the records
+    were made. Those are different questions and only one is closed."""
+    from inferroute_cli import probant_export as E
+    # The auditor forms the claim-3 verdict in AUDIT.md and follows the ranking in VERIFY.md; the pack
+    # ships both, so each has to carry its half or the pointer goes to a document nobody opened.
+    import re as _re
+    # Whitespace-normalised: these documents are hard-wrapped, and a phrase that happens to straddle a line
+    # break is still the phrase. Pinning the wrapping makes the guard fail on reflow, which teaches people
+    # to weaken the guard rather than keep the sentence.
+    flat = lambda t: _re.sub(r"\s+", " ", t)
+    b, v = flat(E.AUDIT_MD), flat(E.VERIFY_MD)
+    assert "https://inferroute.ai/reference/current.json" in b, "claim 3 does not say where to get one"
+    assert "https://inferroute.ai/reference/current.json" in v, "the ranking does not include it"
+    assert "NOT independent of InferRoute" in b and "NOT independent of InferRoute" in v
+    assert "minted on the machine being audited" in v
+    assert "minted on the audited machine" in b
+    # The ranking survives: the engagement letter still comes first, and this is named the weakest form.
+    assert v.index("from your engagement letter") < v.index("https://inferroute.ai/reference/current.json")
+    assert "the weakest form" in v

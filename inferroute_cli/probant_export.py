@@ -95,7 +95,20 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
 1. Take the reference values (and InferRoute's publication key) from your engagement letter or a signed
    release note, and RECORD them in your own file at first use.
 2. Verify every later record against your own first copy: `--reference your-copy.json`.
-3. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
+3. Failing both — you are auditing for someone who did not record it at first use — fetch the reference
+   InferRoute publishes and compare it with `trust-anchors/reference.json` in this folder:
+
+       curl -s https://inferroute.ai/reference/current.json
+
+   Be exact about what agreement there proves, because it is narrower than it looks. Both copies are
+   InferRoute's, so this is NOT independent of InferRoute and does not make claim 3 checkable on its own;
+   it is the weakest form named above. What it DOES defeat is the other reading — that the reference was
+   minted on the machine being audited, in order to make that machine's records verify. An auditor on
+   24 Sep declined claim 3 for exactly that reason, noting the reference was published nine minutes after
+   the enclave was attested and fifty-seven seconds before the session began. A published copy that
+   predates the record, and that the professional did not write, answers that and nothing more. Report
+   which copy you used and say which of the two questions you were able to close.
+4. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
    values with `=`: a pasted value that begins with `-` is otherwise read as another flag, and the error
    ("expected one argument") does not say so. Later
    reference updates signed by that key can then be accepted without re-establishing trust.
@@ -741,6 +754,14 @@ listed in its `cpc_predicted` field. Don't guess at the invention, and don't try
 3. **InferRoute's software, not merely someone's.** The machine's container policy hash (HOST_DATA) and its
    index and model manifests match the reference InferRoute published, and that reference is signed by
    InferRoute's publication key.
+   *Where you got the reference decides what this claim is worth,* and it is the claim most often declined
+   for that reason: the copy in `trust-anchors/` came from the professional's own machine, as did the key
+   it names, and a reference written where the records were made can be made to agree with them. VERIFY.md
+   ranks the ways to obtain one. The best is the value recorded from an engagement letter at first use. If
+   there is none, fetch `https://inferroute.ai/reference/current.json` and compare. Be exact in the report
+   about which you used: a published copy is still InferRoute's, so agreement with it is **NOT independent
+   of InferRoute** — it answers only whether the reference was minted on the audited machine, which is a
+   different question from whether InferRoute's own statement is true.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
    record (except one removed from the very end, which no counter can reveal).

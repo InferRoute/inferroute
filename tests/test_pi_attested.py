@@ -465,7 +465,11 @@ def _run_marks_hook(script_tail):
     consts = ts[ts.index("const STEP_DEEPER"):ts.index("const NEXT_MAX")]
     label = next(ln for ln in ts.splitlines() if "const MARK_LABEL" in ln)
     hook = ts[ts.index("\tlet lastMarksNote"):ts.index("\t});\n", ts.index('pi.on("before_agent_start"')) + 5]
+    # The hook reads the session's deep-search history to decide whether offering another press could do
+    # anything. Stubbed as the real object is: a list the press appends to.
     harness = (consts + label + "\nconst SEARCH = 'http://verifier';\nconst docText = new Map();\nconst priorDocs = new Map();\nlet STATE = {};\nlet searchNo = 0;\n"
+               "const disclosure = { fanouts: [] };\n"
+               "function deepMarksKey(relevant) { return [...relevant].sort().join('\\u0000'); }\n"
                "let FAIL = false;\nasync function searchCall(){ if (FAIL) throw new Error('down'); return STATE; }\n"
                "const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n" + hook + "\n"
                "const run = async () => { const r = await handlers.before_agent_start(); return r ? r.message : null; };\n"
@@ -907,3 +911,62 @@ def test_the_extension_measures_what_each_leg_contributed_not_what_it_returned()
 
     # And the professional is told what to do with it, since the tool will not act on it by itself.
     assert "Marking a document relevant makes the next deep search walk outward from it" in body
+
+
+def test_a_deep_press_over_unchanged_inputs_sends_nothing():
+    """Henry, 24 Sep: the deep-search suggestion "should only show up if it hasn't been done already or if
+    the context-bound content of the deep search changed since the last deep search".
+
+    The planner is deterministic, so this is stronger than a tidy-UI point: the same description and the
+    same marks produce the same queries byte for byte. A second press bills for questions the enclave has
+    already answered and puts duplicate signed statements in the professional's record.
+
+    Two places act on it, and they must agree. The suggestion can see the marks but NOT the disclosure text
+    — nothing in the extension reads the matter's files — so it decides the half it can. The tool sees both
+    and is therefore the only place the text half can be decided."""
+    out = _run_deep_plan(
+        "const k1 = deepInputsKey('A wrist worn device measuring glucose.', ['US-B', 'US-A']);\n"
+        "const k2 = deepInputsKey('A  wrist   worn device\\nmeasuring glucose. ', ['US-A', 'US-B']);\n"
+        "const k3 = deepInputsKey('A wrist worn device measuring glucose.', ['US-A']);\n"
+        "const k4 = deepInputsKey('A wrist worn device measuring glucose by infrared.', ['US-A', 'US-B']);\n"
+        "console.log(JSON.stringify({ same: k1 === k2, marksDiffer: k1 !== k3, textDiffers: k1 !== k4,\n"
+        "  marksOnly: deepMarksKey(['US-B','US-A']) === deepMarksKey(['US-A','US-B']),\n"
+        "  marksOnlyDiffer: deepMarksKey(['US-A']) !== deepMarksKey(['US-A','US-B']) }));\n"
+    )
+    # Whitespace and mark ORDER are not changes: a reflowed paragraph would otherwise read as new work.
+    assert out["same"] is True
+    # Either half changing is a change.
+    assert out["marksDiffer"] is True and out["textDiffers"] is True
+    # And the marks half stands alone, because the suggestion has only that.
+    assert out["marksOnly"] is True and out["marksOnlyDiffer"] is True
+
+
+def test_the_two_places_that_decide_a_repeat_share_one_predicate():
+    """The suggestion and the tool must not each have their own idea of what "the same marks" means. The
+    first version of this indexed into the stored JSON by position to recover the marks — a second way of
+    computing the same thing, which is how two copies of a verdict start to drift."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert ts.count("function deepMarksKey(") == 1, "more than one definition of the marks predicate"
+    # Both callers go through it.
+    assert "lastFanout.marks_key === deepMarksKey(relevant)" in ts, "the suggestion re-derives the marks key"
+    assert "marks_key: deepMarksKey(relevant)" in ts, "the press does not record what the suggestion compares against"
+    assert "deepMarksKey(relevant)" in ts[ts.index("function deepInputsKey("):ts.index("function deepPlan(")], \
+        "the inputs key does not build on the marks key, so the two can disagree"
+
+    start = ts.index('name: "deep_prior_art_search"')
+    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+    # The refusal happens BEFORE the plan is built and before anything is sent.
+    assert body.index("last.inputs_key === inputsKey") < body.index("const plan = deepPlan(text, relevant);")
+    assert "Nothing was sent." in body
+    # It must say what WOULD make a press different, or it is a dead end rather than a step.
+    # The source wraps this sentence, so match the halves rather than the rendered line.
+    assert "document relevant" in body and "walks outward from it" in body and "change the description" in body
+
+
+def test_the_deep_step_is_not_offered_when_the_marks_have_not_moved_since_the_last_press():
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    block = ts[ts.index("const candidates = ["):ts.index("const candidates = [") + 600]
+    assert "...(marksCoveredByLastPress ? [] : [STEP_DEEP])" in block, \
+        "the deep search is still offered unconditionally"
+    # A session that has never pressed must still be offered it.
+    assert "Boolean(lastFanout)" in ts, "with no press at all the step would be suppressed"

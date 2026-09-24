@@ -916,3 +916,60 @@ def test_the_template_refuses_to_be_built_from_a_brief_whose_claims_do_not_numbe
     monkeypatch.setattr(E, "AUDIT_MD", broken)
     with pytest.raises(ValueError, match="not 1..n"):
         E.audit_claims()
+
+
+def test_the_pack_reads_the_anchored_block_out_of_the_proof(tmp_path, monkeypatch):
+    """Two auditors had this proof in front of them on 25 Sep and neither could use it: one had no Bitcoin
+    node, the other could not install the client at all because PEP 668 makes `pip install` refuse on a
+    modern Linux, and reported the whole of claim 3 as COULD NOT CHECK for want of a tool.
+
+    So the pack carries the block height and merkle root, read from the proof by `ots` at pack time. It is
+    a convenience and the brief says so in the same breath: these are OUR values, and a block number we
+    typed binds nothing. It buys the date without a toolchain; the binding still lives in the .ots."""
+    from inferroute_cli import probant_export as E
+
+    ots = tmp_path / "reference.json.ots"
+    ots.write_bytes(b"\x00proof")
+
+    def fake_run(argv, capture_output=True, text=True, timeout=None):
+        assert "--no-bitcoin" in argv and "verify" in argv, argv
+        return SimpleNamespace(returncode=0, stdout="Assuming target filename is 'current.json'\n"
+                               "To verify manually, check that Bitcoin block 968451 has merkleroot "
+                               + "d1" * 32 + "\n", stderr="")
+    monkeypatch.setattr(E.shutil, "which", lambda n: "/usr/bin/ots")
+    monkeypatch.setattr(E.subprocess, "run", fake_run)
+
+    got = E.anchor_block(ots)
+    assert got["bitcoin_block"] == 968451 and got["merkle_root"] == "d1" * 32
+    assert "not InferRoute's" in got["how_to_check"]
+    assert "OUR reading of the proof" in got["how_to_check"]
+
+    # A pending proof has no block, and inventing one would be the worst line in the folder.
+    monkeypatch.setattr(E.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=1, stdout="", stderr="Failed! Timestamp not complete"))
+    pending = E.anchor_block(ots)
+    assert "bitcoin_block" not in pending and "ots upgrade" in pending["note"]
+
+    # No client, and no proof, are each an absence rather than a guess.
+    monkeypatch.setattr(E.shutil, "which", lambda n: None)
+    assert "bitcoin_block" not in E.anchor_block(ots)
+    assert E.anchor_block(tmp_path / "missing.ots") == {}
+
+
+def test_the_brief_says_what_the_recorded_block_is_worth_and_what_it_is_not():
+    from inferroute_cli import probant_export as E
+    import re
+
+    v = re.sub(r"\s+", " ", E.VERIFY_MD)
+    # The blocker two auditors actually hit, and the ways round it.
+    assert "that is PEP 668 and not a dead end" in v
+    assert "uv tool install opentimestamps-client" in v
+    assert "you do not need the tool at all to get the date" in v
+    # And the bound, in the same breath.
+    assert "Those two values are OURS" in v
+    assert "it does not bind that block to this reference" in v
+    assert "the file wins and the disagreement is a finding" in v
+    # The answer that actually comes back, which is neither a pass nor a failure.
+    assert 'Expect the answer to be "some of each"' in v
+    assert "later than 33 of the 58 searches and earlier than 25" in v
+    assert "Give both counts." in v

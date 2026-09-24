@@ -167,26 +167,49 @@ Un lien plutôt qu'une pièce jointe : les passerelles de messagerie rejettent v
 et un lien peut être retiré, ce qu'une pièce jointe dans une boîte aux lettres ne peut plus être. L'adresse
 n'est publiée nulle part et ne mène qu'à ce fichier.
 
+Vous me renvoyez ce qu'affiche la dernière de ces quatre commandes. Cette clé ne contient que des clés publiques : elle ne permet rien
+d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
+ne parte. (Sous Windows les chemins diffèrent — dites-le-moi et je vous envoie l'équivalent.)
+
 Le programme est du Python en clair sur votre disque : il se lit entièrement, sans avoir à nous croire.
 Si vous souhaitez le faire examiner, deux commandes produisent le dossier à remettre tel quel à votre
 propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 
 ```
-~/probant/bin/ir probant audit-client          # la copie installée, celle qui s'exécute chez vous
-~/probant/bin/ir probant audit-client --url …  # le fichier publié, tel qu'il est distribué
+# la copie installée, celle qui s'exécute chez vous
+~/probant/bin/ir probant audit-client
+
+# le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.3-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
 qui a été publié. Les questions sont de nous ; les conclusions seront de lui, pas de nous.
 
-Vous me renvoyez ce qu'elle affiche. Cette clé ne contient que des clés publiques : elle ne permet rien
-d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
-ne parte. (Sous Windows les chemins diffèrent — dites-le-moi et je vous envoie l'équivalent.)
-
 Le client vous dira, en haut de sa page d'accueil, que la recherche d'antériorité n'y est pas encore
 installée : c'est exact, et c'est voulu à ce stade. Rien ne quitte votre poste tant qu'elle ne l'est pas.
 Vous pouvez dès maintenant y travailler vos descriptions ; le même client vous servira pour l'essai, que je
 vous proposerai quand la prochaine version du moteur sera déployée — avec un chiffre à jour et une date.
+
+**Votre question sur l'IA.** Vous me demandiez si j'avais une contre-indication à ce que vous utilisiez
+l'IA de votre côté. Plutôt qu'un avis sur Claude Team ou ChatGPT Business, je préfère vous proposer
+l'assistant du client : il tourne dans une enceinte matérielle que votre poste vérifie avant le moindre
+envoi, vos échanges lui sont chiffrés à elle seule, et son usage vous est offert — les frais sont pour moi.
+Les textes denses dont vous parlez sont précisément ce pour quoi il est fait : l'envoi scellé arrive
+directement sous forme de dossiers dans le client, et vous les travaillez avec l'assistant sans que rien
+n'en reparte en clair. Il vous faudra une clé pour l'activer ; je vous la donnerai de vive voix, en même
+temps que nous vérifierons l'empreinte.
+
+Une précision, parce qu'elle décide de la comparaison : l'enceinte *lit* vos textes pour vous répondre.
+Ce qu'elle apporte n'est pas qu'aucune machine ne les voie, c'est qu'aucune autre ne le puisse, et que
+votre poste l'ait vérifiée lui-même avant d'envoyer. Ce qu'elle garantit et ce qu'elle ne garantit pas est
+écrit dans le client, à l'écran, y compris ce que nous ne pouvons pas prouver. Si après l'avoir lu vous
+préférez votre serveur hébergé en France pour l'ensemble non déposé, cela ne me pose aucune difficulté.
+
+Vous me demandiez aussi un ordre de préférence entre les regroupements. Je vous le donnerai de vive voix :
+la liste des objets change la question, et je préfère vous entendre dessus avant de la trancher. Dites-moi
+un créneau qui vous convient cette semaine ou la suivante — je suis confus d'avoir laissé passer celui que
+vous m'aviez proposé.
 
 Bien à vous,
 Henry Decléty

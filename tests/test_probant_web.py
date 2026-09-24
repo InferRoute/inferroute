@@ -974,8 +974,15 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     r = c.post("/api/audit-pack", json={"path": "/etc"}).json()
     assert made == [proved, proved]
     # `ir` reads a bare first word as a subcommand, so its command starts with a flag; an enclave-backed model.
-    assert r["ir"].startswith("ir --model kimi-k2.6 ") and r["claude"].startswith("claude ")
-    assert r["ir"].endswith('"Read AUDIT.md in this folder and do what it says."')
+    # --plain since 24 Sep: the pack carries no client words, so there is nothing to seal and
+    # the sealed lane would only put a proof card and a keypress before the auditor's work.
+    assert r["ir"].startswith("ir --plain --model kimi-k2.6 ") and r["claude"].startswith("claude ")
+    # Quoted with shlex, not wrapped in double quotes by hand: the prompt is a literal argument, and a
+    # hand-rolled quote breaks the day it contains a " or a $.
+    import shlex as _shlex
+    from inferroute_cli import probant_export as _E
+    assert r["ir"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
+    assert r["claude"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
     js = (STATIC / "app.js").read_text()
     assert 'api("/api/audit-pack", {})' in js and "No Claude subscription?" in js
     assert 'auditOffer($("audit"))' in js                     # in the panel, not inside the export result
@@ -1083,11 +1090,33 @@ def test_the_page_picks_an_agent_and_never_a_command():
     py = Path(W.__file__).resolve().read_text()
     launcher = py[py.index('@app.post("/api/audit-launch")'):py.index('@app.post("/api/close")')]
     assert 'agent not in ("claude", "ir")' in launcher          # a closed set, rejected otherwise
-    assert "AUDIT_PROMPT" in launcher and "AUDIT_IR_MODEL" in launcher
     # Nothing from the request body may become part of what runs: `agent` is compared, never interpolated.
     for forbidden in ('d.get("command"', 'd.get("cmd"', 'd.get("path"', "shell=True"):
         assert forbidden not in launcher, forbidden
-    assert "shlex.quote(prompt)" in launcher                     # and the prompt is quoted, not concatenated raw
+    assert "probant_export.audit_command(agent)" in launcher     # composed there, not assembled here
+
+
+def test_the_shown_command_and_the_run_command_are_the_same_string():
+    """The panel shows a command and the button runs one. Built twice, they drift — and the one place that
+    must never lie about what it runs is the panel asking for a second opinion on our own proof."""
+    from inferroute_cli import probant_export as E
+    py = Path(W.__file__).resolve().read_text()
+    for agent in ("claude", "ir"):
+        assert f'probant_export.audit_command("{agent}")' in py or "audit_command(agent)" in py
+    assert E.audit_command("claude").startswith("claude ")
+    assert E.audit_command("ir").startswith("ir --plain --model ")
+
+
+def test_the_audit_runs_on_the_standard_lane_because_the_pack_holds_no_client_words():
+    """Henry, 24 Sep: this one doesn't need the confidential lane, and that way it won't require Enter after
+    the proof check. The lane exists to keep an unfiled invention out of the clear, and the pack has none in
+    it — query, result and document text are withheld from every row, and the folder name carries no matter
+    name. With nothing to seal it buys the auditor nothing and costs them a card and a wait before any work
+    starts. This test is the tripwire for that reasoning: if the pack ever carries the words again, the
+    withheld list changes and this fails, which is the moment to put it back on the sealed lane."""
+    from inferroute_cli import probant_export as E
+    assert "--plain" in E.audit_command("ir")
+    assert E.WITHHELD_FIELDS == ("query_text", "result", "text")
 
 
 def test_no_terminal_means_the_offer_falls_back_to_copying(monkeypatch):

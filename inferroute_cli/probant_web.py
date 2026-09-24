@@ -886,9 +886,8 @@ class Bridge:
             proved["pack"] = str(pack)              # the folder a launch opens, so it never prepares a second
             return {"ok": True, "path": str(pack), "prompt": prompt,
                     "can_launch": can_open_terminal(),
-                    # `ir` needs a flag first (a bare word is read as a subcommand); an enclave-backed model runs
-                    # on the confidential lane by default, so even this fallback keeps the pack sealed in transit.
-                    "claude": f'claude "{prompt}"', "ir": f'ir --model {probant_export.AUDIT_IR_MODEL} "{prompt}"'}
+                    "claude": probant_export.audit_command("claude"),
+                    "ir": probant_export.audit_command("ir")}
 
         @app.post("/api/audit-launch")
         async def audit_launch(request: Request):
@@ -907,8 +906,7 @@ class Bridge:
             if not pack or not Path(pack).is_dir():
                 return JSONResponse({"error": "prepare the audit pack first"}, status_code=409)
             prompt = probant_export.AUDIT_PROMPT
-            command = (f"claude {shlex.quote(prompt)}" if agent == "claude"
-                       else f"ir --model {probant_export.AUDIT_IR_MODEL} {shlex.quote(prompt)}")
+            command = probant_export.audit_command(agent)
             argv = terminal_argv(audit_launch_script(Path(pack), command))
             if argv is None:
                 return JSONResponse({"error": "no terminal to open on this computer"}, status_code=501)

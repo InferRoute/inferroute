@@ -183,8 +183,10 @@ Vous me renvoyez ce qu'elle affiche. Cette clé ne contient que des clés publiq
 d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
 ne parte. (Sous Windows les chemins diffèrent — dites-le-moi et je vous envoie l'équivalent.)
 
-Le même client vous servira pour l'essai, que je vous proposerai quand la prochaine version du moteur sera
-déployée — avec un chiffre à jour et une date.
+Le client vous dira, en haut de sa page d'accueil, que la recherche d'antériorité n'y est pas encore
+installée : c'est exact, et c'est voulu à ce stade. Rien ne quitte votre poste tant qu'elle ne l'est pas.
+Vous pouvez dès maintenant y travailler vos descriptions ; le même client vous servira pour l'essai, que je
+vous proposerai quand la prochaine version du moteur sera déployée — avec un chiffre à jour et une date.
 
 Bien à vous,
 Henry Decléty

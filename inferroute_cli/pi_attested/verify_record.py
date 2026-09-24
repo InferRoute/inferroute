@@ -362,8 +362,11 @@ def report_signature_ok(p: Dict[str, Any], cert) -> bool:
 def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, pins: Dict[str, str],
               min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> None:
     import datetime as dt
-    c.add(p["version"] >= 2 and p["signature"] != b"\x00" * 512, "hardware report",
-          f"SNP report version {p['version']}, {'signed' if p['signature'] != b'\x00' * 512 else 'UNSIGNED'}")
+    # The comparison is done before the f-string, not inside it: a backslash in an f-string expression is
+    # a syntax error before Python 3.12, and this file has to run wherever the auditor's firm is.
+    signed = p["signature"] != b"\x00" * 512
+    c.add(p["version"] >= 2 and signed, "hardware report",
+          f"SNP report version {p['version']}, {'signed' if signed else 'UNSIGNED'}")
     c.add(not p["debug_allowed"], "debug disabled", "guest policy forbids debugging" if not p["debug_allowed"]
           else "guest policy ALLOWS debugging — the host could inspect this VM")
     if not c.add(p["signing_key"] == "VCEK", "signed by a chip key", f"signing key is {p['signing_key']} (only VCEK accepted)"):
@@ -831,10 +834,15 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     for field, label in (("index_manifest_sha256", "index manifest names real bytes"),
                          ("model_manifest_sha256", "encoder manifest names real bytes")):
         v = rd.get(field)
+        # Composed OUTSIDE the f-string: an expression that spans two lines inside one is a syntax error
+        # before Python 3.12, and this file is the one artifact a third party is asked to run — on whatever
+        # Python their firm happens to have.
+        why = ("SHA-256 of nothing — a manifest built over NO files; it is the same for every "
+               "index and cannot say which one runs" if str(v).lower() == EMPTY_SHA256
+               else "missing, malformed or all zeros")
         c.add(_names_bytes(v), label,
               f"{str(v)[:16]}… identifies the files this enclave serves" if _names_bytes(v)
-              else f"{field} is {'SHA-256 of nothing — a manifest built over NO files; it is the same for every '
-                                'index and cannot say which one runs' if str(v).lower() == EMPTY_SHA256 else 'missing, malformed or all zeros'}")
+              else f"{field} is {why}")
     check_hardware(c, offer or {}, rd, rd_bytes, pins=pins or AMD_ARK_SPKI_SHA256,
                    uvm_root=uvm_root or MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=uvm_min_svn,
                    policy_b64=policy_b64, min_tcb=min_tcb)

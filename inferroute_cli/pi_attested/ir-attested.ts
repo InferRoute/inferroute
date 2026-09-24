@@ -231,6 +231,10 @@ interface SearchProof {
 
 // `depth`, in the words the tool offers the model; the numbers are what the card says, never "a deeper search".
 const DEPTH_K: Record<string, number> = { quick: 10, standard: 25, broad: 50 };
+// Comfortably inside the page's two-minute silence budget, without being chatty. A survey mode that puts
+// one long sealed call depends on this: it is the extension, not the verifier proxy, that owns the phase
+// stream, so keeping the page alive through a multi-minute call is this file's job.
+const SEARCH_HEARTBEAT_MS = 20_000;
 
 // `checked`: for a search, the verification that preceded it. The search response itself does not repeat the
 // reference block; but the search was pinned to that enclave's lifetime and the verifier re-runs the identity
@@ -979,10 +983,18 @@ export default function (pi: ExtensionAPI) {
 		}
 		let out: SearchVerdict;
 		o.phase("searching");
+		// A heartbeat while the sealed call is outstanding. The page stops claiming work after two minutes
+		// of COMPLETE silence, and a single call can legitimately take longer than that — so silence during
+		// one would be read as a hang. Any event from here resets that clock, and a repeated phase is
+		// treated as a heartbeat rather than a new step, so it does not hide a slow search either.
+		let beat: ReturnType<typeof setInterval> | undefined;
 		try {
+			beat = setInterval(() => o.phase("searching"), SEARCH_HEARTBEAT_MS);
 			out = await searchCall("/search", { text, k, expect_lifetime_id: e.lifetime_id }, signal);
 		} catch {
 			throw new Error("the local search verifier did not answer; the search did not complete");
+		} finally {
+			if (beat) clearInterval(beat);
 		}
 		const sp = searchProofOf(out, "search", verified);
 		sp.feature = feature || undefined;

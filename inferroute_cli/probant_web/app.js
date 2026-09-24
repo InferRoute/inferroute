@@ -723,9 +723,13 @@
   function setPhase(entry, phase, at) {
     if (!entry || entry.done || !PHASE_TEXT[phase]) return;
     const when = at || serverNow();
-    if (entry.phase === "approval") entry.approvalMs += when - entry.phaseAt;
+    // A REPEAT of the current phase is a heartbeat, not a transition. The clock for "slower than usual"
+    // runs from when the step began, so restarting it on every heartbeat would hide exactly the slow
+    // search the indicator exists to show — a liveness signal must not overwrite a duration.
+    const same = entry.phase === phase;
+    if (entry.phase === "approval" && !same) entry.approvalMs += when - entry.phaseAt;
     entry.phase = phase;
-    entry.phaseAt = when;
+    if (!same) entry.phaseAt = when;
     toolRunning = phase === "approval" ? "Waiting for your approval…" : `${PHASE_TEXT[phase][0].toUpperCase()}${PHASE_TEXT[phase].slice(1)}…`;
     updateActivity();
     paintProgress(entry);

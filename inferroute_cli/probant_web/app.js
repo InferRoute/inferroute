@@ -926,34 +926,51 @@
         e.notes.textContent = `${d.sent}/${d.planned} queries · ${d.documents} documents`;
         e.title.textContent = `🔍 Deep prior-art survey`;
         clear(e.body);
-        e.body.append(el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`));
-        // WHY it was this size. The count on its own reads as the search having given up, and the reasons
-        // are the part the professional can act on.
-        e.body.append(el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`));
-        const list = el("div", "deep-legs");
+        // `.card-body` carries no padding of its own — in an ordinary search card every child brings its
+        // own (`.card-query`, `.doc`, `.card-foot`). Bare divs appended here sat flush against the border.
+        e.body.append(el("div", "deep-summary",
+          el("div", "", `${d.sent} of ${d.planned} sealed queries completed — ${d.documents} distinct documents.`),
+          // WHY it was this size: the count alone reads as the search having given up, and the reasons are
+          // the part the professional can act on.
+          el("div", "sub", `It put ${d.planned} of a possible ${d.cap}. ${(d.notes || []).join("; ")}.`)));
         for (const leg of d.legs || []) {
           const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
           const count = leg.status === "ok" ? `${leg.hits} document(s)`
             : leg.status === "empty" ? "nothing returned" : (leg.why || "did not complete");
-          // Two lines: the category and the count, then WHAT was put. The category repeats across legs —
-          // two "one feature on its own" told you nothing about which feature.
-          const row = el("div", `deep-leg ${leg.status}`);
-          row.append(el("div", "deep-leg-head",
+          const block = el("div", `deep-leg ${leg.status}`);
+          block.append(el("div", "deep-leg-head",
             `${mark} ${leg.searchNo ? `Search ${leg.searchNo} · ` : ""}${leg.feature} — ${count}`));
-          if (leg.about) row.append(el("div", "deep-leg-about", `“${leg.about}”`));
-          list.append(row);
+          if (leg.about) block.append(el("div", "deep-leg-about", `“${leg.about}”`));
+          // A leg IS an ordinary sealed search, so it gets what one gets: its documents, and the controls
+          // to mark them. Listing a count and calling that a trace gave the outline nowhere to arrive.
+          const docs = leg.docs || [];
+          if (docs.length) {
+            const list = el("ol", "docs");
+            docs.forEach((doc, idx) => {
+              const keyNo = String(doc.key || "");
+              const title = el("div", "dtitle", String(doc.title || ""));
+              const row = el("li", "doc",
+                el("span", "rank", String(idx + 1)),
+                el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
+                  doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
+                markButtons(keyNo, e.card));
+              title.addEventListener("click", () => row.classList.toggle("open"));
+              list.append(row);
+            });
+            block.append(list);
+          }
+          e.body.append(block);
+          // The outline points at THIS leg, not at the card: being sent to the top of a six-search card is
+          // not arriving at search 5.
+          if (leg.about) {
+            outlineAdd({ kind: "search", el: block, entry: e,
+                         label: leg.searchNo ? `Search ${leg.searchNo}` : "Search",
+                         detail: `${leg.about.slice(0, 54)}${leg.about.length > 54 ? "…" : ""}` });
+          }
         }
-        e.body.append(list);
-        // Each leg in the outline, so a press is navigable rather than one entry covering six searches.
-        // The card stays collapsible in the conversation; the index is how you get INTO it.
-        for (const leg of d.legs || []) {
-          if (!leg.about) continue;
-          outlineAdd({ kind: "search", el: e.card, entry: e,
-                       label: leg.searchNo ? `Search ${leg.searchNo}` : "Search",
-                       detail: `${leg.about.slice(0, 54)}${leg.about.length > 54 ? "…" : ""}` });
-        }
-        e.body.append(el("p", "sub", "These are the combined results of separate queries, not a merged "
-          + "ranking: the same invention can appear more than once under different publication numbers."));
+        e.body.append(el("div", "card-foot", "These are the combined results of separate queries, not a "
+          + "merged ranking: the same invention can appear more than once under different publication "
+          + "numbers. Mark what matters — the next deep search walks outward from what you marked."));
       }
       keep();
       return;

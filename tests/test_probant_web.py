@@ -1251,3 +1251,38 @@ def test_a_heartbeat_keeps_the_page_alive_without_hiding_a_slow_search():
     assert "const same = entry.phase === phase;" in fn
     assert "if (!same) entry.phaseAt = when;" in fn
     assert 'entry.phase === "approval" && !same' in fn
+
+
+def test_a_survey_leg_gets_its_documents_its_padding_and_its_own_outline_row():
+    """Henry, 24 Sep, on a real press: padding issues, and "the searches from the deep search when clicked
+    from the left index are not opening".
+
+    Both had the same cause. A leg was rendered as a COUNT — "Search 3 — 10 document(s)" — so there was
+    nothing to open and nothing to mark, and the outline row pointed at the card, which meant clicking
+    search 5 sent you to the top of a six-search card. A leg is an ordinary sealed search and gets what one
+    gets: its documents, the controls to mark them, and an outline row pointing at itself.
+
+    The padding was the same shape of mistake: `.card-body` carries none of its own — in a search card
+    every child brings its own — so bare divs appended to it sat flush against the border."""
+    ts = (STATIC.parent / "pi_attested" / "ir-attested.ts").read_text()
+    js = (STATIC / "app.js").read_text()
+    css = (STATIC / "app.css").read_text()
+
+    # The documents have to leave the tool at all.
+    assert "docs: r.sp.docs" in ts, "a leg reports a count but not what it found"
+
+    deep = js[js.index('if (ev.tool === "deep_prior_art_search") {', js.index("e.notes.textContent") - 4000):]
+    deep = deep[:deep.index('if (ev.tool !== "prior_art_search")')]
+    # Same document rendering and the same marking controls as a search card.
+    assert 'el("ol", "docs")' in deep and "markButtons(keyNo, e.card)" in deep
+    # The outline row points at the LEG, not at the card.
+    assert "outlineAdd({ kind: \"search\", el: block" in deep
+    assert "el: e.card" not in deep.split("outlineAdd")[1][:200]
+    # Every block this appends to the body carries padding, since the body has none.
+    for cls in (".deep-summary", ".deep-leg-head", ".deep-leg-about"):
+        at = css.find(f"{cls} {{")
+        assert at >= 0, cls
+        # The rule's OWN body, not a fixed window: a window spills into the next rule, and this assertion
+        # passed against a padding-less rule because the one after it had padding.
+        body = css[at:css.index("}", at)]
+        assert "padding" in body, f"{cls} has no padding of its own: {body!r}"

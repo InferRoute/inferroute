@@ -508,3 +508,8 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 /* A delivery from someone not yet in your contacts: a real thing to check, not an alarm. The first
    delivery anyone receives is necessarily from an unsaved sender. */
 .soft-warn { color: var(--warn); }
+
+/* The deep search: one press, several sealed queries, minutes rather than seconds. Drawn apart from the
+   other next-step buttons so that is apparent before pressing rather than after. */
+.step-btn.deep { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.step-btn.deep:hover { background: var(--accent-soft); }

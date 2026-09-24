@@ -44,7 +44,7 @@ PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "f667172d09f03febbd4276448d128ea97835d8745310c62904f004ae9893aa42"
+PINNED_CONTRACT_SHA = "d5fca492b93d97e3e95255cf6a5b11edcd974cfd50f88a7d0752a86d806b55c0"
 
 
 def _strip_comments(text: str) -> str:
@@ -244,7 +244,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
-        tools = TOOLS + ((SEARCH_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
+        tools = TOOLS + ((SEARCH_TOOL, DEEP_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
         env.pop("IR_INTAKE_OUT", None)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
@@ -312,6 +312,9 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
 #    to the matter state file OUTSIDE the sandbox (approvals/marks/cutoff the agent must not forge)}
 
 SEARCH_TOOL = "prior_art_search"
+# The fan-out: one press, several sealed queries. Offered with the search tools and only with them — a
+# session with no search machine must not see a tool it cannot use.
+DEEP_TOOL = "deep_prior_art_search"
 # The id of the session records the search verifier writes for the current launch (set by start_search_proxy);
 # the browser page keeps its conversation beside them under the same id.
 LAST_SESSION_ID: str | None = None

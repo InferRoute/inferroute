@@ -407,6 +407,9 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 const STEP_DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
 const STEP_LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
 const STEP_SURVEY = "Run a prior-art survey of the disclosure";
+// The deep search. Worded as the professional would ask for it, like every other step: the button SENDS
+// this sentence, and the assistant answers it by calling deep_prior_art_search.
+const STEP_DEEP = "Search deeply: put the whole disclosure, its features, and my marks to the search machine";
 const stepLike = (key: string) => `Find documents like ${key}`;
 const NEXT_MAX = 4;
 // A button sends EXACTLY its text, so a suggestion is never cut: a cut one sends a broken half-instruction
@@ -466,6 +469,10 @@ class SessionRecord {
 	modelDetail: Record<string, unknown> = {};
 	searchOffered = false;
 	searches: SearchRecord[] = [];
+	// One entry per deep-search press: which sub-queries were put, and what became of each. The sealed
+	// statements for those queries are already rows in `searches`; this says which press they belonged to
+	// and — the part a list of successes cannot say — which sub-queries failed or came back empty.
+	fanouts: Record<string, unknown>[] = [];
 
 	surfaces() {
 		return {
@@ -504,7 +511,7 @@ class SessionRecord {
 				verified: this.modelOk, checks: this.modelChecks, receipt: this.modelReceipt,
 				check_list: this.modelCheckList, limitations: this.modelLimitations, ...this.modelDetail,
 			},
-			search_lane: { offered: this.searchOffered, searches: this.searches },
+			search_lane: { offered: this.searchOffered, searches: this.searches, deep_searches: this.fanouts },
 			which_surface_saw_what: this.surfaces(),
 			note: "A per-surface disclosure record for one attested session. Each line is a checked fact, not a promise.",
 		};
@@ -866,6 +873,118 @@ export default function (pi: ExtensionAPI) {
 
 	if (!SEARCH) return;
 
+	// ── one sealed search, end to end ──────────────────────────────────────────────────────────────
+	//
+	// Verify the machine, clear the approval once per machine per matter, send, record the proof, number it.
+	// `prior_art_search` and the deep fan-out both come through here, and that is the point: the question
+	// "did the professional agree to this machine" must have ONE answer in this extension. A second copy of
+	// that logic is a second opinion about consent, and the two would drift the first time either changed.
+	async function sealedSearch(o: {
+		text: string; k: number; feature?: string; like?: string;
+		ctx: ExtensionContext; signal: AbortSignal | undefined; phase: (name: string) => void;
+	}): Promise<{ sp: SearchProof; out: SearchVerdict; earlier: Map<string, number> }> {
+		const { text, k, ctx, signal } = o;
+		const feature = o.feature ?? "";
+		const like = o.like ?? "";
+		let verified: SearchVerdict;
+		o.phase("verifying");
+		try {
+			verified = await searchCall("/enclave", undefined, signal);
+		} catch {
+			throw new Error("the local search verifier did not answer; nothing was sent");
+		}
+		const vp = searchProofOf(verified, "verify");
+		searchStatus(ctx, vp);
+		if (!verified.ok) {
+			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
+		}
+		const e = verified.enclave ?? {};
+		let matter: { approved?: string[]; cutoff_date?: number | null } = {};
+		try {
+			matter = (await searchCall("/matter/state", undefined, signal)) as unknown as typeof matter;
+		} catch {
+			matter = {};
+		}
+		const measurement = String(e.measurement ?? "");
+		if (!(matter.approved ?? []).includes(measurement)) {
+			o.phase("approval");
+			let pending = approvals.get(measurement);
+			if (!pending) {
+				const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
+				const identity = isInferRoutes(verified)
+					? "running exactly the software InferRoute published (signed reference checked)"
+					: "running exactly the software this computer expects";
+				const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+				pending = (async () => {
+					const ok = await ctx.ui.confirm(
+						"Allow a sealed patent search?",
+						[
+							vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
+							"The assistant wants to search for:\n",
+							`  "${preview}"\n\n`,
+							`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
+							"This text is encrypted here and only that machine can open it. ",
+							`Only documents ${bound} come back.\n\n`,
+							"Allow searches to this machine for this matter? You won't be asked again for it.\n",
+							`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
+						].join(""),
+					);
+					if (ok) {
+						try {
+							await searchCall("/matter/approve", { measurement }, signal);
+						} catch {
+							/* approval recording is best-effort; the confirm above is the gate */
+						}
+					}
+					return ok;
+				})();
+				approvals.set(measurement, pending);
+				pending.finally(() => approvals.delete(measurement)).catch(() => {});
+			}
+			const ok = await pending;
+			if (!ok) {
+				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, searchProofOf(verified, "declined"));
+				throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
+			}
+		}
+		let out: SearchVerdict;
+		o.phase("searching");
+		try {
+			out = await searchCall("/search", { text, k, expect_lifetime_id: e.lifetime_id }, signal);
+		} catch {
+			throw new Error("the local search verifier did not answer; the search did not complete");
+		}
+		const sp = searchProofOf(out, "search", verified);
+		sp.feature = feature || undefined;
+		sp.like = like || undefined;
+		sp.k = k;
+		searchStatus(ctx, sp);
+		disclosure.searches.push({
+			at: sp.at, ok: sp.ok, testRoots: sp.testRoots, measurement: sp.measurement, policy: sp.policy,
+			index: sp.index, hits: sp.hits, refusal: sp.refusal,
+		});
+		disclosure.write();
+		if (!out.ok) {
+			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
+			throw new Error(`the sealed search was refused (${sp.refusal})`);
+		}
+		searchNo += 1;
+		sp.searchNo = searchNo;
+		const earlier = new Map<string, number>();
+		for (const d of sp.docs) {
+			const first = firstSeen.get(d.key);
+			if (first) {
+				earlier.set(d.key, first);
+				d.alsoIn = first;
+			} else {
+				firstSeen.set(d.key, searchNo);
+			}
+			if (d.title) docText.set(d.key, d.title);
+		}
+		return { sp, out, earlier };
+	}
+
 	pi.registerTool({
 		name: "prior_art_search",
 		label: "Prior-art search (sealed)",
@@ -928,120 +1047,217 @@ export default function (pi: ExtensionAPI) {
 			}
 			const asked = params.k ?? DEPTH_K[String(params.depth ?? "quick").toLowerCase()] ?? 10;
 			const k = Math.min(50, Math.max(1, Math.round(Number(asked) || 10)));
-			let verified: SearchVerdict;
-			phase("verifying");
-			try {
-				verified = await searchCall("/enclave", undefined, signal);
-			} catch {
-				throw new Error("the local search verifier did not answer; nothing was sent");
-			}
-			const vp = searchProofOf(verified, "verify");
-			searchStatus(ctx, vp);
-			if (!verified.ok) {
-				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
-				throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
-			}
-			const e = verified.enclave ?? {};
-			// Approval is owned by the host verifier, not by in-sandbox memory or a workspace file the agent
-			// could forge. Ask it whether this enclave measurement is already approved for the matter.
-			let matter: { approved?: string[]; cutoff_date?: number | null } = {};
-			try {
-				matter = (await searchCall("/matter/state", undefined, signal)) as unknown as typeof matter;
-			} catch {
-				matter = {};
-			}
-			const measurement = String(e.measurement ?? "");
-			if (!(matter.approved ?? []).includes(measurement)) {
-				// ONE question per machine per matter, however many searches ask at once. The assistant
-				// issues several searches in the same instant; each used to find the matter not yet
-				// approved and raise its own prompt — five at once on 19 Sep, of which the page could
-				// show one. The first to arrive asks; the rest wait for that same answer. "You won't be
-				// asked again for it" is then true, and a decline stops all of them.
-				phase("approval");
-				let pending = approvals.get(measurement);
-				if (!pending) {
-					const bound = matter.cutoff_date ? `published before ${fmtDate(matter.cutoff_date)}` : "within the matter's date bound";
-					const identity = isInferRoutes(verified)
-						? "running exactly the software InferRoute published (signed reference checked)"
-						: "running exactly the software this computer expects";
-					const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
-					pending = (async () => {
-						const ok = await ctx.ui.confirm(
-							"Allow a sealed patent search?",
-							[
-								vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
-								"The assistant wants to search for:\n",
-								`  "${preview}"\n\n`,
-								`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
-								"This text is encrypted here and only that machine can open it. ",
-								`Only documents ${bound} come back.\n\n`,
-								"Allow searches to this machine for this matter? You won't be asked again for it.\n",
-								`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
-							].join(""),
-						);
-						if (ok) {
-							// Recorded host-side (survives the session, per matter per measurement) BEFORE the
-							// waiting searches are released, so none of them can race past an unrecorded yes.
-							try {
-								await searchCall("/matter/approve", { measurement }, signal);
-							} catch {
-								/* approval recording is best-effort; the confirm above is the gate */
-							}
-						}
-						return ok;
-					})();
-					approvals.set(measurement, pending);
-					// Forgotten once answered: a "no" must be asked again next time, and a "yes" is on the host.
-					pending.finally(() => approvals.delete(measurement)).catch(() => {});
-				}
-				const ok = await pending;
-				if (!ok) {
-					pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, searchProofOf(verified, "declined"));
-					throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
-				}
-			}
-			let out: SearchVerdict;
-			phase("searching");
-			try {
-				// No cutoff here: the host verifier applies the matter's date bound.
-				out = await searchCall("/search", { text, k, expect_lifetime_id: e.lifetime_id }, signal);
-			} catch {
-				throw new Error("the local search verifier did not answer; the search did not complete");
-			}
-			const sp = searchProofOf(out, "search", verified);
-			sp.feature = feature || undefined;
-			sp.like = like || undefined;
-			sp.k = k;
-			searchStatus(ctx, sp);
-			disclosure.searches.push({
-				at: sp.at, ok: sp.ok, testRoots: sp.testRoots, measurement: sp.measurement, policy: sp.policy,
-				index: sp.index, hits: sp.hits, refusal: sp.refusal,
-			});
-			disclosure.write();
-			if (!out.ok) {
-				pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
-				throw new Error(`the sealed search was refused (${sp.refusal})`);
-			}
-			// Number the search, and note which documents an earlier search in this session already returned.
-			searchNo += 1;
-			sp.searchNo = searchNo;
-			const earlier = new Map<string, number>();
-			for (const d of sp.docs) {
-				const first = firstSeen.get(d.key);
-				if (first) {
-					earlier.set(d.key, first);
-					d.alsoIn = first;
-				} else {
-					firstSeen.set(d.key, searchNo);
-				}
-				if (d.title) docText.set(d.key, d.title);
-			}
+			const { sp, out, earlier } = await sealedSearch({ text, k, feature, like, ctx, signal, phase });
 			const label = `Search ${searchNo}${feature ? ` (feature: ${feature})` : ""}${like ? ` (documents like ${like})` : ""}`;
 			return { content: [{ type: "text", text: hitsText(out, label, earlier) }], details: sp };
 		},
 
 		renderResult(result, { expanded }, theme) {
 			return renderSearchProof(result.details as SearchProof | undefined, expanded, theme);
+		},
+	});
+
+	// ── the deep search: one press, a bounded fan-out, no model in the loop ────────────────────────
+	//
+	// Measured, on our own agent-loop experiments: the loop is good at REACHING (pool reachability
+	// 0.27→0.41) and bad at JUDGING (its model-judge kept 0.062 of the keep-set). So this reaches widely
+	// and judges nothing. The model chooses to call it and supplies the description, exactly as it does for
+	// a single search; from that moment every sub-query is a deterministic function of that text and of the
+	// professional's own marks. Nothing here reads a result and decides what to ask next — which is what
+	// keeps the signed statements a record of what was searched rather than of something's opinion.
+	//
+	// The fan-out is bounded (DEEP_MAX) for two reasons that are not about cost: the sealed machine runs on
+	// a schedule, and the page stops claiming the assistant is working after two minutes of complete
+	// silence, so every sub-search must report and the whole press must stay inside the window.
+	const DEEP_MAX = 8;
+	const DEEP_WINDOW = 700;          // characters per window: long enough to be self-contained
+
+	// Split into self-contained windows on sentence boundaries. A single long disclosure put as one query
+	// is truncated upstream, and the tail — which is where the distinguishing features usually are — is
+	// never searched at all.
+	function deepWindows(text: string, max: number): string[] {
+		const parts = text.split(/(?<=[.;:!?])\s+/).map((x) => x.trim()).filter(Boolean);
+		const out: string[] = [];
+		let cur = "";
+		for (const part of parts) {
+			if (cur && cur.length + part.length + 1 > DEEP_WINDOW) {
+				out.push(cur);
+				cur = "";
+			}
+			cur = cur ? `${cur} ${part}` : part;
+		}
+		if (cur) out.push(cur);
+		const usable = out.filter((w) => w.length >= 20);
+		if (usable.length <= max) return usable;
+		// Spread the chosen windows ACROSS the text, always including the last one. Taking the first `max`
+		// would search only the opening — which is the upstream truncation this leg exists to defeat, done
+		// again by hand. The distinguishing features are usually near the end.
+		const picked: string[] = [];
+		for (let i = 0; i < max; i += 1) {
+			picked.push(usable[Math.round((i * (usable.length - 1)) / (max - 1))]);
+		}
+		return [...new Set(picked)];
+	}
+
+	// Enumerated features, when the text has them ("1. …", "- …", "characterised in that …"). Searching one
+	// feature on its own is the single cheapest way to reach art the whole-disclosure query never ranks.
+	function deepElements(text: string, max: number): string[] {
+		const out: string[] = [];
+		for (const raw of text.split(/\n+/)) {
+			const line = raw.replace(/^\s*(?:\d+[.)]|[-*•])\s+/, "").trim();
+			if (line !== raw.trim() && line.length >= 20) out.push(line);
+		}
+		return out.slice(0, max);
+	}
+
+	interface DeepLeg { text: string; feature: string; like?: string }
+
+	// Which marks seed the walk. Only "relevant" — a document the professional set aside as known art or as
+	// not relevant is not a seed, because walking outward from it would be the system quietly overruling the
+	// judgement it asked them for. Named and exported to the same block as the planner so it can be tested:
+	// inside the tool body this was a filter nothing could reach, and a test of the planner passed happily
+	// while it said `true`.
+	function relevantMarks(st: MatterMarks): string[] {
+		return Object.entries(st.marks ?? {})
+			.filter(([, m]) => m?.latest?.value === "relevant")
+			.map(([k]) => k);
+	}
+
+	function deepPlan(text: string, relevant: string[]): DeepLeg[] {
+		const legs: DeepLeg[] = [];
+		const seen = new Set<string>();
+		const add = (t: string, feature: string, like?: string) => {
+			const key = t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
+			if (!key || t.trim().length < 20 || seen.has(key) || legs.length >= DEEP_MAX) return;
+            seen.add(key);
+			legs.push({ text: t.trim(), feature, like });
+		};
+		// The whole description first: it is the query a single search would have made, so the deep search
+		// can never return less than the plain one would have.
+		add(text, "the disclosure as a whole");
+		for (const el of deepElements(text, 3)) add(el, "one feature on its own");
+		for (const w of deepWindows(text, 3)) add(w, "part of the description");
+		// The professional's own relevant marks, walked outward. Only documents they marked relevant, only
+		// text an earlier search on this matter already returned — nothing new leaves because of this.
+		for (const key of relevant) {
+			const known = docText.get(key) ?? priorDocs.get(key);
+			if (known) add(known, `like ${key}`, key);
+		}
+		return legs;
+	}
+
+	pi.registerTool({
+		name: "deep_prior_art_search",
+		label: "Deep prior-art search (sealed)",
+		description:
+			"Run a WIDE prior-art survey of a technical description in one step: it puts several sealed queries — the " +
+			"description as a whole, individual features, parts of the text, and documents like the ones the professional " +
+			"marked relevant — and returns the combined references. Use it when the professional asks for a deep, thorough " +
+			"or autonomous search, or to open a matter that has had none. Prefer `prior_art_search` for a single targeted " +
+			"question. Each sub-query is sealed and verified exactly as a single search is, and every one of them is " +
+			"recorded. It surfaces related art; it does not certify completeness or absence.",
+		promptSnippet: "Run a wide sealed prior-art survey in one step (several queries)",
+		promptGuidelines: [
+			"Use deep_prior_art_search when the professional asks to go deep, to survey thoroughly, or to search everything — pass the full technical description, not a summary.",
+			"Do not describe its results as proving novelty or the absence of prior art.",
+		],
+		parameters: Type.Object({
+			text: Type.String({ description: "The full technical description to survey — the disclosure itself where you have it, not a précis. Its features and parts become separate sealed queries." }),
+		}),
+
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			if (!ctx.hasUI) {
+				throw new Error("deep_prior_art_search needs the user at this machine to approve sealed queries; refused without sending anything");
+			}
+			const phase = (name: string) => {
+				try {
+					onUpdate?.({ content: [], details: { phase: name } });
+				} catch {
+					/* progress is decoration; it must never break a search */
+				}
+			};
+			const text = String(params.text ?? "").trim();
+			if (text.length < 20) {
+				throw new Error("deep_prior_art_search needs a self-contained description of 20 characters or more; nothing was sent");
+			}
+			// The professional's marks, read from the host verifier — their judgements, not the model's.
+			let relevant: string[] = [];
+			try {
+				relevant = relevantMarks((await searchCall("/matter/state", undefined, signal)) as unknown as MatterMarks);
+			} catch {
+				relevant = [];
+			}
+			const legs = deepPlan(text, relevant);
+			const started = new Date().toISOString();
+			const results: { feature: string; status: string; hits: number; searchNo?: number; why?: string }[] = [];
+			const blocks: string[] = [];
+			const union = new Map<string, { title: string; first: number }>();
+			let sent = 0;
+
+			for (const leg of legs) {
+				// Each sub-search re-emits the ordinary phases, so the page never goes quiet for two minutes
+				// in the middle of a press. A phase name outside the fixed list is dropped before it reaches
+				// the page, which would be progress reporting that reports nothing.
+				let r: { sp: SearchProof; out: SearchVerdict; earlier: Map<string, number> };
+				try {
+					r = await sealedSearch({ text: leg.text, k: 10, feature: leg.feature, like: leg.like, ctx, signal, phase });
+				} catch (err) {
+					const why = err instanceof Error ? err.message : String(err);
+					results.push({ feature: leg.feature, status: "failed", hits: 0, why });
+					// A declined approval or an unverifiable machine stops the whole press: every remaining
+					// sub-query would ask the same machine the same question and fail the same way.
+					if (/declined|did not verify|verifier did not answer/.test(why)) break;
+					continue;
+				}
+				sent += 1;
+				const n = r.sp.searchNo ?? 0;
+				results.push({ feature: leg.feature, status: r.sp.docs.length ? "ok" : "empty", hits: r.sp.docs.length, searchNo: n });
+				for (const d of r.sp.docs) {
+					if (!union.has(d.key)) union.set(d.key, { title: d.title ?? "", first: n });
+				}
+				blocks.push(hitsText(r.out, `Search ${n} — ${leg.feature}`, r.earlier));
+			}
+
+			disclosure.fanouts.push({
+				at: started, planned: legs.length, sent,
+				legs: results, documents: union.size,
+			});
+			disclosure.write();
+
+			if (!sent) {
+				const why = results.find((x) => x.why)?.why ?? "no sub-query completed";
+				throw new Error(`the deep search sent nothing: ${why}`);
+			}
+			const failed = results.filter((x) => x.status === "failed");
+			const empty = results.filter((x) => x.status === "empty");
+			const ledger = [
+				`Deep search: ${sent} of ${legs.length} sealed queries completed, ${union.size} distinct documents.`,
+				failed.length ? `${failed.length} did not complete (${failed.map((f) => f.feature).join("; ")}).` : "",
+				empty.length ? `${empty.length} returned nothing (${empty.map((f) => f.feature).join("; ")}).` : "",
+				// Permanent, not a placeholder: the family map that would collapse siblings lives on the
+				// search side, and guessing family from publication numbers misses the cross-jurisdiction
+				// siblings that are most of the duplication. Say it rather than let it look merged.
+				"These are the combined results of separate queries, not a merged ranking: the same invention may appear more than once under different publication numbers.",
+			].filter(Boolean).join(" ");
+
+			return {
+				content: [{ type: "text", text: `${ledger}\n\n${blocks.join("\n\n")}` }],
+				details: { deep: true, at: started, planned: legs.length, sent, documents: union.size, legs: results },
+			};
+		},
+
+		renderResult(result, _options, theme) {
+			const d = result.details as { sent?: number; planned?: number; documents?: number;
+				legs?: { feature: string; status: string; hits: number }[] } | undefined;
+			const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+			if (!d) return box;
+			box.addChild(new Text(theme.bold("Deep prior-art search")
+				+ theme.fg("dim", `  ${d.sent ?? 0}/${d.planned ?? 0} queries · ${d.documents ?? 0} documents`), 0, 0));
+			for (const leg of d.legs ?? []) {
+				const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
+				box.addChild(new Text(`  ${mark} ${leg.feature}${leg.status === "ok" ? ` (${leg.hits})` : ` — ${leg.status}`}`, 0, 0));
+			}
+			return box;
 		},
 	});
 
@@ -1170,6 +1386,7 @@ export default function (pi: ExtensionAPI) {
 		// A new session is its own sitting: until it has run a search, running one is a candidate too.
 		const candidates = [
 			...(searchNo === 0 ? [STEP_SURVEY] : []),
+			STEP_DEEP,
 			...(relevant.length ? [STEP_DEEPER] : []),
 			...relevant.slice(0, 2).map(stepLike),
 			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),

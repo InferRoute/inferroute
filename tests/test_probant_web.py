@@ -742,23 +742,34 @@ def test_one_next_steps_panel_counts_and_covers_by_action():
     assert r.returncode == 0, r.stderr[-600:]
     R = json.loads(r.stdout.strip().splitlines()[-1])
     deeper = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them"
+    deep = "Search deeply: put the whole disclosure, its features, and my marks to the search machine"
+    # The deep search is guaranteed by the PAGE once a conversation has started: it is the headline action of
+    # this client, and leaving it to the assistant to remember would make it appear or not depending on how an
+    # answer happened to end. It rides on its own row and does not take one of the five places — so each case
+    # below asserts the steps that case is about, with the deep row as a constant on the end.
+    tail = {"title": "", "steps": [deep]}
     # 1. A new session on a matter marked in an earlier one, no answer and no search yet: running the survey
     #    comes first — a new session is its own sitting (Henry, 19 Sep) — then the steps from the marks.
     assert R["s1"] == [{"title": "", "steps": ["Run a prior-art survey of the disclosure"]},
-                       {"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
+                       {"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}, tail]
     # 1b. Once this session has searched, the survey is no longer offered on its own account.
-    assert R["s1b"] == [{"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}]
+    assert R["s1b"] == [{"title": "From your marks", "steps": [deeper, "Find documents like US-A1"]}, tail]
     # 2. The assistant saw that mark and chose its own list — including DROPPING "look deeper". Respected.
-    assert len(R["s2"]) == 1 and R["s2"][0]["title"] == "" and deeper not in R["s2"][0]["steps"]
+    assert len(R["s2"]) == 2 and R["s2"][0]["title"] == "" and deeper not in R["s2"][0]["steps"]
+    assert R["s2"][-1] == tail
     # 3. Marks made after it answered are added — and a step that merely DESCRIBES a mark ("…you marked
     #    relevant") does not count as offering "look deeper".
     assert R["s3"][1] == {"title": "From marks you made since", "steps": ["Find documents like US-B2", deeper]}
-    # 4. Five at most, but marks made since always keep a place.
+    # 4. Five at most, but marks made since always keep a place. The deep row is extra to that count.
     assert len(R["s4"][0]["steps"]) == 4 and R["s4"][1]["steps"] == ["Find documents like US-B2"]
-    # 5. While the assistant works on a new message, the previous answer's steps are stale: nothing shown.
+    assert R["s4"][-1] == tail
+    # 5. While the assistant works on a new message, the previous answer's steps are stale: nothing shown —
+    #    and the guaranteed deep row must not resurrect the panel while a message is in flight.
     assert R["s5"] is None
-    # 6-7. No marks, no list: ideas once the conversation has started, nothing before it.
+    # 6-7. No marks, no list: ideas once the conversation has started, nothing before it — including no deep
+    #    row before the conversation exists, since there is nothing yet to search deeply.
     assert R["s6"][0]["title"] == "Ideas" and "Summarise what the searches have surfaced so far" not in R["s6"][0]["steps"]
+    assert R["s6"][-1] == tail
     assert R["s7"] is None
 
 

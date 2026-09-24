@@ -420,7 +420,10 @@ class Bridge:
         machine's, and is left out."""
         from . import probant_timing as T
         kind, call, at = event.get("kind"), str(event.get("call")), event["at"]
-        if kind == "tool_start" and event.get("tool") == "prior_art_search":
+        # A deep search's legs are ordinary sealed searches and take ordinary sealed-search time, so the
+        # progress view's expectations are built from both. Filtering on one tool name left a press with no
+        # timings at all, which is how "checking the search machine…" sits still with nothing behind it.
+        if kind == "tool_start" and event.get("tool") in ("prior_art_search", "deep_prior_art_search"):
             self._timings[call] = {"k": T.k_of(event.get("args") or {}), "phase": "verifying", "since": at, "ms": {}}
             return
         t = self._timings.get(call)
@@ -461,12 +464,36 @@ class Bridge:
             row = {"kind": "search", "ok": bool(event.get("ok") and d.get("ok")), "search_no": d.get("searchNo"),
                    "feature": d.get("feature"), "like": d.get("like"), "k": d.get("k"), "documents": len(d.get("docs") or []),
                    "refusal": "" if event.get("ok") else str(event.get("text") or "")[:300]}
+        elif kind == "tool_end" and event.get("tool") == "deep_prior_art_search":
+            # A press is several sealed searches, and each is a search the professional is entitled to see
+            # the way they see any other — the aggregate alone told them a number and nothing else. One row
+            # opens the press and says why it is the size it is; then one row per leg, in the order run.
+            d = event.get("details") or {}
+            legs = d.get("legs") or []
+            rows = [{"kind": "deep_search", "ok": bool(event.get("ok")), "planned": d.get("planned"),
+                     "cap": d.get("cap"), "sent": d.get("sent"), "documents": d.get("documents"),
+                     "notes": d.get("notes") or [],
+                     "refusal": "" if event.get("ok") else str(event.get("text") or "")[:300]}]
+            for leg in legs:
+                rows.append({"kind": "search", "ok": leg.get("status") == "ok", "search_no": leg.get("searchNo"),
+                             "feature": leg.get("feature"), "like": None, "k": None,
+                             "documents": leg.get("hits") or 0, "of_deep": True,
+                             "refusal": str(leg.get("why") or "")[:300] if leg.get("status") == "failed" else ""})
+            for r in rows:
+                self._append_row(r, at)
+            return
+
         elif kind == "tool_end" and event.get("tool") == "matter_marks":
             row = {"kind": "marks_read"}
         elif kind == "dialog_closed":
             row = {"kind": "approval", "answer": event.get("answer")}
         if row is None:
             return
+        self._append_row(row, at)
+
+    def _append_row(self, row: dict, at: Any) -> None:
+        """One line of the conversation record. Extracted because a deep search appends SEVERAL rows for one
+        tool_end, and a second copy of this write would be a second way for the record to be written."""
         try:
             fd = os.open(self.conversation_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as fh:

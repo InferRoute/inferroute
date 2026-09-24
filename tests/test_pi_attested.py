@@ -615,10 +615,13 @@ def test_the_deep_search_always_puts_the_whole_description_first():
     query that search would have made, so it is always the first leg — the widening is additional, never a
     substitution of clever fragments for the obvious query."""
     out = _run_deep_plan(
-        "const legs = deepPlan('A wrist worn device measuring blood glucose by infrared light absorption.', []);\n"
-        "console.log(JSON.stringify({ first: legs[0], n: legs.length }));")
+        "const p = deepPlan('A wrist worn device measuring blood glucose by infrared light absorption.', []);\n"
+        "console.log(JSON.stringify({ first: p.legs[0], n: p.legs.length, notes: p.notes }));")
     assert out["first"]["feature"] == "the disclosure as a whole"
     assert out["first"]["text"].startswith("A wrist worn device")
+    # And it says WHY it is the size it is — a bare count reads as the search having given up.
+    assert out["notes"], "the plan explains nothing about its own size"
+    assert any("marked relevant" in n for n in out["notes"])
 
 
 def test_features_and_the_tail_of_a_long_description_each_get_their_own_query():
@@ -630,7 +633,7 @@ def test_features_and_the_tail_of_a_long_description_each_get_their_own_query():
             "2. a detector sampling returned intensity and rejecting motion artefacts by correlation\n")
     tail = " ".join(f"Sentence number {i} describing a further distinguishing element of the apparatus." for i in range(40))
     out = _run_deep_plan(
-        f"const legs = deepPlan({json.dumps(text + tail)}, []);\n"
+        f"const legs = deepPlan({json.dumps(text + tail)}, []).legs;\n"
         "console.log(JSON.stringify(legs));")
     feats = [l for l in out if l["feature"] == "one feature on its own"]
     assert any("two distinct wavelengths" in f["text"] for f in feats)
@@ -650,8 +653,8 @@ def test_only_documents_the_professional_marked_relevant_are_walked():
     out = _run_deep_plan(
         "docText.set('US-A1', 'Replaying recorded agent traces to improve a sealed model');\n"
         "docText.set('US-B2', 'Something the attorney set aside as not relevant');\n"
-        "const legs = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-A1']);\n"
-        "const unknown = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-NOTSEEN']);\n"
+        "const legs = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-A1']).legs;\n"
+        "const unknown = deepPlan('A wrist worn device measuring blood glucose by infrared light.', ['US-NOTSEEN']).legs;\n"
         "console.log(JSON.stringify({ legs, unknown }));")
     likes = [l for l in out["legs"] if l.get("like")]
     assert [l["like"] for l in likes] == ["US-A1"]
@@ -685,10 +688,56 @@ def test_a_press_is_bounded_and_never_puts_the_same_query_twice():
     marks = ", ".join(f"'US-{i}'" for i in range(12))
     out = _run_deep_plan(
         "".join(f"docText.set('US-{i}', 'A prior document about element number {i} of an apparatus');\n" for i in range(12))
-        + f"const many = deepPlan({json.dumps(long_text)}, [{marks}]);\n"
-        "const short = deepPlan('A wrist worn device measuring blood glucose by light.', []);\n"
+        + f"const many = deepPlan({json.dumps(long_text)}, [{marks}]).legs;\n"
+        "const short = deepPlan('A wrist worn device measuring blood glucose by light.', []).legs;\n"
         "console.log(JSON.stringify({ n: many.length, cap: DEEP_MAX, short: short.length,\n"
         "  uniq: new Set(many.map(l => l.text)).size }));")
     assert out["n"] == out["cap"], f"a press planned {out['n']} queries against a cap of {out['cap']}"
     assert out["uniq"] == out["n"], "the same query was planned twice in one press"
     assert out["short"] == 1, "a short description was searched more than once for the same text"
+
+
+def test_a_prose_disclosure_still_gets_its_features_searched_on_their_own():
+    """Henry ran a real deep search on 24 Sep and it put THREE queries where eight were allowed. The cause
+    was that deepElements only finds what an author numbered, and a disclosure written as paragraphs has
+    nothing numbered — so the common case got the whole text plus a window or two, barely wider than one
+    search. Sentences carrying a distinct technical assertion are now searched on their own, spread across
+    the text rather than taken from the front. Still deterministic: the same sentences every time."""
+    prose = (
+        "A wrist worn device measures blood glucose without piercing the skin. "
+        "An emitter directs infrared light through the wearer's tissue at two distinct wavelengths chosen to "
+        "separate glucose absorption from water absorption. "
+        "A detector samples the returned intensity and determines a concentration by comparing the two bands. "
+        "A motion sensor is coupled to the detector so that samples taken during movement are rejected before "
+        "the concentration is computed. "
+        "The device transmits the result to a paired handset over a low energy radio link."
+    )
+    out = _run_deep_plan(
+        f"const p = deepPlan({json.dumps(prose)}, []);\n"
+        "console.log(JSON.stringify({legs: p.legs, notes: p.notes}));")
+    feats = [l for l in out["legs"] if l["feature"] == "one feature on its own"]
+    assert feats, "a prose disclosure got no feature searched on its own"
+    assert len(out["legs"]) > 2, "a prose disclosure is still barely wider than one search"
+    assert any("read out of its sentences" in n for n in out["notes"])
+    # Spread ACROSS the disclosure, not taken from the front — the same failure the windows had, and the
+    # distinguishing features are usually near the end. The last qualifying sentence must be reachable.
+    assert any("paired handset" in f["text"] for f in feats), \
+        "the features were taken from the front, so the end of the disclosure is never searched on its own"
+    # Deterministic: the same disclosure plans the same queries.
+    again = _run_deep_plan(f"console.log(JSON.stringify(deepPlan({json.dumps(prose)}, []).legs));")
+    assert [l["text"] for l in again] == [l["text"] for l in out["legs"]]
+
+
+def test_the_press_says_why_it_stopped_where_it_did():
+    """Being told only "three sealed queries ran" reads as the search giving up. The reasons are the part
+    the professional can act on — number the features, mark a document — so they are reported, not inferred."""
+    bare = "A device that measures something using a method and returns a value to the user somehow."
+    out = _run_deep_plan(
+        f"const p = deepPlan({json.dumps(bare)}, []);\n"
+        "console.log(JSON.stringify({n: p.legs.length, cap: DEEP_MAX, notes: p.notes}));")
+    joined = " ".join(out["notes"])
+    assert out["n"] < out["cap"]
+    # Each of the three sources accounts for itself, including when it contributed nothing.
+    assert "feature" in joined
+    assert "split" in joined or "one query" in joined
+    assert "marked relevant" in joined

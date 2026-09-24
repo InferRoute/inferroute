@@ -1110,6 +1110,22 @@ export default function (pi: ExtensionAPI) {
 		return out.slice(0, max);
 	}
 
+	// Features out of PROSE. deepElements only finds what an author numbered, and a disclosure written as
+	// paragraphs has nothing numbered — so on the common case the fan-out was the whole text plus a window
+	// or two, which is barely wider than one search. These are the sentences carrying a distinct technical
+	// assertion, spread across the text rather than taken from the front, each searched on its own.
+	// Deterministic: no model reads this, it is the same sentences every time for the same disclosure.
+	function deepSentences(text: string, max: number): string[] {
+		const parts = text.split(/(?<=[.;!?])\s+/)
+			.map((x) => x.replace(/\s+/g, " ").trim())
+			// Long enough to stand alone as a query, and carrying something a patent search can bite on.
+			.filter((x) => x.length >= 60 && /\b(compris|configur|wherein|adapted|coupled|conne|generat|determin|measur|comput|receiv|transmit|approach|method|device|system|apparatus|module|layer|signal|circuit|sensor|model|key|enclave|index)/i.test(x));
+		if (parts.length <= max) return parts;
+		const picked: string[] = [];
+		for (let i = 0; i < max; i += 1) picked.push(parts[Math.round((i * (parts.length - 1)) / (max - 1))]);
+		return [...new Set(picked)];
+	}
+
 	interface DeepLeg { text: string; feature: string; like?: string }
 
 	// Which marks seed the walk. Only "relevant" — a document the professional set aside as known art or as
@@ -1123,27 +1139,64 @@ export default function (pi: ExtensionAPI) {
 			.map(([k]) => k);
 	}
 
-	function deepPlan(text: string, relevant: string[]): DeepLeg[] {
+	// The plan AND why it is the size it is. A press that put three queries when eight were allowed has a
+	// reason — the disclosure has no numbered features, or nothing is marked yet — and that reason is the
+	// most useful thing the professional can be told, because it is the thing they can change. Reporting
+	// only the count invites the reading that the search gave up.
+	interface DeepPlan { legs: DeepLeg[]; notes: string[] }
+
+	function deepPlan(text: string, relevant: string[]): DeepPlan {
 		const legs: DeepLeg[] = [];
+		const notes: string[] = [];
 		const seen = new Set<string>();
 		const add = (t: string, feature: string, like?: string) => {
 			const key = t.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 200);
-			if (!key || t.trim().length < 20 || seen.has(key) || legs.length >= DEEP_MAX) return;
-            seen.add(key);
+			if (!key || t.trim().length < 20 || seen.has(key) || legs.length >= DEEP_MAX) return false;
+			seen.add(key);
 			legs.push({ text: t.trim(), feature, like });
+			return true;
 		};
 		// The whole description first: it is the query a single search would have made, so the deep search
 		// can never return less than the plain one would have.
 		add(text, "the disclosure as a whole");
-		for (const el of deepElements(text, 3)) add(el, "one feature on its own");
-		for (const w of deepWindows(text, 3)) add(w, "part of the description");
+
+		const listed = deepElements(text, 3);
+		let features = 0;
+		for (const el of listed) if (add(el, "one feature on its own")) features += 1;
+		if (!listed.length) {
+			// Prose, not a numbered list. Sentences carrying a distinct technical assertion are searched on
+			// their own instead — the same leg by another route, because an unnumbered disclosure is the
+			// common case and was getting none of this.
+			for (const st of deepSentences(text, 3)) if (add(st, "one feature on its own")) features += 1;
+			notes.push(features
+				? `${features} feature(s) taken from the text itself — it has no numbered or bulleted list, so they were read out of its sentences`
+				: "no separable feature could be taken from the text: numbering the distinct features would let each be searched on its own");
+		} else {
+			notes.push(`${features} numbered feature(s) searched on their own`);
+		}
+
+		const windows = deepWindows(text, 3);
+		let split = 0;
+		for (const w of windows) if (add(w, "part of the description")) split += 1;
+		notes.push(split > 1
+			? `the description was long enough to split into ${split} overlapping parts, so its end was searched as well as its start`
+			: "the description is short enough to fit one query, so it was not split");
+
 		// The professional's own relevant marks, walked outward. Only documents they marked relevant, only
 		// text an earlier search on this matter already returned — nothing new leaves because of this.
+		let walked = 0;
+		let unknown = 0;
 		for (const key of relevant) {
 			const known = docText.get(key) ?? priorDocs.get(key);
-			if (known) add(known, `like ${key}`, key);
+			if (!known) { unknown += 1; continue; }
+			if (add(known, `like ${key}`, key)) walked += 1;
 		}
-		return legs;
+		if (walked) notes.push(`${walked} document(s) you marked relevant were walked outward from`);
+		else if (relevant.length) notes.push(`${relevant.length} document(s) are marked relevant, but this matter has not returned their text, so none could be walked outward from`);
+		else notes.push("nothing is marked relevant yet — marking a document makes the next deep search walk outward from it");
+
+		if (legs.length >= DEEP_MAX) notes.push(`stopped at the limit of ${DEEP_MAX} queries for one press`);
+		return { legs, notes };
 	}
 
 	pi.registerTool({
@@ -1187,7 +1240,8 @@ export default function (pi: ExtensionAPI) {
 			} catch {
 				relevant = [];
 			}
-			const legs = deepPlan(text, relevant);
+			const plan = deepPlan(text, relevant);
+			const legs = plan.legs;
 			const started = new Date().toISOString();
 			const results: { feature: string; status: string; hits: number; searchNo?: number; why?: string }[] = [];
 			const blocks: string[] = [];
@@ -1219,8 +1273,8 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			disclosure.fanouts.push({
-				at: started, planned: legs.length, sent,
-				legs: results, documents: union.size,
+				at: started, planned: legs.length, cap: DEEP_MAX, sent,
+				legs: results, documents: union.size, notes: plan.notes,
 			});
 			disclosure.write();
 
@@ -1232,6 +1286,10 @@ export default function (pi: ExtensionAPI) {
 			const empty = results.filter((x) => x.status === "empty");
 			const ledger = [
 				`Deep search: ${sent} of ${legs.length} sealed queries completed, ${union.size} distinct documents.`,
+				// WHY it was this size, in the professional's terms. Henry, 24 Sep, on being told only that
+				// three queries ran: "why did it not search further… this can be improved to be clearer".
+				// The count alone reads as the search giving up; the reasons are the part they can act on.
+				`It put ${legs.length} of a possible ${DEEP_MAX}: ${plan.notes.join("; ")}.`,
 				failed.length ? `${failed.length} did not complete (${failed.map((f) => f.feature).join("; ")}).` : "",
 				empty.length ? `${empty.length} returned nothing (${empty.map((f) => f.feature).join("; ")}).` : "",
 				// Permanent, not a placeholder: the family map that would collapse siblings lives on the

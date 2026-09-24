@@ -513,3 +513,10 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
    other next-step buttons so that is apparent before pressing rather than after. */
 .step-btn.deep { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .step-btn.deep:hover { background: var(--accent-soft); }
+
+/* A deep survey's legs: what the press actually put, in the order it put them. Shown because being told
+   only a count reads as the search having given up. */
+.deep-legs { margin: 8px 0 4px; }
+.deep-leg { font-size: 13px; color: var(--muted); padding: 1px 0; }
+.deep-leg.ok { color: var(--ink); }
+.deep-leg.failed { color: var(--bad); }

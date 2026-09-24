@@ -250,7 +250,10 @@ def test_a_session_caveat_becomes_a_limitation_so_it_reaches_the_receipt_and_the
         return dict(A.situational_limitations({"build_recorded": {"why": why}}))
     assert "pending-build" in lims("build x — PENDING — served at run time, not shipped")
     assert "new-build" in lims("NEW BUILD — not yet recorded by InferRoute")
-    repro = lims("build x — recorded by InferRoute since 2026-09-12; MRTD+RTMR1 recomputed here from published artifacts")
+    # "recomputed BY INFERROUTE", not "here": three auditors read "here" as this device having done the
+    # recomputation, when InferRoute did it on its own machine on the build date. The limitation text always
+    # said so; the check's own `why` contradicted it.
+    repro = lims("build x — recorded by InferRoute since 2026-09-12; MRTD+RTMR1 recomputed BY INFERROUTE from published artifacts")
     assert "reproduced" in repro and "MRTD+RTMR1" in repro["reproduced"]
     # a plain recorded build makes no claim either way
     assert lims("build x — recorded by InferRoute since 2026-09-12") == {}

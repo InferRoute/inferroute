@@ -814,10 +814,23 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    not carry a nonce — a second auditor read it that way the same day, reached the right conclusion by the
    wrong route, and would have reported a real difference as benign for a reason that is not true.
 
-   The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), and the
-   hash of the encryption key the session sealed to. **Read it for exactly what it is.** The raw
-   attestation evidence behind those fifteen verdicts is NOT in this folder, so you cannot re-verify the
-   quote the way you can for a search — the verdicts are the professional's own device speaking. What you
+   The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), the
+   hash of the encryption key the session sealed to, and — since 24 Sep — `attestation`: the evidence row
+   this device verified. **Recompute the verdicts from it rather than reading them.** It holds the Intel
+   TDX `quote`, the enclave-signed `attested_body` with its `signature` and `certificate`, and every GPU
+   report. That is everything the eight offline checks are computed from, so you can redo them:
+
+   - parse the quote (48-byte header, then a 584-byte TD report body) and read `mrtd` and `rtmr0`-`rtmr3`
+     at their offsets; compare with the receipt's `instance`;
+   - confirm our challenge appears verbatim in `attested_body` — if it does not, the evidence was replayed;
+   - verify `signature` over `attested_body` under `certificate`, and that the certificate's SPKI is the
+     one the quote commits to;
+   - confirm the quote commits to SHA-256(challenge ‖ the encryption key the session sealed to);
+   - check the certificate chain.
+
+   Report each as yours, not ours. Two things are still beyond this folder: the ONLINE checks (Intel PCS
+   TCB and CRLs, NVIDIA's per-GPU verdict) need those services, and a receipt written before 24 Sep has no
+   `attestation` at all — `written_by` says which client wrote it. Where you
    CAN do, and should: check the receipt's `mrtd` and `rtmrs` against the build list bundled in
    InferRoute's published client — `BUNDLED` in `inferroute_local/confidential/builds.py`, inside a package
    you download yourself (`pip download inferroute --no-deps`). That list ships in a release rather than

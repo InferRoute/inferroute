@@ -113,9 +113,17 @@ class ConfidentialSession:
         say("evidence verified; pinning an enclave for this session…")
         self._absorb_pool(e2, fetched_at=fetched_at)
         eligible = [i for i in self._pool if i in verified]
+        # An auditor read "6 instances, 2 verified, failed_instance_ids: []" and could not tell what became
+        # of the other four — reasonably, because `failed_instance_ids` is the OPERATOR's list of instances
+        # that could not produce evidence, not ours. The four had produced evidence and failed OUR checks,
+        # and the receipt named neither them nor which check. It does now, and says whose list is whose.
         self.receipt.fleet = {"instances": len(self.fleet.instances), "verified": len(verified),
                               "e2ee_capable": len(e2.get("instances") or []), "eligible": len(eligible),
-                              "failed_instance_ids": self.fleet.failed_instance_ids}
+                              "failed_instance_ids": self.fleet.failed_instance_ids,
+                              "failed_instance_ids_are": "the operator's own list of instances that could not "
+                                                         "produce evidence — not instances this device rejected",
+                              "rejected_here": {i.instance_id[:8]: i.failing
+                                                for i in self.fleet.instances if not i.verified}}
         if not eligible:
             failing = {i.instance_id[:8]: i.failing for i in self.fleet.instances if not i.verified}
             return self._refuse("no instance is BOTH verified and e2ee-capable"
@@ -170,6 +178,9 @@ class ConfidentialSession:
                                  "e2ee_pubkey_sha256": _sha256_b64(p.pubkey_b64), "gpus": r.gpus}
         self.receipt.checks = {k: {"ok": c.ok, "why": c.why, "label": attest.LABELS[k][0], "explain": attest.LABELS[k][1]}
                                for k, c in r.checks.items()}
+        # The bytes behind those verdicts, so a reader can recompute them instead of taking our word.
+        self.receipt.attestation = next(
+            (row for row in (self._raw_evidence or []) if str(row.get("instance_id") or "") == iid), {})
         # Session-specific caveats first: they are the ones a reader most needs, and they are the
         # ones that used to exist only on screen.
         self.receipt.limitations = [{"id": k, "text": t} for k, t in

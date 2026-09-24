@@ -208,7 +208,10 @@ def test_the_bundle_carries_the_conversation_receipt_and_the_brief_asks_about_it
     md = E.AUDIT_MD
     assert "The CONVERSATION, not only the searches" in md
     assert "session-*.receipt.json" in md
-    assert "is NOT in this folder" in md                 # the limit is stated, not implied
+    # Until 24 Sep the raw attestation was absent and claim 7 could only be READ. It is carried now, so the
+    # brief asks for it to be recomputed — and states the limit that remains rather than the one that went.
+    assert "Recompute the verdicts from it rather than reading them" in md
+    assert "the ONLINE checks" in md and "need those services" in md
     assert "which of this you verified and which you read" in md
     # The report is per-claim. Since 24 Sep the heading carries the claim's own title, so a claim that was
     # never reached cannot be papered over by a heading the auditor wrote themselves — one answered a list
@@ -460,3 +463,31 @@ def test_not_verified_and_could_not_check_are_taught_apart():
     assert "that is NOT VERIFIED on provenance, not a gap" in b
     # And it is taught BEFORE the claims, not only in the report format at the end.
     assert b.index("Three verdicts") < b.index("**Sealed hardware.**")
+
+
+def test_the_receipt_carries_the_evidence_its_verdicts_were_computed_from():
+    """Two independent auditors, on the same day, wrote the same sentence about claim 7: "the receipts are
+    data, not proof I can recompute". Both returned COULD NOT CHECK on fifteen checks whose inputs this
+    device had in memory when it wrote the receipt, and threw away.
+
+    The row is kept now — quote, attested body, its signature and certificate, every GPU report — so the
+    eight offline checks can be redone by whoever reads it. It reaches the pack because a receipt travels
+    whole except for `path`; this test exists because "added a field" and "the field reached the artifact"
+    are different claims, and the deep survey's cap taught me that the hard way today."""
+    from inferroute_local.confidential.receipt import Receipt
+    from inferroute_cli import probant_export as E
+    import json as _json
+
+    r = Receipt(session_id="s", model_short="m", upstream_model="u", fleet_id="f", transport="t")
+    assert hasattr(r, "attestation")
+
+    # A receipt with evidence survives the pack's scrubber intact — only `path` is removed.
+    row = {"instance_id": "abc", "quote": "QUOTE", "attested_body": "BODY",
+           "signature": "SIG", "certificate": "CERT", "gpu_evidence": ["g1", "g2"]}
+    packed = _json.loads(E._receipt_for_pack(_json.dumps({"attestation": row, "path": "/home/someone/x"}).encode()))
+    assert packed["attestation"] == row, "the evidence did not survive into the pack"
+    assert "path" not in packed and packed["withheld"] == ["path"]
+
+    # And the brief tells the auditor it is there and what to do with it, or the bytes sit unread.
+    for must in ("`attestation`", "Recompute the verdicts from it", "attested_body", "GPU report"):
+        assert must in E.AUDIT_MD.replace("\n   ", " "), must

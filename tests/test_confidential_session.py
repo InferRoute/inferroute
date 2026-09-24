@@ -121,9 +121,25 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     assert r.verdict == "confidential" and r.instance["id"] == "i-a"
     assert sorted(world["online_seen"]) == ["i-a", "i-b"], "online checks run only for offline-verified, sealable instances"
     assert all(r.checks[k]["ok"] for k in attest.REQUIRED_ONLINE)
-    assert r.fleet == {"instances": 3, "verified": 2, "e2ee_capable": 2, "eligible": 2, "failed_instance_ids": []}
+    # `failed_instance_ids` is the OPERATOR's list; an auditor read it as ours and could not account for the
+    # instances that were checked here and rejected. Both are now named, and so is the difference.
+    assert r.fleet["instances"] == 3 and r.fleet["verified"] == 2 and r.fleet["eligible"] == 2
+    assert r.fleet["failed_instance_ids"] == []
+    assert "not instances this device rejected" in r.fleet["failed_instance_ids_are"]
+    assert set(r.fleet["rejected_here"]) and all(v for v in r.fleet["rejected_here"].values()), \
+        "an instance this device rejected must say which check it failed"
     assert all(c["ok"] for c in r.checks.values()) and set(r.checks) == set(attest.REQUIRED) | set(attest.REQUIRED_ONLINE)
     assert r.claim and r.path and r.e2ee["kem"].startswith("ML-KEM-768")
+    # The evidence the fifteen verdicts were computed FROM, kept so a reader can recompute instead of
+    # believing. Asserted on a real open, not merely on the dataclass having the field: adding a field and
+    # the field arriving in the artifact are different claims, and today the second one failed twice.
+    ev = r.attestation
+    assert ev and ev.get("instance_id") == "i-a", "the pinned instance's evidence row was not kept"
+    # It is the row the fleet was verified FROM, not a summary of it: whatever the evidence service sent
+    # for this instance is what a reader gets, so every field the checks read is there by construction.
+    assert ev is not r.instance and set(ev) >= {"instance_id"}
+    assert any(row.get("instance_id") == "i-a" and row == ev for row in s._raw_evidence), \
+        "the receipt's evidence is not the row this device actually verified"
     assert not any(lim["id"] == "attributed-key" for lim in r.limitations), "the key binding is a check, not a limitation"
     assert r.checks["e2e_key_bound"]["ok"] and "commits to" in r.checks["e2e_key_bound"]["explain"]
 

@@ -42,6 +42,13 @@ class Receipt:
     started_at: str = field(default_factory=_now)
     ended_at: str = ""
     instance: dict = field(default_factory=dict)        # id, gpu_count, mrtd, rtmrs, chain
+    # The evidence row this device verified: the TDX quote, the enclave-signed attested body, its
+    # certificate and signature, and every GPU report. Kept because without it the fifteen verdicts below
+    # are THIS DEVICE'S WORD and nothing else — two independent auditors said so on 24 Sep, in the same
+    # sentence: "the receipts are data, not proof I can recompute". We hold these bytes at verification
+    # time and were throwing them away, which made a checkable claim uncheckable for no reason.
+    # No conversation content is in here: measurements, our own challenge, and public keys.
+    attestation: dict = field(default_factory=dict)
     checks: dict = field(default_factory=dict)          # name → {ok, why, label, explain}
     fleet: dict = field(default_factory=dict)           # {instances, verified, e2ee_capable, eligible}
     limitations: list = field(default_factory=lambda: [{"id": k, "text": t} for k, t in attest.LIMITATIONS])

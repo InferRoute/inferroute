@@ -77,7 +77,11 @@ LABELS: dict[str, tuple[str, str]] = {
     "spki_bound": ("Signing key bound to enclave", "the hardware quote commits to that signing key"),
     "e2e_key_bound": ("Encryption key bound to enclave", "the quote commits to SHA-256(challenge ‖ the key you seal to)"),
     "tdx_shape": ("Genuine TDX, debug off", "a real confidential VM, not a debuggable one"),
-    "measurement_ok": ("Published build", "measurements match the operator's published registry"),
+    # NOT "Published build": on the unstructured path this check's own `why` says the measurements'
+    # "belonging to ONE image is not established", so a label asserting a build overstated its own evidence.
+    # Three auditors flagged the gap between this label and that sentence, on 24 Sep, independently.
+    "measurement_ok": ("Measurements in the published registry",
+                       "MRTD and RTMR0-3 appear in the registry the operator publishes"),
     "build_recorded": ("Recorded build", "a build InferRoute has recorded and watches — not only the operator's word"),
     "chain_ok": ("Certificate chain sound", "every link verifies up to a self-signed root"),
     "quote_sig": ("Quote signed by the hardware", "Intel's Quoting Enclave signed it; the signature verifies"),
@@ -120,8 +124,8 @@ def situational_limitations(checks: dict) -> list[tuple[str, str]]:
     if "NEW BUILD" in why:
         out.append(("new-build", "This enclave build is not recorded by InferRoute at all. You allowed it with "
                                  "IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1; nothing about this image has been reviewed."))
-    elif "recomputed here" in why:
-        regs = why.split("recomputed here")[0].rsplit(";", 1)[-1].strip()
+    elif "recomputed BY INFERROUTE" in why:
+        regs = why.split("recomputed BY INFERROUTE")[0].rsplit(";", 1)[-1].strip()
         out.append(("reproduced", f"For this build InferRoute recomputed {regs} on its own machine from artifacts "
                                   "the operator publishes, and they matched — the firmware, the bootloader chain, "
                                   "the kernel command line and the initial RAM filesystem. What is not recomputed "
@@ -339,7 +343,7 @@ def check_build_recorded(q: dict) -> Check:
             how = "reviewed by InferRoute"
         elif repro:
             how = (f"recorded by InferRoute since {b.get('first_seen', '?')}; "
-                   f"{'+'.join(r.upper() for r in repro)} recomputed here from published artifacts")
+                   f"{'+'.join(r.upper() for r in repro)} recomputed BY INFERROUTE from published artifacts")
         else:
             how = f"recorded by InferRoute since {b.get('first_seen', '?')}"
         return Check(True, f"build {b.get('id', '?')} — {how}")

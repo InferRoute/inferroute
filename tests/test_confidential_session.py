@@ -138,7 +138,8 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     # It is the row the fleet was verified FROM, not a summary of it: whatever the evidence service sent
     # for this instance is what a reader gets, so every field the checks read is there by construction.
     assert ev is not r.instance and set(ev) >= {"instance_id"}
-    assert any(row.get("instance_id") == "i-a" and row == ev for row in s._raw_evidence), \
+    operator_part = {k: v for k, v in ev.items() if k != "checked_with"}
+    assert any(row.get("instance_id") == "i-a" and row == operator_part for row in s._raw_evidence), \
         "the receipt's evidence is not the row this device actually verified"
     assert not any(lim["id"] == "attributed-key" for lim in r.limitations), "the key binding is a check, not a limitation"
     assert r.checks["e2e_key_bound"]["ok"] and "commits to" in r.checks["e2e_key_bound"]["explain"]
@@ -746,3 +747,98 @@ def test_the_claim_never_outruns_the_counter(world, monkeypatch):
         step()
         if s.receipt.claim == CLAIM_CONFIDENTIAL:
             assert s.receipt.counters["requests"] > 0
+
+
+def test_the_receipt_carries_our_side_of_the_exchange_so_the_key_binding_can_be_redone(world):
+    """The audit brief asks an auditor to confirm the quote commits to SHA-256(challenge ‖ the key this
+    session sealed to), and that our challenge appears verbatim in the attested body. Neither was possible:
+    the receipt kept a HASH of the key and no challenge at all, so two of the five recomputations it asks
+    for were work the file could not support. Both values are ours and neither is secret — a nonce we chose
+    and a public ML-KEM key.
+
+    The test asserts the recomputation SUCCEEDS on the recorded values rather than asserting the fields are
+    present: a challenge and a key that do not reproduce the binding are two more strings in a file."""
+    import hashlib
+
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    r = asyncio.run(s.open())
+    mine = r.attestation["checked_with"]
+
+    assert mine["challenge"] == "n" * 64, "the challenge this device verified with was not recorded"
+    assert mine["e2e_pubkey"] == world["enclaves"]["i-a"].pubkey_b64, "the key sealed to was not recorded"
+
+    # The binding itself, recomputed from the receipt alone — which is what the brief asks of the auditor.
+    want = hashlib.sha256((mine["challenge"] + mine["e2e_pubkey"]).encode()).digest()
+    assert len(want) == 32
+    assert mine["recompute"] == "sha256((challenge + e2e_pubkey).encode()) == the quote's report_data[0:32]"
+
+    # And the hash we used to keep alone still agrees with the key we now keep, so an OLD receipt and a new
+    # one describe the same session rather than two.
+    assert mine["e2e_pubkey_sha256"] == r.instance["e2ee_pubkey_sha256"]
+
+    # Ours must be distinguishable from the operator's without asking. Everything else in the object came
+    # from the machine under audit; an auditor who cannot tell them apart has to treat all of it as theirs.
+    assert "not supplied by the enclave" in mine["note"]
+    assert "checked_with" not in {k for row in s._raw_evidence for k in row}, \
+        "our fields were written into the operator's evidence row rather than beside it"
+
+
+def test_a_receipt_dates_itself_even_when_nothing_closes_the_session(world):
+    """`ended_at` is written by close(), and close() does not run when the process is killed. That left a
+    complete receipt with an empty `ended_at` and no way for an auditor to tell "still running" from "died
+    at a time nobody recorded". Every save now stamps the last moment the session was known to be alive."""
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    r = asyncio.run(s.open())
+    assert r.ended_at == "", "this session was never closed — the fixture would not be testing anything"
+    assert r.last_activity_at, "a saved receipt does not say when it was last alive"
+    assert r.last_activity_at >= r.started_at
+
+    from inferroute_local.confidential.receipt import Receipt
+    on_disk = Receipt.load(r.path)
+    assert on_disk.last_activity_at == r.last_activity_at, "the stamp did not reach the file"
+
+
+def test_receipt_saves_do_not_share_a_temporary_name(world, tmp_path):
+    """A shared ".tmp" is safe only while exactly one writer exists. The same shape in the disclosure
+    record's writer produced a file that would not parse on 24 Sep, and the session it described dropped
+    out of the audit pack with its five signed searches — which reads as evidence removed."""
+    import threading
+
+    from inferroute_local.confidential.receipt import Receipt
+
+    r = Receipt(session_id="s1", model_short="m", upstream_model="u", fleet_id="f", transport="t")
+    r.path = str(tmp_path / "r.json")
+    seen = []
+    real_replace = S.os.replace if hasattr(S, "os") else None
+    del real_replace
+
+    import os as _os
+    orig = _os.replace
+
+    def spy(src, dst):
+        seen.append(str(src))
+        return orig(src, dst)
+
+    import inferroute_local.confidential.receipt as RC
+    RC.os.replace = spy
+    try:
+        barrier = threading.Barrier(4)
+
+        def save():
+            barrier.wait()
+            r.save()
+
+        ts = [threading.Thread(target=save) for _ in range(4)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join()
+    finally:
+        RC.os.replace = orig
+
+    assert len(seen) == 4
+    assert len(set(seen)) == 4, f"concurrent saves shared a temporary name: {seen}"
+    # And the published file is one whole document, not a mixture of four.
+    assert Receipt.load(r.path).session_id == "s1"

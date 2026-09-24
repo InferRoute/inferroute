@@ -117,6 +117,30 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
    would decide it is a copy whose date is fixed by someone who is not InferRoute: the value recorded in an
    engagement letter the client holds, or a third-party timestamp over the published file. Report which of
    those you had, and if you had neither, say so rather than crediting the fetch.
+
+4a. **`trust-anchors/reference.json.ots` — the one date in this folder that is not ours.** When present, it
+   is an OpenTimestamps proof over the reference: independent calendar servers, and in time a Bitcoin
+   block, attest that these exact bytes existed no later than that moment. Check it:
+
+       ots verify trust-anchors/reference.json.ots        # needs `pip install opentimestamps-client`
+       ots info   trust-anchors/reference.json.ots        # prints the sha256 it commits to
+
+   Read the result precisely, because this is the one place in the folder where an over-reading is easy:
+
+   - The sha256 in `ots info` must equal `sha256sum trust-anchors/reference.json`. A proof over some
+     OTHER bytes is not a proof about this reference, and it will still say "Success".
+   - **It settles the minted-here question if, and only if, the timestamp PRECEDES the searches.** The
+     attack it defeats is a reference written after the fact to fit a record. A reference fixed by
+     outsiders before the record existed cannot have been written to fit it. Compare the timestamp with
+     each statement's `started_utc` and say which came first.
+   - `Pending confirmation in Bitcoin blockchain` means the calendars have committed to it but no block
+     carries it yet — the date then rests on those servers rather than on Bitcoin. Run
+     `ots upgrade trust-anchors/reference.json.ots` and re-verify; if it is still pending, say so and
+     rate it as the weaker thing it is.
+   - It says nothing whatever about whether the reference's CONTENTS are true. It dates a file. Claim 3
+     also asks whether that file describes InferRoute's software, and no timestamp can answer that.
+
+   No `.ots` in the folder means this computer had none beside its reference — an absence, not a failure.
 4. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
    values with `=`: a pasted value that begins with `-` is otherwise read as another flag, and the error
    ("expected one argument") does not say so. Later
@@ -809,6 +833,15 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    of InferRoute**. It bears on whether the reference was minted on the audited machine — a different
    question from whether InferRoute's statement is true — and it bears on that only when the publishing
    machine is not the audited one. Establish that before crediting the fetch; VERIFY.md §3 says how.
+
+   **If `trust-anchors/reference.json.ots` is present, check it — it is the only date here that is not
+   ours.** `ots verify` it, confirm with `ots info` that it commits to the sha256 of
+   `trust-anchors/reference.json` and not to some other bytes, and compare its time with the statements'
+   `started_utc`. A timestamp EARLIER than the searches settles the minted-here half of this claim, because
+   a reference outsiders fixed before the record existed cannot have been written to fit it. A timestamp
+   later than the searches settles nothing. A timestamp still `Pending confirmation` rests on the calendar
+   servers rather than on Bitcoin — say which you saw. It remains silent on the other half: whether the
+   reference's contents are true. VERIFY.md §4a has the commands.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
    record (except one removed from the very end, which no counter can reveal).
@@ -852,6 +885,39 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    - confirm the quote commits to SHA-256(challenge ‖ the encryption key the session sealed to);
    - check the certificate chain.
 
+   **`attestation.checked_with` holds OUR side of those two, and did not exist before 24 Sep.** Until then
+   the receipt kept a HASH of the encryption key and no challenge at all, so the second and fourth steps
+   above asked for work the file could not support — an instruction to recompute something, over a file
+   missing the inputs. It now carries `challenge` (the nonce this device chose) and `e2e_pubkey` (the
+   instance's PUBLIC ML-KEM key), with `recompute` naming the equation:
+   `sha256((challenge + e2e_pubkey).encode())` must equal the quote's `report_data[0:32]`. Do that
+   arithmetic yourself and report the result as yours.
+
+   `checked_with` is separated from the rest of `attestation` for a reason you should preserve in the
+   report: **everything beside it came from the machine under audit; those two values came from this
+   device.** A receipt that predates the change has no `checked_with` — then those two steps are COULD NOT
+   CHECK on that session, not failures, and `written_by` says which client wrote it.
+
+   The offsets, so that "parse the quote" is arithmetic rather than research. A TDX v4 quote is a 48-byte
+   header followed by a 584-byte TD report body; within the BODY, `mrtd` is [136:184], `rtmr0`-`rtmr3` are
+   [328:376], [376:424], [424:472], [472:520], and `report_data` is [520:584]:
+
+       import base64, hashlib, json
+       r = json.load(open("session-....receipt.json")); a = r["attestation"]
+       body = base64.b64decode(a["quote"])[48:48 + 584]
+       assert body[136:184].hex() == r["instance"]["mrtd"]              # the measurement it claims
+       mine = a["checked_with"]
+       want = hashlib.sha256((mine["challenge"] + mine["e2e_pubkey"]).encode()).digest()
+       assert body[520:584][:32] == want                                # the key this session sealed to
+       assert mine["challenge"].encode() in base64.b64decode(a["attested_body"])   # not replayed
+
+   Three of the fifteen, done from the file and nothing else. Run it; do not reproduce it as though you
+   had. If an assertion fails, that is a finding and the exact line belongs in your report.
+
+   **`ended_at` empty does not mean the session is still open.** It is written when a session closes, and a
+   session that was killed never closes. `last_activity_at` — stamped on every save — is the last moment
+   the session is known to have been alive. Read that instead, and say which you used.
+
    Report each as yours, not ours. Two things are still beyond this folder: the ONLINE checks (Intel PCS
    TCB and CRLs, NVIDIA's per-GPU verdict) need those services, and a receipt written before 24 Sep has no
    `attestation` at all — `written_by` says which client wrote it. Where you
@@ -883,6 +949,13 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    happened is an absence of evidence, and calling that a verified claim is the one mistake this brief
    most needs you not to make: it turns "we cannot tell" into "we checked, and it was fine". The same
    applies anywhere else here — an empty list is not a passed test.
+
+   `MANIFEST.json` → `contents` states the count per kind, so you do not have to infer it from empty
+   fields: `document_reads: 0` says this matter did no document reads. It does NOT say document reads go
+   unrecorded — the two would look identical without it, which is why the count is written down. Quote the
+   number in your verdict. Note what the count is and is not: it is the pack's own unsigned index, so it
+   tells you what to expect and the signed statements in `searches.json` are what settle it. If they
+   disagree, the statements win and the disagreement is itself a finding.
 
 ## Quote each claim before you answer it
 
@@ -1118,6 +1191,41 @@ def _client_version() -> str:
         return ""
 
 
+# The verifier decides what a row IS with `str(st.get("kind") or "search") == "document"`, in
+# verify_record.py's dispatch. That file is standalone by design — it has to run in a firm that has none of
+# this installed — so the rule cannot be imported and lives in two places. It is pinned from both sides by
+# test_the_census_classifies_rows_the_way_the_verifier_does, which fails if either copy moves.
+DOCUMENT_KIND = "document"
+
+
+def _row_kind(row: object) -> str:
+    """A row's kind as the SIGNED statement gives it. The row carries an unsigned `kind` beside the
+    statement; that one is the record's claim about itself, and this census must not rest on it."""
+    st = row.get("statement") if isinstance(row, dict) else None
+    if not isinstance(st, dict):
+        return "unknown"
+    return str(st.get("kind") or "search")
+
+
+def _census(rows: list) -> Dict[str, int]:
+    """How many of each kind of signed operation this pack contains.
+
+    A zero here is a STATED zero. Nothing else in the folder distinguishes "this matter had no document
+    reads" from "document reads are not recorded", and on 24 Sep an auditor read claim 8 as VERIFIED
+    because the coverage fields were null in every search — an absence of evidence reported as a passed
+    test. A count the auditor can see is the cheapest way to make the two look different."""
+    out = {"searches": 0, "document_reads": 0, "unknown_kind": 0}
+    for r in rows:
+        k = _row_kind(r)
+        if k == DOCUMENT_KIND:
+            out["document_reads"] += 1
+        elif k == "unknown":
+            out["unknown_kind"] += 1
+        else:
+            out["searches"] += 1
+    return out
+
+
 def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = None) -> Path:
     """An evidence-only copy of an exported record, for the professional's own AI to audit. Written beside the
     record by default. Its name carries no matter name, because a matter name can say what the invention is."""
@@ -1191,6 +1299,10 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # the brief says so. It saves the auditor a guess, and proves nothing on its own.
                 "client_version": _client_version(),
                 "reference_hint": src_manifest.get("reference_hint"),
+                # A stated count per kind, so that nothing here has to be inferred from an empty field.
+                # `document_reads: 0` means this matter did no document reads — it does not mean they went
+                # unrecorded, and claim 8 is COULD NOT CHECK rather than verified when it is zero.
+                "contents": dict(_census(rows), session_receipts=len(receipts)),
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
     files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
@@ -1208,6 +1320,15 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     if ref:
         shutil.copyfile(ref, anchors / "reference.json")
         os.chmod(anchors / "reference.json", 0o600)
+        # An OpenTimestamps proof of the reference, when this computer has one beside it. This is the only
+        # artefact in the folder whose date does NOT come from InferRoute: the calendars, and later a
+        # Bitcoin block, fix when this exact reference existed. Everything else here is dated by the party
+        # being audited. Copied rather than made, because making one publishes a hash to public servers and
+        # that is the operator's decision, not something an export should do behind them.
+        ots = Path(str(ref) + ".ots")
+        if ots.is_file():
+            shutil.copyfile(ots, anchors / "reference.json.ots")
+            os.chmod(anchors / "reference.json.ots", 0o600)
     if key:
         (anchors / "publication-key.txt").write_text(str(key).strip() + "\n")
         os.chmod(anchors / "publication-key.txt", 0o600)

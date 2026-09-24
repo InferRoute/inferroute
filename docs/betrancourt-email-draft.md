@@ -157,9 +157,9 @@ vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux mi
 Il me faut pour cela votre **clé publique**. Quatre commandes dans un terminal, et la dernière l'affiche :
 
 ```
-curl -LO https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.14-py3-none-any.whl
+curl -LO https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.15-py3-none-any.whl
 python3 -m venv ~/probant
-~/probant/bin/pip install "./inferroute-0.9.14-py3-none-any.whl[confidential]"
+~/probant/bin/pip install "./inferroute-0.9.15-py3-none-any.whl[confidential]"
 ~/probant/bin/ir probant identity
 ```
 
@@ -180,7 +180,7 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 ~/probant/bin/ir probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.14-py3-none-any.whl
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.15-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
@@ -197,7 +197,12 @@ vaut que si la clé qui la signe est bien la nôtre. Voici son empreinte :
 Gardez-la avec ce courrier. Un tiers qui contrôlera un certificat plus tard vous demandera cette valeur-là,
 et la prendre à ce moment sur notre site ou sur votre poste ne prouverait rien : c'est d'en avoir la trace
 antérieure, chez vous, qui fait la différence. Trois vérificateurs indépendants nous l'ont signalé le même
-jour — c'est le seul point sur lequel ils butent tous, et il ne se règle pas de notre côté.
+jour — c'est le seul point sur lequel ils butent tous, et il ne se règle pas entièrement de notre côté.
+
+Nous avons toutefois fait ce qui en dépendait. La référence elle-même est désormais horodatée par
+OpenTimestamps : des serveurs indépendants, puis un bloc Bitcoin, attestent la date à laquelle ce fichier
+exact existait. C'est la seule date du dossier qui ne vienne pas de nous. Elle ne dit rien du contenu de la
+référence — seulement qu'il n'a pas pu être écrit après coup pour s'accorder à un certificat.
 
 Le client vous dira, en haut de sa page d'accueil, que la recherche d'antériorité n'y est pas encore
 installée : c'est exact, et c'est voulu à ce stade. Rien ne quitte votre poste tant qu'elle ne l'est pas.

@@ -1226,3 +1226,28 @@ def test_a_survey_reports_its_position_and_the_channel_carries_only_integers():
     # The page turns them into words rather than being sent words.
     js = (STATIC / "app.js").read_text()
     assert "search ${ev.step} of ${ev.steps}" in js
+
+
+def test_a_heartbeat_keeps_the_page_alive_without_hiding_a_slow_search():
+    """A survey mode that puts ONE sealed call needs that call to outlive the page's two-minute silence
+    budget. The extension owns the phase stream, so it beats while the call is outstanding — and any event
+    from the agent resets the stall clock.
+
+    The trap is the obvious implementation: re-running setPhase on every beat restarts `phaseAt`, which is
+    what "slower than usual" is measured from. A liveness signal that overwrites a duration would hide
+    exactly the slow search the indicator exists to surface. A repeat is a heartbeat, not a transition."""
+    ts = (STATIC.parent / "pi_attested" / "ir-attested.ts").read_text()
+    js = (STATIC / "app.js").read_text()
+
+    # It beats, it is bounded, and it always stops.
+    assert "SEARCH_HEARTBEAT_MS" in ts
+    beat = ts[ts.index('o.phase("searching");', ts.index("let out: SearchVerdict;")):]
+    beat = beat[:beat.index("const sp = searchProofOf")]
+    assert "setInterval(() => o.phase(\"searching\"), SEARCH_HEARTBEAT_MS)" in beat
+    assert "finally {" in beat and "clearInterval(beat)" in beat, "a heartbeat that can outlive its call"
+
+    # And a repeat does not restart the step clock.
+    fn = js[js.index("function setPhase("):js.index("\n  }", js.index("function setPhase("))]
+    assert "const same = entry.phase === phase;" in fn
+    assert "if (!same) entry.phaseAt = when;" in fn
+    assert 'entry.phase === "approval" && !same' in fn

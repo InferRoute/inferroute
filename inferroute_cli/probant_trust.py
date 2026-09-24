@@ -1,4 +1,4 @@
-"""What an attorney is told about a Probant session's protection — in plain words, derived from checks.
+"""What the user is told about a Probant session's protection — in plain words, derived from checks.
 
 One summary, rendered twice: as the terminal card `ir probant open` shows before the agent starts, and as
 the trust panel of the local browser page (`ir probant open --web`). Both read the dict `build()` returns,

@@ -1,6 +1,6 @@
 """`ir probant reference` — issue the out-of-band reference that lets a record say "InferRoute's enclave".
 
-THIS IS THE OPERATOR'S SIDE OF THE PROOF, not the attorney's. A record bundle proves, on its own, that a
+THIS IS THE OPERATOR'S SIDE OF THE PROOF, not the user's. A record bundle proves, on its own, that a
 genuine AMD SEV-SNP container ran inside Microsoft's utility VM. It proves the container was OURS only when
 the reader compares the container-policy hash and the index / encoder manifest hashes against values they
 obtained from InferRoute through a channel they already trust. These commands produce and sign those values.

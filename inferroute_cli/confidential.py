@@ -190,7 +190,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     web = bool(probant and probant.get("web"))
     if web:
         passthrough = [*passthrough, "--mode", "rpc"]
-    # Probant never asks an attorney to pick a model from a price list: it runs the default, the model its
+    # Probant never asks the user to pick a model from a price list: it runs the default, the model its
     # mission contract is written and tested against.
     if user_model is None and _interactive(passthrough) and probant is None:
         # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.

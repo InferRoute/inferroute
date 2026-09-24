@@ -1,4 +1,4 @@
-"""`ir probant` — the attorney entry to the attested prior-art assistant. One matter at a time, in a
+"""`ir probant` — the user's entry to the attested prior-art assistant. One matter at a time, in a
 folder confined to that matter, with the date bound and approvals held where the agent cannot reach them.
 
     ir probant new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
@@ -263,7 +263,7 @@ def disclosure_has_content(workspace: Path) -> bool:
         body = p.read_text()
     except OSError:
         return False
-    # Strip the template's own words; anything of substance left means the attorney has written a disclosure.
+    # Strip the template's own words; anything of substance left means the user has written a disclosure.
     stripped = body.replace(TEMPLATE_DISCLOSURE, "")
     for line in stripped.splitlines():
         line = line.strip()
@@ -328,7 +328,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     os.environ["IR_MATTER_RECORD_DIR"] = str(records_dir(client, matter))     # per-session record files (Q2)
     os.environ["IR_REPORT_MATTER"] = f"{client}/{matter}"                     # labels on the rendered search report
     os.environ["IR_REPORT_FIRM"] = client
-    # F1: an attorney session is confined at address level, FULL STOP — never inherit a leftover
+    # F1: a Probant session is confined at address level, FULL STOP — never inherit a leftover
     # IR_ATTESTED_CONFINE=off from the shell (that would silently run unconfined and, under trusted state,
     # trust forgeable approvals). Force require. The only way down is an explicit developer override, which
     # is banner-loud, recorded as unconfined, and (in the verifier) never granted trusted state.

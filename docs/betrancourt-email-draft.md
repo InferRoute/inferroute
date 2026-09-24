@@ -186,6 +186,19 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
 qui a été publié. Les questions sont de nous ; les conclusions seront de lui, pas de nous.
 
+Un point à consigner dès maintenant, parce qu'il ne vaut que s'il est noté avant d'en avoir besoin. Les
+certificats produits par l'outil sont vérifiés contre une référence que nous signons, et cette référence ne
+vaut que si la clé qui la signe est bien la nôtre. Voici son empreinte :
+
+```
+748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204
+```
+
+Gardez-la avec ce courrier. Un tiers qui contrôlera un certificat plus tard vous demandera cette valeur-là,
+et la prendre à ce moment sur notre site ou sur votre poste ne prouverait rien : c'est d'en avoir la trace
+antérieure, chez vous, qui fait la différence. Trois vérificateurs indépendants nous l'ont signalé le même
+jour — c'est le seul point sur lequel ils butent tous, et il ne se règle pas de notre côté.
+
 Le client vous dira, en haut de sa page d'accueil, que la recherche d'antériorité n'y est pas encore
 installée : c'est exact, et c'est voulu à ce stade. Rien ne quitte votre poste tant qu'elle ne l'est pas.
 Vous pouvez dès maintenant y travailler vos descriptions ; le même client vous servira pour l'essai, que je

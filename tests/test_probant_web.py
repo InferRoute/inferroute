@@ -1286,3 +1286,63 @@ def test_a_survey_leg_gets_its_documents_its_padding_and_its_own_outline_row():
         # passed against a padding-less rule because the one after it had padding.
         body = css[at:css.index("}", at)]
         assert "padding" in body, f"{cls} has no padding of its own: {body!r}"
+
+
+def test_the_deep_card_says_where_the_press_did_not_reach(tmp_path):
+    """Henry, 24 Sep, asked whether the deep search should get a second autonomous turn. Ruled with
+    sealed-research: not yet — an adaptive turn is gated on counsel AND on a change in the shape of the
+    approval, because a press-time approval cannot cover queries that do not exist at press time.
+
+    What ships instead reports facts the record already holds and leaves the next move to the professional,
+    so no query is ever sent they could not see coming. The two facts: which legs found nothing, and which
+    found only documents the other legs had already returned — the second being invisible in a hit count,
+    where a leg that contributes nothing looks like the strongest in the press.
+
+    Run against the page's own function, not a copy of its wording."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "deep_coverage_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    # A press where every leg contributed says nothing: an empty coverage note is noise on a good result.
+    assert out["none"] == ""
+
+    assert "1 query found nothing: leg three." in out["empty_only"]
+    assert "found only documents the other queries had already returned: leg two" in out["spent_only"]
+    # The point of saying it: unsearched and already-covered are different, and only one is a gap.
+    assert "covered by what you already have, not unsearched" in out["spent_only"]
+
+    # Both kinds, and the actionable line, on one press.
+    assert "found nothing" in out["both"] and "already returned" in out["both"]
+    assert "walk outward from it" in out["both"]
+    # A failed leg is NOT a coverage gap — it is a failure, reported by the leg itself.
+    assert "leg four" not in out["both"]
+
+    # A record written before `added` existed must not be read as "this leg added nothing". Absent and zero
+    # are different, and the older packs on this machine have no `added` at all.
+    assert out["legacy"] == ""
+
+
+def test_the_page_claims_contribution_and_not_family_collapsing():
+    """"Added nothing new" is the weaker claim, and the only one that is actually computed. Collapsing
+    siblings needs the family map, which lives on the search side; guessing family from publication numbers
+    misses the cross-jurisdiction siblings that are most of the duplication. Saying "one family" would be a
+    claim the page cannot support, in the one place a professional would rely on it."""
+    root = Path(__file__).resolve().parent.parent
+    js = (root / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    start = js.index("  function deepCoverage(d) {")
+    body = js[start:js.index("  function seenIn(")]
+    assert "l.added === 0" in body, "the page no longer measures contribution the way the extension records it"
+    # The comments MUST discuss families — that is where the reason for not claiming them is recorded. It is
+    # what the function SAYS that has to stay inside what it can compute, so strip the comments first.
+    shown = "\n".join(ln for ln in body.splitlines() if not ln.strip().startswith("//"))
+    for forbidden in ("family", "families", "saturat"):
+        assert forbidden not in shown.lower(), f"the rendered text claims {forbidden!r}, which is not computed here"
+    assert "family" in body.lower(), "the reason for not claiming families is no longer recorded beside the code"

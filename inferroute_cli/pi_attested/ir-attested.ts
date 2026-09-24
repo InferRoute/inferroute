@@ -1342,7 +1342,7 @@ export default function (pi: ExtensionAPI) {
 			// results and its marking controls, not a count. Without them the outline entry for a leg had
 			// nowhere to arrive and nothing to mark.
 			const results: { feature: string; about: string; status: string; hits: number; searchNo?: number;
-			                 why?: string; docs?: unknown[] }[] = [];
+			                 why?: string; docs?: unknown[]; added?: number }[] = [];
 			const blocks: string[] = [];
 			const union = new Map<string, { title: string; first: number }>();
 			let sent = 0;
@@ -1368,11 +1368,15 @@ export default function (pi: ExtensionAPI) {
 				sent += 1;
 				corpusId = corpusId || String(r.sp.index ?? "");
 				const n = r.sp.searchNo ?? 0;
-				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : "empty",
-				               hits: r.sp.docs.length, searchNo: n, docs: r.sp.docs });
+				// What this leg CONTRIBUTED, not what it returned. A leg that returns ten documents the
+				// earlier legs already returned has told the professional nothing new, and the hit count
+				// hides that completely — it looks like the strongest leg in the press.
+				const before = union.size;
 				for (const d of r.sp.docs) {
 					if (!union.has(d.key)) union.set(d.key, { title: d.title ?? "", first: n });
 				}
+				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : "empty",
+				               hits: r.sp.docs.length, searchNo: n, docs: r.sp.docs, added: union.size - before });
 				blocks.push(hitsText(r.out, `Search ${n} — ${leg.feature}`, r.earlier));
 			}
 
@@ -1388,6 +1392,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			const failed = results.filter((x) => x.status === "failed");
 			const empty = results.filter((x) => x.status === "empty");
+			// "Added nothing new" — NOT "saturated on one family". Collapsing siblings needs the family map,
+			// which lives on the search side; guessing it from publication numbers misses exactly the
+			// cross-jurisdiction siblings that are most of the duplication. Claim the weaker thing we can
+			// actually compute. A leg that returned hits but raised the union by zero is the whole test.
+			const spent = results.filter((x) => x.status === "ok" && (x.added ?? 0) === 0);
 			const ledger = [
 				`Deep search over ${corpusPhrase(corpusId)}: ${sent} of ${legs.length} sealed queries completed, `
 					+ `${union.size} distinct documents.`,
@@ -1397,6 +1406,18 @@ export default function (pi: ExtensionAPI) {
 				`It put ${legs.length} of a possible ${DEEP_MAX}: ${plan.notes.join("; ")}.`,
 				failed.length ? `${failed.length} did not complete (${failed.map((f) => f.feature).join("; ")}).` : "",
 				empty.length ? `${empty.length} returned nothing (${empty.map((f) => f.feature).join("; ")}).` : "",
+				// WHERE THE PRESS DID NOT REACH, and what the professional can do about it. This is the
+				// deliberate alternative to an autonomous second turn: it reports facts the record already
+				// holds and leaves the next move to the person, so no query is ever sent that they could not
+				// see coming. Ruled with sealed-research on 24 Sep — an adaptive turn is gated on counsel and
+				// on a change in the shape of the approval, and neither is ours to assume.
+				spent.length ? `${spent.length} found only documents the other queries had already returned `
+					+ `(${spent.map((f) => f.feature).join("; ")}) — that part of the description is covered `
+					+ `by what you already have, not unsearched.` : "",
+				(empty.length || spent.length)
+					? "Marking a document relevant makes the next deep search walk outward from it, so pressing "
+						+ "again after marking searches differently rather than repeating this."
+					: "",
 				// Permanent, not a placeholder: the family map that would collapse siblings lives on the
 				// search side, and guessing family from publication numbers misses the cross-jurisdiction
 				// siblings that are most of the duplication. Say it rather than let it look merged.
@@ -1408,20 +1429,26 @@ export default function (pi: ExtensionAPI) {
 				// cap and notes travel HERE too. They were added to the session record only, so the page —
 				// which reads `details` — rendered "a possible undefined" and an empty list of reasons.
 				details: { deep: true, at: started, planned: legs.length, cap: DEEP_MAX, sent,
-				           documents: union.size, legs: results, notes: plan.notes },
+				           documents: union.size, legs: results, notes: plan.notes,
+				           // The page renders `details`; a field added only to the session record arrives
+				           // as undefined there, which has caught me twice on this same object.
+				           coverage: { empty: empty.length, added_nothing: spent.length } },
 			};
 		},
 
 		renderResult(result, _options, theme) {
 			const d = result.details as { sent?: number; planned?: number; documents?: number;
-				legs?: { feature: string; status: string; hits: number }[] } | undefined;
+				legs?: { feature: string; status: string; hits: number; added?: number }[] } | undefined;
 			const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
 			if (!d) return box;
 			box.addChild(new Text(theme.bold("Deep prior-art search")
 				+ theme.fg("dim", `  ${d.sent ?? 0}/${d.planned ?? 0} queries · ${d.documents ?? 0} documents`), 0, 0));
 			for (const leg of d.legs ?? []) {
 				const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
-				box.addChild(new Text(`  ${mark} ${leg.feature}${leg.status === "ok" ? ` (${leg.hits})` : ` — ${leg.status}`}`, 0, 0));
+				const tail = leg.status === "ok"
+					? ` (${leg.hits}${(leg.added ?? 0) === 0 ? ", none new" : `, ${leg.added} new`})`
+					: ` — ${leg.status}`;
+				box.addChild(new Text(`  ${mark} ${leg.feature}${tail}`, 0, 0));
 			}
 			return box;
 		},

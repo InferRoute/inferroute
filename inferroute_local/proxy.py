@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import AsyncIterator, Optional
@@ -31,11 +32,27 @@ from .recorder import Recorder, new_user_block_hash
 
 logger = logging.getLogger("inferroute_local")
 
+# Override for a one-off long job: INFERROUTE_READ_TIMEOUT=3600 ir …
+_READ_TIMEOUT_S = float(os.environ.get("INFERROUTE_READ_TIMEOUT", "1800"))
+
 
 class InferrouteProxy:
     def __init__(self, config: Config):
         self.config = config
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(300.0))
+        # Upstream read budget. `Timeout(300.0)` set connect/read/write/pool all
+        # to 300s, and read is time-to-first-byte here: a reasoning model on a
+        # large bundle thinks before it emits. The morning digest editor's last
+        # success took 296s against that flat 300s wall; every run from
+        # 2026-09-13 to 2026-09-24 then died at 300.5s with ttft never set, and
+        # shipped a fallback brief for twelve days. Sized against the longest
+        # success actually observed on the serving path (1456s, 2026-08-25),
+        # not against a guess. Connect/pool stay short so a genuinely dead
+        # upstream still fails fast.
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=30.0, read=_READ_TIMEOUT_S, write=300.0, pool=30.0
+            )
+        )
 
         base_dir = (
             Path(config.record_dir)
@@ -99,7 +116,13 @@ class InferrouteProxy:
                 body, request_headers, self._visibility_headers(body, v2)
             )
         except httpx.HTTPError as e:
-            logger.warning(f"upstream unreachable ({e})")
+            elapsed = time.monotonic() - start
+            # Many httpx exceptions stringify to "", so `({e})` alone logged
+            # "upstream unreachable ()" and named neither cause nor duration.
+            logger.warning(
+                "upstream %s after %.1fs: %s",
+                type(e).__name__, elapsed, str(e) or "no detail",
+            )
             self.recorder.record_outcome(
                 turn_id=turn_id, session_id=session_id, status=502,
                 ttft_ms=None, total_ms=(time.monotonic() - start) * 1000,
@@ -108,8 +131,17 @@ class InferrouteProxy:
             )
             return self._inject_error(
                 streaming,
-                "inferroute-local: upstream is unreachable. Check your connection "
-                "or run `ir status`.",
+                (
+                    f"inferroute-local: upstream timed out after {elapsed:.0f}s "
+                    f"({type(e).__name__}) with no response. The model may need "
+                    f"longer than the {_READ_TIMEOUT_S:.0f}s read budget; retry "
+                    f"or raise INFERROUTE_READ_TIMEOUT."
+                )
+                if isinstance(e, httpx.TimeoutException)
+                else (
+                    "inferroute-local: upstream is unreachable. Check your "
+                    "connection or run `ir status`."
+                ),
             )
 
         # The Anthropic response request-id equals the transcript's `requestId`,

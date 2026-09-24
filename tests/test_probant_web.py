@@ -771,6 +771,11 @@ def test_one_next_steps_panel_counts_and_covers_by_action():
     assert R["s6"][0]["title"] == "Ideas" and "Summarise what the searches have surfaced so far" not in R["s6"][0]["steps"]
     assert R["s6"][-1] == tail
     assert R["s7"] is None
+    # 8. No search machine — which is every client on its first day, before one is set up. The deep button
+    #    is not offered at all: the session registers no search tools, so pressing it would send a sentence
+    #    the assistant has no way to act on. The ordinary mark steps still stand.
+    assert R["s8"] and all(deep not in g["steps"] for g in R["s8"])
+    assert any(deeper in g["steps"] for g in R["s8"])
 
 
 def test_the_unrecognised_events_line_names_only_what_is_new(tmp_path):
@@ -1047,3 +1052,17 @@ def test_a_round_says_when_it_happened_and_which_job_it_was(client, tmp_path, mo
     monkeypatch.delenv("IR_ROUND_LABEL")
     b._write_round_log("work done")
     assert json.loads(log.read_text().splitlines()[-1])["label"] == ""
+
+
+def test_the_page_learns_about_the_search_machine_from_the_session_payload():
+    """The deep button is gated on whether this session has a search machine, and the panel simulator sets
+    that flag directly — so the WIRE between the server's /api/session and the page's variable is checked by
+    nothing. Delete the assignment and the button silently never appears again; rename the field on the
+    server and the same. Both ends are asserted here, against the same key name."""
+    py = Path(W.__file__).resolve().read_text()
+    js = (STATIC / "app.js").read_text()
+    # The server tells the page, in the session payload, whether a search endpoint is configured.
+    assert '"search": bool(bridge.search_endpoint)' in py
+    # The page reads THAT key into the flag the steps panel gates on.
+    assert "searchOffered = Boolean(s.search);" in js
+    assert "started && searchOffered &&" in js, "the guaranteed deep row is no longer gated on it"

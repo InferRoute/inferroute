@@ -131,6 +131,9 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
        ots --no-bitcoin verify trust-anchors/reference.json.ots   # `pip install opentimestamps-client`
        ots info                trust-anchors/reference.json.ots   # the sha256 it commits to
 
+   The package name is **`opentimestamps-client`**. `opentimestamps` alone is the library and does
+   not install the `ots` command. Check `ots --version` before treating missing tooling as a proof failure.
+
    **If `pip install` refuses, that is PEP 668 and not a dead end.** A modern Linux marks its Python as
    externally managed, and an auditor on 25 Sep reported the whole of claim 3 as COULD NOT CHECK for want
    of the tool. Any of these work: `uv tool install opentimestamps-client`,
@@ -180,6 +183,32 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
      also asks whether that file describes InferRoute's software, and no timestamp can answer that.
 
    No `.ots` in the folder means this computer had none beside its reference — an absence, not a failure.
+4b. **Publication-key identity: Sigstore.** If the attestation JSON and bundle are present in
+   `trust-anchors/`, verify them separately; `verify_record.py` does not verify their signature or roots.
+   Obtain `cosign` from https://docs.sigstore.dev/cosign/system_config/installation/ (on a Mac with
+   Homebrew, `brew install cosign`). From the pack directory, for InferRoute's published identity:
+
+       cosign verify-blob --bundle trust-anchors/publication-key-attestation.bundle \
+         --certificate-identity henry@inferroute.ai \
+         --certificate-oidc-issuer https://accounts.google.com \
+         trust-anchors/publication-key-attestation.json
+
+   Decide whether that is the identity you intended to trust; do not replace the expected identity with
+   whichever identity happens to be in a supplied certificate. Check that the attestation's
+   `publication_key` equals the key verifying the reference. The public verification roots are
+   Sigstore's; the assertion binding this key to that identity is still the signer's.
+
+   If independently recomputing the ECDSA signature, verify the original JSON bytes with ECDSA-SHA256,
+   or verify `messageDigest.digest` with SHA256 in **Prehashed** mode. Hashing the digest again checks
+   different bytes. A raw signature check alone does NOT check the certificate chain, expected identity,
+   transparency-log inclusion or signing time; use the full cosign check for those.
+
+   Report the actual verified signing/log time. This commitment does not retroactively authenticate
+   earlier records, establish the truth of the reference's contents, prevent future key rotation, or
+   prove runtime confidentiality. Moving the audit to another computer does not change who produced
+   the record or who controls the reference. State the software-identity matches, key-identity evidence,
+   timestamp coverage and remaining trust assumptions separately when judging claim 3.
+
 4. If the reference is signed, pass the publication key you recorded once: `--reference-key=<hex>`. Attach
    values with `=`: a pasted value that begins with `-` is otherwise read as another flag, and the error
    ("expected one argument") does not say so. Later
@@ -1279,6 +1308,12 @@ method. It is **VERIFIED IN PART**, with the sample size in the verdict line —
 remainder rests on the tool, and that is exactly the unstated gap the paragraph above is about. "VERIFIED"
 with no sample size reads as all of them. If you recomputed every one, say that, and VERIFIED is yours.
 
+A receipt's counters are cumulative. `plaintext_bytes_sealed_here` counts input to encryption, not
+plaintext sent over the network; a final `degraded` verdict does not date those bytes relative to the
+refusal. Without per-request evidence, do not infer that traffic continued after the refusal or that
+plaintext was transmitted. State that the ordering is not established. Likewise, numbers under an
+`events` list describe recorded events, not a complete signed history.
+
 ## Last: one plain statement about confidentiality
 
 Finish with two or three sentences, in the words a patent professional would use to a client, saying what
@@ -1904,7 +1939,8 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     files: Dict[str, bytes] = {
         "searches.json": json.dumps(stripped, indent=1, ensure_ascii=False).encode("utf-8"),
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
-        "VERIFY.md": (src / "VERIFY.md").read_bytes(),
+        # Instructions must describe the verifier shipped by this client, not an older record exporter.
+        "VERIFY.md": VERIFY_MD.encode("utf-8"),
         "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
         # THIS CLIENT'S verifier, not the record bundle's. The pack reports `client_version` and links to
         # that version's wheel; shipping the copy that came with the RECORD — written by whatever client
@@ -1990,9 +2026,12 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         # beside the key rather than instead of it, because the verifier compares the two and a
         # disagreement between them is a finding.
         for name in ("publication-key-attestation.json", "publication-key-attestation.bundle"):
-            src = Path(__file__).resolve().parent.parent / "docs" / "trust" / name
-            if src.is_file():
-                anchor_files[f"trust-anchors/{name}"] = src.read_bytes()
+            asset = Path(__file__).resolve().parent / "trust" / name
+            if not asset.is_file():
+                # Source checkouts keep the signed originals in docs; wheels carry package data.
+                asset = Path(__file__).resolve().parent.parent / "docs" / "trust" / name
+            if asset.is_file():
+                anchor_files[f"trust-anchors/{name}"] = asset.read_bytes()
     block = anchor_block(Path(str(ref) + ".ots")) if ref else {}
     # STATIONERY, not evidence. The report template is the one file in this folder that is MEANT to be
     # written to, so it must not sit in SHA256SUMS: an auditor on 25 Sep filled it in where it lay and

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.9.53"
+version = "0.9.54"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"
@@ -84,4 +84,7 @@ Issues = "https://github.com/InferRoute/inferroute/issues"
 packages = ["inferroute_cli", "inferroute_local"]
 # Generated offline catalog snapshot (model list/prices/aliases) — the ir offline
 # fallback. Force-include so a wheel always ships it even if build hygiene changes.
-force-include = { "inferroute_cli/catalog_bundled.json" = "inferroute_cli/catalog_bundled.json" }
+[tool.hatch.build.targets.wheel.force-include]
+"inferroute_cli/catalog_bundled.json" = "inferroute_cli/catalog_bundled.json"
+"docs/trust/publication-key-attestation.json" = "inferroute_cli/trust/publication-key-attestation.json"
+"docs/trust/publication-key-attestation.bundle" = "inferroute_cli/trust/publication-key-attestation.bundle"

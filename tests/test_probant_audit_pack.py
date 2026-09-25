@@ -1599,3 +1599,18 @@ def test_the_verifier_provenance_step_cannot_pollute_the_evidence_folder():
     assert "present-but-unlisted" in window, "the consequence is not explained"
     # and the hazard must be stated as a rule, not only shown in the command
     assert "writes to the CURRENT directory" in window
+
+
+def test_the_brief_points_at_the_surfaces_that_produced_the_findings():
+    """Round four's verdict was that the prose is converged and the COVERAGE is not: its four best
+    findings all came from ground the brief said little or nothing about. These are pointers, deliberately
+    without the answers -- naming a surface is not the same as printing what is on it."""
+    brief = E.AUDIT_MD
+    for pointer in ("Read the archived policy itself, not only its hash",
+                    "Give the DISTRIBUTION of every count the enclave reports about itself",
+                    "`counters.instance_switches`",
+                    "Establish what actually JOINS a receipt to the searches"):
+        assert pointer in brief, pointer
+    # and they must not hand over what was found there
+    for answer in ("allow_stdio_access", "four instances", "UUID and", "1,120,000"):
+        assert answer not in brief, f"the brief now supplies the finding: {answer}"

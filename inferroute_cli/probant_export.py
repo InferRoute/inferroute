@@ -939,6 +939,13 @@ other order would have been marked down by a rule this brief had broken itself.
    question from whether InferRoute's statement is true — and it bears on that only when the publishing
    machine is not the audited one. Establish that before crediting the fetch; VERIFY.md §3 says how.
 
+   **Read the archived policy itself, not only its hash.** `HOST_DATA` pins the file, so what that file
+   PERMITS is attested too — and the verifier's confidentiality section now reports those permissions as
+   named rows rather than leaving them to be discovered. Check its reading against your own: the document
+   is in `policy_b64` in every evidence file, base64, a few kilobytes of Rego. Two auditors found the same
+   consequential thing in it by hand on 25 Sep, on a brief whose only mention of it was an instruction not
+   to worry about it.
+
    **Ignore the HTTP `Last-Modified` on that fetch. It is not the reference's age.** The page is served
    from a general-purpose static host, which re-stamps every file it serves whenever anything on the site
    is deployed — a client wheel, an unrelated page. An auditor on 25 Sep fetched the reference and found
@@ -1003,6 +1010,9 @@ other order would have been marked down by a rule this brief had broken itself.
    attestation of what software ran can establish it. A `removed_by_*` of 0 is legitimate — no candidate
    fell outside the bound — and is not evidence the filter did nothing. A statement with no `*_applied` is
    from an enclave that predates the report: the verifier SKIPs it, naming the gap, and so should you.
+   **Give the DISTRIBUTION of every count the enclave reports about itself, not one row's value.** How
+   many searches, what values, how often repeated. A single `removed_by_*` tells a reader almost nothing;
+   the same number on every search in the record is a different fact and may be the reportable one.
    One asymmetry to know before you read its output: a filter that was neither GIVEN nor reported produces
    no row at all — not even a SKIP, unlike the withheld texts. Silence in the verifier's output is
    therefore not evidence about a filter. Read the signed statements directly, which is sound either way.
@@ -1112,6 +1122,18 @@ other order would have been marked down by a rule this brief had broken itself.
    corrected is still a defect in that record and worth reporting as one; it is not evidence about the
    client the professional is running now, and reporting it as though it were would misdirect whoever acts
    on your report. `written_by` is self-reported, like everything else the device says about itself.
+
+   **Four fields this brief never named, which on 25 Sep produced more of one auditor's claim-7 report
+   than every field it did name: `events`, `fleet`, `refusal`, and `counters.instance_switches`.** Read
+   them in every receipt. Two questions to put to them rather than answers to expect: a receipt's
+   `attestation` block describes ONE machine — did the session use only one? And when a receipt's own
+   events record something going wrong, does its `verdict` reflect it?
+
+   **Establish what actually JOINS a receipt to the searches it is offered as covering.** This brief
+   sends you to `MANIFEST.json` → `sessions` for that mapping and, until 25 Sep, implied the question was
+   settled there. Work out for yourself which identifiers are involved, which of them are SIGNED, and
+   what the join would survive. It is the attachment the whole of claim 7 hangs from — "this device
+   checked that machine before anything was sent to it" needs "anything" to be tied to "that machine".
 
 8. **A document read's coverage is part of what it returned.** A read's statement carries `coverage`
    (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the

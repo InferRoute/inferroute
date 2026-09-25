@@ -14,36 +14,34 @@ Maître,
 Je vous adresse en début de semaine prochaine le client complet, avec les objets dont nous avons parlé.
 L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste.
 
-Il me faut pour cela votre **clé publique**. Elle se produit sur votre machine en trois commandes :
+Il me faut pour cela votre **clé publique**. Vous n'avez rien à installer : le fichier joint,
+`cle-probant.py`, ne fait que cela. Il tient en quatre-vingt-dix lignes que vous pouvez lire en entier
+avant de l'exécuter — c'est précisément pourquoi je vous l'envoie sous cette forme plutôt qu'en
+installant un programme chez vous.
 
 ```
-python3 -m venv ~/probant
-~/probant/bin/pip install https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl cryptography
-~/probant/bin/ir probant identity
+python3 cle-probant.py
 ```
 
-La première crée un dossier isolé, la deuxième y installe le programme, la troisième fabrique votre paire
-de clés et affiche la partie publique. Rien n'est touché ailleurs sur votre poste, et rien n'est envoyé :
-ces trois lignes ne font que créer deux clés sur votre disque et en imprimer une.
-
-Vous me renvoyez ce que la dernière commande affiche entre les deux lignes de tirets. **Elle ne contient
-que des clés publiques** : qui la lit n'apprend rien et ne peut rien ouvrir. Elle affiche aussi une
-empreinte courte, de la forme `1234-abcd-5678-ef90`, que nous relirons de vive voix avant que quoi que ce
-soit ne parte.
-
-Je ne vous envoie pas de script à exécuter : trois lignes que vous lisez valent mieux qu'un fichier qui
-en fait autant sans que vous le voyiez.
-
-Si `uv` est installé chez vous, une seule ligne suffit et fait exactement la même chose :
+Il crée deux clés dans votre dossier personnel et affiche la partie publique. Il n'ouvre aucun réseau,
+ne contacte aucun serveur et n'installe rien : vous pouvez le vérifier à la lecture, il n'importe même
+pas de quoi le faire. Si la bibliothèque `cryptography` manque sur votre machine, il vous le dit et
+s'arrête **sans rien écrire** ; une seule commande la fournit :
 
 ```
-uvx --from https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl --with cryptography ir probant identity
+python3 -m pip install 'cryptography>=50'
 ```
 
-(Sous Windows les chemins diffèrent : dites-le-moi et je vous envoie l'équivalent.)
+Vous me renvoyez ce que le script affiche entre les deux lignes de tirets. **Ce bloc ne contient que des
+clés publiques** : qui le lit n'apprend rien et ne peut rien ouvrir. Les parties secrètes restent sur
+votre disque et ne sont jamais affichées. Le script imprime aussi une empreinte courte, de la forme
+`1234-abcd-5678-ef90`, que nous relirons de vive voix avant que quoi que ce soit ne parte.
 
-Votre clé restera en place pour l'envoi de la semaine prochaine : elle s'écrit dans votre dossier
-personnel et non dans l'installation, de sorte que le client complet la retrouvera telle quelle.
+Relancé une seconde fois, il ne recrée rien : il vous réaffiche la même clé. Une clé écrasée rendrait
+illisible tout ce qui lui aurait déjà été adressé.
+
+La clé qu'il produit est exactement celle qu'attend le client complet de la semaine prochaine, et elle
+l'attendra à la bonne place : elle s'écrit dans votre dossier personnel, pas dans une installation.
 
 ## Une valeur à conserver dès maintenant
 
@@ -74,18 +72,22 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
-- **Passé de six commandes à trois**, et vérifié dans les deux formes depuis un HOME vierge sur 0.9.50.
-  Ce qui a sauté : les deux `curl` (pip installe directement depuis l'adresse) et l'extra
-  `[confidential]`, qui tirait fastapi, uvicorn et httpx — **la fabrication de la clé n'a besoin que de
-  `cryptography`**. Testé explicitement : sans `cryptography` le programme refuse proprement et ne touche
-  à rien ; avec, et rien d'autre, il fonctionne.
-- **La ligne `sha256sum -c` a disparu avec les `curl`.** Elle valait moins qu'elle n'en avait l'air :
-  l'empreinte et le fichier viennent du même serveur, donc elle écartait une altération en route et rien
-  de plus. Le vrai contrôle est `ir probant audit-client`, qui compare la copie installée au fichier
-  publié — il appartient à la lettre complète, pas à celle-ci.
-- **La variante `uvx` en une ligne a été testée, y compris l'aller-retour** : la clé produite par la
-  forme éphémère est relue à l'identique par une installation normale (même empreinte). C'est ce qui
-  autorise à lui proposer les deux formes sans risque pour l'envoi de la semaine prochaine.
+- **Plus d'installation du tout.** Le script joint (`docs/handout/cle-probant.py`) reproduit exactement
+  le format d'identité du client : ML-KEM-768 dérivée d'une graine conservée, Ed25519, empreinte
+  `sha256("probant-identity-v1" ‖ pub_kem ‖ pub_ed)`, écrit dans `~/.inferroute/confidential/identity/`.
+- **L'aller-retour est vérifié, pas supposé.** Une charge scellée à la carte qu'il imprime s'ouvre avec
+  la graine qu'il a stockée, et le client relit son identité avec la même empreinte. C'est le point qui
+  compte : des empreintes identiques ne prouvent que l'accord des parties PUBLIQUES ; ce test-ci prouve
+  qu'il pourra ouvrir l'envoi.
+- **Le format existe désormais en deux exemplaires, et c'est le vrai risque.** Ils ne peuvent pas être
+  fusionnés — l'intérêt du script est de ne dépendre de rien chez nous — donc la dérive est rendue
+  DÉTECTABLE : quatre tests la cassent, et les trois dérives plausibles ont été introduites
+  volontairement pour vérifier qu'ils les attrapent. Si le format bouge avant l'envoi, la suite rougit.
+- **Découvert en le testant** : `public_card()` republie l'empreinte stockée sans la recalculer. Une
+  identité portant une mauvaise empreinte serait propagée telle quelle par le client. Sans conséquence
+  ici (le test la recalcule à partir des clés brutes), mais c'est une faiblesse réelle à corriger.
+- **`cryptography` reste nécessaire** et c'est la seule dépendance : ML-KEM-768 n'est pas dans la
+  bibliothèque standard. Le script refuse proprement sans elle, sans rien écrire — comportement vérifié.
 - **Pas de script hébergé, délibérément.** Un `curl … | bash` ferait la même chose en moins de lignes et
   serait exactement le contraire de ce que cette lettre promet. C'est dit dans le courrier en une phrase.
 - **0.9.50 est la version du jour.** Celle de la semaine prochaine sera plus récente ; la clé qu'il

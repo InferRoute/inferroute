@@ -6,9 +6,13 @@ cannot check by eye: that only the addressee can open it, that a signature is ab
 that an unknown sender is SAID to be unknown rather than quietly accepted, and that the date bound — which
 decides what any later search may return — arrives as the sender set it.
 """
+import base64
 import json
 import os
 import stat
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -271,3 +275,74 @@ def test_bare_ir_probant_says_where_to_start(monkeypatch, capsys):
     # A real subcommand is untouched by the guard.
     monkeypatch.setattr(_sys, "argv", ["ir", "probant", "list"])
     assert CLI.main(["list"]) == 0
+
+
+# --- The standalone key script (docs/handout/cle-probant.py) -------------------------------------------
+# Bétrancourt gets a 93-line script instead of an install, so the identity format now exists in TWO
+# places. They cannot be merged -- the point of the script is that it depends on nothing of ours -- so
+# the duplication has to be made DETECTABLE instead. These tests fail the moment the client's format
+# moves and the handout does not, which is the only failure mode that matters: a key he made in
+# September that cannot open what we seal to it in October.
+
+HANDOUT = Path(__file__).resolve().parent.parent / "docs" / "handout" / "cle-probant.py"
+
+
+def _run_handout(home):
+    # Only INFERROUTE_HOME is overridden, never HOME: HOME also decides where Python looks for the user
+    # site directory, so moving it hides `cryptography` from the subprocess and the script then refuses
+    # for a reason that has nothing to do with what is under test. (It refused correctly -- writing
+    # nothing -- which is how this was caught rather than mis-read as a script bug.)
+    env = {**os.environ, "INFERROUTE_HOME": str(Path(home) / ".inferroute")}
+    return subprocess.run([sys.executable, str(HANDOUT)], capture_output=True, text=True, env=env, timeout=120)
+
+
+def test_the_handout_script_makes_a_key_the_client_reads_as_its_own(tmp_path, monkeypatch):
+    r = _run_handout(tmp_path)
+    assert r.returncode == 0, r.stderr
+    card = json.loads(r.stdout[r.stdout.index("{"):r.stdout.rindex("}") + 1])
+    assert card["schema"] == "inferroute.probant-contact/1"
+
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / ".inferroute"))
+    import importlib
+    from inferroute_cli import probant_share as SH
+    importlib.reload(SH)
+    me = SH.identity(create=False)          # create=False: it must ALREADY be there and be ours
+    assert SH.public_card(me) == card
+    # RECOMPUTED from the raw keys, never compared against the stored value. The client's public_card
+    # re-publishes whatever fingerprint is in the file without checking it, so comparing stored-to-stored
+    # would pass even if the script derived it a different way -- which an inversion proved it does.
+    assert SH.fingerprint(me["mlkem_pub_raw"], me["ed_pub_raw"]) == card["fingerprint"]
+
+
+def test_a_payload_sealed_to_the_handouts_card_opens_with_what_the_handout_stored(tmp_path, monkeypatch):
+    """The seam that actually matters. Matching fingerprints only prove the PUBLIC halves agree; this
+    proves the stored seed still decapsulates, which is what he needs in October."""
+    assert _run_handout(tmp_path).returncode == 0
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / ".inferroute"))
+    import importlib
+    from inferroute_cli import probant_share as SH
+    importlib.reload(SH)
+    from inferroute_local.confidential import e2ee
+    from cryptography.hazmat.primitives.asymmetric import mlkem
+    me = SH.identity(create=False)
+    shared, ct = e2ee.backend().encaps(base64.b64decode(SH.public_card(me)["mlkem_pub"]))
+    sk = mlkem.MLKEM768PrivateKey.from_seed_bytes(base64.b64decode(me["mlkem_seed"]))
+    assert bytes(sk.decapsulate(bytes(ct))) == bytes(shared)
+
+
+def test_the_handout_never_overwrites_an_existing_key(tmp_path):
+    """Overwriting would silently orphan everything already sealed to the old one."""
+    first = _run_handout(tmp_path)
+    assert first.returncode == 0
+    fp = json.loads(first.stdout[first.stdout.index("{"):first.stdout.rindex("}") + 1])["fingerprint"]
+    again = _run_handout(tmp_path)
+    assert again.returncode == 0
+    assert "déjà une clé" in again.stdout
+    assert json.loads(again.stdout[again.stdout.index("{"):again.stdout.rindex("}") + 1])["fingerprint"] == fp
+
+
+def test_the_handout_reaches_the_network_nowhere():
+    """It is offered as a file he can read instead of trusting. That promise is checkable."""
+    src = HANDOUT.read_text()
+    for forbidden in ("urllib", "requests", "httpx", "socket", "subprocess", "http.client"):
+        assert forbidden not in src, f"the handout imports {forbidden}"

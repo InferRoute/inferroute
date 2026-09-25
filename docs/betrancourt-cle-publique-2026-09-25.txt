@@ -2,19 +2,23 @@ Maître,
 
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ; je l'ai relue.
 
+Pardon de ce silence depuis le 7 septembre : vous m'aviez laissé vous proposer un créneau, et je ne l'ai pas fait. Vos disponibilités de la semaine prochaine seront les miennes. Je reviens vers vous d'ici là sur vos deux questions du 4 septembre — l'usage de l'IA de votre côté, et les éléments que nous préférerions finalement garder secrets.
+
 J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment qu'il fallait tenter.
 
 Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provisoires ne seront pas valables et qu'il faut les reprendre. Je vous confirme ma volonté d'y aller, et je suis à votre disposition pour en reparler quand vous le voudrez.
 
 L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
 
-Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste — il porte de l'ensemble non déposé, et c'est la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
+Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui répond notamment à votre question du 4 septembre sur l'ordre de préférence des regroupements. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
+
+Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 
 Il m'aura demandé plus de temps que prévu, et pas du côté où je l'attendais : l'essentiel des dernières semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un tiers puisse refaire les vérifications lui-même, sans avoir à nous croire sur parole. J'ai supposé que c'était la partie qui comptait le plus pour un cabinet ; vous me direz si je me suis trompé.
 
 Deux choses seront vraies le jour où vous l'ouvrirez. La recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, ce qui est la difficulté propre à une recherche avant dépôt. Et chaque recherche laisse une pièce datée et scellée, qu'un tiers peut revérifier plus tard sans nous.
 
-J'espère que cela couvrira ce que vous m'aviez demandé, et peut-être un peu plus — mais c'est une première version, elle aura ses angles morts, et je préfère vous le dire avant que vous les trouviez. C'est pourquoi je suis impatient que vous la mettiez à l'épreuve : votre lecture dira si c'est utile, et je n'ai pas de meilleur juge.
+J'espère que cela vous sera utile au-delà de cette seule question — mais c'est une première version, elle aura ses angles morts, et je préfère vous le dire avant que vous les trouviez. C'est pourquoi je suis impatient que vous la mettiez à l'épreuve : votre lecture dira si c'est utile, et je n'ai pas de meilleur juge.
 
 Si vous êtes partant, il me faudrait une chose de votre part d'ici là, et je vous remercie par avance des quelques minutes qu'elle demande : votre clé publique. Sans elle je ne peux rien vous adresser à vous seul, et c'est la seule chose qui me manque.
 

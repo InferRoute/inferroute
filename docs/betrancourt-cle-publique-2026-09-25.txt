@@ -2,55 +2,35 @@ Maître,
 
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ; je l'ai relue.
 
-J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment qu'il fallait tenter.
+J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment qu'il fallait tenter. Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts ne seront pas valables et qu'il faut les reprendre : je vous confirme ma volonté d'y aller.
 
-Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provisoires ne seront pas valables et qu'il faut les reprendre. Je vous confirme ma volonté d'y aller, et je suis à votre disposition pour en reparler quand vous le voudrez.
-
-L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
-
-Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui porte notamment l'ordre de préférence des regroupements que vous m'aviez demandé. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
+L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains. Il viendrait avec le travail préparatoire, qui porte notamment l'ordre de préférence des regroupements que vous m'aviez demandé. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et ne peut donc pas partir en pièce jointe ordinaire.
 
 Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 
-Il m'aura demandé plus de temps que prévu, et pas du côté où je l'attendais : l'essentiel des dernières semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un tiers puisse refaire les vérifications lui-même, sans avoir à nous croire sur parole. J'ai supposé que c'était la partie qui comptait le plus pour un cabinet ; vous me direz si je me suis trompé.
+Il m'aura demandé plus de temps que prévu, l'essentiel passé à le rendre vérifiable par un tiers plutôt qu'à produire le résultat — ce qui m'a semblé être ce qui compte pour un cabinet. Deux choses seront vraies : la recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, et chaque recherche laisse une pièce datée et scellée qu'un tiers peut revérifier sans nous. C'est une première version, avec ses angles morts ; je préfère vous le dire avant que vous les trouviez. Votre lecture dira si c'est utile.
 
-Deux choses seront vraies le jour où vous l'ouvrirez. La recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, ce qui est la difficulté propre à une recherche avant dépôt. Et chaque recherche laisse une pièce datée et scellée, qu'un tiers peut revérifier plus tard sans nous.
-
-J'espère que cela vous sera utile au-delà de cette seule question — mais c'est une première version, elle aura ses angles morts, et je préfère vous le dire avant que vous les trouviez. C'est pourquoi je suis impatient que vous la mettiez à l'épreuve : votre lecture dira si c'est utile, et je n'ai pas de meilleur juge.
-
-Si vous êtes partant, il me faudrait une chose de votre part d'ici là, et je vous remercie par avance des quelques minutes qu'elle demande : votre clé publique. Sans elle je ne peux rien vous adresser à vous seul, et c'est la seule chose qui me manque.
+Si vous êtes partant, il me faudrait une chose d'ici là : votre clé publique. Sans elle je ne peux rien vous adresser à vous seul.
 
 Vous n'avez rien à installer. Un fichier d'une centaine de lignes fait cela et rien d'autre :
 
 https://inferroute.ai/client/cle-probant.py
 
-Ouvrez-le d'abord dans votre navigateur : il s'y affiche comme du texte, et vous pouvez le lire en entier avant de décider de l'exécuter. C'est la raison de sa taille, et la raison pour laquelle je vous l'envoie sous cette forme plutôt qu'en installant un programme chez vous. Un lien plutôt qu'une pièce jointe parce que les passerelles de messagerie rejettent volontiers ce type de fichier — et parce qu'un lien peut être retiré, ce qu'une pièce jointe dans une boîte aux lettres ne peut plus être.
-
-Puis, dans un terminal, depuis le dossier où vous l'avez enregistré, cette ligne :
+Ouvrez-le d'abord dans votre navigateur : il s'y affiche comme du texte et se lit en entier avant qu'on décide de l'exécuter. Un lien plutôt qu'une pièce jointe, que les passerelles de messagerie rejettent volontiers. Puis, depuis le dossier où vous l'avez enregistré :
 
 python3 -m venv /tmp/cle && /tmp/cle/bin/pip install 'cryptography>=50' && /tmp/cle/bin/python cle-probant.py
 
-Elle fait trois choses, dans cet ordre : un dossier de travail jetable dans /tmp, la seule bibliothèque dont le script a besoin (ML-KEM-768 n'est pas dans Python par défaut), puis le script. Le détour par /tmp n'est pas une précaution de style : sur macOS comme sur Linux récents, installer directement dans le Python du système est refusé, et cette forme-là marche partout sans y toucher. Vous pouvez effacer /tmp/cle aussitôt après ; votre clé, elle, est ailleurs et reste.
+Un dossier jetable dans /tmp, la seule bibliothèque nécessaire (ML-KEM-768 n'est pas dans Python par défaut), puis le script. Le détour par /tmp évite le Python du système, qui refuse ce genre d'installation sur macOS et Linux récents ; effacez-le aussitôt après, votre clé est ailleurs. Si cryptography est déjà chez vous, python3 cle-probant.py suffit.
 
-Si cryptography est déjà présente chez vous, python3 cle-probant.py suffit — et si elle ne l'est pas, le script vous le dit et vous réaffiche la ligne ci-dessus, sans rien écrire.
-
-Il crée deux clés dans votre dossier personnel et affiche la partie publique. Il n'ouvre aucun réseau et ne contacte aucun serveur : vous pouvez le vérifier à la lecture, il n'importe même pas de quoi le faire.
-
-Vous me renvoyez par courriel ce qu'il affiche entre les deux lignes de tirets, tel quel. Ce bloc ne contient que des clés publiques : qui le lit n'apprend rien et ne peut rien ouvrir. Les parties secrètes restent sur votre disque et ne sont jamais affichées.
-
-Relancé une seconde fois, il ne recrée rien : il vous réaffiche la même clé. Une clé écrasée rendrait illisible tout ce qui lui aurait déjà été adressé.
-
-La clé qu'il produit est exactement celle qu'attend l'outil de la semaine prochaine, et elle l'attendra à la bonne place : elle s'écrit dans votre dossier personnel, pas dans une installation.
+Il crée deux clés dans votre dossier personnel et affiche la partie publique — il n'ouvre aucun réseau, vérifiable à la lecture. Vous me renvoyez par courriel ce qu'il affiche entre les deux lignes de tirets, tel quel : ce bloc ne contient que des clés publiques, les parties secrètes restent chez vous. Relancé, il ne recrée rien et vous réaffiche la même clé. Elle attendra l'outil à la bonne place.
 
 Une valeur à conserver dès maintenant
 
-Un point qui ne vaut que s'il est noté avant d'en avoir besoin, et c'est pourquoi il part aujourd'hui plutôt qu'avec le reste.
-
-Les certificats que l'outil produira se vérifient contre une référence que nous signons. Cette référence ne vaut que si la clé qui la signe est bien la nôtre. Voici son empreinte :
+Les certificats que l'outil produira se vérifient contre une référence que nous signons, et cette référence ne vaut que si la clé qui la signe est bien la nôtre. Voici son empreinte :
 
 748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204
 
-Gardez-la avec ce courrier. Un tiers qui contrôlera un certificat plus tard vous demandera cette valeur-là ; la prendre à ce moment sur notre site ne prouverait rien, puisque le site est le nôtre. C'est d'en avoir la trace antérieure, chez vous, qui fait la différence. Plusieurs vérificateurs indépendants ont buté sur exactement ce point, et il ne se règle pas entièrement de notre côté : il se règle par ce courrier-ci.
+Gardez-la avec ce courrier. Un tiers qui contrôlera un certificat vous demandera cette valeur ; la prendre alors sur notre site ne prouverait rien, puisque le site est le nôtre. C'est d'en avoir la trace antérieure, chez vous, qui fait la différence — et cela ne se règle que par un courrier comme celui-ci.
 
 Bien à vous,
 Henry Declety

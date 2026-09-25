@@ -29,8 +29,8 @@ l'ensemble non déposé, et ne peut donc pas partir en pièce jointe ordinaire.
 Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité
 avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 
-Il m'aura demandé plus de temps que prévu, l'essentiel passé à le rendre vérifiable par un tiers plutôt
-qu'à produire le résultat — ce qui m'a semblé être ce qui compte pour un cabinet. Deux choses seront
+Il m'aura demandé plus de temps que prévu : produire le résultat, et le rendre vérifiable par un tiers,
+ont chacun demandé beaucoup de travail. Deux choses seront
 vraies : la recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, et chaque
 recherche laisse une pièce datée et scellée qu'un tiers peut revérifier sans nous. C'est une première
 version, avec ses angles morts ; je préfère vous le dire avant que vous les trouviez. Votre lecture dira

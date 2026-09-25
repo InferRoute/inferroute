@@ -274,7 +274,7 @@ def test_the_brief_does_not_claim_the_index_carries_the_verifier():
     assert "not**\n     independent corroboration" in brief or "not** independent corroboration" in brief
     assert "targeted substitution" in brief
     # Three sources, ordered by what they establish.
-    for marker in ("**(a) The public package index.**", "**(b) The published client wheel**",
+    for marker in ("**(a) The public package index.**", "**(b) The published client wheel.**",
                    "**(c) The professional's installed copy**"):
         assert marker in brief, marker
 

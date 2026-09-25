@@ -8,7 +8,7 @@ Il crée deux clés dans votre dossier personnel, sous ~/.inferroute/confidentia
   - une clé ML-KEM-768, qui sert à vous adresser un envoi chiffré ;
   - une clé Ed25519, qui sert à signer ce que vous envoyez.
 Les parties SECRÈTES restent sur votre disque et ne sont jamais affichées. Seule la partie publique
-est imprimée, et c'est elle que vous renvoyez.
+est imprimée, et c'est elle que vous renvoyez par courriel.
 
     python3 cle-probant.py
 
@@ -32,7 +32,7 @@ def b64(raw: bytes) -> str:
 
 
 def fingerprint(mlkem_pub: bytes, ed_pub: bytes) -> str:
-    """Les seize caractères que deux personnes se lisent au téléphone."""
+    """Une empreinte courte de la clé : de quoi la désigner sans recopier le bloc entier."""
     digest = hashlib.sha256(b"probant-identity-v1" + mlkem_pub + ed_pub).hexdigest()
     return "-".join(digest[i:i + 4] for i in range(0, 16, 4))
 
@@ -85,7 +85,7 @@ def main() -> int:
     print(json.dumps(card, indent=1))
     print("\n  ── fin ──\n")
     print("  Ce bloc ne contient que des clés publiques : qui le lit n'apprend rien et n'ouvre rien.")
-    print(f"  Nous relirons l'empreinte {held['fingerprint']} de vive voix avant tout envoi.\n")
+    print("  Renvoyez-le par courriel, tel quel.\n")
     return 0
 
 

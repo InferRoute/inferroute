@@ -1024,11 +1024,14 @@ other order would have been marked down by a rule this brief had broken itself.
    wrong route, and would have reported a real difference as benign for a reason that is not true.
 
    **Check whether `counters_mean` is present before quoting it.** When a receipt carries it, it defines
-   what each counter measures and you should read that rather than guess. When it does not — and no
-   receipt in a pack exported before 0.9.34 has it — say so, and report the raw numbers and the ratio
+   what each counter measures and you should read that rather than guess. When it does not, say so,
+   and report the raw numbers and the ratio
    you computed rather than an explanation you did not get from the file. No expected ratio is printed
    here on purpose: an auditor on 25 Sep quoted this field, with a figure, from a receipt that does not
    contain it, and the number it quoted was the one the brief used to supply.
+   Which receipts carry it depends on the client version in each receipt's own `written_by`, NOT on the
+   version that exported this pack: a pack exported today can be full of receipts written months ago by
+   clients that had no such field. This brief said the opposite until 25 Sep.
 
    The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), the
    hash of the encryption key the session sealed to, and — since 24 Sep — `attestation`: the evidence row
@@ -1135,7 +1138,10 @@ other order would have been marked down by a rule this brief had broken itself.
 
 **That file is in this folder and its headings are already the eight claims.** Do this, exactly:
 
-    cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md     # then fill in THAT copy
+    cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md  &&  chmod u+w ../REPORT-<this folder's name>.md
+
+(the `chmod` is needed because the template ships read-only — that is what stops it being filled in where
+it lies, and `cp` carries the mode to your copy. Fill in THAT copy.)
 
 Not "fill it in and hand it back" — WHERE was the part the instruction left out, and an auditor on 25 Sep
 filled it in where it lay. That broke the pack's own `SHA256SUMS`, and a second auditor working in the
@@ -1150,8 +1156,8 @@ is only a convenient way to carry them. Three auditors on 25 Sep worked in envir
 let them write a report, and the right move is the one they took: reproduce the headings exactly in
 whatever form you hand back, and say in a line that you could not write the file. Do not leave an empty
 copy behind in the parent directory. Do not compose a report of your own shape around it: the numbering below has been asked
-for in prose since 24 Sep and three of five auditors have still answered `verify_record.py`'s fifteen
-check names instead. One of them explained why in its own report — a mechanical requirement that creates
+for in prose since 24 Sep and three of five auditors have still answered `verify_record.py`'s own
+check names instead — of which it prints more than forty, against these eight claims. One of them explained why in its own report — a mechanical requirement that creates
 no enforcement of its own is the kind of instruction that gets dropped once the work gets interesting. So
 it is a file now rather than a request, and completing it makes the mistake impossible instead of
 forbidden.
@@ -1161,7 +1167,10 @@ above, copied exactly**, then your verdict, then the evidence. Not the name of a
 `verify_record.py`, and not a title of your own.
 
 `verify_record.py`'s check names are NOT these claims, and they are the thing most likely to replace them:
-it prints fifteen of them, they are concrete, and the brief asks you to read the program first. **If your
+it prints more than forty of them, they are concrete, and the brief asks you to read the program
+first. (This sentence said "fifteen" until 25 Sep, which is the RECEIPT's count of checks and not the
+verifier's — an auditor counted 42 distinct names in its output and reported the error, which was sitting
+inside the one passage arguing for accuracy about this program.) **If your
 report has a "claim 4" about query text matching a hash, or a "claim 5" about the result, you are
 answering the verifier's list and not this one** — those are check names. Claim 4 here is whether the
 statements are untampered; claim 5 is whether anything was removed. Two auditors on 24 Sep made exactly
@@ -1214,7 +1223,15 @@ this session.
 ## A verdict may not be VERIFIED while part of the claim is unchecked
 
 If a claim has parts you could not check, VERIFIED is the wrong word for it — whatever the parts you DID
-check came back as. Report it as verified in the parts you name, and say which parts you could not reach
+check came back as. **Its scope, because read strictly the rule swallows the vocabulary it belongs to:**
+some limits here can never be closed by evidence of this kind at all — attestation shows which software
+ran and not what it did with a text after decrypting it, and no folder can fix that. Name those in the
+report; they do not by themselves downgrade a verdict, or nothing is ever VERIFIED and four verdicts
+collapse back to three. What downgrades a verdict is a part you COULD have settled — from this folder, or
+from a public source you can reach — and did not: an unpinned firmware floor, a revocation you did not
+look up, a check that needed a service you could not call, a sample you did not extend. Two auditors on
+25 Sep split VERIFIED against VERIFIED IN PART on claim 1 for exactly this reason, and the disagreement
+was about this paragraph rather than about the evidence. Report it as verified in the parts you name, and say which parts you could not reach
 and why. The reader is deciding whether to rely on this, and "VERIFIED" with an unstated gap is the one
 outcome that moves them to rely on something nobody tested.
 
@@ -1526,7 +1543,7 @@ def report_template() -> str:
 
     The brief has asked auditors to quote each claim's title since 24 Sep, in increasingly explicit prose —
     including a paragraph naming the exact symptom of getting it wrong. It has now failed on three of five
-    auditors, all of whom answered `verify_record.py`'s fifteen check names instead. One of them said in
+    auditors, all of whom answered `verify_record.py`'s own check names instead. One of them said in
     its own report why: a mechanical requirement that creates no enforcement of its own is the kind of
     instruction that gets dropped once the work gets interesting.
 

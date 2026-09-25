@@ -1426,7 +1426,10 @@ def test_the_brief_stops_handing_over_the_answer_before_the_question():
     assert "typically 55-75% on JSON" not in b, "the brief still hands over the number to expect"
     assert "a third to a half" not in b, "the brief still predicts the ratio"
     assert "Check whether `counters_mean` is present before quoting it" in b
-    assert "no receipt in a pack exported before 0.9.34 has it" in b
+    # It used to key on the EXPORTING version here; the field is written by whatever client wrote the
+    # receipt, which in a pack exported today may be months older. Corrected 25 Sep.
+    assert "no receipt in a pack exported before 0.9.34 has it" not in b
+    assert "depends on the client version in each receipt's own `written_by`" in b
 
 
 def test_the_brief_answers_three_more_things_opus_found(tmp_path):
@@ -1530,3 +1533,55 @@ def test_the_confidentiality_section_gives_no_paragraph_to_copy():
     brief = E.AUDIT_MD
     assert "No model paragraph is given" in brief
     assert "The shape, not a form of words to copy" not in brief
+
+
+# --- Round three, 25 Sep. Two of these are plain factual errors in the brief; the third is a command the
+#     brief gives as "do this, exactly" that cannot succeed as written.
+
+def test_the_brief_does_not_call_the_verifiers_check_names_fifteen():
+    """Fifteen is the RECEIPT's count of checks. The verifier prints over forty, and the brief used the
+    receipt's number for it in three places -- one of them inside the passage arguing for precision about
+    that very program."""
+    brief = E.AUDIT_MD
+    for i, line in enumerate(brief.splitlines()):
+        if "verify_record.py" in line and "fifteen" in line:
+            raise AssertionError(f"line {i}: the verifier's check names called fifteen: {line!r}")
+    assert "it prints more than forty of them" in brief
+
+
+def test_the_number_the_brief_gives_for_the_check_names_is_the_real_one(tmp_path, V, kms):
+    """A bound rather than an exact count, because a new check must not make the brief wrong -- but it has
+    to be a bound the program actually satisfies, or this is the same error with a different number."""
+    from tests.test_verify_record import _synthetic_bundle, _run
+    d = _synthetic_bundle(tmp_path, V, kms)
+    _, out = _run(d, "--reference", str(tmp_path / "reference.json"))
+    names = {m.group(1) for m in re.finditer(r"^\s*(?:PASS|FAIL|SKIP) ([^:]+):", out, re.M)}
+    assert len(names) > 15, f"only {len(names)} distinct check names: {sorted(names)}"
+
+
+def test_the_template_copy_instruction_accounts_for_the_read_only_mode():
+    """The template ships 0400 so it cannot be filled in where it lies -- and `cp` carries that mode to
+    the copy, so the instruction as given produced a read-only report file."""
+    brief = E.AUDIT_MD
+    i = brief.index("cp REPORT-TEMPLATE.md")
+    assert "chmod u+w" in brief[i:i + 400], "the copy inherits 0400 and nothing says to make it writable"
+
+
+def test_counters_mean_is_keyed_on_the_receipts_own_version():
+    """It is written by the client that wrote the RECEIPT, not by the one that exported the pack: a pack
+    exported today can be full of receipts written by clients that had no such field."""
+    brief = E.AUDIT_MD
+    i = brief.index("counters_mean")
+    window = brief[i:i + 1400]
+    assert "`written_by`" in window and "NOT on the" in window
+    assert "exported before 0.9.34" not in brief
+
+
+def test_the_no_verified_while_unchecked_rule_has_a_scope():
+    """Read strictly it collapses four verdicts to three -- every claim here has some limit no evidence of
+    this kind can close, so nothing would ever be VERIFIED. Two auditors split on claim 1 over it."""
+    brief = E.AUDIT_MD
+    i = brief.index("VERIFIED is the wrong word for it")
+    window = brief[i:i + 1400]
+    assert "they do not by themselves downgrade a verdict" in window
+    assert "a part you COULD have settled" in window

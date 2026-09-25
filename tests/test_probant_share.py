@@ -346,3 +346,25 @@ def test_the_handout_reaches_the_network_nowhere():
     src = HANDOUT.read_text()
     for forbidden in ("urllib", "requests", "httpx", "socket", "subprocess", "http.client"):
         assert forbidden not in src, f"the handout imports {forbidden}"
+
+
+def test_the_handout_never_tells_anyone_to_pip_install_into_the_system_python():
+    """It did, and on the machines he is most likely to have that command fails outright: PEP 668
+    refuses `pip install` into a system Python on current Debian, Ubuntu and Homebrew macOS. A letter
+    whose one dependency step does not run is a letter that gets no key back."""
+    src = HANDOUT.read_text()
+    assert "python3 -m pip install" not in src
+    assert "-m venv" in src and "externally-managed" in src
+
+
+def test_the_handout_writes_nothing_when_it_cannot_run(tmp_path):
+    """The refusal has to be clean: a half-written identity would be worse than none."""
+    import venv
+    venv.create(tmp_path / "bare", with_pip=False)
+    ir_home = tmp_path / "ir"
+    r = subprocess.run([str(tmp_path / "bare" / "bin" / "python"), str(HANDOUT)],
+                       capture_output=True, text=True,
+                       env={**os.environ, "INFERROUTE_HOME": str(ir_home)}, timeout=120)
+    assert r.returncode == 1
+    assert "cryptography" in r.stderr and "venv" in r.stderr
+    assert not ir_home.exists(), "it wrote something on the path where it should have refused"

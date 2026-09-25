@@ -29,20 +29,23 @@ sous cette forme plutôt qu'en installant un programme chez vous. Un lien plutô
 parce que les passerelles de messagerie rejettent volontiers ce type de fichier — et parce qu'un lien
 peut être retiré, ce qu'une pièce jointe dans une boîte aux lettres ne peut plus être.
 
-Puis, dans un terminal, depuis le dossier où vous l'avez enregistré :
+Puis, dans un terminal, depuis le dossier où vous l'avez enregistré, cette ligne :
 
 ```
-python3 cle-probant.py
+python3 -m venv /tmp/cle && /tmp/cle/bin/pip install 'cryptography>=50' && /tmp/cle/bin/python cle-probant.py
 ```
+
+Elle fait trois choses, dans cet ordre : un dossier de travail jetable dans `/tmp`, la seule bibliothèque
+dont le script a besoin (ML-KEM-768 n'est pas dans Python par défaut), puis le script. Le détour par
+`/tmp` n'est pas une précaution de style : sur macOS comme sur Linux récents, installer directement dans
+le Python du système est refusé, et cette forme-là marche partout sans y toucher. Vous pouvez effacer
+`/tmp/cle` aussitôt après ; votre clé, elle, est ailleurs et reste.
+
+Si `cryptography` est déjà présente chez vous, `python3 cle-probant.py` suffit — et si elle ne l'est pas,
+le script vous le dit et vous réaffiche la ligne ci-dessus, sans rien écrire.
 
 Il crée deux clés dans votre dossier personnel et affiche la partie publique. Il n'ouvre aucun réseau et
 ne contacte aucun serveur : vous pouvez le vérifier à la lecture, il n'importe même pas de quoi le faire.
-Si la bibliothèque `cryptography` manque sur votre machine, il vous le dit et s'arrête **sans rien
-écrire** ; une seule commande la fournit :
-
-```
-python3 -m pip install 'cryptography>=50'
-```
 
 **Vous me renvoyez par courriel ce qu'il affiche entre les deux lignes de tirets, tel quel.** Ce bloc ne
 contient que des clés publiques : qui le lit n'apprend rien et ne peut rien ouvrir. Les parties secrètes
@@ -110,6 +113,13 @@ Henry Declety
   courriel, point. À noter une fois : l'empreinte est ce qui attraperait une clé substituée en route.
   Elle reste imprimée et conservée des deux côtés, donc la comparer reste possible à tout moment si vous
   vous parlez avant l'envoi — dix secondes, et rien ne l'impose.
+- **⚠ La version précédente de cette lettre ne marchait probablement pas chez lui.** Elle disait
+  « une seule commande la fournit : `python3 -m pip install 'cryptography>=50'` ». Sur macOS avec
+  Homebrew, sur Debian et sur Ubuntu récents, cette commande **échoue** (PEP 668,
+  `externally-managed-environment`). Vérifié sur cette machine : elle refuse. Remplacée par la forme
+  `venv` jetable, testée de bout en bout sur une machine PEP 668 — la clé se crée et atterrit bien dans
+  le dossier personnel, pas dans le venv. Le script lui-même affiche désormais cette ligne-là quand la
+  bibliothèque manque, et non plus celle qui échoue.
 - **`cryptography` reste nécessaire** et c'est la seule dépendance : ML-KEM-768 n'est pas dans la
   bibliothèque standard. Le script refuse proprement sans elle, sans rien écrire — comportement vérifié.
 - **Pas de script hébergé, délibérément.** Un `curl … | bash` ferait la même chose en moins de lignes et

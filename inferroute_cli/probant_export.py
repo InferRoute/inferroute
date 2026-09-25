@@ -1125,10 +1125,20 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
      independent of InferRoute exists to compare against, and everything below rests on copies InferRoute
      controls. Do not report it as a match or as a failure of the record.
 
-     **(b) The published client wheel** — the .whl the professional downloaded, or its link.
-     `MANIFEST.json` here records `client_version`, which is the version to ask for; treat that as the
-     audited party naming itself, useful for finding the right file and evidence of nothing. The file's
-     name and SHA-256 are published beside it:
+     **(b) The published client wheel.** `MANIFEST.json` gives you both halves: `client_version`, and
+     `client_wheel_url` — a direct link to that exact version, with its SHA-256 published beside it as
+     `<same url>.sha256`. Every auditor before 25 Sep reported this step as unrunnable: the package is not
+     on PyPI and nothing in the pack said where else to look. One of them put it exactly — "a URL in
+     MANIFEST (unsigned, but findable) would make step (b) runnable" — so it is there now.
+
+         curl -sO <client_wheel_url>  &&  curl -sO <client_wheel_url>.sha256  &&  sha256sum -c *.sha256
+
+     Read it for what it is. **Both the link and the version are the audited party naming itself**, and an
+     unsigned URL we control proves nothing on its own — what the comparison is worth comes from the copy
+     arriving over a channel this machine does not serve. A 404 means that exact version was not
+     published, not that the record is wrong: say which version you asked for and that it was not there.
+     PyPI is worth trying too and the highest release there may lag the client that made this pack, which
+     is an absence and not a finding. The file's name and SHA-256 are published beside it:
 
          python3 -c "import zipfile,hashlib,sys; z=zipfile.ZipFile(sys.argv[1]); \
            n=[x for x in z.namelist() if x.endswith('verify_record.py')][0]; \
@@ -1269,6 +1279,22 @@ def _brief(has_searches: bool) -> str:
         return AUDIT_MD
     head, _, rest = AUDIT_MD.partition("\n")
     return head + "\n\n" + NO_SEARCHES_BANNER.strip() + "\n" + rest
+
+
+# A GENERIC path, not the per-recipient one. A link minted for one reader is no use to their auditor, who
+# may be a third party months later; this one is stable, derived from the version in the manifest beside
+# it, and excluded from indexing at the site's robots.txt so it stays unlisted without being secret.
+CLIENT_WHEEL_URL = "https://inferroute.ai/client/inferroute-{version}-py3-none-any.whl"
+
+
+def wheel_url_for(version: str) -> str:
+    """The link, or nothing. A pack built from an uninstalled tree reports a version like `0.0.0+dev`,
+    and a URL formed from that would send an auditor after a file that has never existed — which reads in
+    our own record as a broken link rather than as the absence it is. Only a plain release version gets a
+    link; anything else gets none, and the brief already tells them what an absent one means."""
+    import re
+    v = (version or "").strip()
+    return CLIENT_WHEEL_URL.format(version=v) if re.fullmatch(r"\d+\.\d+\.\d+", v) else ""
 
 
 def _client_version() -> str:
@@ -1539,6 +1565,16 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # knows WHICH wheel to fetch. Self-reported — this is the audited party naming itself — and
                 # the brief says so. It saves the auditor a guess, and proves nothing on its own.
                 "client_version": _client_version(),
+                # WHERE TO GET THAT WHEEL. VERIFY.md's step (b) — compare the shipped verifier against an
+                # independently published copy — was unrunnable for every auditor so far: the package is
+                # not on PyPI and nothing in the pack said where else to look. One of them named it
+                # exactly: "it isn't on PyPI, and nothing in the pack says where it is published. A URL in
+                # MANIFEST (unsigned, but findable) would make step (b) runnable."
+                #
+                # Unsigned and self-reported, like everything else this machine says about itself: it
+                # tells an auditor where to look, and proves nothing on its own. What makes the comparison
+                # worth anything is that the copy comes from somewhere this machine does not control.
+                "client_wheel_url": wheel_url_for(_client_version()),
                 "reference_hint": src_manifest.get("reference_hint"),
                 # A stated count per kind, so that nothing here has to be inferred from an empty field.
                 # `document_reads: 0` means this matter did no document reads — it does not mean they went

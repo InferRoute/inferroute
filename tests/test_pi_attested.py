@@ -1292,7 +1292,11 @@ def test_the_press_says_which_leg_is_the_ranking():
     assert "That date is part of the claim" in body
     assert "it is a measurement, it can be superseded" in body
     assert "The others are " in body and "REACH, not " in body   # the sentence wraps
-    assert "merging them measurably buries what the first " in body   # the sentence wraps
+    # "measurably" asserted a detected effect the bench never powered; corrected 25 Sep. The reason the
+    # legs are listed separately is not the size of that deficit -- it is that a merge hides which query
+    # reached what, which is true whatever the number turns out to be.
+    assert "merging them did not improve on the first " in body   # the sentence wraps
+    assert "measurably bur" not in body
     # A focused or composed press has no whole-disclosure leg, so the sentence must be conditional.
     assert 'legs.some((l) => l.feature === "the disclosure as a whole")' in body
     assert "Read each on its own terms." in body

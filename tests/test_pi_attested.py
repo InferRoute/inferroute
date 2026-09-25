@@ -1192,3 +1192,39 @@ def test_the_record_says_whether_the_assistant_acted_on_the_next_round_brief():
     assert "deep_brief_follow_through: this.briefFollowThrough()" in ts
     assert "brief_follow_through:" not in ts.replace("deep_brief_follow_through:", ""), \
         "a stored copy of the count would drift from the rows it counts"
+
+
+def test_the_end_of_a_press_actually_runs():
+    """25 Sep, on a real press: "Cannot access 'nextRound' before initialization" — after four sealed
+    queries had been paid for and returned. `brief_emitted: Boolean(nextRound)` was written into the record
+    thirty lines above where `nextRound` is declared. A `const` read before its declaration is a temporal
+    dead zone: the file parses, every grep finds the string, and it throws at runtime.
+
+    Every test I had written for that region asserted a string was IN THE FILE. Not one of them executed
+    it. So this one runs it — the gap computation, the record write and the ledger — with everything they
+    read stubbed, which is the only kind of test that could have caught an ordering bug."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(PA.__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "deep_ledger_sim.ts")],
+                       cwd=root, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "strip-types" in r.stderr:
+        pytest.skip("this node cannot strip TypeScript")
+    assert r.returncode == 0, r.stderr[-900:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    # A press that left gaps asks for another round, names them, and the record says it asked.
+    assert out["gapsAsk"] is True
+    assert out["gapsRecorded"] is True, "the record does not say the press asked for a round"
+    assert out["gapsNamed"] is True, "the brief does not name the gaps it is asking about"
+    assert out["ledgerCarriesBrief"] is True, "the brief is not in the text the assistant reads"
+
+    # A press where every leg contributed asks for nothing: asking then is an agent finding work.
+    assert out["cleanAsks"] is False
+    assert out["cleanRecorded"] is False
+    # The last allowed generation asks for nothing more.
+    assert out["lastGenerationAsks"] is False

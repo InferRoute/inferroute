@@ -1703,14 +1703,23 @@ export default function (pi: ExtensionAPI) {
 				// The product reason for listing the legs separately does not rest on that number at all:
 				// a merged ranking hides which query reached what, and the per-leg trace is the only
 				// surface through which reach reaches a human. So that is what it now says.
+				// CLOSED 25 Sep. The experiment behind this finished on a null and the embargo lifted:
+				// the challenger was given the engine's OWN per-hit relevance scores -- the strongest
+				// signal the data holds -- and still did not beat the head query. So the first clause
+				// gains the challenger it survived, which is the part that makes it worth anything, and
+				// the reach figure stops being an interim reading and becomes a closed-experiment fact.
+				// The negative stays observation-shaped; the positive is what the trace exists for.
 				legs.some((l) => l.feature === "the disclosure as a whole")
 					? "Read the whole-disclosure query first: on a benchmark measured 2026-09-25, no tested "
-						+ "combination of these queries beat it, and merging them by rank fusion landed below "
-						+ "it — so it is the ranked list. The others are "
-						+ "REACH, not ranking — together they surface documents the first query never reaches, "
-						+ "and they are listed separately because merging them did not improve on the first "
-						+ "query and hides which query reached what. That date is part of the claim: "
-						+ "it is a measurement, it can be superseded, "
+						+ "combination of these queries beat it — including a learned fusion given the "
+						+ "engine's own relevance scores — and the merged list landed below it. "
+						+ "So it is the ranked list. The others are "
+						+ "REACH, not ranking: together they surface documents the first query never reaches, "
+						+ "about 14 points more of the known-relevant families at depth 200 (52.8% against "
+						+ "38.4%). They are listed separately because merging them did not improve on the "
+						+ "first query and hides which query reached what — reading the legs one by one is "
+						+ "today the only way that extra reach becomes anything. "
+						+ "That date is part of the claim: it is a measurement, it can be superseded, "
 						+ "and a record made long after it should be read with that in mind."
 					: "These queries are listed separately, not merged into one ranking: in testing, merging "
 						+ "did not improve on the best single query, and it hides which query reached what. "

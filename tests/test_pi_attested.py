@@ -7,6 +7,7 @@ stub session that records every plaintext request body Pi sends. Skipped when Pi
 import copy
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -1266,17 +1267,29 @@ def test_continuing_a_survey_is_offered_only_once_one_has_started():
 
 
 def test_the_press_says_which_leg_is_the_ranking():
-    """sealed-research's survey bench, DEV n=297, 25 Sep: the whole-disclosure leg alone ranks better
-    than any fan-out arm (famR@100 0.3665; best arm -0.005 ns, worst -0.052 SIG). But the legs' union
-    reaches 57.8% of gold families at depth 200 against the head's 38.2%, and RRF fusion lands at 33.1% —
-    BELOW the head. The fan-out finds; fusion loses.
+    """sealed-research's survey bench, DEV n=297. CLOSED 25 Sep on a null, and the numbers below are the
+    corrected ones -- an earlier revision of this docstring carried 57.8/38.2/33.1, which came from a
+    union across all SEVEN arm configurations (roughly three times the search cost of a real press) and
+    counted gold DOCUMENTS where the metric's unit is gold FAMILIES.
+
+    The whole-disclosure leg alone ranks better than any fan-out arm (famR@100 0.3665). The final
+    challenger was a learned fusion given the engine's OWN per-hit relevance scores -- the strongest
+    signal the data holds -- and it landed at 0.3530, -0.0135, not significant; deterministic head-fill
+    +0.0011, not significant. Nothing qualified, closure wording "no effect >= 0.025 detected at n=297,
+    80% power". The legs' reach is the durable positive: 52.8% of gold families at depth 200 against the
+    head's 38.4%, about +14 points the head cannot see.
 
     This press never fused, which turns out to have been right for a reason I did not have at the time.
     What it did not do was say which list is the ranking — so a professional reading eight lists had no
     way to know the first one is the one that ranks, and the rest are reach."""
     ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
     start = ts.index('name: "deep_prior_art_search"')
-    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+    raw = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+    # Join adjacent string literals before matching. These assertions used to run against the raw source,
+    # so a sentence that was correct could fail purely because a rewrap moved a "+" into the middle of a
+    # pinned phrase -- which happened four times in one afternoon and each time looked, for a moment, like
+    # the claim had gone missing. The claim is in the STRING the user reads, not in its line breaks.
+    body = re.sub(r'"\s*\+\s*"', "", raw)
 
     assert "Read the whole-disclosure query first" in body
     assert "it is the ranked list" in body
@@ -1284,7 +1297,7 @@ def test_the_press_says_which_leg_is_the_ranking():
     # wording said "beats any combination", which claims a universal from a sample of eight and would be
     # falsified by a single better fusion. sealed-research caught it; e109 exists to try exactly that.
     assert "no tested " in body and "combination of these queries beat it" in body
-    assert "beats any combination" not in body
+    assert "beats any combination" not in raw   # raw: the old wording must not return, even in a comment
     # A measured claim in an auditor-facing document carries its date, so a reader months later can ask
     # whether it still holds rather than assume. sealed-research has registered notifying this lane
     # before any fusion result ships; until then the date is what lets the sentence age honestly.
@@ -1296,7 +1309,7 @@ def test_the_press_says_which_leg_is_the_ranking():
     # legs are listed separately is not the size of that deficit -- it is that a merge hides which query
     # reached what, which is true whatever the number turns out to be.
     assert "merging them did not improve on the first " in body   # the sentence wraps
-    assert "measurably bur" not in body
+    assert "measurably bur" not in raw          # raw, same reason
     # A focused or composed press has no whole-disclosure leg, so the sentence must be conditional.
     assert 'legs.some((l) => l.feature === "the disclosure as a whole")' in body
     assert "Read each on its own terms." in body

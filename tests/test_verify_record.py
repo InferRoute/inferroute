@@ -1236,3 +1236,20 @@ def test_a_policy_that_imports_fragments_is_reported_as_a_floor(V):
     assert reach == 0 and any("fragments" in b for b in blockers)
     # inversion: the same policy without the fragment block reaches the top
     assert _clean_posture(V)["self_contained"] is True
+
+
+def test_unsigned_reference_is_not_called_authenticated_by_confidentiality_block(tmp_path, V, kms, monkeypatch):
+    key, pub = _signing_key()
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    signed = _ref(tmp_path, "signed.json", [host], sign_with=key)
+    unsigned = _ref(tmp_path, "unsigned.json", [host])
+    monkeypatch.setattr(V, "check_hardware", lambda c, *a, **k: {"host_data": host, "product": "Milan"})
+    monkeypatch.setattr(V, "check_identity", lambda *a, **k: None)
+    seen = []
+    monkeypatch.setattr(V, "report_confidentiality", lambda *a, **k: seen.append(k))
+    assert V.main([str(d), f"--reference={unsigned}"]) == 0
+    assert not seen[-1]["authenticated"]
+    assert V.main([str(d), f"--reference={unsigned}", f"--reference-key={pub}"]) == 1
+    assert not seen[-1]["authenticated"]
+    assert V.main([str(d), f"--reference={signed}", f"--reference-key={pub}"]) == 0
+    assert seen[-1]["authenticated"] and seen[-1]["record_ok"]

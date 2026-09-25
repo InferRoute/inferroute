@@ -943,7 +943,8 @@ def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_pat
           "         cosign verify-blob --bundle <bundle> --certificate-identity <the identity> \\\n"
           "             --certificate-oidc-issuer https://accounts.google.com <attestation.json>\n"
           "         If it passes, a verified identity committed to this key in a public append-only log, "
-          "which closes substitution and back-dating. It does NOT make the key independent of its owner.")
+          "at the verified log time. It does NOT authenticate earlier records retroactively or make the key "
+          "independent of its owner. See VERIFY.md section 4b for the complete command and limits.")
 
 
 def _ref_windowed(reference: Dict[str, Any]) -> bool:
@@ -1837,10 +1838,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             reference=reference,
             floor_pinned=bool(min_tcb),
             revocation_checked=bool(a.check_revocation and not revocation_failed),
-            # A reference that is ABSENT is not an authenticated one. This read `not bool(... and ...)`,
-            # which is vacuously true when reference is None -- so a run with no --reference at all, with
-            # identity FAILing on all 70 searches, reported the reference as authenticated.
-            authenticated=bool(isinstance(reference, dict) and (not reference.get("sig") or a.reference_key)),
+            # An unsigned reference remains usable as manually supplied expected measurements, but
+            # this program has not authenticated its provenance. A supplied key alone proves nothing;
+            # the signature must exist and the earlier signature check must pass (record_ok below).
+            authenticated=bool(isinstance(reference, dict) and reference.get("sig") and a.reference_key),
             record_ok=(fails == 0),
             committed=seen_host_data or None)
     # A reference that is signed but was checked against no key: every other line can pass, and the identity

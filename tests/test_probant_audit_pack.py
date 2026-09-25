@@ -1680,7 +1680,8 @@ def test_the_attestation_travels_with_the_pack_and_is_not_claimed_as_checked():
     assert "THIS PROGRAM HAS NOT CHECKED THEM" in verifier
     assert "cosign verify-blob" in verifier
     # and it must keep saying what the attestation does not do
-    assert "does NOT make the key independent of its owner" in verifier
+    assert "independent of its owner" in verifier
+    assert "does NOT authenticate earlier records retroactively" in verifier
 
 
 def test_an_attestation_naming_a_different_key_is_a_finding(tmp_path):
@@ -1697,3 +1698,11 @@ def test_an_attestation_naming_a_different_key_is_a_finding(tmp_path):
     c2 = V.Checks()
     V.check_key_attestation(c2, str(bundle), str(att), "bb" * 32)
     assert c2.rows[0][0] != "FAIL"
+
+
+def test_pack_refreshes_verification_instructions_with_its_verifier(tmp_path, V, kms, no_anchors):
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    (rec / "VERIFY.md").write_text("STALE instructions from an older client")
+    pack = E.write_audit_pack(rec, tmp_path / "fresh-pack")
+    assert (pack / "VERIFY.md").read_text() == E.VERIFY_MD
+    assert (pack / "verify_record.py").read_bytes() == E._installed_verifier()

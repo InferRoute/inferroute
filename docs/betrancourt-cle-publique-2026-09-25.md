@@ -24,8 +24,7 @@ et qu'il faut les reprendre. Je vous confirme ma volonté d'y aller, et je suis 
 en reparler quand vous le voudrez.
 
 L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine
-prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains ; et si
-le moment est mal choisi, dites-le-moi sans façon.
+prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
 
 Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter. L'envoi est
 chiffré à votre seule clé et s'ouvre sur votre poste — il porte de l'ensemble non déposé, et c'est la
@@ -163,8 +162,9 @@ Henry Declety
   intérêt », puis « vous aviez bien voulu vous dire prêt », puis « j'avais cru comprendre que vous
   seriez curieux » — toutes attribuaient à un tiers réel une position qu'il n'a pas prise. Il ne reste
   qu'une offre : « si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les
-  mains ; et si le moment est mal choisi, dites-le-moi sans façon. » Le refus proposé porte sur le
-  MOMENT et non sur l'outil : il peut décliner sans rien juger.
+  mains. » La porte de sortie explicite (« si le moment est mal choisi… ») a été retirée ensuite : le
+  « si vous souhaitez » porte déjà l'absence d'obligation, et proposer un refus revient à en suggérer
+  un — on n'ouvre pas la porte à quelqu'un qui n'a pas dit qu'il voulait sortir.
 - **La demande est devenue conditionnelle** : « Si vous êtes partant, il me faudrait… ». Elle ne
   s'adresse plus qu'à quelqu'un qui a dit oui, au lieu de présumer qu'il l'a dit. Et « je vous
   l'adresserai » est passé au conditionnel pour la même raison.

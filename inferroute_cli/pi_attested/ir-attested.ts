@@ -1693,16 +1693,28 @@ export default function (pi: ExtensionAPI) {
 				// DOCUMENTS where the metric's unit is gold FAMILIES. sealed-research caught it in
 				// adversarial review and sent the correction unprompted. The direction and the verdict do
 				// not move; the size of the claim does, by a third.
+				// CORRECTED AGAIN 25 Sep, same defect as above surviving in its twin. When the first
+				// clause was narrowed to "no tested combination beat it", the universal it replaced was
+				// removed only there -- the word "measurably" was left standing in the three places that
+				// describe the MERGE. (The guard below greps the source, so the old wording cannot be
+				// quoted even in a comment; that is the guard working, not a nuisance.) It
+				// asserts a detected effect, and what the bench actually showed is that the merged list
+				// landed BELOW the head query -- an observation on a small sample, never a powered one.
+				// The product reason for listing the legs separately does not rest on that number at all:
+				// a merged ranking hides which query reached what, and the per-leg trace is the only
+				// surface through which reach reaches a human. So that is what it now says.
 				legs.some((l) => l.feature === "the disclosure as a whole")
 					? "Read the whole-disclosure query first: on a benchmark measured 2026-09-25, no tested "
-						+ "combination of these queries beat it, and merging them by rank fusion measurably "
-						+ "buried what it found — so it is the ranked list. The others are "
+						+ "combination of these queries beat it, and merging them by rank fusion landed below "
+						+ "it — so it is the ranked list. The others are "
 						+ "REACH, not ranking — together they surface documents the first query never reaches, "
-						+ "and they are listed separately because merging them measurably buries what the first "
-						+ "one found. That date is part of the claim: it is a measurement, it can be superseded, "
+						+ "and they are listed separately because merging them did not improve on the first "
+						+ "query and hides which query reached what. That date is part of the claim: "
+						+ "it is a measurement, it can be superseded, "
 						+ "and a record made long after it should be read with that in mind."
-					: "These queries are listed separately, not merged into one ranking: merging measurably "
-						+ "buries good results rather than improving them. Read each on its own terms.",
+					: "These queries are listed separately, not merged into one ranking: in testing, merging "
+						+ "did not improve on the best single query, and it hides which query reached what. "
+						+ "Read each on its own terms.",
 				"The same invention may appear more than once under different publication numbers.",
 			].filter(Boolean).join(" ");
 

@@ -14,13 +14,13 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Vous aviez bien voulu vous dire prêt à essayer l'outil de recherche d'antériorité dont nous avions parlé.
-Il devrait être prêt en début de semaine prochaine, et je me permets de vous écrire sur cette base — en
-espérant que cet intérêt tienne toujours.
+L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine
+prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains ; et si
+le moment est mal choisi, dites-le-moi sans façon.
 
-Je vous l'adresserai avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter.
-L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de l'ensemble non déposé,
-et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
+Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter. L'envoi est
+chiffré à votre seule clé et s'ouvre sur votre poste — il porte de l'ensemble non déposé, et c'est la
+raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
 
 Il m'aura demandé plus de temps que prévu, et pas du côté où je l'attendais : l'essentiel des dernières
 semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un
@@ -36,9 +36,9 @@ première version, elle aura ses angles morts, et je préfère vous le dire avan
 C'est pourquoi je suis impatient que vous la mettiez à l'épreuve : votre lecture dira si c'est utile, et
 je n'ai pas de meilleur juge.
 
-D'ici là, une seule chose de votre part, et je vous remercie par avance des quelques minutes qu'elle
-demande : il me faudrait votre **clé publique**. Sans elle je ne peux rien vous adresser à vous seul, et
-c'est la seule chose qui me manque.
+Si vous êtes partant, il me faudrait une chose de votre part d'ici là, et je vous remercie par avance
+des quelques minutes qu'elle demande : votre **clé publique**. Sans elle je ne peux rien vous adresser à
+vous seul, et c'est la seule chose qui me manque.
 
 Vous n'avez rien à installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
 
@@ -107,6 +107,16 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **Rien ne dit plus qu'il a accepté, parce qu'il n'a rien accepté** (votre précision : intérêt
+  implicite, léger, aucun engagement). Les versions successives disaient « vous m'aviez dit votre
+  intérêt », puis « vous aviez bien voulu vous dire prêt », puis « j'avais cru comprendre que vous
+  seriez curieux » — toutes attribuaient à un tiers réel une position qu'il n'a pas prise. Il ne reste
+  qu'une offre : « si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les
+  mains ; et si le moment est mal choisi, dites-le-moi sans façon. » Le refus proposé porte sur le
+  MOMENT et non sur l'outil : il peut décliner sans rien juger.
+- **La demande est devenue conditionnelle** : « Si vous êtes partant, il me faudrait… ». Elle ne
+  s'adresse plus qu'à quelqu'un qui a dit oui, au lieu de présumer qu'il l'a dit. Et « je vous
+  l'adresserai » est passé au conditionnel pour la même raison.
 - **L'entrée aussi, sur le même registre.** « Vous m'aviez dit votre intérêt » énonçait son accord comme
   un fait acquis, et « ce qui me vaut de vous écrire » s'en prévalait. Devenu « vous aviez bien voulu
   vous dire prêt » (c'était une amabilité, pas un engagement), « je me permets de vous écrire sur cette

@@ -1005,3 +1005,55 @@ def test_the_reference_signature_does_not_claim_what_the_program_cannot_know(V):
     assert "that you supplied" in src
     assert "yours to attest, not this program's" in src
     assert "you recorded at first use\")" not in src
+
+
+# --- An auditor on 25 Sep read the program and found two rows that said less than their wording implied:
+#     the reference's signature "verifies" under a key taken from a file beside it that holds the
+#     reference's OWN publication_key, and the identity row claimed a time was tested on a reference whose
+#     entries carry no windows at all. Neither is fixable by the program; both are sayable by it.
+
+def _signed_ref(V, sk, *, publication_key, entries=None):
+    r = {"schema": V.REFERENCE_SCHEMA, "source": "t", "published_at": "2026-01-01T00:00:00Z",
+         "policy_sha256": entries or [{"value": "aa"}],
+         "index_manifest_sha256": [{"value": "bb"}], "model_manifest_sha256": [{"value": "cc"}]}
+    if publication_key is not None:
+        r["publication_key"] = publication_key
+    r["sig"] = sk.sign(V.canonical(r)).hex()
+    return r
+
+
+def _sig_why(V, ref, key_hex):
+    c = V.Checks()
+    V.check_reference_signature(c, ref, key_hex)
+    return [row[2] for row in c.rows if row[1] == "reference signature"][0]
+
+
+def test_a_reference_signed_by_the_key_it_names_is_called_self_consistency(V):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    sk = Ed25519PrivateKey.generate()
+    pub = sk.public_key().public_bytes_raw().hex()
+    why = _sig_why(V, _signed_ref(V, sk, publication_key=pub), pub)
+    assert "self-consistency, NOT authentication" in why
+    assert "engagement letter" in why
+
+
+def test_a_key_the_reference_does_not_name_is_not_called_self_consistency(V):
+    """The inversion. If this passed too, the row would be decoration: it must distinguish the two cases."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    sk = Ed25519PrivateKey.generate()
+    pub = sk.public_key().public_bytes_raw().hex()
+    other = Ed25519PrivateKey.generate().public_key().public_bytes_raw().hex()
+    assert "self-consistency" not in _sig_why(V, _signed_ref(V, sk, publication_key=other), pub)
+    assert "self-consistency" not in _sig_why(V, _signed_ref(V, sk, publication_key=None), pub)
+
+
+def test_a_reference_with_no_windows_is_not_described_as_windowed(V):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    sk = Ed25519PrivateKey.generate()
+    pub = sk.public_key().public_bytes_raw().hex()
+    assert V._ref_windowed(_signed_ref(V, sk, publication_key=pub)) is False
+    # and the inversion, per entry kind: either a window or a retired flag makes the apparatus live
+    for e in ({"value": "aa", "valid_from": "2026-01-01T00:00:00Z"},
+              {"value": "aa", "valid_to": "2026-01-01T00:00:00Z"},
+              {"value": "aa", "retired": True}):
+        assert V._ref_windowed(_signed_ref(V, sk, publication_key=pub, entries=[e])) is True

@@ -221,7 +221,7 @@ def test_the_bundle_carries_the_conversation_receipt_and_the_brief_asks_about_it
     # The report is per-claim. Since 24 Sep the heading carries the claim's own title, so a claim that was
     # never reached cannot be papered over by a heading the auditor wrote themselves — one answered a list
     # of the verifier's check names and its report gave no sign that claim 3 had gone unexamined.
-    assert "### Claim N —" in md
+    assert "## Claim N —" in md
     assert "paste the claim's bold title from above, exactly" in md
 
 
@@ -463,11 +463,11 @@ def test_not_verified_and_could_not_check_are_taught_apart():
     from inferroute_cli import probant_export as E
     import re
     b = re.sub(r"\s+", " ", E.AUDIT_MD)
-    assert "Three verdicts, and the difference between two of them matters" in b
+    assert "Four verdicts, and the difference between two of them matters" in b
     assert "the evidence is here and it does not support the claim" in b
     assert "that is NOT VERIFIED on provenance, not a gap" in b
     # And it is taught BEFORE the claims, not only in the report format at the end.
-    assert b.index("Three verdicts") < b.index("**Sealed hardware.**")
+    assert b.index("Four verdicts") < b.index("**Sealed hardware.**")
 
 
 def test_the_receipt_carries_the_evidence_its_verdicts_were_computed_from():
@@ -1014,8 +1014,7 @@ def test_the_brief_says_what_the_recorded_block_is_worth_and_what_it_is_not():
     assert "the file wins and the disagreement is a finding" in v
     # The answer that actually comes back, which is neither a pass nor a failure.
     assert 'Expect the answer to be "some of each"' in v
-    assert "later than 33 of the 58 searches and earlier than 25" in v
-    assert "Give both counts." in v
+    assert "Give both counts, from your own comparison" in v
 
 
 def test_the_template_cannot_be_filled_in_where_it_lies(tmp_path, V, kms, no_anchors):
@@ -1309,7 +1308,7 @@ def test_the_exporter_accounts_for_operations_missing_from_this_record(tmp_path,
     import re
     brief = re.sub(r"\s+", " ", E.AUDIT_MD)
     assert "the exporter answering the question the verifier tells you to ask it" in brief
-    assert "A non-zero `unaccounted` is still exactly that finding" in brief
+    assert "a non-zero `unaccounted` is a finding" in brief
 
 
 def test_the_brief_asks_the_auditor_about_its_own_independence():
@@ -1474,3 +1473,60 @@ def test_the_brief_does_not_send_the_auditor_after_a_chain_that_is_not_there():
     assert "compare its root with Intel's own published certificate" in b
     # The bare instruction that caused it must not come back.
     assert "- check the certificate chain." not in E.AUDIT_MD
+
+
+# --- An auditor on 25 Sep was asked what was still wrong with the brief itself and returned seven things.
+#     These are the ones a later edit could silently undo.
+
+def _template_text():
+    t = E.report_template()
+    return t if isinstance(t, str) else "\n".join(t)
+
+
+def test_the_brief_and_the_template_name_the_same_verdicts():
+    """AUDIT.md said "Three verdicts" while REPORT-TEMPLATE.md said "exactly four ... do not invent a
+    fifth" and required VERIFIED IN PART. The brief forbade the word its own mandatory form demanded."""
+    brief, tpl = E.AUDIT_MD, _template_text()
+    assert "Four verdicts" in brief
+    for verdict in ("VERIFIED IN PART", "NOT VERIFIED", "COULD NOT CHECK"):
+        assert verdict in brief, verdict
+        assert verdict in tpl, verdict
+    assert "Three verdicts" not in brief
+    # and the shape the two ask for must agree, not just the vocabulary
+    assert "## Claim N —" in brief and "**Verdict:**" in brief
+
+
+def test_a_sample_verdict_is_resolved_rather_than_left_to_guess():
+    """"VERIFIED is wrong if any part is unchecked" and "two of thirty-nine is the right method" gave an
+    auditor no way to grade a sample. The brief now names which verdict a sample earns."""
+    brief = E.AUDIT_MD
+    i = brief.index("verified on a SAMPLE")
+    assert "VERIFIED IN PART" in brief[i:i + 700]
+
+
+def test_the_brief_does_not_print_the_counts_it_asks_the_auditor_to_compute():
+    """Claim 5's whole content is a count, and the brief used to print a real record's — so recall and
+    arithmetic became indistinguishable on the one claim where that matters most. Same for the anchor
+    split in VERIFY.md, and for the verifier comment the brief sends them to read first."""
+    verifier = (E.Path(__file__).resolve().parent.parent
+                / "inferroute_cli" / "pi_attested" / "verify_record.py").read_text()
+    for text, name in ((E.AUDIT_MD, "AUDIT.md"), (E.VERIFY_MD, "VERIFY.md"), (verifier, "verify_record.py")):
+        for anchored in ("28 absent", "37 of seq", "33 of the", "1..65"):
+            assert anchored not in text, f"{name} still prints {anchored!r}"
+
+
+def test_the_brief_tells_the_auditor_not_to_read_the_earlier_audits():
+    """It sends them to work in the directory where every prior report sits under an obvious name, and
+    said nothing about them. The instruction has to ship with the pack, not ride in a covering message."""
+    brief = E.AUDIT_MD
+    assert "do not read what is already there" in brief
+    i = brief.index("do not read what is already there")
+    assert "independent" in brief[i:i + 500]
+
+
+def test_the_confidentiality_section_gives_no_paragraph_to_copy():
+    """Its worked example was reproduced almost clause for clause by the auditor who met it — the same
+    reason the self-disclosure section had its example removed."""
+    brief = E.AUDIT_MD
+    assert "No model paragraph is given" in brief
+    assert "The shape, not a form of words to copy" not in brief

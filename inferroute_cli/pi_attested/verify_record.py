@@ -548,6 +548,16 @@ def _parse_time(s: Any) -> Optional["datetime.datetime"]:
     return d.astimezone(datetime.timezone.utc)
 
 
+def _ref_windowed(reference: Dict[str, Any]) -> bool:
+    """True when ANY reference entry carries a validity window or a retired flag. With none, the whole
+    windowing apparatus is inert for this reference and no row may imply a time was checked."""
+    for field in ("policy_sha256", "index_manifest_sha256", "model_manifest_sha256"):
+        for e in _ref_entries(reference, field):
+            if e.get("valid_from") or e.get("valid_to") or e.get("retired"):
+                return True
+    return False
+
+
 def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str]) -> Tuple[bool, str]:
     """(current_match, why). EVERY entry whose value matches is evaluated: the match is current if ANY of
     them is current at the statement's time (that entry is reported); it is refused only when no matching
@@ -625,8 +635,19 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
     body = {k: v for k, v in reference.items() if k != "sig"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(key_hex)).verify(bytes.fromhex(str(sig)), canonical(body))
+        # An auditor on 25 Sep read this program and found what the row did not say: the key you pass is
+        # never compared against anything outside the reference, and the command VERIFY.md recommends takes
+        # it from a file beside the reference that holds the reference's OWN publication_key. The signature
+        # then verifies under a key the signed file names about itself — self-consistency, which is a real
+        # property and not the one the word "verifies" suggests. The program cannot fix that; it can refuse
+        # to let it pass unremarked, so the row now says which of the two it is.
+        self_named = str(reference.get("publication_key") or "").strip().lower() == key_hex.strip().lower()
         c.add(True, "reference signature", f"verifies under the publication key {key_hex[:16]}… that you supplied "
-              "(whether it was recorded at first use is yours to attest, not this program's)")
+              + ("— but that key is the one THIS REFERENCE NAMES ABOUT ITSELF (its publication_key field), so "
+                 "this is self-consistency, NOT authentication: a substituted reference carrying its own key "
+                 "would pass this row identically. Compare the fingerprint against your engagement letter."
+                 if self_named else
+                 "(whether it was recorded at first use is yours to attest, not this program's)"))
     except Exception:                                       # noqa: BLE001
         c.add(False, "reference signature", "does NOT verify under the given publication key")
 
@@ -706,8 +727,11 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Op
     #
     #   * The BENIGN case named first, because on real data it is the common one. An enclave serves every
     #     matter on the professional's installation, so a record of one matter is missing the searches of
-    #     all the others by construction. Measured on this machine the same day: 37 of seq 1..65 carried,
-    #     28 absent, all of them other matters. Leading with "another client" invites a solo practitioner
+    #     all the others by construction — measured on a real installation, most of the range was absent
+    #     and every absent number belonged to another matter. (The counts were written out here until
+    #     25 Sep; the brief sends auditors to read this file before computing anything, so printing the
+    #     answer to the one claim whose whole content is a count made recall and arithmetic
+    #     indistinguishable.) Leading with "another client" invites a solo practitioner
     #     to report a breach where there is a second matter.
     #   * The list is BOUNDED. `f"{missing}"` on a long-lived enclave prints thousands of numbers into a
     #     verifier's output; the count is the fact, the numbers are the illustration.
@@ -824,7 +848,10 @@ def check_identity(c: "Checks", rd: Dict[str, Any], p: Optional[Dict[str, Any]],
         c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
               f"policy: {pol_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — against reference "
               f"{reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}"
-              + (f", at the search's time {at}" if at else ""))
+              # Only claim a time was tested when some entry actually carries a window. With none, every
+              # match is current by default and "at the search's time X" reads as a check that did not
+              # happen — flagged by an auditor on 25 Sep as decorative, which on this record it was.
+              + (f", at the search's time {at}" if at and _ref_windowed(reference) else ""))
 
 
 

@@ -1850,7 +1850,11 @@ export default function (pi: ExtensionAPI) {
 			...(marksCoveredByLastPress ? [] : [lastFanout ? STEP_DEEP_FOCUSED : STEP_DEEP]),
 			...(relevant.length ? [STEP_DEEPER] : []),
 			...relevant.slice(0, 2).map(stepLike),
-			...(entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),
+			// Only once a search HAS run: the step says "continue the survey", and a sitting that has not
+			// searched has no survey to continue. Marks outlive a session, so without this a fresh one
+			// offers to continue something that never started. Same rule as the page, which gates on
+			// whether any search card is on screen.
+			...(searchNo > 0 && entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),
 		];
 		const text = [
 			"[Probant note: the professional's relevance marks as of this message — their judgment, not yours. " +

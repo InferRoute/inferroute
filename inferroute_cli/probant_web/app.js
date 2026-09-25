@@ -380,8 +380,14 @@
     const relevant = relevantOrdered().filter(isNew);
     const excluded = Array.from(marks.keys()).some((k) => isNew(k) && (marks.get(k) === "known" || marks.get(k) === "not-relevant"));
     const like = relevant.slice(0, 2).map((k) => `Find documents like ${k}`);
-    if (onlyNew) return [...like.slice(0, 1), ...(relevant.length ? [DEEPER] : []), ...like.slice(1), ...(excluded ? [LEAVE_OUT] : [])];
-    return [...(relevant.length ? [DEEPER] : []), ...like, ...(excluded ? [LEAVE_OUT] : [])];
+    // "CONTINUE the survey" presupposes one. Marks belong to the MATTER and outlive a sitting, so a fresh
+    // session opens holding every mark the professional ever made and was offering to continue a survey
+    // that had not started — Henry, 25 Sep: "now im seeing this while the session is still fully empty".
+    // The other mark steps are fine with nothing on screen: "find documents like US-X" is a new search,
+    // not a continuation. This one is the only one whose words claim something about what has happened.
+    const canContinue = excluded && cards.size > 0;
+    if (onlyNew) return [...like.slice(0, 1), ...(relevant.length ? [DEEPER] : []), ...like.slice(1), ...(canContinue ? [LEAVE_OUT] : [])];
+    return [...(relevant.length ? [DEEPER] : []), ...like, ...(canContinue ? [LEAVE_OUT] : [])];
   }
   // Does the assistant's list already offer this, perhaps in its own words? A publication number named anywhere
   // in it covers "find documents like" that document.

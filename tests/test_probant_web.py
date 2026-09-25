@@ -1503,3 +1503,38 @@ def test_what_a_folded_leg_hides_is_its_documents_and_not_its_headline():
     assert '.deep-leg-head::before { content: "▾ "; }'.replace('{ content', '{ content') in css or \
            '.deep-leg-head::before' in css
     assert '.deep-leg.folded > .deep-leg-head::before { content: "▸ "; }' in css
+
+
+def test_the_page_offers_to_continue_a_survey_only_once_one_is_on_screen():
+    """Henry, 25 Sep: "now im seeing this while the session is still fully empty, thats not right:
+    Continue the survey, leaving out what I marked known or not relevant".
+
+    Marks belong to the MATTER and outlive a sitting, so a fresh session opens holding every mark ever
+    made. The other mark steps survive that — "find documents like US-X" is a new search, not a
+    continuation. This is the only step whose words claim something about what has already happened in the
+    room, and it was claiming it in an empty one.
+
+    Run through the page's own markCandidates rather than read off the source: the extension side of this
+    had a test and the page side did not, which is why the page is where Henry saw it."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "mark_steps_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert "continue, leaving out" not in out["emptySession"], \
+        "an empty sitting offered to continue a survey that had not started"
+    # The steps that stay honest with nothing on screen are still offered.
+    assert "Find documents like US-A1" in out["emptySession"]
+    assert "look deeper" in out["emptySession"]
+
+    assert "continue, leaving out" in out["afterSearching"], \
+        "once a survey is on screen, continuing it is exactly the right offer"
+    # And with nothing set aside there is nothing to leave out, searches or not.
+    assert "continue, leaving out" not in out["onlyRelevant"]

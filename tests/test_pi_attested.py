@@ -1280,6 +1280,11 @@ def test_the_press_says_which_leg_is_the_ranking():
 
     assert "Read the whole-disclosure query first" in body
     assert "it is the ranked list" in body
+    # EIGHT registered combinations under ONE fusion rule were tested — not all combinations. The first
+    # wording said "beats any combination", which claims a universal from a sample of eight and would be
+    # falsified by a single better fusion. sealed-research caught it; e109 exists to try exactly that.
+    assert "no tested " in body and "combination of these queries beat it" in body
+    assert "beats any combination" not in body
     # A measured claim in an auditor-facing document carries its date, so a reader months later can ask
     # whether it still holds rather than assume. sealed-research has registered notifying this lane
     # before any fusion result ships; until then the date is what lets the sentence age honestly.

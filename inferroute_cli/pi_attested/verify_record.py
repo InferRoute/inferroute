@@ -90,7 +90,12 @@ UVM_MIN_SVN = 100
 
 MIN_CRYPTOGRAPHY = 42            # not_valid_before_utc needs 42+; signature_algorithm_parameters 41+
 REQUIRED_FILES = ("record.html", "searches.json", "verify_record.py", "VERIFY.md")
-UNLISTED_OK = {"MANIFEST.json", "MANIFEST.json.ots", "SHA256SUMS"}
+# Present in the folder and deliberately NOT in the manifest's file list. REPORT-TEMPLATE.md is stationery
+# — an audit pack invites the auditor to fill it in, so pinning it would fail the integrity check the
+# moment they did what they were asked. On 2026-09-25 exactly that happened: one auditor filled it in where
+# it lay, and a second auditor running in the same folder found the pack broken and was one step from
+# filing evidence tampering that was really a colleague's scratch edit.
+UNLISTED_OK = {"MANIFEST.json", "MANIFEST.json.ots", "SHA256SUMS", "REPORT-TEMPLATE.md"}
 OPTIONAL_FILES = ("unanswered.json",)            # present only when a sealed search went unanswered
 
 _AMD = "1.3.6.1.4.1.3704.1."

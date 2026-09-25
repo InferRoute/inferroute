@@ -1307,3 +1307,26 @@ def test_the_exporter_accounts_for_operations_missing_from_this_record(tmp_path,
     brief = re.sub(r"\s+", " ", E.AUDIT_MD)
     assert "the exporter answering the question the verifier tells you to ask it" in brief
     assert "A non-zero `unaccounted` is still exactly that finding" in brief
+
+
+def test_the_brief_asks_the_auditor_about_its_own_independence():
+    """Round 4 of the audit loop did this unprompted: it noticed the vendor's own repository on the
+    filesystem it was working in, stated that none of its findings drew on it, and told the professional
+    the audit was not run from an unrelated third party's machine.
+
+    That is the one part of the report only the auditor can write, and claim 3 makes it unavoidable —
+    a report that asks whether a REFERENCE is independent of the party that produced it, and never asks
+    the same of itself, is incomplete. Three of four audits did not raise it."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "Say what about YOUR OWN position could affect this audit" in b
+    assert "also holds InferRoute's source or internal material, say so" in b
+    assert "the same question applies to you" in b
+    assert "It is the one part of the report only you can write" in b
+
+    # And the skeleton carries the heading, so it is not a paragraph to be skipped.
+    tmpl = E.report_template()
+    assert "## About this audit" in tmpl
+    assert tmpl.index("## About this audit") < tmpl.index("## Claim 1"), "it must come before the claims"

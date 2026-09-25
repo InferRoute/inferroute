@@ -1117,6 +1117,23 @@ InferRoute's. It substituted the verifier's check names for these claims, and th
 mislabel — the claim that most needed judgement was never reached, and its report gave no sign of the
 gap. Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
 
+## Say what about YOUR OWN position could affect this audit
+
+Before the claims, in two or three sentences: who you are, what you had access to, and anything about
+where or how you ran that a reader should weigh. If you audited on a machine that also holds InferRoute's
+source or internal material, say so. If you had network access, say so. If you are the same kind of
+system as the one that produced the record, say so.
+
+An auditor on 25 Sep did this unprompted — it noticed the vendor's own repository on the filesystem it
+was working in, stated that none of its findings drew on it, and said the professional should know the
+audit was not run from an unrelated third party's machine. That disclosure cost it nothing and told the
+reader something no verdict could. Claim 3 asks you to weigh whether a reference is independent of the
+party that produced it; the same question applies to you, and a report that raises it about the evidence
+and not about itself is incomplete.
+
+This is not a confession and it is not a disclaimer to be waved through. It is the one part of the report
+only you can write.
+
 ## A verdict may not be VERIFIED while part of the claim is unchecked
 
 If a claim has parts you could not check, VERIFIED is the wrong word for it — whatever the parts you DID
@@ -1450,6 +1467,12 @@ def report_template() -> str:
            "Each verdict is one of exactly three words: **VERIFIED**, **NOT VERIFIED**, **COULD NOT CHECK**.",
            "There is no fourth. VERIFIED is wrong while any part of the claim is unchecked; say what you did",
            "reach, and name what you did not. If you verified on a sample, give the sample size.",
+           "",
+           "## About this audit",
+           "",
+           "<who you are, what you had access to, and anything about where or how you ran that a reader",
+           "should weigh — including whether the machine you audited on also holds the vendor's own",
+           "material. Only you can write this.>",
            ""]
     for n, title in claims:
         out += [f"## Claim {n} — {title}",

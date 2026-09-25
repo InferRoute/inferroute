@@ -17,7 +17,7 @@ je l'ai relue.
 J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts
 provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me
 semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment
-qu'il fallait tenter. L'échange m'a été utile : j'en suis ressorti avec des nuances que je n'avais pas.
+qu'il fallait tenter.
 
 Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provisoires ne seront pas valables
 et qu'il faut les reprendre. Je vous confirme ma volonté d'y aller, et je suis à votre disposition pour
@@ -149,6 +149,10 @@ Henry Declety
   « **l'ingénieur partageait le sentiment qu'il fallait tenter** » = ce que lui a dit, et rien de plus.
   Si ces trois-là se fondaient en une seule voix, la lettre ferait dire à l'INPI que vos concepts sont
   brevetables — ce qu'il n'a pas dit, et ce que votre lecteur vérifierait.
+- **« L'échange m'a été utile… » retiré** : la phrase disait ce que vous aviez retiré de l'entretien,
+  et non ce qu'il en ressortait pour lui. Devant quelqu'un dont c'est le métier, dire qu'on a appris
+  des nuances invite à se demander lesquelles — et la lettre ne les donne pas. Le paragraphe va plus
+  vite sans elle.
 - Le verdict de l'entretien n'est toujours pas caractérisé, et pas davantage par un synonyme
   (« mitigé », « sans réponse tranchée » diraient la même chose autrement).
 - **Ce que l'INPI a changé, et ce qu'il n'a pas changé** : il n'est pas à l'origine de la décision de

@@ -898,6 +898,54 @@ def check_revocation(c: Checks, chains: List[Tuple[str, Any, Any]], *, timeout: 
     return all_checked
 
 
+# --- Who says this key is theirs -----------------------------------------------------------------------
+#
+# Every auditor from 24 Sep on reached the same objection and none of them could get past it: the
+# publication key reaches the reader from the audited party, so a reference agreeing with it proves only
+# that the party agrees with itself. The row above can name that honestly and no more.
+#
+# An attestation changes what the row can say. If the pack carries a Sigstore bundle over a document
+# naming the key, then a verified identity committed to that key, certified by Fulcio, and the commitment
+# sits in Rekor -- an append-only log operated by neither party. That kills SUBSTITUTION and BACK-DATING,
+# which is what the objection is actually about. It does NOT make the key independent of the party whose
+# key it is, and this program must not imply otherwise.
+#
+# Deliberately NOT verified here. Checking a Sigstore bundle means Fulcio and Rekor roots, certificate
+# transparency and an inclusion proof — a second trust root system inside a program whose whole value is
+# that a stranger can read all of it. So this reports the attestation's PRESENCE and prints the exact
+# command that checks it, and never claims the check was done. A row that said "attested" on the strength
+# of a file in the same folder would be the circularity it exists to break, wearing a better word.
+
+def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_path: Optional[str],
+                          key_hex: Optional[str]) -> None:
+    if not bundle_path or not attestation_path:
+        c.add(None, "publication key attested out of band",
+              "no attestation in this folder — the key rests on however you obtained it, and if that was "
+              "from the audited party then agreement with it is self-consistency. See "
+              "https://inferroute.ai/trust/ for the published attestation and check it yourself.")
+        return
+    try:
+        att = json.load(open(attestation_path))
+        named = str(att.get("publication_key") or "").strip().lower()
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "publication key attested out of band",
+              f"attestation present but unreadable ({type(exc).__name__})")
+        return
+    if key_hex and named != key_hex.strip().lower():
+        c.add(False, "publication key attested out of band",
+              f"the attestation names {named[:16]}… but the key in use is {key_hex[:16]}… — they are "
+              "different keys, and that is a finding, not a formatting difference")
+        return
+    c.add(None, "publication key attested out of band",
+          f"an attestation naming {named[:16]}… and a signature bundle are present, and THIS PROGRAM HAS "
+          "NOT CHECKED THEM — verifying a Sigstore bundle needs Fulcio and Rekor roots this verifier "
+          "deliberately does not carry. Run it yourself; it asks the audited party for nothing:\n"
+          "         cosign verify-blob --bundle <bundle> --certificate-identity <the identity> \\\n"
+          "             --certificate-oidc-issuer https://accounts.google.com <attestation.json>\n"
+          "         If it passes, a verified identity committed to this key in a public append-only log, "
+          "which closes substitution and back-dating. It does NOT make the key independent of its owner.")
+
+
 def _ref_windowed(reference: Dict[str, Any]) -> bool:
     """True when ANY reference entry carries a validity window or a retired flag. With none, the whole
     windowing apparatus is inert for this reference and no row may imply a time was checked."""
@@ -1630,6 +1678,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     c0, manifest = check_manifest(a.bundle)
     if reference is not None:
         check_reference_signature(c0, reference, a.reference_key)
+        _att = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.json")
+        _bun = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.bundle")
+        check_key_attestation(c0, _bun if os.path.isfile(_bun) else None,
+                              _att if os.path.isfile(_att) else None, a.reference_key)
     c0.dump()
     fails = len(c0.failed)
     try:

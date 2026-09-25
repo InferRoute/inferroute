@@ -1984,6 +1984,15 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
             anchor_files["trust-anchors/reference.json.ots"] = ots.read_bytes()
     if key:
         anchor_files["trust-anchors/publication-key.txt"] = (str(key).strip() + "\n").encode("utf-8")
+        # The attestation and its Sigstore bundle, when this installation has them. They are the only
+        # thing in trust-anchors/ an auditor can check WITHOUT us: the rest of this folder is ours, and
+        # a key that reaches them from us is self-consistency however many places we put it. Shipped
+        # beside the key rather than instead of it, because the verifier compares the two and a
+        # disagreement between them is a finding.
+        for name in ("publication-key-attestation.json", "publication-key-attestation.bundle"):
+            src = Path(__file__).resolve().parent.parent / "docs" / "trust" / name
+            if src.is_file():
+                anchor_files[f"trust-anchors/{name}"] = src.read_bytes()
     block = anchor_block(Path(str(ref) + ".ots")) if ref else {}
     # STATIONERY, not evidence. The report template is the one file in this folder that is MEANT to be
     # written to, so it must not sit in SHA256SUMS: an auditor on 25 Sep filled it in where it lay and

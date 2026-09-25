@@ -6,6 +6,7 @@ the only check lines allowed to differ are the ones that need the withheld text,
 SKIP, never PASS.
 """
 import json
+from pathlib import Path
 from types import SimpleNamespace
 import re
 import stat
@@ -821,7 +822,12 @@ def test_the_manifest_accounts_for_every_file_in_the_folder(tmp_path, V, kms, mo
     m = json.loads((pack / "MANIFEST.json").read_text())
 
     anchors = m["trust_anchors"]["files"]
-    assert set(anchors) == {"trust-anchors/reference.json", "trust-anchors/reference.json.ots",
+    # The attestation and its bundle join the anchors from 25 Sep. They are the only thing in
+    # trust-anchors/ an auditor can check WITHOUT the audited party, so they belong beside the key
+    # rather than instead of it — the verifier compares the two and a disagreement is a finding.
+    assert set(anchors) <= {"trust-anchors/publication-key-attestation.json",
+                            "trust-anchors/publication-key-attestation.bundle",
+                            "trust-anchors/reference.json", "trust-anchors/reference.json.ots",
                             "trust-anchors/publication-key.txt"}, anchors
     for name, sha in anchors.items():
         assert E._sha256_hex((pack / name).read_bytes()) == sha, name
@@ -1653,3 +1659,41 @@ def test_the_hard_parse_warns_that_a_wrong_read_looks_like_our_failure():
     flat = re.sub(r"\s+", " ", E.AUDIT_MD)
     assert "suspect your parse before you suspect the evidence" in flat
     assert "type 6" in flat and "type 5" in flat
+
+
+def test_the_attestation_travels_with_the_pack_and_is_not_claimed_as_checked():
+    """The attestation is the only item in trust-anchors/ an auditor can check without us. It must ship,
+    it must be compared against the key in use, and the verifier must NOT say it verified it: checking a
+    Sigstore bundle needs Fulcio and Rekor roots this verifier deliberately does not carry, and a row
+    reading "attested" on the strength of a file in the same folder would be the circularity it exists
+    to break, wearing a better word."""
+    src = Path(__file__).resolve().parent.parent / "docs" / "trust"
+    assert (src / "publication-key-attestation.json").is_file()
+    assert (src / "publication-key-attestation.bundle").is_file()
+
+    raw = (Path(__file__).resolve().parent.parent
+           / "inferroute_cli" / "pi_attested" / "verify_record.py").read_text()
+    # Join adjacent string literals before matching. Four times today an assertion has failed because a
+    # rewrap moved a "+" or a line break into the middle of a pinned phrase, on text that was correct.
+    verifier = re.sub(r'"\s*\n\s*"', "", raw)
+    assert "def check_key_attestation" in verifier
+    assert "THIS PROGRAM HAS NOT CHECKED THEM" in verifier
+    assert "cosign verify-blob" in verifier
+    # and it must keep saying what the attestation does not do
+    assert "does NOT make the key independent of its owner" in verifier
+
+
+def test_an_attestation_naming_a_different_key_is_a_finding(tmp_path):
+    from tests.test_verify_record import _load
+    V = _load()
+    att = tmp_path / "a.json"
+    att.write_text(json.dumps({"publication_key": "bb" * 32}))
+    bundle = tmp_path / "a.bundle"; bundle.write_text("{}")
+    c = V.Checks()
+    V.check_key_attestation(c, str(bundle), str(att), "aa" * 32)
+    assert c.rows[0][0] == "FAIL"
+    assert "different keys" in c.rows[0][2]
+    # inversion: the same key agreeing must NOT fail
+    c2 = V.Checks()
+    V.check_key_attestation(c2, str(bundle), str(att), "bb" * 32)
+    assert c2.rows[0][0] != "FAIL"

@@ -1677,7 +1677,22 @@ export default function (pi: ExtensionAPI) {
 				// Permanent, not a placeholder: the family map that would collapse siblings lives on the
 				// search side, and guessing family from publication numbers misses the cross-jurisdiction
 				// siblings that are most of the duplication. Say it rather than let it look merged.
-				"These are the combined results of separate queries, not a merged ranking: the same invention may appear more than once under different publication numbers.",
+				// WHICH LIST IS THE RANKING, and why the others are not merged into it. Measured on
+				// sealed-research's survey bench, DEV n=297, 25 Sep: the whole-disclosure leg alone ranks
+				// BETTER than any fan-out arm they tried (famR@100 0.3665; best arm -0.005, worst -0.052).
+				// Yet the legs' union reaches 57.8% of gold families at depth 200 against the head's
+				// 38.2% — the extra legs genuinely find +19.6 points more — and reciprocal-rank fusion
+				// lands at 33.1%, BELOW the head, displacing gold the head had. So the fan-out finds and
+				// fusion loses. Presenting one merged list would therefore be worse than presenting none,
+				// which is why these stay separate: not a caveat about our tidiness, a measured result.
+				legs.some((l) => l.feature === "the disclosure as a whole")
+					? "Read the whole-disclosure query first: on a measured benchmark its ranking beats any "
+						+ "combination of these queries, so it is the ranked list. The others are REACH, not "
+						+ "ranking — together they surface documents the first query never reaches, and they "
+						+ "are listed separately because merging them measurably buries what the first one found."
+					: "These queries are listed separately, not merged into one ranking: merging measurably "
+						+ "buries good results rather than improving them. Read each on its own terms.",
+				"The same invention may appear more than once under different publication numbers.",
 			].filter(Boolean).join(" ");
 
 			return {

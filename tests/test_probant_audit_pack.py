@@ -1330,3 +1330,30 @@ def test_the_brief_asks_the_auditor_about_its_own_independence():
     tmpl = E.report_template()
     assert "## About this audit" in tmpl
     assert tmpl.index("## About this audit") < tmpl.index("## Claim 1"), "it must come before the claims"
+
+
+def test_the_brief_disarms_the_last_modified_trap():
+    """Round 5 of the audit loop fetched the published reference and found its HTTP `Last-Modified` within
+    thirty seconds of the pack's own `generated_at`. It could not rule out that the reference had been
+    republished to fit the record, and reported the observation unresolved.
+
+    It had not been. The bytes were unchanged — same sha256 as the copy anchored in Bitcoin block 968451
+    three days earlier — and the header moved only because deploying an unrelated file re-stamps every
+    static file on the host. The auditor was right to flag it and right not to resolve it in our favour,
+    which is exactly why the brief has to answer it rather than leave each one to discover it alone.
+
+    The answer must not be "trust us": it is an arithmetic check the auditor already has the inputs for."""
+    from inferroute_cli import probant_export as E
+    import re
+    v = re.sub(r"\s+", " ", E.AUDIT_MD)          # claim 3 lives in the brief
+
+    assert "Ignore the HTTP `Last-Modified` on that fetch. It is not the reference's age." in v
+    assert "re-stamps every file it serves whenever anything on the site is deployed" in v
+    # The auditor's own observation is preserved rather than smoothed over.
+    assert "within THIRTY SECONDS of the pack's own `generated_at`" in v
+    assert "right to flag what it saw, and right not to resolve it in our favour" in v
+    # And the resolution is a computation, not an assurance.
+    assert "Hash the bytes you fetched and compare them with what the timestamp proof commits to" in v
+    assert "curl -s https://inferroute.ai/reference/current.json | sha256sum" in v
+    # Including what a genuine mismatch would mean — the check has to be able to fail.
+    assert "If they DISAGREE, that is a real finding and a serious one" in v

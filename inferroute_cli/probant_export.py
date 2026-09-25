@@ -927,6 +927,24 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    question from whether InferRoute's statement is true — and it bears on that only when the publishing
    machine is not the audited one. Establish that before crediting the fetch; VERIFY.md §3 says how.
 
+   **Ignore the HTTP `Last-Modified` on that fetch. It is not the reference's age.** The page is served
+   from a general-purpose static host, which re-stamps every file it serves whenever anything on the site
+   is deployed — a client wheel, an unrelated page. An auditor on 25 Sep fetched the reference and found
+   `Last-Modified` within THIRTY SECONDS of the pack's own `generated_at`, could not rule out that the
+   reference had been republished to fit the record, and said so. It had not: the bytes were unchanged
+   and their timestamp proof was three days older than the header. But the auditor was right to flag what
+   it saw, and right not to resolve it in our favour.
+
+   The answer is in the folder and does not depend on any header. Hash the bytes you fetched and compare
+   them with what the timestamp proof commits to:
+
+       curl -s https://inferroute.ai/reference/current.json | sha256sum
+       ots info trust-anchors/reference.json.ots | head -1
+
+   If those agree, the file you just downloaded is the file that was anchored, whatever date the web
+   server put on it — and the anchor's date is the one that is not ours. If they DISAGREE, that is a real
+   finding and a serious one: the published reference has changed since it was anchored.
+
    **If `trust-anchors/reference.json.ots` is present, check it — it is the only date here that is not
    ours.** `ots verify` it, confirm with `ots info` that it commits to the sha256 of
    `trust-anchors/reference.json` and not to some other bytes, and compare its time with the statements'

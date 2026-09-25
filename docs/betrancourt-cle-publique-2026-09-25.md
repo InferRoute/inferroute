@@ -18,6 +18,22 @@ Je vous adresse en début de semaine prochaine le travail préparatoire dont nou
 qui l'a produit. L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de
 l'ensemble non déposé, et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
 
+Un mot sur ce qui arrive, puisque nous en avions parlé et que vous aviez bien voulu vous dire prêt à
+l'essayer.
+
+L'outil sera prêt **en début de semaine prochaine**. Il aura demandé plus de travail que je ne le
+pensais, et pas du côté où je l'attendais : l'essentiel des dernières semaines est passé non pas à
+produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un tiers puisse refaire les
+vérifications lui-même, sans avoir à nous croire sur parole. Pour un cabinet, c'est la partie qui compte,
+et c'est celle qui prend le temps.
+
+Deux choses seront vraies le jour où vous l'ouvrirez. La recherche s'exécute sans que l'invention non
+déposée quitte votre poste en clair — la difficulté même d'une recherche d'antériorité avant dépôt. Et
+chaque recherche laisse une pièce datée, scellée, qu'un tiers peut revérifier des années plus tard.
+
+Cela couvre ce que vous m'aviez demandé, et un peu plus. Je suis impatient que vous le mettiez à
+l'épreuve : à partir de là, c'est votre lecture qui dira si c'est utile, et je n'ai pas de meilleur juge.
+
 Il me faut donc votre **clé publique**, et c'est tout ce que demande cette lettre-ci. Vous n'avez rien à
 installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
 
@@ -86,6 +102,20 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **Le rappel produit : ce qu'il dit et ce qu'il ne dit pas.** Il reste au niveau des PROPRIÉTÉS (la
+  recherche sans exposition, la pièce revérifiable), jamais des mécanismes — c'est exactement la limite
+  posée le 22 sept. Pas de chiffre, pas de « état de l'art », pas de pourcentages de leviers, rien sur la
+  confirmation agentique, et surtout aucune mention de ce qui est omis : annoncer une omission la
+  désigne. Les deux propriétés citées sont celles de la lettre d'origine, reprises telles quelles.
+- **Un blanc à combler, si vous voulez** : « ce que vous m'aviez demandé » reste volontairement vague,
+  parce que je ne sais pas de quoi il s'agissait. Si c'était la question de regroupement, nommez-la —
+  une phrase qui montre que vous vous en souvenez vaut plus que tout le reste du paragraphe.
+- **Le chiffre (~0,19) n'y est pas, alors qu'il était autorisé par écrit.** Dans une lettre complète il
+  est honnête parce qu'il est cadré (« c'est peu », et pourquoi). Dans un rappel de quatre phrases il
+  n'a pas la place d'être cadré, et un chiffre non cadré se retient mal. Il appartient à l'envoi de la
+  semaine prochaine.
+- **« plus de travail que je ne le pensais »** est vrai et vérifiable : les dernières semaines sont
+  effectivement passées dans le contrôle plutôt que dans le moteur. Ce n'est pas une formule.
 - **Ce qui avait été perdu et qui est revenu** (vous l'aviez repéré) : la mention que la lettre est
   préparée par un LLM, qui ouvre chacune des précédentes ; la raison d'être de la clé (l'envoi porte de
   l'ensemble non déposé, donc il ne part pas en pièce jointe ordinaire) ; et l'argument lien-plutôt-que-

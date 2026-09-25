@@ -1378,3 +1378,24 @@ def test_the_verdict_line_carries_the_completeness_rule():
     for line in tmpl.splitlines():
         if line.startswith("**Verdict:**"):
             assert "could not reach" in line, line
+
+
+def test_the_brief_requires_every_stated_fact_to_have_been_read():
+    """Haiku's first round reported four field values that do not exist in the pack it was auditing —
+    a `"receipt": "none"` no session has, a `written_by` string no receipt contains, a `counters_mean`
+    field absent from the receipt it was quoted from, and "26" numbers in a range holding 28. All four
+    sat inside otherwise careful prose.
+
+    Its second round, given this rule explicitly, fabricated nothing: every figure I spot-checked was
+    correct. That is one round of evidence, not proof, but the rule costs nothing and the failure it
+    addresses is the one a reader without the pack cannot catch."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "Every fact you state about this folder must be one you read out of it" in b
+    assert "If you name a field, you opened that file. If you give a count, you counted." in b
+    # The failure named by its symptom, as the renumbering rule had to be.
+    assert "four field values that do not exist in the pack it was auditing" in b
+    # And why it matters more than an omission.
+    assert "worse than one that omits it, because the omission is visible and the invention is not" in b

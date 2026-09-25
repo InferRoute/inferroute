@@ -1152,6 +1152,23 @@ and not about itself is incomplete.
 This is not a confession and it is not a disclaimer to be waved through. It is the one part of the report
 only you can write.
 
+## Every fact you state about this folder must be one you read out of it
+
+Not "as I recall", not what a file of this kind usually contains — the value you read, from the file you
+read it in. If you name a field, you opened that file. If you give a count, you counted. If you say two
+things match, you printed both and they are in your report for the reader to compare.
+
+This is not pedantry about style. On 25 Sep an auditor reported four field values that do not exist in
+the pack it was auditing: two sessions marked `"receipt": "none"` when no session was, a `written_by`
+string that the receipt does not contain, a `counters_mean` field absent from the receipt it was quoted
+from, and a gap of "26" numbers where the range it named holds 28. Every one was checkable in seconds.
+They sat inside otherwise careful prose, and a reader with no access to the pack could not have caught
+any of them.
+
+A report that invents a detail is worse than one that omits it, because the omission is visible and the
+invention is not. If you are unsure whether you read something or assumed it, open the file again or
+leave it out and say you did not check.
+
 ## A verdict may not be VERIFIED while part of the claim is unchecked
 
 If a claim has parts you could not check, VERIFIED is the wrong word for it — whatever the parts you DID

@@ -15,10 +15,10 @@ Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un
 je l'ai relue.
 
 J'ai rencontré un ingénieur de l'INPI pour faire examiner la brevetabilité de concepts figurant dans les
-dépôts provisoires. Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre franchement non plus —
-et il m'a expliqué pourquoi l'informatique, et l'IA en particulier, s'y prêtent mal. J'en suis ressorti
-avec des nuances que je n'avais pas, et avec l'idée qu'il valait mieux tenter que renoncer. C'est ce que
-nous allons faire.
+dépôts provisoires. Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre
+franchement non plus — et il m'a expliqué pourquoi l'informatique, et l'IA en particulier, s'y prêtent
+mal. J'en suis ressorti avec des nuances que je n'avais pas, et avec l'idée qu'il valait mieux tenter
+que renoncer. C'est ce que nous allons faire.
 
 Je vous en parle parce que c'est votre métier et que ce n'est pas le mien. Si vous avez un avis
 là-dessus, je le prendrai volontiers.

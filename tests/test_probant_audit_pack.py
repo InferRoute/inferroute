@@ -1585,3 +1585,17 @@ def test_the_no_verified_while_unchecked_rule_has_a_scope():
     window = brief[i:i + 1400]
     assert "they do not by themselves downgrade a verdict" in window
     assert "a part you COULD have settled" in window
+
+
+def test_the_verifier_provenance_step_cannot_pollute_the_evidence_folder():
+    """`curl -sO` writes to the CURRENT directory, and the auditor starts in the pack. The brief's own
+    step (b) therefore dropped two files into the sealed set and broke the integrity check it tells them
+    to trust -- warning against the hazard on one line and causing it on another. Found by an auditor on
+    25 Sep, who hit it."""
+    brief = E.AUDIT_MD
+    i = brief.index("curl -sO")
+    window = brief[max(0, i - 200):i + 900]
+    assert "mktemp -d" in window, "step (b) still downloads into the current directory"
+    assert "present-but-unlisted" in window, "the consequence is not explained"
+    # and the hazard must be stated as a rule, not only shown in the command
+    assert "writes to the CURRENT directory" in window

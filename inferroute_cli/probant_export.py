@@ -1322,7 +1322,17 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
      on PyPI and nothing in the pack said where else to look. One of them put it exactly — "a URL in
      MANIFEST (unsigned, but findable) would make step (b) runnable" — so it is there now.
 
-         curl -sO <client_wheel_url>  &&  curl -sO <client_wheel_url>.sha256  &&  sha256sum -c *.sha256
+         d=$(mktemp -d) && ( cd "$d" && curl -sO <client_wheel_url> \
+              && curl -sO <client_wheel_url>.sha256 && sha256sum -c *.sha256 ) && echo "wheel in $d"
+
+     **Run it in that temp directory and not here, which is why the command makes one.** `curl -sO`
+     writes to the CURRENT directory, and the current directory is this folder — so the plain two-curl
+     version of this line, which is what the brief gave until 25 Sep, drops the wheel and its checksum
+     into the evidence set and the bundle-integrity check then reports `present-but-unlisted`. An
+     auditor did exactly that on the day it was fixed, on a brief whose step 3 already said in bold to
+     write nothing in here: the instruction warned against the hazard on one line and caused it on
+     another. If it has already happened to you, delete the two files you downloaded and re-run the
+     verifier — nothing is damaged, and say in your report that you did it.
 
      Read it for what it is. **Both the link and the version are the audited party naming itself**, and an
      unsigned URL we control proves nothing on its own — what the comparison is worth comes from the copy

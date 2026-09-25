@@ -14,12 +14,12 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Vous m'aviez dit votre intérêt à l'essayer. C'est ce qui me permet de vous écrire aujourd'hui, et je vous
-en remercie.
+Vous m'aviez dit votre intérêt à essayer l'outil de recherche d'antériorité dont nous avions parlé. Il
+sera prêt en début de semaine prochaine, et c'est ce qui me vaut de vous écrire aujourd'hui.
 
-En début de semaine prochaine, je vous adresse le travail préparatoire dont nous avons parlé, avec un
-outil pour le traiter. L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de
-l'ensemble non déposé, et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
+Je vous l'adresserai avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter.
+L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de l'ensemble non déposé,
+et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
 
 Il aura demandé plus de travail que je ne le pensais, et pas du côté où je l'attendais : l'essentiel des
 dernières semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en
@@ -103,6 +103,11 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **« l'essayer » n'avait pas d'antécédent** (votre remarque). C'était la deuxième phrase de la lettre,
+  et l'outil n'était nommé qu'au paragraphe suivant : le lecteur voyait un pronom avant la chose. Il est
+  nommé maintenant — « l'outil de recherche d'antériorité dont nous avions parlé » — et tous les « il »
+  et « l' » qui suivent s'y rattachent. Nommer la capacité ne touche pas à la limite PI : c'est la
+  formulation déjà retenue le 22 sept., et elle ne décrit aucun mécanisme.
 - **L'entrée s'appuie sur son accord, et remercie avant de demander.** « Vous m'aviez dit votre intérêt
   à l'essayer. C'est ce qui me permet de vous écrire aujourd'hui » : la demande découle de ce qu'il a
   déjà accordé au lieu de tomber sans raison. Les remerciements sont placés devant l'effort demandé,

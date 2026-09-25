@@ -157,9 +157,9 @@ vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux mi
 Il me faut pour cela votre **clé publique**. Quatre commandes dans un terminal, et la dernière l'affiche :
 
 ```
-curl -LO https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.18-py3-none-any.whl
+curl -LO https://inferroute.ai/client/inferroute-0.9.38-py3-none-any.whl
 python3 -m venv ~/probant
-~/probant/bin/pip install "./inferroute-0.9.18-py3-none-any.whl[confidential]"
+~/probant/bin/pip install "./inferroute-0.9.38-py3-none-any.whl[confidential]"
 ~/probant/bin/ir probant identity
 ```
 
@@ -180,7 +180,7 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 ~/probant/bin/ir probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/qsq7adtvwv3ug9/inferroute-0.9.18-py3-none-any.whl
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.38-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
@@ -350,7 +350,7 @@ InferRoute SASU
   point that exact tooling at our evidence.
 - **Note for when he does it:** the audit brief tells the auditor to treat the shipped verifier as
   untrusted and to compare it against the published package. That comparison now has something to compare
-  against — 0.9.14 is served at the link above, and its sha256 is beside it — but note the limit the brief
+  against — 0.9.38 is served at the link above, and its sha256 is beside it — but note the limit the brief
   itself states: the published copy is InferRoute's too, and it is published from the same machine the
   records are made on. It answers "was this minted here?" only for someone who can rule that out, which
   today nobody can. The value he records from THIS letter at first use is the copy that carries weight;
@@ -372,7 +372,11 @@ InferRoute SASU
   argued: unless it is obtained another way — a call, or the trial at Build 2 — the next engine version
   gets built without the one input the recall session calls its principal unknown. Worth raising by voice
   when he replies.
-- **Blocked on:** IP clearance only. The install blocker is gone — 0.9.14 is live at the link and installs
+- **The link in this letter is now the same one an audit pack names.** It was a per-recipient token path;
+  a pack's `client_wheel_url` points at the generic one, so Bétrancourt and anyone he hands the record to
+  are sent to the same file by the same URL. `robots.txt` keeps `/client/` out of search indexes either
+  way. The token path still serves 0.9.18 and is left alone rather than broken.
+- **Blocked on:** IP clearance only. The install blocker is gone — 0.9.38 is live at the link and installs
   with the two commands above, verified by fetching it back and comparing hashes on 24 Sep. The email's
   "dès que la version est prête" can therefore be dropped or kept; keeping it commits you to nothing, and
   dropping it removes a hedge that no longer describes the state.

@@ -1686,10 +1686,12 @@ export default function (pi: ExtensionAPI) {
 				// fusion loses. Presenting one merged list would therefore be worse than presenting none,
 				// which is why these stay separate: not a caveat about our tidiness, a measured result.
 				legs.some((l) => l.feature === "the disclosure as a whole")
-					? "Read the whole-disclosure query first: on a measured benchmark its ranking beats any "
-						+ "combination of these queries, so it is the ranked list. The others are REACH, not "
-						+ "ranking — together they surface documents the first query never reaches, and they "
-						+ "are listed separately because merging them measurably buries what the first one found."
+					? "Read the whole-disclosure query first: on a benchmark measured 2026-09-25 its ranking "
+						+ "beats any combination of these queries, so it is the ranked list. The others are "
+						+ "REACH, not ranking — together they surface documents the first query never reaches, "
+						+ "and they are listed separately because merging them measurably buries what the first "
+						+ "one found. That date is part of the claim: it is a measurement, it can be superseded, "
+						+ "and a record made long after it should be read with that in mind."
 					: "These queries are listed separately, not merged into one ranking: merging measurably "
 						+ "buries good results rather than improving them. Read each on its own terms.",
 				"The same invention may appear more than once under different publication numbers.",

@@ -167,9 +167,11 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
      each statement's `started_utc` and say which came first.
      **Expect the answer to be "some of each", and report it that way.** A reference is timestamped when
      it is published, and a matter searches whenever the professional works — so the anchor commonly lands
-     in the middle of a record. An auditor on 25 Sep found exactly that: the block was later than 33 of the
-     58 searches and earlier than 25. That is not a pass and not a failure; it means the proof covers the
-     searches after it and says nothing about the ones before. Give both counts.
+     in the middle of a record, and an auditor has found exactly that. It is not a pass and not a failure;
+     it means the proof covers the searches after it and says nothing about the ones before. Give both
+     counts, from your own comparison. The counts from that earlier record used to be printed here and
+     are not any more: one of them happened to coincide with a later record's, and the auditor who met it
+     had to go and establish that the agreement was a coincidence rather than their own recall.
    - `Pending confirmation in Bitcoin blockchain` means the calendars have committed to it but no block
      carries it yet — the date then rests on those servers rather than on Bitcoin. Run
      `ots upgrade trust-anchors/reference.json.ots` and re-verify; if it is still pending, say so and
@@ -880,7 +882,11 @@ by SHA-256), the verifier, and the reference InferRoute published.
 
 Expected consequence, not a problem: for each search the verifier prints SKIP for "query text is the one
 searched" and "result is the signed result". Those two need the withheld words. The professional's own
-computer ran them on the full record. You cannot redo them, so say so in the report.
+computer ran them on the full record. You cannot redo them, so say so in the report. A third consequence
+is quieter and was not stated here until an auditor traced it on 25 Sep: withholding the result also
+removes the verifier's hit-count row, which is only emitted when there is a result to count. The signed
+`hits_n` is therefore corroborated by nothing in this folder beyond not exceeding `k`. Do not report it
+as checked.
 
 What you CAN still infer: the dates, counts and timings in each statement, and any technology classes
 listed in its `cpc_predicted` field. Don't guess at the invention, and don't try to recover the texts.
@@ -902,13 +908,19 @@ numbered 3 here was never reached.
   - Claims 7 and 8 the verifier barely touches. Claim 7 rests on a receipt it does not parse; claim 8 on
     fields it reports but cannot corroborate.
 
-**Three verdicts, and the difference between two of them matters.** VERIFIED, NOT VERIFIED, COULD NOT
-CHECK. *Could not check* means the evidence for it is absent from this folder. *Not verified* means the
+**Four verdicts, and the difference between two of them matters.** VERIFIED, VERIFIED IN PART, NOT
+VERIFIED, COULD NOT CHECK — the same four `REPORT-TEMPLATE.md` defines, and there is no fifth.
+*Could not check* means the evidence for it is absent from this folder. *Not verified* means the
 evidence is here and it does not support the claim, or it supports it only on an assumption you are not
 willing to make. They are not interchangeable and the second is a finding: an auditor who only ever writes
 VERIFIED or COULD NOT CHECK will file a real objection as an absence of information, and a professional
 reading "could not check" concludes there was no data rather than that something is wrong. If the
 reference came from the machine whose records it validates, that is NOT VERIFIED on provenance, not a gap.
+*Verified in part* is for the common case: you reached some of the claim, all of what you reached held,
+and you name what you could not reach. Until 25 Sep this section said "three verdicts" and the template
+said "exactly four — do not invent a fifth", so the brief forbade the word its own mandatory form
+required. An auditor navigated the contradiction correctly and reported it; one reading the two in the
+other order would have been marked down by a rule this brief had broken itself.
 
 1. **Sealed hardware.** Each search ran inside an AMD SEV-SNP confidential machine with debugging
    disabled. The report is signed by a chip key (VCEK) that chains to AMD's root.
@@ -975,9 +987,13 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    from this record, how many of those this installation's OTHER matters hold, and how many remain
    unaccounted. Counts, never names — which matter, and what it searched, is not yours to see and is not
    there. It is self-reported and unsigned like everything else this machine says about itself, so weigh
-   it as a claim; what it changes is that there is now a claim to weigh instead of a silence. An auditor
-   on 25 Sep returned NOT VERIFIED on this claim over 28 absent numbers nothing could explain — which was
-   the right call on what they had. **A non-zero `unaccounted` is still exactly that finding.**
+   it as a claim; what it changes is that there is now a claim to weigh instead of a silence. Before this
+   row existed an auditor returned NOT VERIFIED here over a block of absent numbers nothing could explain,
+   which was the right call on what they had. **Read the row and say what it says, whichever way it comes
+   out** — a non-zero `unaccounted` is a finding, and a zero is the exporter's assertion that nothing is
+   missing, which is not the same as evidence that nothing is. Count the absent numbers yourself and give
+   both your count and the row's; do not take either from this brief, which deliberately no longer states
+   them.
 6. **Filters — what was given, and what the enclave says applying them did.** Each statement carries the
    filters it was given (`cutoff_date`, `from_date`, `offices`) and, from enclaves that report it, a
    matching object with counts over the candidates that filter saw — `cutoff_applied`, `from_date_applied`,
@@ -987,6 +1003,9 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    attestation of what software ran can establish it. A `removed_by_*` of 0 is legitimate — no candidate
    fell outside the bound — and is not evidence the filter did nothing. A statement with no `*_applied` is
    from an enclave that predates the report: the verifier SKIPs it, naming the gap, and so should you.
+   One asymmetry to know before you read its output: a filter that was neither GIVEN nor reported produces
+   no row at all — not even a SKIP, unlike the withheld texts. Silence in the verifier's output is
+   therefore not evidence about a filter. Read the signed statements directly, which is sound either way.
 
 7. **The CONVERSATION, not only the searches.** A matter's work happens in a sealed session with an AI
    machine, and `session-*.receipt.json` is this device's record of checking that machine before anything
@@ -1095,7 +1114,10 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    (`abstract`, `claims`, `description` as held, truncated or not_held). "The enclave returned the
    document" and "the enclave returned a fifth of one" are different claims, and only this field
    distinguishes them. Report the coverage with the verdict, never as a footnote.
-   **A record with no document reads does not VERIFY this claim — it leaves it COULD NOT CHECK.** On
+   **A rule, given rather than tested, because getting it wrong is serious and it is cheaper to tell you:
+   a record with no document reads does not VERIFY this claim — it leaves it COULD NOT CHECK.** Follow it
+   and we learn nothing about your judgement here, which we accept; what we are protecting is the reader.
+   On
    24 Sep an auditor reported it verified because `text_coverage` and `paper_coverage` were null in every
    search, reasoning that the fields exist and are correctly empty. A field that is null because nothing
    happened is an absence of evidence, and calling that a verified claim is the one mistake this brief
@@ -1143,13 +1165,9 @@ it prints fifteen of them, they are concrete, and the brief asks you to read the
 report has a "claim 4" about query text matching a hash, or a "claim 5" about the result, you are
 answering the verifier's list and not this one** — those are check names. Claim 4 here is whether the
 statements are untampered; claim 5 is whether anything was removed. Two auditors on 24 Sep made exactly
-that substitution, on a pack that already carried this instruction.
-
-This is not bookkeeping. On 24 Sep two auditors read the same pack and one of them answered a different
-list: its "claim 3" was about query text matching a hash, where claim 3 here is whether the software is
-InferRoute's. It substituted the verifier's check names for these claims, and the consequence was not a
-mislabel — the claim that most needed judgement was never reached, and its report gave no sign of the
-gap. Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
+that substitution, on a pack that already carried this instruction, and the consequence was not a
+mislabel: the claim that most needed judgement was never reached, and the report gave no sign of the gap.
+Quoting the titles makes that visible to whoever reads your report, and to you while writing it.
 
 ## Say what about YOUR OWN position could affect this audit
 
@@ -1207,9 +1225,11 @@ and never mentioned the online checks — having done the offline ones correctly
 this brief that the online ones were out of reach. Both were careful; only one verdict tells the reader
 what they are relying on.
 
-The same applies to a claim you verified on a SAMPLE. Two auditors recomputed claims 1, 2 and 4 by hand on
-two of thirty-nine searches, and took the other thirty-seven from `verify_record.py`. That is good work
-and the right method — say so in those words. "VERIFIED" without the sample size reads as thirty-nine.
+The same applies to a claim you verified on a SAMPLE, and here is the answer to the question that leaves
+open. Recomputing a handful by hand and taking the rest from `verify_record.py` is good work and the right
+method. It is **VERIFIED IN PART**, with the sample size in the verdict line — not VERIFIED, because the
+remainder rests on the tool, and that is exactly the unstated gap the paragraph above is about. "VERIFIED"
+with no sample size reads as all of them. If you recomputed every one, say that, and VERIFIED is yours.
 
 ## Last: one plain statement about confidentiality
 
@@ -1230,11 +1250,10 @@ What it may and may not say:
     hashes commit to texts you could not open.
   - Name the one thing a reader would otherwise assume and should not.
 
-The shape, not a form of words to copy: *"The invention text was encrypted on the professional's own
-computer to a key that a genuine AMD SEV-SNP machine's hardware report commits to, so no relay between
-them could read it; I verified that chain myself against AMD. I could not establish that the machine was
-InferRoute's rather than another party's, and nothing here shows what the software inside it did with the
-text after decrypting it."*
+No model paragraph is given. One used to be, and the auditor who met it on 25 Sep reported that their own
+closing had converged on its clause order — which is what the bullets above are for and what a worked
+example undoes. The self-disclosure section had its example removed for this reason; this one kept its
+until the same auditor pointed out the inconsistency.
 
 ## How long this takes
 
@@ -1333,6 +1352,12 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
    — then check the chain and the report signature with your own tools. Recompute REPORT_DATA from the
    runtime data, and the statement signature from the signer key.
 
+   **Work one directory up, and do not read what is already there.** The directory this folder sits in
+   may hold earlier audits of this same pack — reports, verifier output, previous extractions — under
+   names that say so. Do not open them. Your value here is an independent reading, and a verdict you have
+   seen is no longer one you reached; if you have already seen one, say so in your report, because a
+   reader weighing two agreeing audits needs to know whether they are two.
+
    **Write nothing inside this folder.** Its integrity check lists every file AT THE TOP LEVEL, so a scratch
    file you leave there is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about
    the evidence. Note the limit, because it cuts both ways: the check does not descend into subdirectories,
@@ -1368,8 +1393,11 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 Write each claim's verdict with its own title as the heading, so a claim you did not reach cannot be
 filled in by a heading you wrote yourself:
 
-    ### Claim N — <paste the claim's bold title from above, exactly>
-    VERDICT: VERIFIED | NOT VERIFIED | COULD NOT CHECK
+    ## Claim N — <paste the claim's bold title from above, exactly>
+    **Verdict:** VERIFIED | VERIFIED IN PART | NOT VERIFIED | COULD NOT CHECK
+
+(the heading level and the `**Verdict:**` form are the ones `REPORT-TEMPLATE.md` already prints — follow
+the template where the two ever differ, and tell us, because they should not)
 
 Then the evidence you used, and
 **which of it you computed yourself rather than taking from `verify_record.py`** — that distinction is the

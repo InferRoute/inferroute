@@ -21,20 +21,23 @@ Je vous l'adresserai avec le travail préparatoire dont nous avons parlé, qu'il
 L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de l'ensemble non déposé,
 et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
 
-Il aura demandé plus de travail que je ne le pensais, et pas du côté où je l'attendais : l'essentiel des
-dernières semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en
-sorte qu'un tiers puisse refaire les vérifications lui-même, sans avoir à nous croire sur parole. Pour un
-cabinet, c'est la partie qui compte, et c'est celle qui prend le temps.
+Il m'aura demandé plus de temps que prévu, et pas du côté où je l'attendais : l'essentiel des dernières
+semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un
+tiers puisse refaire les vérifications lui-même, sans avoir à nous croire sur parole. J'ai supposé que
+c'était la partie qui comptait le plus pour un cabinet ; vous me direz si je me suis trompé.
 
 Deux choses seront vraies le jour où vous l'ouvrirez. La recherche s'exécute sans que l'invention non
-déposée quitte votre poste en clair — la difficulté même d'une recherche d'antériorité avant dépôt. Et
-chaque recherche laisse une pièce datée, scellée, qu'un tiers peut revérifier des années plus tard.
+déposée quitte votre poste en clair, ce qui est la difficulté propre à une recherche avant dépôt. Et
+chaque recherche laisse une pièce datée et scellée, qu'un tiers peut revérifier plus tard sans nous.
 
-Cela couvre ce que vous m'aviez demandé, et un peu plus. Je suis impatient que vous le mettiez à
-l'épreuve : à partir de là, c'est votre lecture qui dira si c'est utile, et je n'ai pas de meilleur juge.
+J'espère que cela couvrira ce que vous m'aviez demandé, et peut-être un peu plus — mais c'est une
+première version, elle aura ses angles morts, et je préfère vous le dire avant que vous les trouviez.
+C'est pourquoi je suis impatient que vous la mettiez à l'épreuve : votre lecture dira si c'est utile, et
+je n'ai pas de meilleur juge.
 
 D'ici là, une seule chose de votre part, et je vous remercie par avance des quelques minutes qu'elle
-demande : il me faut votre **clé publique**, faute de quoi je ne peux rien vous adresser à vous seul.
+demande : il me faudrait votre **clé publique**. Sans elle je ne peux rien vous adresser à vous seul, et
+c'est la seule chose qui me manque.
 
 Vous n'avez rien à installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
 
@@ -103,6 +106,15 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **Ton : trois corrections d'orgueil.** « Pour un cabinet, c'est la partie qui compte » disait à un
+  avocat ce qui compte dans son métier — devenu « j'ai supposé que… ; vous me direz si je me suis
+  trompé ». « Cela couvre ce que vous m'aviez demandé » affirmait un résultat non constaté — devenu
+  « j'espère que cela couvrira ». Et « la difficulté même » revendiquait d'avoir résolu le problème
+  central ; il ne reste que la description de la difficulté.
+- **Un aveu ajouté, et je crois qu'il gagne plus qu'il ne coûte** : « c'est une première version, elle
+  aura ses angles morts, et je préfère vous le dire avant que vous les trouviez. » Il les trouvera. Le
+  dire d'avance transforme chaque défaut qu'il rencontrera en confirmation de votre franchise plutôt
+  qu'en démenti de vos promesses — et c'est vrai, ce qui est la seule raison valable de l'écrire.
 - **« l'essayer » n'avait pas d'antécédent** (votre remarque). C'était la deuxième phrase de la lettre,
   et l'outil n'était nommé qu'au paragraphe suivant : le lecteur voyait un pronom avant la chose. Il est
   nommé maintenant — « l'outil de recherche d'antériorité dont nous avions parlé » — et tous les « il »

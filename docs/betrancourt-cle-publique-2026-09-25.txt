@@ -8,7 +8,7 @@ Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provi
 
 L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
 
-Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui revient notamment sur les regroupements. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
+Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui porte notamment l'ordre de préférence des regroupements que vous m'aviez demandé. L'envoi est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
 
 Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 

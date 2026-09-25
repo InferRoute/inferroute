@@ -27,7 +27,7 @@ L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt
 prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
 
 Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui
-revient notamment sur les regroupements. L'envoi
+porte notamment l'ordre de préférence des regroupements que vous m'aviez demandé. L'envoi
 est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est
 la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
 
@@ -120,10 +120,11 @@ Henry Declety
   Une boîte aux lettres ne montre pas les appels, et l'absence de trace n'est pas l'absence de contact.
   Retiré. **Trois phrases de la lettre dépendent encore de ce qui s'est dit à cet appel** — voir
   ci-dessous.
-- **Deux phrases rendues indépendantes de ce qui s'est dit à l'appel**, faute de pouvoir le savoir :
-  les regroupements ne sont plus datés (« votre question du 4 septembre » ferait croire que vous avez
-  oublié l'appel s'il y a été question) ; l'accord de confidentialité s'appuie sur « ce dont nous étions
-  convenus l'un et l'autre », ce qui reste vrai que l'appel l'ait abordé ou non.
+- **Vos deux réponses intégrées.** L'ordre de préférence des regroupements n'a pas encore été donné et
+  passera par l'envoi : la lettre l'annonce donc comme contenu de l'envoi, sans dater sa question (la
+  dater ferait croire que vous avez oublié l'appel). L'accord de confidentialité n'est pas réglé : la
+  proposition reste, appuyée sur « ce dont nous étions convenus l'un et l'autre », ce qui est exact —
+  27 août de votre part, 31 août de la sienne, jamais conclu depuis.
 - **Ce que je ne peux pas retrouver** : l'appel lui-même. Pas de scope Calendar sur les jetons
   (annuaire, gmail.send, gmail.readonly), et en ajouter un suppose un consentement au navigateur. La
   boîte ne garde aucune trace côté Santarelli après le 7 septembre — cohérent avec un appel

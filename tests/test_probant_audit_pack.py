@@ -1357,3 +1357,24 @@ def test_the_brief_disarms_the_last_modified_trap():
     assert "curl -s https://inferroute.ai/reference/current.json | sha256sum" in v
     # Including what a genuine mismatch would mean — the check has to be able to fail.
     assert "If they DISAGREE, that is a real finding and a serious one" in v
+
+
+def test_the_verdict_line_carries_the_completeness_rule():
+    """Haiku, 25 Sep, wrote "**Verdict:** VERIFIED" on claim 3 and then, in the same section, wrote that
+    establishing the claim "depends on the publication key being InferRoute's, which I cannot verify from
+    this folder alone". Two sentences, four lines apart, contradicting each other.
+
+    The brief already forbids this in two separate places. Saying it a third time in the brief was not
+    going to work — the rule has to be at the point where the word is typed, which is the template's
+    Verdict line. Same reason the three allowed verdicts are printed under each heading rather than left
+    in a paragraph elsewhere."""
+    from inferroute_cli import probant_export as E
+
+    tmpl = E.report_template()
+    n = len(E.audit_claims())
+    assert tmpl.count("not VERIFIED if any part of this claim below is one you could not reach") == n, \
+        "the rule is missing from at least one claim's verdict line"
+    # It sits on the Verdict line itself, not in a preamble the reader has already scrolled past.
+    for line in tmpl.splitlines():
+        if line.startswith("**Verdict:**"):
+            assert "could not reach" in line, line

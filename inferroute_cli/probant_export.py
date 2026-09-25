@@ -1495,7 +1495,12 @@ def report_template() -> str:
     for n, title in claims:
         out += [f"## Claim {n} — {title}",
                 "",
-                "**Verdict:** ",
+                # The completeness rule printed where the word is written, not only in the brief. An
+                # auditor on 25 Sep wrote VERIFIED on claim 3 and then, in the same section, named a part
+                # of it it could not reach — the two sentences sat four lines apart. The brief says this
+                # twice; saying it a third time in the brief would have changed nothing.
+                "**Verdict:** _(VERIFIED, NOT VERIFIED or COULD NOT CHECK — and not VERIFIED if any part "
+                "of this claim below is one you could not reach)_",
                 "",
                 "**What I computed myself:** ",
                 "",

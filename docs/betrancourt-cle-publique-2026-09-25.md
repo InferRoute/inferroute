@@ -48,7 +48,7 @@ Si vous êtes partant, il me faudrait une chose de votre part d'ici là, et je v
 des quelques minutes qu'elle demande : votre **clé publique**. Sans elle je ne peux rien vous adresser à
 vous seul, et c'est la seule chose qui me manque.
 
-Vous n'avez rien à installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
+Vous n'avez rien à installer. Un fichier d'une centaine de lignes fait cela et rien d'autre :
 
 **https://inferroute.ai/client/cle-probant.py**
 
@@ -110,6 +110,19 @@ Henry Declety
 ---
 
 ## Notes pour Henry — ne pas envoyer
+
+- **Version à coller : `betrancourt-cle-publique-2026-09-25.txt`.** Ce fichier-ci est en Markdown ; les
+  `**gras**`, les `##` et les blocs de code ne s'affichent pas dans un client de messagerie, ils s'y
+  voient. Le `.txt` est engendré depuis ce document (pas réécrit à la main, donc pas de divergence
+  possible), sans la section présente, avec les commandes indentées de quatre espaces. La ligne de
+  commande y tient sur une seule ligne : si votre client la coupe, il faut la recoller avant envoi —
+  un `&&` cassé en deux donne une erreur chez lui et pas chez vous.
+- **Chaîne vérifiée une dernière fois, telle qu'il la vivra** : lien public → `curl` → la ligne exacte
+  de la lettre → carte de clé imprimée, sur une machine PEP 668, dans un HOME vierge. La copie publiée
+  et la copie locale du script ont le même sha256.
+- **« une centaine de lignes »** et non « quatre-vingt-dix » : le script en fait 99 depuis l'ajout du
+  message d'erreur. Un chiffre faux et vérifiable, devant ce lecteur-là, ne coûte rien à corriger et
+  cher à laisser.
 
 - **Pourquoi celui-ci peut partir aujourd'hui et la lettre complète non.** Le blocage était la revue PI,
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,

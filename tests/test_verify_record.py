@@ -48,14 +48,29 @@ def test_standalone_has_no_inferroute_imports():
     import ast
     src = SCRIPT.read_text()
     assert "sealedresearch" not in src and "inferroute_cli" not in src and "inferroute_local" not in src
-    allowed = {"base64", "hashlib", "json", "os", "struct", "sys", "typing", "cryptography", "datetime", "argparse",
-               "warnings", "__future__"}
-    for node in ast.walk(ast.parse(src)):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert alias.name.split(".")[0] in allowed, alias.name
-        elif isinstance(node, ast.ImportFrom):
-            assert (node.module or "").split(".")[0] in allowed, node.module
+    allowed = {"base64", "hashlib", "json", "os", "re", "struct", "sys", "typing", "cryptography", "datetime",
+               "argparse", "warnings", "__future__"}
+    # `urllib` is allowed ONLY inside a function body. This program's value is that it runs offline and
+    # deterministically over a folder; a module-level network import would make that a matter of intent
+    # rather than of structure. --check-revocation is the one path that reaches the network, it is off by
+    # default, and this test is what keeps that true.
+    tree = ast.parse(src)
+    fn_nodes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for inner in ast.walk(node):
+                fn_nodes.add(id(inner))
+    for node in ast.walk(tree):
+        names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                 else [node.module or ""] if isinstance(node, ast.ImportFrom) else None)
+        if names is None:
+            continue
+        for name in names:
+            root = name.split(".")[0]
+            if root == "urllib":
+                assert id(node) in fn_nodes, "urllib must not be imported at module level"
+                continue
+            assert root in allowed, name
 
 
 def test_real_amd_chain_and_uvm_verify_under_production_pins(V, kms):
@@ -1057,3 +1072,104 @@ def test_a_reference_with_no_windows_is_not_described_as_windowed(V):
               {"value": "aa", "valid_to": "2026-01-01T00:00:00Z"},
               {"value": "aa", "retired": True}):
         assert V._ref_windowed(_signed_ref(V, sk, publication_key=pub, entries=[e])) is True
+
+
+# --- The policy's PERMISSIONS, and the sentence they license -------------------------------------------
+# Until 25 Sep this program hashed the archived policy and never read it, so allow_stdio_access:true in
+# every container of a real record was invisible to every check. These rows do not move the exit code --
+# a permissive policy is not a damaged record -- so their teeth are that they change what a reader may
+# write. Each test below therefore asserts the SENTENCE, not just the row.
+
+def _policy(stdio=False, elevated=False, exec_procs=None, layers=True,
+            logging_=False, dumps=False, scratch=False):
+    cont = {"allow_elevated": elevated, "allow_stdio_access": stdio,
+            "exec_processes": [] if exec_procs is None else exec_procs}
+    if layers:
+        cont["layers"] = ["aa" * 32, "bb" * 32]
+    return base64.b64encode(("package policy\n\n"
+                             f"allow_runtime_logging := {str(logging_).lower()}\n"
+                             f"allow_dump_stacks := {str(dumps).lower()}\n"
+                             f"allow_unencrypted_scratch := {str(scratch).lower()}\n\n"
+                             "containers := " + json.dumps([cont, dict(cont)]) + "\n").encode()).decode()
+
+
+def _posture(V, **kw):
+    c = V.Checks()
+    return c, V.check_policy_posture(c, _policy(**kw))
+
+
+def test_a_clean_policy_satisfies_every_posture_condition(V):
+    c, out = _posture(V)
+    assert [s for s, _, _ in c.rows if s != "PASS"] == [], c.rows
+    assert all(out[k] is True for k in out), out
+
+
+@pytest.mark.parametrize("kw,key", [
+    ({"stdio": True}, "allow_stdio_access"),
+    ({"elevated": True}, "allow_elevated"),
+    ({"logging_": True}, "allow_runtime_logging"),
+    ({"dumps": True}, "allow_dump_stacks"),
+    ({"scratch": True}, "allow_unencrypted_scratch"),
+    ({"layers": False}, "image_pinned"),
+    ({"exec_procs": [{"command": ["sh"]}]}, "no_exec"),
+])
+def test_each_permission_is_detected_on_its_own(V, kw, key):
+    """The inversion, one condition at a time: if any of these still came back satisfied, that row would
+    be decoration and the licensed sentence would overreach on a policy that permits observation."""
+    c, out = _posture(V, **kw)
+    assert out[key] is not True, f"{key} not detected: {c.rows}"
+    assert any(s == "FAIL" for s, _, _ in c.rows)
+
+
+def test_a_flag_the_policy_omits_is_not_read_as_denied(V):
+    """Absent must not read as false. A document that never mentions a permission denies nothing."""
+    pol = base64.b64encode(b'package policy\n\ncontainers := [{"allow_elevated":false,'
+                           b'"allow_stdio_access":false,"exec_processes":[],"layers":["aa"]}]\n').decode()
+    c = V.Checks()
+    out = V.check_policy_posture(c, pol)
+    assert out["allow_runtime_logging"] is False
+    assert any("does not carry allow_runtime_logging" in d for _, _, d in c.rows)
+
+
+def _reach(V, posture, **kw):
+    opts = {"floor_pinned": True, "revocation_checked": True, "image_published": True, "authenticated": True}
+    opts.update(kw)
+    return V.confidentiality_reach(posture, **opts)
+
+
+def test_the_strong_sentence_needs_every_condition(V):
+    _, clean = _posture(V)
+    assert _reach(V, clean)[0] == 2
+    # and the inversion on each condition that is not the policy's
+    for missing in ("floor_pinned", "revocation_checked", "image_published", "authenticated"):
+        reach, blockers = _reach(V, clean, **{missing: False})
+        assert reach < 2, f"{missing} absent still licensed the strongest sentence"
+        assert blockers, missing
+
+
+def test_a_permissive_policy_cannot_reach_even_the_middle_sentence(V):
+    _, leaky = _posture(V, stdio=True)
+    reach, blockers = _reach(V, leaky)
+    assert reach == 0
+    assert any("stdio" in b for b in blockers), blockers
+
+
+def test_only_the_policy_conditions_gate_the_middle_sentence(V):
+    """floor and revocation gate it too -- but a published image and an authenticated reference are about
+    claim 3 and inspectability, not about who was positioned to observe, and must not block sentence 2."""
+    _, clean = _posture(V)
+    assert _reach(V, clean, image_published=False, authenticated=False)[0] == 1
+    assert _reach(V, clean, floor_pinned=False)[0] == 0
+
+
+def test_the_licensed_sentences_are_scoped_to_the_search_lane(V):
+    """An auditor on 25 Sep found three things in the session receipts that bear on these sentences and
+    that this program cannot see: a session that used four AI instances while attesting one, an unsigned
+    receipt-to-search join, and a request served by an instance that later failed re-verification. A
+    block that licensed "remained confidential" without naming them would overclaim on the strength of
+    the lane it DOES check."""
+    assert "SEARCHES in this record remained confidential" in V.STATEMENT_CONFIDENTIAL
+    assert len(V.AI_LANE_CONDITIONS) == 3
+    joined = " ".join(V.AI_LANE_CONDITIONS)
+    for must in ("instance_switches", "SIGNED", "pinned-failed-reverify"):
+        assert must in joined, must

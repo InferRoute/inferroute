@@ -68,6 +68,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import struct
 import sys
 from typing import Any, Dict, List, Optional, Tuple
@@ -546,6 +547,312 @@ def _parse_time(s: Any) -> Optional["datetime.datetime"]:
     if d.tzinfo is None:
         d = d.replace(tzinfo=datetime.timezone.utc)
     return d.astimezone(datetime.timezone.utc)
+
+
+# --- What the policy PERMITS, not just what it hashes to -----------------------------------------------
+#
+# Until 25 Sep this program hashed the archived policy against HOST_DATA and never read it. The hash
+# answers "is this the policy the hardware ran"; it says nothing about what that policy ALLOWS. An
+# auditor who wanted to know had to read 9.5 KB of Rego by hand, and the one who did found
+# allow_stdio_access:true in all three containers — a permission that bears directly on whether anyone
+# outside the enclave could observe what it handled, and which no check here would ever have surfaced.
+#
+# These rows do not change the exit code. The exit code answers "is this record intact", and a permissive
+# policy is not a damaged record. What they change is the SENTENCE the evidence licenses, which is
+# computed below and printed — so the strongest confidentiality claim a reader may make is mechanical
+# rather than a matter of how boldly the report is written.
+
+CONFIDENTIALITY_POSTURE = (
+    # (key, per-container, wanted, row name, what it bears on)
+    ("allow_stdio_access", True, False, "policy denies host access to the enclave's stdio",
+     "with this true, the operator can attach to the container's standard streams"),
+    ("allow_elevated", True, False, "policy denies elevated execution",
+     "an elevated process can reach outside the container's confinement"),
+    ("allow_runtime_logging", False, False, "policy denies runtime logging",
+     "runtime logging surfaces container activity to the host"),
+    ("allow_dump_stacks", False, False, "policy denies stack dumps",
+     "a stack dump can carry live memory contents out of the enclave"),
+    ("allow_unencrypted_scratch", False, False, "policy denies unencrypted scratch space",
+     "unencrypted scratch writes plaintext to storage the operator can read"),
+)
+
+
+def _policy_containers(text: str) -> Optional[List[Dict[str, Any]]]:
+    """The containers array out of the Rego document, by bracket matching — the file is Rego, so it cannot
+    simply be json.loads'd, and a regex over 9.5 KB of nested JSON would be guesswork."""
+    i = text.find("containers := [")
+    if i < 0:
+        return None
+    start = text.index("[", i)
+    depth, in_str, esc = 0, False, False
+    for j in range(start, len(text)):
+        ch = text[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    out = json.loads(text[start:j + 1])
+                except ValueError:
+                    return None
+                return out if isinstance(out, list) else None
+    return None
+
+
+def _policy_flag(text: str, name: str) -> Optional[bool]:
+    """A top-level `name := true/false` assignment. None when the document does not carry it at all,
+    which must not read the same as false."""
+    m = re.search(r"^\s*" + re.escape(name) + r"\s*:=\s*(true|false)\s*$", text, re.M)
+    return None if not m else (m.group(1) == "true")
+
+
+def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Optional[bool]]:
+    """Report each permission that bears on whether anything outside the enclave could observe the work.
+    Returns {condition: True/False/None}; None is "the document does not say", which is NOT satisfied."""
+    out: Dict[str, Optional[bool]] = {k: None for k, *_ in CONFIDENTIALITY_POSTURE}
+    out["image_pinned"] = None
+    out["no_exec"] = None
+    if not policy_b64:
+        c.add(None, "policy permissions", "no policy archived in the bundle — nothing to read")
+        return out
+    try:
+        text = base64.b64decode(policy_b64).decode("utf-8", "replace")
+    except Exception:                                       # noqa: BLE001
+        c.add(False, "policy permissions", "policy in bundle is not valid base64")
+        return out
+    containers = _policy_containers(text)
+    if containers is None:
+        c.add(False, "policy permissions", "could not read the containers list out of the policy document")
+        return out
+
+    for key, per_container, wanted, name, bears_on in CONFIDENTIALITY_POSTURE:
+        if per_container:
+            vals = [cont.get(key) for cont in containers]
+            got = all(v is wanted for v in vals) if vals else None
+            n_bad = sum(1 for v in vals if v is not wanted)
+            detail = (f"all {len(vals)} container(s) set {key}={str(wanted).lower()}" if got else
+                      f"{n_bad} of {len(vals)} container(s) set {key}={str(not wanted).lower()} — {bears_on}")
+        else:
+            v = _policy_flag(text, key)
+            got = (v is wanted)
+            detail = (f"{key}={str(wanted).lower()}" if got else
+                      (f"the policy does not carry {key} at all, so nothing denies it" if v is None
+                       else f"{key}={str(v).lower()} — {bears_on}"))
+        out[key] = got
+        c.add(got, name, detail)
+
+    layered = [cont for cont in containers if isinstance(cont.get("layers"), list) and cont["layers"]]
+    out["image_pinned"] = len(layered) == len(containers) and bool(containers)
+    c.add(out["image_pinned"], "policy pins the image that ran",
+          f"{len(layered)} of {len(containers)} container(s) pin their filesystem layer roots"
+          + ("" if out["image_pinned"] else " — an unpinned container can be any image"))
+
+    no_exec = [cont for cont in containers if cont.get("exec_processes") == []]
+    out["no_exec"] = len(no_exec) == len(containers) and bool(containers)
+    c.add(out["no_exec"], "policy allows no arbitrary execution",
+          f"{len(no_exec)} of {len(containers)} container(s) set exec_processes: []"
+          + ("" if out["no_exec"] else " — a permitted exec can run code the measurement never covered"))
+    return out
+
+
+# --- Which confidentiality sentence this evidence licenses ---------------------------------------------
+#
+# The three sentences a reader most wants -- "was never exposed", "could not have been read", "remained
+# confidential" -- were flatly forbidden by the audit brief, on the correct ground that attestation shows
+# WHICH code ran and not what it did. But "forbidden" is the wrong shape for it: what actually blocks them
+# is a finite list of conditions, most of which are ours to close. Enumerating them turns a prohibition
+# into a score, so a reader can see what is missing and we can see what to fix.
+#
+# None of this changes the exit code. The exit code answers "is this record intact". These answer "how far
+# does the intact record reach", which is a different question and must not be able to mask the first.
+
+STATEMENT_SEALED = (
+    "The text was sealed on the professional's own computer to a key a genuine, non-debuggable "
+    "confidential machine's hardware report commits to, so no relay, host or platform operator between "
+    "the two could read it in transit.")
+STATEMENT_ENCLOSED = (
+    "In addition: the policy the hardware enforced pins the image that ran, permits no arbitrary "
+    "execution, and denies the operator every channel by which the work could be observed from outside "
+    "-- so no party outside the enclave was POSITIONED to read the text at any point in this record.")
+STATEMENT_CONFIDENTIAL = (
+    "In addition: the image those measurements pin is published and its identity reproducible from "
+    "source, so what the code does with the text is open to inspection rather than taken on trust. "
+    "Together with the above, and with an auditor's own reading of that source, this is what supports "
+    "saying the SEARCHES in this record remained confidential -- that their text could not have been "
+    "read outside the enclave.")
+
+# The scope line matters as much as the sentences. This program checks the SEARCH lane (AMD SEV-SNP).
+# The conversation with the AI machine is a different machine on different hardware, attested in the
+# session receipts, which this program deliberately does not parse. An auditor on 25 Sep found three
+# things there that bear directly on these sentences and that nothing here can see, so they are named
+# rather than left to be discovered:
+AI_LANE_CONDITIONS = (
+    "every AI instance a session actually used is attested, not only the last one it pinned "
+    "(a receipt with counters.instance_switches > 0 attests ONE instance; requests that went to the "
+    "others have no attestation in the pack)",
+    "the session receipt is bound to the searches it is offered as covering by something SIGNED "
+    "(today the join is the exporter's unsigned filename stem: the receipt's session_id is a UUID and "
+    "the signed statement's is an unrelated 32-hex value)",
+    "no request was served by an instance that later failed its own re-verification "
+    "(receipts carry a pinned-failed-reverify event for exactly that, and still read `confidential`)",
+)
+
+
+def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
+                          revocation_checked: bool, image_published: bool,
+                          authenticated: bool) -> Tuple[int, List[str]]:
+    """How far the evidence reaches, and what is holding it back. Every blocker is phrased as the thing
+    someone must DO, because each one is somebody's to close -- ours, the operator's, or the auditor's."""
+    blockers: List[str] = []
+    for key, _per, _want, name, _bears in CONFIDENTIALITY_POSTURE:
+        if posture.get(key) is not True:
+            blockers.append(f"the policy does not satisfy: {name}")
+    if posture.get("image_pinned") is not True:
+        blockers.append("the policy does not pin the image that ran")
+    if posture.get("no_exec") is not True:
+        blockers.append("the policy permits arbitrary execution inside the enclave")
+    enclosed = not blockers
+    if not floor_pinned:
+        blockers.append("no firmware floor is pinned, so a downgraded-firmware machine would pass "
+                        "(put min_tcb in the published reference)")
+    if not revocation_checked:
+        blockers.append("certificate revocation was not checked (pass --check-revocation, needs network)")
+    enclosed = enclosed and floor_pinned and revocation_checked
+    if not image_published:
+        blockers.append("the reference does not name a published, reproducible source for the image these "
+                        "measurements pin, so what the code DOES with the text cannot be inspected")
+    if not authenticated:
+        blockers.append("the reference was not authenticated against a key obtained outside this record")
+    if enclosed and image_published and authenticated:
+        return 2, []
+    return (1 if enclosed else 0), blockers
+
+
+def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Optional[Dict[str, Any]],
+                           floor_pinned: bool, revocation_checked: bool, authenticated: bool) -> None:
+    """`policies` is [(host_data_hex, policy_b64)] as actually seen, deduplicated by the caller."""
+    print()
+    print("What this evidence licenses you to say about confidentiality")
+    print("  (these rows do NOT affect the exit code above, which is about the record's integrity)")
+    if not policies:
+        print("  SKIP no policy archived in this record — the posture below cannot be read")
+        return
+    if len(policies) > 1:
+        print(f"  NOTE {len(policies)} DISTINCT policies across this record; each is reported separately")
+    reach, blockers = 2, []
+    for hd, pol in policies:
+        if len(policies) > 1:
+            print(f"  policy {hd[:16]}…")
+        c = Checks()
+        posture = check_policy_posture(c, pol)
+        c.dump(indent="    " if len(policies) > 1 else "  ")
+        image_published = bool(isinstance(reference, dict) and reference.get("image_source"))
+        r, b = confidentiality_reach(posture, floor_pinned=floor_pinned,
+                                     revocation_checked=revocation_checked,
+                                     image_published=image_published, authenticated=authenticated)
+        if r < reach:
+            reach, blockers = r, b
+        elif r == reach:
+            blockers = blockers or b
+    print()
+    print("  You may write:")
+    print(f"    1. {STATEMENT_SEALED}")
+    if reach >= 1:
+        print(f"    2. {STATEMENT_ENCLOSED}")
+    if reach >= 2:
+        print(f"    3. {STATEMENT_CONFIDENTIAL}")
+    if reach < 2:
+        print("  You may NOT write that the text was never exposed, could not have been read, or remained "
+              "confidential. What is missing:")
+        for b in blockers:
+            print(f"    - {b}")
+    print("  In every case: no evidence of this kind establishes what the enclave's own code did with the "
+          "text after decrypting it beyond what reading that code shows.")
+    print("  SCOPE — these sentences are about the SEARCH lane only. The conversation with the AI machine "
+          "ran on different hardware, attested in the session receipts, which this program does not parse. "
+          "Before extending any of the above to the conversation, establish by hand that:")
+    for cond in AI_LANE_CONDITIONS:
+        print(f"    - {cond}")
+
+
+# --- Revocation ---------------------------------------------------------------------------------------
+#
+# Listed as a NON-check since this program was written, and every auditor has correctly written it down as
+# a limitation: a revoked VCEK passes every other check here. It stays OFF by default, because this
+# verifier's value is that it runs offline and deterministically on a folder, and a check that silently
+# needs the network would make an air-gapped run look worse than it is. --check-revocation opts in.
+#
+# A fetch that fails is a SKIP, never a FAIL. "I could not reach AMD" and "this certificate is revoked"
+# must not produce the same row -- that is the failure this codebase has been bitten by before.
+
+AMD_CRL_URL = "https://kdsintf.amd.com/vcek/v1/{product}/crl"
+
+
+def check_revocation(c: Checks, chains: List[Tuple[str, Any, Any]], *, timeout: float = 20.0) -> bool:
+    """`chains` is [(product, ask, ark)] deduplicated by the caller. Returns True only if every chain was
+    actually CHECKED against a CRL we verified, and none was revoked.
+
+    Read what this can and cannot reach, because a first attempt here got it wrong in the direction that
+    flatters us. AMD's CRL for a product line is issued by the ARK and lists ASK-level serials -- the
+    Genoa CRL carried exactly one entry when this was written. **VCEKs are not individually revocable
+    this way: every VCEK AMD issues carries serial number 0**, so a per-chip CRL lookup is not merely
+    unavailable, it silently matches nothing and passes. The first version of this function did exactly
+    that and reported "none on AMD's CRL" for 70 certificates it had never really looked up.
+
+    So the honest decomposition is: this checks the ASK, and the control against a chip running
+    outdated or broken firmware is NOT a CRL at all -- it is the TCB floor (min_tcb). That is why the
+    confidentiality posture treats an unpinned floor as the serious gap and this row as secondary."""
+    import urllib.request
+    from cryptography import x509
+    if not chains:
+        c.add(None, "certificate revocation", "no certificate chain to check")
+        return False
+    all_checked = True
+    for product, ask, ark in sorted(chains, key=lambda t: t[0]):
+        url = AMD_CRL_URL.format(product=product)
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:      # noqa: S310 — fixed AMD host
+                raw = r.read()
+            crl = x509.load_der_x509_crl(raw)
+        except Exception as exc:                            # noqa: BLE001
+            all_checked = False
+            c.add(None, "certificate revocation",
+                  f"could not obtain AMD's CRL for {product} ({type(exc).__name__}) — NOT a statement that "
+                  "the certificates are good, only that this run did not find out")
+            continue
+        # A CRL nobody authenticated is an attacker's list. It must be signed by the same ARK this record
+        # already pinned, or it tells us nothing and must not be allowed to produce a pass.
+        if not crl.is_signature_valid(ark.public_key()):
+            all_checked = False
+            c.add(False, "certificate revocation",
+                  f"AMD's CRL for {product} is NOT signed by the ARK this record pins — disregarded")
+            continue
+        hit = crl.get_revoked_certificate_by_serial_number(ask.serial_number)
+        if hit is not None:
+            all_checked = False
+            c.add(False, "certificate revocation",
+                  f"the {product} ASK (serial {ask.serial_number:#x}) is REVOKED in AMD's CRL as of "
+                  f"{hit.revocation_date_utc.isoformat()}")
+        else:
+            c.add(True, "certificate revocation",
+                  f"{product} ASK (serial {ask.serial_number:#x}) is not on AMD's ARK-signed CRL "
+                  f"({len(list(crl))} entr(y/ies), issued {crl.last_update_utc.isoformat()})")
+        c.add(None, "per-chip revocation",
+              f"AMD issues every {product} VCEK with serial number 0, so there is no per-chip CRL lookup "
+              "to do — a run that reports one is reporting nothing. The control against a chip on outdated "
+              "firmware is the TCB floor (min_tcb), not this list.")
+    return all_checked
 
 
 def _ref_windowed(reference: Dict[str, Any]) -> bool:
@@ -1232,6 +1539,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="minimum firmware TCB per product line (same shape as the UVM SVN floor)")
     ap.add_argument("--extract", default=None, metavar="DIR", help="also write each search's raw evidence as files for independent tools")
     ap.add_argument("--amd-pin", action="append", default=[], metavar="PRODUCT=SPKI_SHA256_HEX", help="TEST ROOTS ONLY; requires --i-am-testing")
+    ap.add_argument("--check-revocation", action="store_true",
+                    help="also ask AMD whether the chip certificates are revoked (needs network; off by default "
+                         "so an offline run stays deterministic)")
     ap.add_argument("--uvm-root", default=None, help="TEST ROOTS ONLY; requires --i-am-testing")
     ap.add_argument("--uvm-min-svn", type=int, default=UVM_MIN_SVN)
     ap.add_argument("--i-am-testing", action="store_true", help="acknowledge that pin overrides make this a TEST run, never a verification of Azure (exit 3 at best)")
@@ -1269,7 +1579,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(f"Attested prior-art record: {os.path.abspath(a.bundle)}")
     print("Trust model: two root pins (AMD ARK per product line, Microsoft Supply Chain RSA Root CA 2022) plus signature links. "
-          "No revocation checking; no basicConstraints / keyUsage / path-length validation. Identity comes only from --reference.")
+          + ("Revocation: AMD's ARK-signed CRL is fetched and the ASK checked against it (--check-revocation). "
+             if a.check_revocation else "No revocation checking (pass --check-revocation to fetch AMD's CRL). ")
+          + "No basicConstraints / keyUsage / path-length validation. Identity comes only from --reference.")
     if test_roots:
         print("!!! NON-PRODUCTION ROOTS PINNED (--i-am-testing): this run verifies a TEST enclave, never Azure. Exit code 3 at best. !!!")
     c0, manifest = check_manifest(a.bundle)
@@ -1315,6 +1627,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print("  FAIL sealed searches: this record contains NO sealed search — there is nothing to verify")
         fails += 1
+    seen_policies: Dict[str, str] = {}
+    seen_chains: Dict[Tuple[str, bytes], Tuple[str, Any, Any]] = {}
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
             print(f"\nSearch {i}: FAIL malformed row")
@@ -1340,6 +1654,26 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print("  FAIL evidence file: none named for this search")
             fails += 1
+        try:
+            # Keyed on the ASK's own bytes, never on a serial: AMD issues every VCEK with serial 0, so a
+            # serial is not an identity here and deduplicating on one silently collapses the whole record
+            # to a single certificate. An earlier version of this did, and reported "1 distinct VCEK" for
+            # a record spanning two chips.
+            _certs = load_certs(base64.b64decode((ev.get("offer") or {}).get("endorsements", ""), validate=True))
+            _prod = (_der_ia5(_ext(_certs[0], OID_PRODUCT)) or "").split("-", 1)[0]
+            _ask = next((x for x in _certs[1:] if _cn(x) == f"SEV-{_prod}"), None)
+            _ark = next((x for x in _certs[1:] if _cn(x) == f"ARK-{_prod}"), None)
+            if _prod and _ask is not None and _ark is not None:
+                seen_chains.setdefault((_prod, _ask.tbs_certificate_bytes), (_prod, _ask, _ark))
+        except Exception:                                   # noqa: BLE001 — the chain is checked per search above
+            pass
+        if ev.get("policy_b64"):
+            try:
+                _hd = sha256_hex(base64.b64decode(ev["policy_b64"]))
+                if _hd not in seen_policies:
+                    seen_policies[_hd] = ev["policy_b64"]
+            except Exception:                               # noqa: BLE001 — a malformed policy is reported by the row below
+                pass
         try:
             c = verify_search(row, ev, pins=pins, uvm_root=uvm_root, uvm_min_svn=a.uvm_min_svn, matter_cutoff=cutoff,
                               reference=reference, min_tcb=min_tcb)
@@ -1386,7 +1720,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
     print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
           "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
-    print("Not redone here: confinement of the machine that made this record (self-reported); fetching anything; certificate revocation.")
+    print("Not redone here: confinement of the machine that made this record (self-reported); fetching anything"
+          + ("" if a.check_revocation else "; certificate revocation") + ".")
+    revocation_failed = False
+    if searches and a.check_revocation:
+        rc_checks = Checks()
+        revocation_ok = check_revocation(rc_checks, list(seen_chains.values()))
+        rc_checks.dump()
+        revocation_failed = not revocation_ok
+        fails += len(rc_checks.failed)
+    if searches:
+        report_confidentiality(
+            [(hd, pol) for hd, pol in seen_policies.items()],
+            reference=reference,
+            floor_pinned=bool(min_tcb),
+            revocation_checked=bool(a.check_revocation and not revocation_failed),
+            authenticated=not bool(isinstance(reference, dict) and reference.get("sig") and not a.reference_key))
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

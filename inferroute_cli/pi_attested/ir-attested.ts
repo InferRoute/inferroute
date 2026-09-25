@@ -806,7 +806,7 @@ export default function (pi: ExtensionAPI) {
 
 	// ── recording many findings at once ──
 	// One call per finding costs a model turn per finding: measured 20 Sep, 31 findings from 60 KB took
-	// thirteen minutes, ~25 s each, while the reading itself was three calls. Over a 3 MB portfolio that is
+	// thirteen minutes, ~25 s each, while the reading itself was three calls. Over a 3 MB cluster that is
 	// eleven hours of round trips for work the model has already done. This takes them in one call.
 	const batchOut = process.env.IR_INTAKE_OUT ?? "";
 	if (batchOut) {
@@ -864,26 +864,26 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
-	// ── clustering a portfolio, round after round ──
+	// ── clustering a cluster, round after round ──
 	// One call per cluster, each naming the candidates it holds. The host checks the partition (every
 	// candidate exactly once), compares it with the previous round's, and decides whether it has converged:
 	// an agent asked "have you converged?" says yes, and a partition compared with its predecessor cannot.
-	// ── the synthesis pass: every finding in the portfolio, in one context ──
+	// ── the synthesis pass: every finding in the cluster, in one context ──
 	// The corpus itself does not fit any context on this lane (measured 20 Sep: 2.46 M tokens against a 1 M
 	// ceiling). What it ASSERTS does — roughly 90 k tokens of findings — so this is the step that genuinely
-	// sees the whole portfolio at once, and every theme it draws must name the findings it rests on.
+	// sees the whole cluster at once, and every theme it draws must name the findings it rests on.
 	const clusterOut = process.env.IR_CLUSTER_OUT ?? "";
 	if (clusterOut) {
 		pi.registerTool({
 			name: "propose_cluster",
 			label: "Propose a theme",
 			description:
-				"Record ONE theme or matter of the portfolio per call, until every finding worth placing is in exactly one of them. `label` names it in a few words; `thesis` is one sentence saying what the " +
+				"Record ONE theme or matter of the cluster per call, until every finding worth placing is in exactly one of them. `label` names it in a few words; `thesis` is one sentence saying what the " +
 				"members have in common that matters technically — not a category name, the actual claim; `members` is " +
 				"the list of candidate ids (c1, c2 …) exactly as given; `why` is what made you put these together and " +
 				"leave others out. Do not invent ids, do not leave a candidate out because it fits badly — put it where " +
 				"it fits least badly and say so in `why`, or give it a cluster of its own. " +
-				"When the portfolio has a register, also give `register` (the ids it covers, e.g. P3, TA-L3), " +
+				"When the cluster has a register, also give `register` (the ids it covers, e.g. P3, TA-L3), " +
 				"`aspects` (the features that matter to a claim, one short line each) and `detail` (anything a reader " +
 				"would want beside them — variants, dependencies, what it does NOT cover — kept compact).",
 			promptSnippet: "Group the candidates into themes (one call per cluster, all candidates covered)",
@@ -892,7 +892,7 @@ export default function (pi: ExtensionAPI) {
 				thesis: Type.String(),
 				members: Type.Array(Type.String(), { minItems: 1 }),
 				why: Type.Optional(Type.String()),
-				// Optional, so a portfolio without a register keeps working exactly as before.
+				// Optional, so a cluster without a register keeps working exactly as before.
 				register: Type.Optional(Type.Array(Type.String())),
 				aspects: Type.Optional(Type.Array(Type.String())),
 				detail: Type.Optional(Type.String()),

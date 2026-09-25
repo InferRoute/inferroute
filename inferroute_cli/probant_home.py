@@ -637,15 +637,15 @@ class Home:
             return {"ok": True, "id": made}
 
         def corpus_documents() -> List[Dict[str, Any]]:
-            """The documents this installation can send WITH a corpus: what a portfolio run wrote about the
-            whole portfolio (its matter list, its reading guide).
+            """The documents this installation can send WITH a corpus: what a cluster run wrote about the
+            whole cluster (its matter list, its reading guide).
 
             The page chooses by ID from this list and never sends a path. A path from a browser page is a
             path someone can edit, and "seal this file to a stranger" is the last place to accept one.
             """
-            from . import probant_portfolio as PF
+            from . import probant_cluster as PF
             out: List[Dict[str, Any]] = []
-            root = PF.portfolio_root()
+            root = PF.cluster_root()
             if not root.is_dir():
                 return out
             for run in sorted(root.iterdir(), reverse=True):

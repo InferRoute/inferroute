@@ -423,7 +423,7 @@ def test_the_page_shares_a_corpus_and_never_shows_a_secret(home, tmp_path):
     # A populated list on purpose: asserting `== []` is satisfied just as well by an API that never
     # carries deliveries at all, which is exactly what it was doing before.
     from pathlib import Path as _P
-    SH.record_sent({"corpus": {"id": "cid-1", "name": "Acme portfolio", "files": [{"name": "M.txt"}]},
+    SH.record_sent({"corpus": {"id": "cid-1", "name": "Acme cluster", "files": [{"name": "M.txt"}]},
                     "matters": [{"matter": "Acme/battery"}]}, "them", "ffff", _P("/tmp/x"))
     got = c.get("/api/sharing").json().get("corpora")
     assert got and got[0]["id"] == "cid-1" and got[0]["direction"] == "sent"
@@ -494,7 +494,7 @@ def test_opening_a_corpus_from_the_page_does_not_drop_its_documents(home, tmp_pa
     payload = SH.build_share([{"matter": "InferRoute/continuity", "date_bound": "2026-07-13",
                                "disclosure": "d", "marks": {}, "claims": [], "origin": "x"}],
                              note="the pre-work", files=SH.corpus_files([guide]),
-                             corpus_name="InferRoute portfolio")
+                             corpus_name="InferRoute cluster")
     blob = SH.seal_to(SH.public_card(me), payload, me)
     share = tmp_path / "corpus.probant-share"
     share.write_bytes(blob)
@@ -503,7 +503,7 @@ def test_opening_a_corpus_from_the_page_does_not_drop_its_documents(home, tmp_pa
     r = app_client.post("/api/sharing/open", json={"path": str(share)})
     assert r.status_code == 200, r.text
     assert [f["name"] for f in r.json()["documents"]] == ["READING-GUIDE.txt"]
-    assert r.json()["corpus"] == "InferRoute portfolio"
+    assert r.json()["corpus"] == "InferRoute cluster"
 
     # …then opening it writes them, and SAYS where.
     r = app_client.post("/api/sharing/open", json={"path": str(share), "client": "FromHenry"})
@@ -518,10 +518,10 @@ def test_opening_a_corpus_from_the_page_does_not_drop_its_documents(home, tmp_pa
 def test_the_page_offers_corpus_documents_by_id_and_never_takes_a_path(home, tmp_path, monkeypatch):
     """A path from a browser page is a path someone can edit, and "seal this file to a stranger" is the last
     place to accept one. The page picks from what the server offers, by id."""
-    from inferroute_cli import probant_portfolio as PF
+    from inferroute_cli import probant_cluster as PF
     from inferroute_cli import probant_share as SH
     _h, c, _tmp = home
-    run = PF.portfolio_root() / "20260920T151600Z-2695ad"
+    run = PF.cluster_root() / "20260920T151600Z-2695ad"
     run.mkdir(parents=True, exist_ok=True)
     (run / "MATTERS.txt").write_text("MATTERS\n\n1. CONTINUITY\n")
     secret = tmp_path / "not-offered.txt"

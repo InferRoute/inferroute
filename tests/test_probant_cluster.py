@@ -1,4 +1,4 @@
-"""Reading a portfolio: what the host checks, and what it refuses to claim.
+"""Reading a cluster: what the host checks, and what it refuses to claim.
 
 The clustering loop this started as is gone (docs/portfolio-analysis-proposal.md): a partition that agrees
 with itself measures the model, not the corpus. What survives is what a reader cannot check by eye — that a
@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from inferroute_cli import probant as S
-from inferroute_cli import probant_portfolio as P
+from inferroute_cli import probant_cluster as P
 
 A = "A jacket with COOLANT-MARKER channels moulded between the cells of a pack.\n" * 3
 B = "Predicting swelling from SWELL-MARKER impedance drift over fifty cycles.\n" * 3
@@ -22,7 +22,7 @@ B = "Predicting swelling from SWELL-MARKER impedance drift over fifty cycles.\n"
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
-    src = tmp_path / "portfolio"
+    src = tmp_path / "cluster"
     (src / "sub").mkdir(parents=True)
     (src / "one.md").write_text(A)
     (src / "sub" / "one.md").write_text(B)        # same basename, different document
@@ -30,7 +30,7 @@ def home(tmp_path, monkeypatch):
 
 
 def _stage(src):
-    return P.stage(sorted(src.rglob("*.md")), "test portfolio")
+    return P.stage(sorted(src.rglob("*.md")), "test cluster")
 
 
 def _propose(ident, rows):
@@ -147,7 +147,7 @@ def test_the_synthesis_sees_every_finding_and_its_themes_are_checked_back_to_the
 
 
 def test_the_same_document_filed_twice_is_read_once(home):
-    """Measured on the real portfolio: 459 files, 385 distinct — 74 exact copies (bundle-preview beside
+    """Measured on the real cluster: 459 files, 385 distinct — 74 exact copies (bundle-preview beside
     audit-trail). A copy costs a session AND invents a "two documents agree" signal, which is worse."""
     _, src = home
     (src / "copy.md").write_text((src / "one.md").read_text())        # byte-identical to one.md
@@ -160,8 +160,8 @@ def test_the_same_document_filed_twice_is_read_once(home):
 def test_recall_is_measured_against_the_register_because_nothing_else_can_measure_it(home, tmp_path):
     """Henry, 20 Sep: "are you sure we can trust the results and will not need to run it again?" Precision is
     checkable by construction — every finding carries a verified quote. Recall is not: no reading pass can
-    say what the model chose not to record. But this portfolio keeps a register of its own filings and
-    candidates, and that is an answer key: a run that misses a third of it did not read the portfolio,
+    say what the model chose not to record. But this cluster keeps a register of its own filings and
+    candidates, and that is an answer key: a run that misses a third of it did not read the cluster,
     whatever its totals say."""
     _, src = home
     ident = _stage(src)["id"]
@@ -197,7 +197,7 @@ def test_every_module_function_the_runner_calls_exists():
     called = {node.attr for node in ast.walk(tree)
               if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "PF"}
     missing = sorted(name for name in called if not hasattr(P, name))
-    assert not missing, f"probant.py calls probant_portfolio.{missing}, which does not exist"
+    assert not missing, f"probant.py calls probant_cluster.{missing}, which does not exist"
     assert {"brief", "record_job", "provenance", "candidates", "plan"} <= called   # the runner really uses them
 
 
@@ -393,7 +393,7 @@ def test_a_filing_as_deposited_is_staged_as_its_text_not_its_markup(home, tmp_pa
 
 def test_the_matter_list_says_which_register_entries_no_matter_claims(home, tmp_path):
     """The synthesis is the step nothing can verify — no computation says a matter is the right matter. What
-    IS computable is whether it accounted for the index the portfolio already keeps. Today's themes run cited
+    IS computable is whether it accounted for the index the cluster already keeps. Today's themes run cited
     285 of 4,420 findings and read like an answer; a list that silently drops register entries must not."""
     _, src = home
     ident = _stage(src)["id"]
@@ -439,10 +439,10 @@ def test_the_register_is_never_staged_as_one_of_the_documents(home, tmp_path, mo
     (src / "corpus.json").write_text(json.dumps({"filed": [{"id": "P1", "title": "Cooling jacket"}],
                                                  "surplus": [{"id": "TA-L3", "mechanism": "resale"}]}))
     staged = {}
-    monkeypatch.setattr(CLI, "_portfolio_round", lambda *a, **k: 0)
+    monkeypatch.setattr(CLI, "_cluster_round", lambda *a, **k: 0)
     real_stage = P.stage
     monkeypatch.setattr(P, "stage", lambda files, *a, **k: staged.setdefault("m", real_stage(files, *a, **k)))
-    CLI.cmd_portfolio(str(src))
+    CLI.cmd_cluster(str(src))
     names = [d["name"] for d in staged["m"]["documents"]]
     assert "corpus.json" not in names, names
     assert sorted(names) == ["FR2609630-P1.txt", "P10-TEMP-surplus.md"]
@@ -482,7 +482,7 @@ def test_a_reading_run_refuses_to_start_on_a_machine_already_near_the_wall(home,
         raise RuntimeError("stage was reached: the run did not refuse before doing work")
     monkeypatch.setattr(P, "stage", _must_not_be_called)
     with pytest.raises(S.ProbantError, match="refusing to start"):
-        CLI.cmd_portfolio(str(src))
+        CLI.cmd_cluster(str(src))
 
 
 def test_the_memory_guard_reads_available_not_free(monkeypatch, tmp_path):
@@ -581,20 +581,20 @@ def test_the_holes_flag_reaches_the_workers(home, tmp_path, monkeypatch):
     import subprocess
     from inferroute_cli import probant as CLI
     _, src = home
-    ident = _stage(src)["id"]                      # a real run: _portfolio_workers reads its state
+    ident = _stage(src)["id"]                      # a real run: _cluster_workers reads its state
     spawned = []
     class _P:
         def wait(self): return 0
     monkeypatch.setattr(subprocess, "Popen", lambda argv, **k: (spawned.append(argv), _P())[1])
-    monkeypatch.setattr(CLI, "cmd_portfolio", lambda *a, **k: 0)
-    CLI._portfolio_workers(ident, src, 2, "m", "t", 30000, 4, holes=True)
+    monkeypatch.setattr(CLI, "cmd_cluster", lambda *a, **k: 0)
+    CLI._cluster_workers(ident, src, 2, "m", "t", 30000, 4, holes=True)
     assert spawned, "no worker was spawned"
     for argv in spawned:
         assert "--holes" in argv, argv
         assert "--budget" in argv and "30000" in argv, argv
         assert "--slice" in argv, argv
     spawned.clear()
-    CLI._portfolio_workers(ident, src, 2, "m", "t", 30000, 4, holes=False)
+    CLI._cluster_workers(ident, src, 2, "m", "t", 30000, 4, holes=False)
     assert spawned and all("--holes" not in argv for argv in spawned), spawned
 
 
@@ -613,14 +613,14 @@ def test_a_fully_read_corpus_can_still_be_synthesised(home, tmp_path, monkeypatc
     _job(ident, first, second)
     assert P.plan_unread(ident) == []                       # nothing left to read
     ran = []
-    monkeypatch.setattr(CLI, "_portfolio_round", lambda *a, **k: ran.append(k.get("label")) or 0)
-    CLI.cmd_portfolio(str(src), resume=ident)
+    monkeypatch.setattr(CLI, "_cluster_round", lambda *a, **k: ran.append(k.get("label")) or 0)
+    CLI.cmd_cluster(str(src), resume=ident)
     assert "synthesis" in ran, "a fully-read corpus with no themes must still synthesise"
     # Once the synthesis HAS run, a later resume is a report and does not pay for it twice.
     (P.path_of(ident) / P.THEMES).write_text(json.dumps(
         {"label": "Thermal", "thesis": "t", "members": ["f1"]}) + "\n")
     ran.clear()
-    CLI.cmd_portfolio(str(src), resume=ident)
+    CLI.cmd_cluster(str(src), resume=ident)
     assert ran == [], "the synthesis must not run again once themes exist"
 
 
@@ -677,7 +677,7 @@ def test_a_disclosure_never_names_our_own_filings(home):
 
     disclosure.md is what the AGENT reads before searching. Our own applications are not prior art against
     us: naming them invites a search to chase our filing numbers or to treat our own text as known art, and
-    the date bound already carries priority. Portfolio bookkeeping belongs in the matter list, which a
+    the date bound already carries priority. Cluster bookkeeping belongs in the matter list, which a
     person reads. Not even in an HTML comment — the agent reads the file as text, and our source filenames
     ARE our filing numbers."""
     _, src = home

@@ -192,7 +192,7 @@ def test_the_proposal_tool_is_registered_before_the_search_only_guard():
 def test_findings_are_recorded_in_one_call_because_a_round_trip_each_is_the_cost():
     """Measured 20 Sep on a real 114 KB filing: reading the range took three calls, recording what it found
     took THIRTY-ONE, one model turn each, ~25 s apiece — thirteen minutes for 60 KB, and about eleven hours
-    extrapolated over a 3.2 MB portfolio. The reading was never the cost; the round trips were."""
+    extrapolated over a 3.2 MB cluster. The reading was never the cost; the round trips were."""
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not on PATH here")

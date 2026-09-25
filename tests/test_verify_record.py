@@ -959,6 +959,13 @@ def _row(lifetime, session, session_seq, seq):
                           "session_seq": session_seq, "seq": seq}}
 
 
+# ⚠ DO NOT DELETE THE TWO TESTS BELOW WITHOUT REPLACING THEM.
+# `verify_record.py` is vendored by sealed-research and pinned there by byte identity against this repo.
+# They confirmed on 25 Sep that they have NO behavioural test of this block — deliberately, because a
+# second copy of the suite would drift from this one the way the file itself just did. So these inversions
+# are the only thing keeping the check honest in either repo.
+
+
 def test_the_verifier_observes_operations_missing_from_the_record(V):
     """Merged from sealed-research, 25 Sep, after the 09-24 corrupt-session incident: per-session numbering
     can be contiguous while the ENCLAVE's own counter shows operations the record does not contain. That

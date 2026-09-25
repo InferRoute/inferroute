@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from . import probant as S
 
 SCHEMA = "inferroute.probant-share/3"        # /2 shares still open: the corpus block is optional
-MAX_CORPUS_FILE = 4_000_000                  # one side document; the reading guide of a 9-filing portfolio is 47 KB
+MAX_CORPUS_FILE = 4_000_000                  # one side document; the reading guide of a 9-filing cluster is 47 KB
 MAX_CORPUS_TOTAL = 16_000_000
 SUFFIX = ".probant-share"
 
@@ -241,13 +241,13 @@ def _secret_key(me: Dict[str, Any]):
     return _unb64(me["mlkem_sk"])
 
 
-def claims_from_portfolio(ident: str, limit: int = 2000) -> List[Dict[str, Any]]:
-    """The claims corpus a portfolio run produced: each with its quote and the document it came from.
+def claims_from_cluster(ident: str, limit: int = 2000) -> List[Dict[str, Any]]:
+    """The claims corpus a cluster run produced: each with its quote and the document it came from.
 
     The documents themselves do not travel, so what goes is the hash of each — enough to tell two sources
     apart and to match one later, not enough to re-check the quote. Said plainly in the share.
     """
-    from . import probant_portfolio as PF
+    from . import probant_cluster as PF
     meta = PF.meta_of(ident)
     by_name = {d["name"]: d for d in meta["documents"]}
     out = []
@@ -278,16 +278,16 @@ def matter_payload(client: str, matter: str) -> Dict[str, Any]:
             "marks": marks, "claims": [], "origin": f"matter:{client}/{matter}"}
 
 
-def portfolio_payload(ident: str, limit: int = 2000) -> Dict[str, Any]:
-    from . import probant_portfolio as PF
-    return {"matter": f"portfolio {ident}", "date_bound": "", "disclosure": "",
-            "marks": {}, "claims": claims_from_portfolio(ident, limit), "origin": f"portfolio:{ident}"}
+def cluster_payload(ident: str, limit: int = 2000) -> Dict[str, Any]:
+    from . import probant_cluster as PF
+    return {"matter": f"cluster {ident}", "date_bound": "", "disclosure": "",
+            "marks": {}, "claims": claims_from_cluster(ident, limit), "origin": f"cluster:{ident}"}
 
 
 def corpus_files(paths: Sequence[Path]) -> List[Dict[str, Any]]:
     """Side documents that belong to the DELIVERY rather than to any one matter.
 
-    A matter list and a reading guide describe a portfolio as a whole; there was nowhere for them to travel,
+    A matter list and a reading guide describe a cluster as a whole; there was nowhere for them to travel,
     so they would have gone as plain email attachments — carrying verbatim quotes from every filing and from
     the UNFILED surplus. That is the disclosure this product exists to prevent, and the fix is not to warn
     about it but to give the corpus somewhere to put them, inside the same seal as the matters.
@@ -320,7 +320,7 @@ def build_share(matters: List[Dict[str, Any]], note: str = "", files: Optional[L
                 corpus_name: str = "") -> Dict[str, Any]:
     """A corpus of matters in one share: several matters, one file, one signature, one key exchange.
 
-    One matter at a time was the first shape, and it is the wrong unit for the job — handing a portfolio to
+    One matter at a time was the first shape, and it is the wrong unit for the job — handing a cluster to
     counsel means handing over everything at once, not fifteen files and fifteen confirmations.
 
     The corpus also carries an IDENTITY and its own side documents. The identity is what lets the recipient

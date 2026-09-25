@@ -177,13 +177,13 @@ def test_a_corpus_carries_the_documents_that_describe_the_whole_delivery(tmp_pat
     assert [f["name"] for f in files] == ["READING-GUIDE.txt", "MATTERS.txt"]
     payload = SH.build_share([{"matter": "InferRoute/continuity", "date_bound": "2026-07-13",
                                "disclosure": "d", "marks": {}, "claims": CLAIMS, "origin": "x"}],
-                             note="the pre-work you asked for", files=files, corpus_name="InferRoute portfolio")
+                             note="the pre-work you asked for", files=files, corpus_name="InferRoute cluster")
     lawyer = _install(tmp_path, "lawyer", monkeypatch)
     blob = SH.seal_to(SH.public_card(lawyer), payload, henry)
     # The side documents are sealed with everything else — not in the clear anywhere in the file.
     assert b"coolant channels are moulded" not in blob
     got = SH.open_sealed(blob, lawyer)
-    assert got["corpus"]["name"] == "InferRoute portfolio" and got["corpus"]["id"]
+    assert got["corpus"]["name"] == "InferRoute cluster" and got["corpus"]["id"]
 
     SH.create_matters_from_share(got, "FromHenry")
     written = SH.write_corpus(got, "FromHenry")

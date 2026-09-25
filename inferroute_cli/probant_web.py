@@ -365,7 +365,7 @@ class Bridge:
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
         self.opening = ""                   # a reading session's first instruction; empty for a matter session
-        self.oneshot = False                # a round of a portfolio run: end the session when its work is done
+        self.oneshot = False                # a round of a cluster run: end the session when its work is done
         self.recorded = 0                   # findings this session has actually written
         self.turns = 0                      # assistant turns, so "barely started" is distinguishable
         self.tool_counts: Dict[str, int] = {}
@@ -1079,7 +1079,7 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     # agent sitting at an empty prompt waiting to be told to read it is a page that looks broken.
     if mode == "intake":
         bridge.opening = str(probant.get("instruction") or OPENING_INSTRUCTION)
-        # A round of a portfolio run has nobody at the keyboard: when its turn ends, the round is over, and
+        # A round of a cluster run has nobody at the keyboard: when its turn ends, the round is over, and
         # a session left open would hold the next round behind it.
         bridge.oneshot = bool(probant.get("oneshot"))
     url = open_url(bridge)

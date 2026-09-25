@@ -110,7 +110,7 @@ def read_proposals(ident: str) -> List[Dict[str, Any]]:
     if hashlib.sha256(body.encode("utf-8")).hexdigest() != meta.get("sha256"):
         raise S.ProbantError("the staged document changed after it was staged; refusing to read proposals "
                               "against it. Stage it again.")
-    from .probant_portfolio import canonical      # markdown markers off both sides; see there for why
+    from .probant_cluster import canonical      # markdown markers off both sides; see there for why
     flat = canonical(body)
     out: List[Dict[str, Any]] = []
     seen = set()

@@ -58,6 +58,20 @@ class Receipt:
         "requests": 0, "plaintext_bytes_sealed_here": 0, "ciphertext_bytes_sent": 0,
         "ciphertext_frames_received": 0, "response_bytes_opened_here": 0, "errors": 0,
         "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0})
+    # WHAT THE COUNTERS ABOVE MEASURE. An auditor on 25 Sep found ciphertext_bytes_sent was only 26-42% of
+    # plaintext_bytes_sealed_here in every session with traffic, could not tell from the receipt whether
+    # that meant compression or two different layers, and reported it as unexplained. The answer is benign
+    # — the body is gzipped before it is sealed — but a number whose units are not stated invites the
+    # reading that something is missing, and "unexplained" in an audit report costs more than the two
+    # lines that prevent it.
+    counters_mean: dict = field(default_factory=lambda: {
+        "plaintext_bytes_sealed_here": "the request body as JSON, BEFORE gzip — what this device encrypted",
+        "ciphertext_bytes_sent": "the sealed blob that left this device: the same body gzipped, then "
+                                 "encrypted. Smaller than the line above by whatever gzip achieved, which "
+                                 "is typically 55-75% on JSON. A ratio well under 1 is compression, not loss.",
+        "response_bytes_opened_here": "the reply after this device decrypted it",
+        "ciphertext_frames_received": "sealed frames read off the wire, not messages",
+    })
     events: list = field(default_factory=list)          # [{ts, kind, detail}] — pins, switches, re-verifications
     verified_at: str = ""
     # Stamped on every save, so a receipt dates itself even when nothing closes it. See save().

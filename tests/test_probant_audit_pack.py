@@ -919,11 +919,14 @@ def test_the_pack_ships_a_report_skeleton_whose_headings_are_the_brief_s_claims(
 
     # The three verdicts, named here because a fourth one gets invented when the allowed set is elsewhere
     # in a long document ("CONDITIONALLY VERIFIED", 25 Sep).
-    for v in ("**VERIFIED**", "**NOT VERIFIED**", "**COULD NOT CHECK**"):
+    for v in ("**VERIFIED**", "**VERIFIED IN PART**", "**NOT VERIFIED**", "**COULD NOT CHECK**"):
         assert v in tmpl, v
-    assert "There is no fourth" in tmpl
-    assert "VERIFIED is wrong while any part of the claim is unchecked" in tmpl
-    assert "give the sample size" in tmpl
+    # The fourth word exists because two models needed it and wrote it anyway on 25 Sep; the brief used
+    # to forbid it while praising a report that used it. A FIFTH is still invented, so the bound stays.
+    assert "There is no fifth — do not invent one" in tmpl
+    assert "you reached some of it, all of what you reached held" in tmpl
+    assert 'reads it as "there was no data"' in tmpl
+    assert "give the size" in tmpl          # wording moved with the fourth verdict
 
     # It is accounted for, but as STATIONERY and without a hash. An auditor on 25 Sep filled it in where
     # it lay and broke the pack's own SHA256SUMS — the check the brief tells them to run. The instrument
@@ -1323,8 +1326,12 @@ def test_the_brief_asks_the_auditor_about_its_own_independence():
 
     assert "Say what about YOUR OWN position could affect this audit" in b
     assert "also holds InferRoute's source or internal material, say so" in b
-    assert "the same question applies to you" in b
+    assert "same question applies to you" in b   # sentence-initial since the example was cut
     assert "It is the one part of the report only you can write" in b
+    # And NO worked example: an auditor on 25 Sep said the example made one observation the obvious one
+    # to make, so it could no longer tell its own noticing from compliance.
+    assert "No example is given here, on purpose" in b
+    assert "vendor's own repository on the filesystem it" not in b
 
     # And the skeleton carries the heading, so it is not a paragraph to be skipped.
     tmpl = E.report_template()
@@ -1372,7 +1379,7 @@ def test_the_verdict_line_carries_the_completeness_rule():
 
     tmpl = E.report_template()
     n = len(E.audit_claims())
-    assert tmpl.count("not VERIFIED if any part of this claim below is one you could not reach") == n, \
+    assert tmpl.count("not plain VERIFIED if any part of this claim below is one you could not reach") == n, \
         "the rule is missing from at least one claim's verdict line"
     # It sits on the Verdict line itself, not in a preamble the reader has already scrolled past.
     for line in tmpl.splitlines():
@@ -1399,3 +1406,71 @@ def test_the_brief_requires_every_stated_fact_to_have_been_read():
     assert "four field values that do not exist in the pack it was auditing" in b
     # And why it matters more than an omission.
     assert "worse than one that omits it, because the omission is visible and the invention is not" in b
+
+
+def test_the_brief_stops_handing_over_the_answer_before_the_question():
+    """Opus, 25 Sep, on the brief itself: "The brief itself is the biggest anchoring risk in the folder,
+    and it does not say so." It warns at length that verify_record.py's check names will colonise your
+    thinking if you meet them first — and then supplies, in advance, the expected gzip ratio, that RTMR0
+    varies benignly, that the anchor lands mid-record, that a zero in removed_by_cutoff is legitimate.
+
+    Its sharpest example: `counters_mean` is described in enough detail that a tired auditor could quote
+    it as a field they read. It exists in NO receipt in this pack — and Haiku did exactly that, quoting a
+    30% figure from a field that is not there.
+
+    So the ratio is no longer stated as a number to expect. The brief says what the field is FOR, tells
+    the auditor to check whether it is present, and says what to do when it is not."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "typically 55-75% on JSON" not in b, "the brief still hands over the number to expect"
+    assert "a third to a half" not in b, "the brief still predicts the ratio"
+    assert "Check whether `counters_mean` is present before quoting it" in b
+    assert "no receipt in a pack exported before 0.9.34 has it" in b
+
+
+def test_the_brief_answers_three_more_things_opus_found(tmp_path):
+    """Three of the seven criticisms Opus made of the brief on 25 Sep, each a place the brief asked for
+    something it had not thought through:
+
+    * it asks the auditor to put the verifier's exit code in the report header, and never says the exit
+      code is silent on the one quantitative anomaly in the record — a clean 0 coexists with a 28-hole;
+    * it forbids reporting a hash you did not print, and says nothing about a file you did not fetch;
+      `pip download` prints "File was already downloaded" over another auditor's leftovers and exits 0;
+    * it made filling in a copied template "a file now rather than a request" — and three auditors ran in
+      environments that refuse to write files, so the enforcement produced an empty copy and no report."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "A zero exit code does not mean this gap was judged acceptable" in b
+    assert "If you find one, put it in the header too" in b
+
+    assert "The same goes for a file you did not fetch" in b
+    assert '"File was already downloaded"' in b
+    assert "you fetched those bytes yourself, in this session" in b
+
+    assert "If you cannot write files at all, that is not a blocker" in b
+    assert "The headings are the requirement" in b
+    assert "Do not leave an empty copy behind" in b
+
+
+def test_the_brief_does_not_send_the_auditor_after_a_chain_that_is_not_there():
+    """Opus, 25 Sep: step five of claim 7 read "check the certificate chain", and the receipt's
+    certificate is SELF-SIGNED. "An auditor following the instruction literally would report a
+    one-certificate chain as a weakness, or would quietly substitute the Intel PCK chain (which IS there,
+    inside the quote) and report it as though it were the thing asked for."
+
+    The chain that exists is Intel's, inside the quote, and its root is checkable against Intel's own
+    published certificate — which is a real independent check the brief was not asking for."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "SELF-SIGNED (`CN=attestation-service`)" in b
+    assert "finding none is not a weakness you have discovered" in b
+    assert "PCK → PCK Platform CA → SGX Root CA" in b
+    assert "compare its root with Intel's own published certificate" in b
+    # The bare instruction that caused it must not come back.
+    assert "- check the certificate chain." not in E.AUDIT_MD

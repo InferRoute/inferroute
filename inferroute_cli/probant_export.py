@@ -964,6 +964,11 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    enclave-wide counter, the verifier reports gaps in it as an observation — read that alongside this, and
    read `MANIFEST.json` → `enclave_gaps` with it.
 
+   **A zero exit code does not mean this gap was judged acceptable — it means the program does not judge
+   it.** The enclave-wide counter is an observation (SKIP) and can never fail the run, so `exit 0` and a
+   twenty-eight-operation hole coexist without contradiction. A reader who saw only the exit code in your
+   report's header would never learn the hole exists. If you find one, put it in the header too.
+
    **`enclave_gaps` is the exporter answering the question the verifier tells you to ask it.** An enclave
    serves every matter on an installation, so a record of one matter is missing the others by
    construction, and only the exporting machine can say so. Each row gives how many operations are absent
@@ -999,11 +1004,12 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    not carry a nonce — a second auditor read it that way the same day, reached the right conclusion by the
    wrong route, and would have reported a real difference as benign for a reason that is not true.
 
-   **`counters_mean` says what the counters measure — read it before reporting a ratio as odd.**
-   `ciphertext_bytes_sent` is typically a third to a half of `plaintext_bytes_sealed_here`, and that is
-   gzip, not loss: the body is compressed and then sealed. An auditor on 25 Sep reported the gap as
-   unexplained because the receipt did not define its own units. A receipt written before that has no
-   `counters_mean`; the same explanation holds, and say which you relied on.
+   **Check whether `counters_mean` is present before quoting it.** When a receipt carries it, it defines
+   what each counter measures and you should read that rather than guess. When it does not — and no
+   receipt in a pack exported before 0.9.34 has it — say so, and report the raw numbers and the ratio
+   you computed rather than an explanation you did not get from the file. No expected ratio is printed
+   here on purpose: an auditor on 25 Sep quoted this field, with a figure, from a receipt that does not
+   contain it, and the number it quoted was the one the brief used to supply.
 
    The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), the
    hash of the encryption key the session sealed to, and — since 24 Sep — `attestation`: the evidence row
@@ -1017,7 +1023,11 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    - verify `signature` over `attested_body` under `certificate`, and that the certificate's SPKI is the
      one the quote commits to;
    - confirm the quote commits to SHA-256(challenge ‖ the encryption key the session sealed to);
-   - check the certificate chain.
+   - the receipt's `certificate` is SELF-SIGNED (`CN=attestation-service`). There is no CA above it, and
+     finding none is not a weakness you have discovered — its authority comes entirely from the quote
+     committing to its key, which is the step above. The chain that DOES exist is Intel's, inside the
+     quote: PCK → PCK Platform CA → SGX Root CA. Check that one, and compare its root with Intel's own
+     published certificate rather than with anything in this folder.
 
    **`attestation.checked_with` holds OUR side of those two, and did not exist before 24 Sep.** Until then
    the receipt kept a HASH of the encryption key and no challenge at all, so the second and fourth steps
@@ -1111,7 +1121,13 @@ same folder found the record failing its integrity check and was one step from f
 that was really a colleague's scratch edit. The copy is not politeness: it makes the correct action and
 the non-destructive action the same action. The template is read-only and outside the checked set so that
 ignoring this cannot break anything — but write your report one directory up regardless, along with
-everything else you produce. Do not compose a report of your own shape around it: the numbering below has been asked
+everything else you produce.
+
+**If you cannot write files at all, that is not a blocker.** The headings are the requirement; the file
+is only a convenient way to carry them. Three auditors on 25 Sep worked in environments that refused to
+let them write a report, and the right move is the one they took: reproduce the headings exactly in
+whatever form you hand back, and say in a line that you could not write the file. Do not leave an empty
+copy behind in the parent directory. Do not compose a report of your own shape around it: the numbering below has been asked
 for in prose since 24 Sep and three of five auditors have still answered `verify_record.py`'s fifteen
 check names instead. One of them explained why in its own report — a mechanical requirement that creates
 no enforcement of its own is the kind of instruction that gets dropped once the work gets interesting. So
@@ -1142,12 +1158,14 @@ where or how you ran that a reader should weigh. If you audited on a machine tha
 source or internal material, say so. If you had network access, say so. If you are the same kind of
 system as the one that produced the record, say so.
 
-An auditor on 25 Sep did this unprompted — it noticed the vendor's own repository on the filesystem it
-was working in, stated that none of its findings drew on it, and said the professional should know the
-audit was not run from an unrelated third party's machine. That disclosure cost it nothing and told the
-reader something no verdict could. Claim 3 asks you to weigh whether a reference is independent of the
-party that produced it; the same question applies to you, and a report that raises it about the evidence
-and not about itself is incomplete.
+Claim 3 asks you to weigh whether a reference is independent of the party that produced the record. The
+same question applies to you, and a report that raises it about the evidence and not about itself is
+incomplete.
+
+No example is given here, on purpose. An auditor on 25 Sep pointed out that the worked example this
+section used to carry made one particular observation the obvious one to make, and that having read it
+they could no longer tell how much of their own disclosure was noticing and how much was compliance.
+Look at where you are actually running, and say what you actually find.
 
 This is not a confession and it is not a disclaimer to be waved through. It is the one part of the report
 only you can write.
@@ -1168,6 +1186,12 @@ any of them.
 A report that invents a detail is worse than one that omits it, because the omission is visible and the
 invention is not. If you are unsure whether you read something or assumed it, open the file again or
 leave it out and say you did not check.
+
+**The same goes for a file you did not fetch.** Download into a directory of your own and look at what is
+already in it: `pip download` prints "File was already downloaded" and exits 0 over a wheel someone left
+there hours ago, and that line reads exactly like a successful fetch. An auditor on 25 Sep hit precisely
+that and started again in a clean directory. If you report a hash, you fetched those bytes yourself, in
+this session.
 
 ## A verdict may not be VERIFIED while part of the claim is unchecked
 
@@ -1499,9 +1523,19 @@ def report_template() -> str:
            "leave one out. If a claim cannot be reached from this folder, its verdict is COULD NOT CHECK and",
            "that is a real answer — a blank is not.",
            "",
-           "Each verdict is one of exactly three words: **VERIFIED**, **NOT VERIFIED**, **COULD NOT CHECK**.",
-           "There is no fourth. VERIFIED is wrong while any part of the claim is unchecked; say what you did",
-           "reach, and name what you did not. If you verified on a sample, give the sample size.",
+           "Each verdict is one of exactly four: **VERIFIED**, **VERIFIED IN PART**, **NOT VERIFIED**,",
+           "**COULD NOT CHECK**. There is no fifth — do not invent one.",
+           "",
+           "  * VERIFIED — you reached all of it and it held.",
+           "  * VERIFIED IN PART — you reached some of it, all of what you reached held, and nothing",
+           "    contradicted the rest. Name both halves: what you verified, and what you could not reach.",
+           "  * NOT VERIFIED — the evidence is here and does not establish the claim, or supports it only",
+           "    on an assumption you are not willing to make. A finding, not a gap.",
+           "  * COULD NOT CHECK — there is nothing here to test the claim against.",
+           "",
+           "Do not reach for COULD NOT CHECK when you verified a great deal and could not finish: a",
+           "professional reads it as \"there was no data\", which would be false. If you verified on a",
+           "sample, give the size.",
            "",
            "## About this audit",
            "",
@@ -1516,8 +1550,8 @@ def report_template() -> str:
                 # auditor on 25 Sep wrote VERIFIED on claim 3 and then, in the same section, named a part
                 # of it it could not reach — the two sentences sat four lines apart. The brief says this
                 # twice; saying it a third time in the brief would have changed nothing.
-                "**Verdict:** _(VERIFIED, NOT VERIFIED or COULD NOT CHECK — and not VERIFIED if any part "
-                "of this claim below is one you could not reach)_",
+                "**Verdict:** _(VERIFIED / VERIFIED IN PART / NOT VERIFIED / COULD NOT CHECK — and not "
+                "plain VERIFIED if any part of this claim below is one you could not reach)_",
                 "",
                 "**What I computed myself:** ",
                 "",

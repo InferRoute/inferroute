@@ -1263,3 +1263,30 @@ def test_continuing_a_survey_is_offered_only_once_one_has_started():
         "searchNo = 3; STATE = { marks: { 'US-A1': { latest: { value: 'relevant' } } } };\n"
         "console.log(JSON.stringify({ note: (await run()).content }));")
     assert "Continue the survey, leaving out" not in only_relevant["note"]
+
+
+def test_the_press_says_which_leg_is_the_ranking():
+    """sealed-research's survey bench, DEV n=297, 25 Sep: the whole-disclosure leg alone ranks better
+    than any fan-out arm (famR@100 0.3665; best arm -0.005 ns, worst -0.052 SIG). But the legs' union
+    reaches 57.8% of gold families at depth 200 against the head's 38.2%, and RRF fusion lands at 33.1% —
+    BELOW the head. The fan-out finds; fusion loses.
+
+    This press never fused, which turns out to have been right for a reason I did not have at the time.
+    What it did not do was say which list is the ranking — so a professional reading eight lists had no
+    way to know the first one is the one that ranks, and the rest are reach."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index('name: "deep_prior_art_search"')
+    body = ts[start:start + ts[start:].index("renderResult(result, _options, theme)")]
+
+    assert "Read the whole-disclosure query first" in body
+    assert "it is the ranked list" in body
+    assert "The others are REACH, not " in body
+    assert "merging them measurably buries what the first one found" in body
+    # A focused or composed press has no whole-disclosure leg, so the sentence must be conditional.
+    assert 'legs.some((l) => l.feature === "the disclosure as a whole")' in body
+    assert "Read each on its own terms." in body
+
+    # And still no fusion anywhere: the union is a count, not a ranking.
+    assert "union.set(d.key" in body
+    for banned in ("RRF", "rerank", "fuse("):
+        assert banned not in body, banned

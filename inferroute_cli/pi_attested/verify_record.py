@@ -636,6 +636,21 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
         c.add(False, "policy permissions", "could not read the containers list out of the policy document")
         return out
 
+    # A policy may PULL IN containers it does not contain. This document declares an external fragment,
+    # and counting only the containers written here understates what the hardware actually enforced: an
+    # auditor on 25 Sep fetched the fragment this record names and found ten more containers, eight of
+    # them allowing elevated execution and one with a non-empty exec_processes. Every row below counts
+    # what is IN THIS FILE, so when a fragment can add containers, the rows are a floor and not a census.
+    fragments = re.findall(r'"feed"\s*:\s*"([^"]+)"', text)
+    includes_containers = '"containers"' in text and bool(fragments)
+    out["self_contained"] = not includes_containers
+    c.add(out["self_contained"], "policy is self-contained",
+          "no external fragment contributes containers" if out["self_contained"] else
+          f"the policy imports {len(fragments)} fragment(s) that may contribute further containers "
+          f"({', '.join(sorted(set(fragments))[:3])}) — every permission row below counts only the "
+          f"{len(containers)} container(s) written in this document, so they are a FLOOR, not a census. "
+          "Fetch the fragment and read it before relying on them.")
+
     for key, per_container, wanted, name, bears_on in CONFIDENTIALITY_POSTURE:
         if per_container:
             vals = [cont.get(key) for cont in containers]
@@ -711,9 +726,24 @@ AI_LANE_CONDITIONS = (
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
                           revocation_checked: bool, image_published: bool,
-                          authenticated: bool) -> Tuple[int, List[str]]:
+                          authenticated: bool, record_ok: bool = True,
+                          policy_committed: bool = True) -> Tuple[int, List[str]]:
     """How far the evidence reaches, and what is holding it back. Every blocker is phrased as the thing
-    someone must DO, because each one is somebody's to close -- ours, the operator's, or the auditor's."""
+    someone must DO, because each one is somebody's to close -- ours, the operator's, or the auditor's.
+
+    `record_ok` and `policy_committed` are the two that were MISSING until 25 Sep, and their absence made
+    this whole section unsound. An auditor set the DEBUG bit in all 70 reports -- 140 FAILs, exit 1 --
+    and this function still licensed "a genuine, non-debuggable confidential machine". They then rewrote
+    allow_stdio_access to false in all 70 archived policies, breaking SHA-256(policy) == HOST_DATA 70
+    times, and it licensed "the policy the hardware enforced ... denies the operator every channel".
+    An attacker needed no valid hardware evidence at all, only a policy_b64 that reads well. A section
+    that tells a reader what they may write MUST be downstream of whether anything verified."""
+    if not record_ok:
+        return 0, ["this record did not verify — see the FAIL lines above. Nothing below is licensed by "
+                   "evidence that failed its own checks, and no sentence here may be written at all."]
+    if not policy_committed:
+        return 0, ["the archived policy is NOT the one the hardware committed to (SHA-256(policy) != "
+                   "HOST_DATA), so what it permits says nothing about what was enforced"]
     blockers: List[str] = []
     for key, _per, _want, name, _bears in CONFIDENTIALITY_POSTURE:
         if posture.get(key) is not True:
@@ -722,6 +752,9 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
         blockers.append("the policy does not pin the image that ran")
     if posture.get("no_exec") is not True:
         blockers.append("the policy permits arbitrary execution inside the enclave")
+    if posture.get("self_contained") is not True:
+        blockers.append("the policy imports fragments that may add containers this program did not read, "
+                        "so its permission rows are a floor and not a census — fetch them and read them")
     enclosed = not blockers
     if not floor_pinned:
         blockers.append("no firmware floor is pinned, so a downgraded-firmware machine would pass "
@@ -740,7 +773,8 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
 
 
 def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Optional[Dict[str, Any]],
-                           floor_pinned: bool, revocation_checked: bool, authenticated: bool) -> None:
+                           floor_pinned: bool, revocation_checked: bool, authenticated: bool,
+                           record_ok: bool, committed: Optional[set] = None) -> None:
     """`policies` is [(host_data_hex, policy_b64)] as actually seen, deduplicated by the caller."""
     print()
     print("What this evidence licenses you to say about confidentiality")
@@ -750,6 +784,11 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         return
     if len(policies) > 1:
         print(f"  NOTE {len(policies)} DISTINCT policies across this record; each is reported separately")
+    if not record_ok:
+        print("  REFUSED — this record did not verify (see the FAIL lines above). This section says what "
+              "the evidence licenses; evidence that failed its own checks licenses nothing, so nothing "
+              "is printed here.")
+        return
     reach, blockers = 2, []
     for hd, pol in policies:
         if len(policies) > 1:
@@ -760,7 +799,9 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         image_published = bool(isinstance(reference, dict) and reference.get("image_source"))
         r, b = confidentiality_reach(posture, floor_pinned=floor_pinned,
                                      revocation_checked=revocation_checked,
-                                     image_published=image_published, authenticated=authenticated)
+                                     image_published=image_published, authenticated=authenticated,
+                                     record_ok=True,
+                                     policy_committed=(committed is None or hd in committed))
         if r < reach:
             reach, blockers = r, b
         elif r == reach:
@@ -1629,6 +1670,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         fails += 1
     seen_policies: Dict[str, str] = {}
     seen_chains: Dict[Tuple[str, bytes], Tuple[str, Any, Any]] = {}
+    seen_host_data: set = set()
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
             print(f"\nSearch {i}: FAIL malformed row")
@@ -1659,6 +1701,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             # serial is not an identity here and deduplicating on one silently collapses the whole record
             # to a single certificate. An earlier version of this did, and reported "1 distinct VCEK" for
             # a record spanning two chips.
+            _rep = base64.b64decode((ev.get("offer") or {}).get("evidence", ""), validate=True)
+            if len(_rep) == REPORT_LEN:
+                seen_host_data.add(parse_report(_rep)["host_data"].hex())
+        except Exception:                                   # noqa: BLE001 — the report is checked per search
+            pass
+        try:
             _certs = load_certs(base64.b64decode((ev.get("offer") or {}).get("endorsements", ""), validate=True))
             _prod = (_der_ia5(_ext(_certs[0], OID_PRODUCT)) or "").split("-", 1)[0]
             _ask = next((x for x in _certs[1:] if _cn(x) == f"SEV-{_prod}"), None)
@@ -1735,7 +1783,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             reference=reference,
             floor_pinned=bool(min_tcb),
             revocation_checked=bool(a.check_revocation and not revocation_failed),
-            authenticated=not bool(isinstance(reference, dict) and reference.get("sig") and not a.reference_key))
+            # A reference that is ABSENT is not an authenticated one. This read `not bool(... and ...)`,
+            # which is vacuously true when reference is None -- so a run with no --reference at all, with
+            # identity FAILing on all 70 searches, reported the reference as authenticated.
+            authenticated=bool(isinstance(reference, dict) and (not reference.get("sig") or a.reference_key)),
+            record_ok=(fails == 0),
+            committed=seen_host_data or None)
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

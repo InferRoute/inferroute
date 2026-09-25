@@ -1173,3 +1173,59 @@ def test_the_licensed_sentences_are_scoped_to_the_search_lane(V):
     joined = " ".join(V.AI_LANE_CONDITIONS)
     for must in ("instance_switches", "SIGNED", "pinned-failed-reverify"):
         assert must in joined, must
+
+
+# --- The licence block must be downstream of whether anything verified ------------------------------
+# An auditor on 25 Sep attacked this section as built and got it to license "a genuine, non-debuggable
+# confidential machine" over 140 FAIL lines, and "the policy the hardware enforced" over a policy whose
+# hash did not match HOST_DATA 70 times. An adversary needed no valid hardware evidence at all, only a
+# policy_b64 that read well. A section that tells a reader what they MAY WRITE is the one place in this
+# program where being wrong is not a missing check but an active endorsement.
+
+def _clean_posture(V):
+    c = V.Checks()
+    return V.check_policy_posture(c, _policy())
+
+
+def test_a_record_that_did_not_verify_licenses_nothing(V):
+    posture = _clean_posture(V)
+    reach, blockers = V.confidentiality_reach(
+        posture, floor_pinned=True, revocation_checked=True, image_published=True,
+        authenticated=True, record_ok=False)
+    assert reach == 0
+    assert len(blockers) == 1 and "did not verify" in blockers[0]
+    # the inversion: with everything else identical and the record intact, it reaches the top
+    assert V.confidentiality_reach(posture, floor_pinned=True, revocation_checked=True,
+                                   image_published=True, authenticated=True, record_ok=True)[0] == 2
+
+
+def test_a_policy_the_hardware_did_not_commit_to_licenses_nothing(V):
+    """Defence in depth. The per-search row that compares SHA-256(policy) to HOST_DATA already FAILs,
+    so record_ok catches this today -- but if that row ever softens to a SKIP, this gate still holds."""
+    posture = _clean_posture(V)
+    reach, blockers = V.confidentiality_reach(
+        posture, floor_pinned=True, revocation_checked=True, image_published=True,
+        authenticated=True, record_ok=True, policy_committed=False)
+    assert reach == 0
+    assert any("HOST_DATA" in b for b in blockers)
+
+
+def test_a_policy_that_imports_fragments_is_reported_as_a_floor(V):
+    """The document lists 3 containers; the fragment it names contributes 10 more, 8 of them allowing
+    elevated execution. Counting only what is written here and calling it "the policy the hardware
+    enforced" is how the rows became prose."""
+    pol = base64.b64encode(('package policy\n\nfragments := [{"feed":"mcr.microsoft.com/aci/x",'
+                            '"includes":["containers","fragments"],"minimum_svn":"4"}]\n\n'
+                            'allow_runtime_logging := false\nallow_dump_stacks := false\n'
+                            'allow_unencrypted_scratch := false\n\n'
+                            'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+                            '"exec_processes":[],"layers":["aa"]}]\n').encode()).decode()
+    c = V.Checks()
+    out = V.check_policy_posture(c, pol)
+    assert out["self_contained"] is False
+    assert any("FLOOR, not a census" in d for _, _, d in c.rows)
+    reach, blockers = V.confidentiality_reach(out, floor_pinned=True, revocation_checked=True,
+                                              image_published=True, authenticated=True)
+    assert reach == 0 and any("fragments" in b for b in blockers)
+    # inversion: the same policy without the fragment block reaches the top
+    assert _clean_posture(V)["self_contained"] is True

@@ -5,7 +5,7 @@ documents, ni aucun mécanisme — il ne demande qu'une clé et donne les comman
 ici ne touche à l'ensemble non déposé, donc rien ici n'attend la revue PI. Le client complet part en
 début de semaine prochaine.
 
-Objet : **Une clé publique de votre part, avant l'envoi de la semaine prochaine**
+Objet : **Votre clé publique, avant l'envoi**
 
 ---
 

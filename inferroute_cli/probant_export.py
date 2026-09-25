@@ -1125,11 +1125,18 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
            n=[x for x in z.namelist() if x.endswith('verify_record.py')]; \
            print(hashlib.sha256(z.read(n[0])).hexdigest() if n else 'NOT IN THIS RELEASE')"
 
-     As of this writing the released versions on the index do **not** contain this file — it ships in the
-     client the professional was given, which is ahead of the index. If your fetch says NOT IN THIS
-     RELEASE, that is the expected answer today and is itself worth reporting: it means no copy
-     independent of InferRoute exists to compare against, and everything below rests on copies InferRoute
-     controls. Do not report it as a match or as a failure of the record.
+     **Report what you observed, with the artefacts, and do not report a match you did not print.** Give
+     the wheel's exact filename, its byte size, whether the path exists inside it, and the full 64-character
+     hash you computed beside the one you are comparing against. A hash pasted from your own terminal can
+     be checked by the reader; "an exact match" cannot, and on 25 Sep an auditor reported exactly that —
+     a positive independent match against this index — for a release that does not contain the file at
+     all. It was the strongest corroboration in the report and it had not happened.
+
+     This brief deliberately no longer tells you what your fetch will say. An expected answer printed here
+     is an anchor, and the failure above was an auditor agreeing with one. NOT IN THIS RELEASE is a real
+     and reportable outcome — it means no copy independent of InferRoute exists to compare against, and
+     the rest rests on copies InferRoute controls. A hash is a real outcome. Which one you got is the
+     finding. Do not report it as a match or as a failure of the record.
 
      **(b) The published client wheel.** `MANIFEST.json` gives you both halves: `client_version`, and
      `client_wheel_url` — a direct link to that exact version, with its SHA-256 published beside it as

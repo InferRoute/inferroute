@@ -269,7 +269,12 @@ def test_the_brief_does_not_claim_the_index_carries_the_verifier():
     brief = E.AUDIT_MD
     assert "InferRoute publishes this verifier inside\n     its client package" not in brief
     assert "NOT IN THIS RELEASE" in brief, "the fetch that comes back empty has no expected answer"
-    assert "do **not** contain this file" in brief
+    # It used to go on to say the index does NOT contain the file. True at the time, and still true — but
+    # a brief that prints the expected answer is an anchor, and on 25 Sep an auditor agreed with one,
+    # reporting a positive independent match against PyPI for a release that has no such file. The brief
+    # now predicts nothing in either direction and asks for the artefacts instead.
+    assert "do **not** contain this file" not in brief, "the brief predicts the answer again"
+    assert "no longer tells you what your fetch will say" in brief
     # The wheel is offered, and is NOT dressed up as independent corroboration.
     assert "not**\n     independent corroboration" in brief or "not** independent corroboration" in brief
     assert "targeted substitution" in brief

@@ -1124,3 +1124,28 @@ def test_the_pack_ships_the_verifier_of_the_client_that_wrote_it(tmp_path, V, km
     code, out = _run(pack)
     assert "PASS bundle integrity" in out, out[-500:]
     assert "present-but-unlisted" not in out
+
+
+def test_the_brief_asks_for_observations_and_never_predicts_the_answer():
+    """Round 2 of the audit loop, 25 Sep: an auditor reported a positive independent match of
+    verify_record.py against PyPI — "the strongest of the three sources… PyPI is not InferRoute" — for a
+    release that does not contain the file at all. I checked PyPI myself rather than acting on it.
+
+    That is the second confabulation in three audits, and both ran in the direction of making the
+    auditor's own work look more complete. The client cannot stop an auditor inventing, but it can stop
+    ASKING to be agreed with: the brief used to say what the fetch would return, and an expected answer
+    printed in a brief is an anchor. It now asks for the artefacts instead — filename, size, and the full
+    hash printed beside the one being compared — because a pasted hash is falsifiable and "an exact match"
+    is not."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "do not report a match you did not print" in b
+    assert "the wheel's exact filename, its byte size" in b
+    assert "the full 64-character hash you computed beside the one you are comparing against" in b
+    assert "A hash pasted from your own terminal can be checked by the reader" in b
+    # The anchor is gone, and the reason it is gone is stated where someone might put it back.
+    assert "no longer tells you what your fetch will say" in b
+    assert "An expected answer printed here is an anchor" in b
+    assert "As of this writing the released versions on the index do **not** contain this file" not in E.AUDIT_MD

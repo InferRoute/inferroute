@@ -503,8 +503,10 @@ def test_marks_ride_with_the_professionals_message_once_per_change():
     assert 'Marked relevant: US-A1 "Replaying recorded agent traces to improve a sealed model"' in text
     assert "Marked known art: US-C3" in text
     # The same candidates the page would offer, so the assistant can keep, reword, merge or drop them.
-    for c in ("Look deeper at the ones I marked relevant", "Find documents like US-A1", "Continue the survey, leaving out"):
+    for c in ("Look deeper at the ones I marked relevant", "Find documents like US-A1"):
         assert c in text, c
+    # ...but NOT "continue the survey", because this sitting has not searched. See the test below.
+    assert "Continue the survey, leaving out" not in text
     assert "keep, reword" in text and "do not reply to it or mention it" in text
     assert out["again"] is None                          # unchanged marks are not sent again: nothing piles up
     assert out["changed"] is True
@@ -1228,3 +1230,36 @@ def test_the_end_of_a_press_actually_runs():
     assert out["cleanRecorded"] is False
     # The last allowed generation asks for nothing more.
     assert out["lastGenerationAsks"] is False
+
+
+
+def test_continuing_a_survey_is_offered_only_once_one_has_started():
+    """Henry, 25 Sep: "now im seeing this while the session is still fully empty, thats not right:
+    Continue the survey, leaving out what I marked known or not relevant".
+
+    Marks belong to the MATTER and outlive a sitting, so a fresh session opens holding every mark the
+    professional has ever made. The other mark steps survive that fine — "find documents like US-X" is a
+    new search, not a continuation. This one is the only step whose words claim something about what has
+    already happened in the room, and it was claiming it in an empty one."""
+    empty = _run_marks_hook(
+        "searchNo = 0; STATE = { marks: { 'US-C3': { latest: { value: 'known' } },\n"
+        "  'US-A1': { latest: { value: 'relevant' } } } };\n"
+        "console.log(JSON.stringify({ note: (await run()).content }));")
+    assert "Continue the survey, leaving out" not in empty["note"], \
+        "a sitting with no searches offered to continue a survey that had not started"
+    # The steps that are still honest in an empty session are still there.
+    assert "Find documents like US-A1" in empty["note"]
+    assert "Run a prior-art survey of the disclosure" in empty["note"]
+
+    searched = _run_marks_hook(
+        "searchNo = 3; STATE = { marks: { 'US-C3': { latest: { value: 'known' } },\n"
+        "  'US-A1': { latest: { value: 'relevant' } } } };\n"
+        "console.log(JSON.stringify({ note: (await run()).content }));")
+    assert "Continue the survey, leaving out" in searched["note"], \
+        "once a survey has run, continuing it is exactly the right offer"
+
+    # And with nothing set aside there is nothing to leave out, searches or not.
+    only_relevant = _run_marks_hook(
+        "searchNo = 3; STATE = { marks: { 'US-A1': { latest: { value: 'relevant' } } } };\n"
+        "console.log(JSON.stringify({ note: (await run()).content }));")
+    assert "Continue the survey, leaving out" not in only_relevant["note"]

@@ -620,7 +620,8 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
     body = {k: v for k, v in reference.items() if k != "sig"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(key_hex)).verify(bytes.fromhex(str(sig)), canonical(body))
-        c.add(True, "reference signature", f"verifies under the publication key {key_hex[:16]}… you recorded at first use")
+        c.add(True, "reference signature", f"verifies under the publication key {key_hex[:16]}… that you supplied "
+              "(whether it was recorded at first use is yours to attest, not this program's)")
     except Exception:                                       # noqa: BLE001
         c.add(False, "reference signature", "does NOT verify under the given publication key")
 
@@ -692,6 +693,36 @@ def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Op
             ("every search of each enclave SHOWN, in order; a search dropped from the END of a lifetime, or an "
              "entire lifetime dropped from the record, remains undetectable")
     c.add(not problems, name, ("; ".join(summary) + f" — covers {shown}") if not problems else "; ".join(problems))
+    # ENCLAVE-WIDE COUNTER OBSERVATION (informational, never fatal): when session numbering is in use, the
+    # per-enclave `seq` values this record happens to carry can still reveal operations that exist on the
+    # enclave but are ABSENT from this record. On 2026-09-24 exactly such a gap was a corrupt/omitted
+    # session of THIS record's own matter, and only a human auditor noticed. State the gap where the reader
+    # meets it; let the reader judge whose it is. From sealed-research, with two changes:
+    #
+    #   * The BENIGN case named first, because on real data it is the common one. An enclave serves every
+    #     matter on the professional's installation, so a record of one matter is missing the searches of
+    #     all the others by construction. Measured on this machine the same day: 37 of seq 1..65 carried,
+    #     28 absent, all of them other matters. Leading with "another client" invites a solo practitioner
+    #     to report a breach where there is a second matter.
+    #   * The list is BOUNDED. `f"{missing}"` on a long-lived enclave prints thousands of numbers into a
+    #     verifier's output; the count is the fact, the numbers are the illustration.
+    if per_session:
+        eseq: Dict[str, set] = {}
+        for row in searches:
+            st = row.get("statement") if isinstance(row, dict) else None
+            if isinstance(st, dict) and st.get("lifetime_id") and isinstance(st.get("seq"), int):
+                eseq.setdefault(str(st["lifetime_id"]), set()).add(int(st["seq"]))
+        for lid, seen in sorted(eseq.items()):
+            lo, hi = min(seen), max(seen)
+            missing = [n for n in range(lo, hi + 1) if n not in seen]
+            if missing:
+                shown_missing = ", ".join(str(n) for n in missing[:12]) + ("…" if len(missing) > 12 else "")
+                c.add(None, "enclave-wide counter (observation)",
+                      f"enclave {lid[:8]}…: this record carries enclave seq {lo}..{hi} but not {len(missing)} "
+                      f"of them ({shown_missing}) — operations that ran on the enclave and are not in this "
+                      f"record. Usually another MATTER on the same installation, or another client where the "
+                      f"enclave is shared; but a session of this matter missing from the export looks "
+                      f"identical here. The record cannot say which; ask the exporter to account for them.")
 
 
 def _counted(rows: List[Tuple[Any, str]]) -> str:

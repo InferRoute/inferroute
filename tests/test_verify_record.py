@@ -944,3 +944,57 @@ def test_the_verifier_compiles_on_every_python_it_claims_to_support():
         r = subprocess.run([exe, "-c", f"compile(open({str(src)!r}).read(), 'v', 'exec')"],
                            capture_output=True, text=True, timeout=120)
         assert r.returncode == 0, f"{exe} cannot compile the verifier:\n{r.stderr[-400:]}"
+
+
+def _completeness(V, rows):
+    c = V.Checks()
+    V.check_completeness(c, rows)
+    return c.rows
+
+
+def _row(lifetime, session, session_seq, seq):
+    # A real statement carries BOTH: session_seq numbers the sitting, seq numbers the ENCLAVE. The
+    # observation being tested reads the second, and a fixture with only one of them never reaches it.
+    return {"statement": {"lifetime_id": lifetime, "session_id": session,
+                          "session_seq": session_seq, "seq": seq}}
+
+
+def test_the_verifier_observes_operations_missing_from_the_record(V):
+    """Merged from sealed-research, 25 Sep, after the 09-24 corrupt-session incident: per-session numbering
+    can be contiguous while the ENCLAVE's own counter shows operations the record does not contain. That
+    day exactly such a gap was a corrupt session of the record's own matter, and only a human noticed.
+
+    Never fatal, because the record genuinely cannot tell whose the missing operations are. On this
+    installation the benign answer is the common one — measured the same day, a real pack carried 37 of
+    enclave seq 1..65 and all 28 absent ones were other matters — so the wording leads with that. Leading
+    with "another client" invites a solo practitioner to report a breach where there is a second matter."""
+    with_gap = _completeness(V, [_row("aa" * 16, "s1", 1, 1), _row("aa" * 16, "s1", 2, 2), _row("aa" * 16, "s2", 1, 5)])
+    obs = [r for r in with_gap if r[1] == "enclave-wide counter (observation)"]
+    assert len(obs) == 1, with_gap
+    status, _, detail = obs[0]
+    assert status == "SKIP", "an observation the record cannot resolve must never fail the run"
+    assert "but not 2 of them (3, 4)" in detail
+    assert "another MATTER on the same installation" in detail
+    assert "a session of this matter missing from the export looks " in detail
+    assert "ask the exporter to account for them" in detail
+
+    # A contiguous enclave counter says nothing: silence is the right output when there is no gap.
+    clean = _completeness(V, [_row("bb" * 16, "s1", 1, 1), _row("bb" * 16, "s2", 1, 2)])
+    assert not [r for r in clean if r[1] == "enclave-wide counter (observation)"]
+
+    # The list is BOUNDED. `f"{missing}"` on a long-lived enclave prints thousands of numbers into a
+    # verifier's output; the count is the fact and the numbers are only the illustration.
+    wide = _completeness(V, [_row("cc" * 16, "s1", 1, 1), _row("cc" * 16, "s2", 1, 400)])
+    detail = [r for r in wide if r[1] == "enclave-wide counter (observation)"][0][2]
+    assert "but not 398 of them" in detail and detail.count(",") <= 12 and "…" in detail
+    assert len(detail) < 600, f"unbounded observation: {len(detail)} chars"
+
+
+def test_the_reference_signature_does_not_claim_what_the_program_cannot_know(V):
+    """The old wording said the key was one "you recorded at first use". The program has no way to know
+    that — it verifies a signature under a key it was handed. Claiming provenance it cannot check is the
+    same defect the brief spends pages warning auditors about, in the tool itself."""
+    src = Path(V.__file__).read_text()
+    assert "that you supplied" in src
+    assert "yours to attest, not this program's" in src
+    assert "you recorded at first use\")" not in src

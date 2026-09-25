@@ -1042,3 +1042,46 @@ def test_claim_five_names_both_ways_a_removal_hides():
     assert "TWO exceptions no counter can reveal" in b
     assert "a verdict that names only the first is overstating what was checked" in b
     assert "an entire session, or an entire enclave lifetime, dropped from the record wholesale" in b
+
+
+def test_the_pack_says_where_to_get_the_wheel_it_was_built_by(tmp_path, V, kms, no_anchors, monkeypatch):
+    """Every auditor so far reported VERIFY.md's step (b) — compare the shipped verifier against an
+    independently published copy — as unrunnable. The package is not on PyPI and nothing in the pack said
+    where else to look. One of them named the fix exactly: "a URL in MANIFEST (unsigned, but findable)
+    would make step (b) runnable."
+
+    Generic, not the per-recipient path: a link minted for one reader is no use to their auditor, who may
+    be a third party months later. And bounded in the same breath — both the link and the version are the
+    audited party naming itself, so what the comparison is worth comes from the copy arriving over a
+    channel this machine does not serve."""
+    from inferroute_cli import probant_export as E
+    import re
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    # This tree is not installed, so it reports 0.0.0+dev and correctly emits no link — which is the other
+    # half of the behaviour, asserted below. Pin a release version to see the link a real pack carries.
+    monkeypatch.setattr(E, "_client_version", lambda: "0.9.32")
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    m = json.loads((pack / "MANIFEST.json").read_text())
+
+    url = m["client_wheel_url"]
+    assert url.startswith("https://inferroute.ai/client/inferroute-")
+    assert url.endswith("-py3-none-any.whl")
+    assert m["client_version"] in url, "the link does not point at the version that built this pack"
+    # NOT the per-recipient token path, which is useless to a third-party auditor.
+    assert "qsq7adtvwv3ug9" not in url
+
+    # A pack built from an uninstalled tree must NOT claim a published URL: sending an auditor to fetch
+    # "inferroute-0.0.0+dev…whl" wastes their time and reads as a broken link in our record rather than
+    # as what it is. Absence is the honest output.
+    assert E.wheel_url_for("0.9.32") == "https://inferroute.ai/client/inferroute-0.9.32-py3-none-any.whl"
+    assert E.wheel_url_for("0.0.0+dev") == ""
+    assert E.wheel_url_for("") == ""
+
+    v = re.sub(r"\s+", " ", E.AUDIT_MD)          # step (b) lives in the brief, not VERIFY.md
+    assert "`client_wheel_url`" in v and "<same url>.sha256" in v
+    # The bound, stated where the link is offered.
+    assert "Both the link and the version are the audited party naming itself" in v
+    assert "an unsigned URL we control proves nothing on its own" in v
+    # And the 404, which is the case an auditor will actually hit on a version we did not publish.
+    assert "A 404 means that exact version was not published, not that the record is wrong" in v

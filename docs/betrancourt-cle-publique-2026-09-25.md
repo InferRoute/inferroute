@@ -14,8 +14,8 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-J'ai rencontré un ingénieur de l'INPI pour faire examiner la brevetabilité de ce que nous construisons.
-Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre franchement non plus —
+J'ai rencontré un ingénieur de l'INPI pour faire examiner la brevetabilité de concepts figurant dans les
+dépôts provisoires. Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre franchement non plus —
 et il m'a expliqué pourquoi l'informatique, et l'IA en particulier, s'y prêtent mal. J'en suis ressorti
 avec des nuances que je n'avais pas, et avec l'idée qu'il valait mieux tenter que renoncer. C'est ce que
 nous allons faire.
@@ -116,6 +116,11 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **« provisoires », pas « provisionnels ».** Vous avez dicté « provisionels » ; en français
+  « provisionnel » se rapporte à une provision (le tiers provisionnel de l'impôt), et le terme du droit
+  des brevets est **provisoire** — demande provisoire, dépôt provisoire. Devant un conseil en propriété
+  industrielle, le mot juste se remarque et le mot faux aussi. Corrigé ; dites-moi si vous visiez autre
+  chose que les dépôts dont il a déjà connaissance.
 - **⚠ L'INPI et la règle du 23 sept. — à vérifier par vous.** Vous aviez tranché : ne pas écrire « ils
   sont en cours d'examen de brevetabilité », parce qu'annoncer une omission la désigne. Ce passage-ci
   est compatible **à une condition**, et elle est respectée : il raconte un rendez-vous et ce que vous

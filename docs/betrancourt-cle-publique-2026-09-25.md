@@ -14,6 +14,15 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
+J'ai rencontré un ingénieur de l'INPI pour faire examiner la brevetabilité de ce que nous construisons.
+Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre franchement non plus —
+et il m'a expliqué pourquoi l'informatique, et l'IA en particulier, s'y prêtent mal. J'en suis ressorti
+avec des nuances que je n'avais pas, et avec l'idée qu'il valait mieux tenter que renoncer. C'est ce que
+nous allons faire.
+
+Je vous en parle parce que c'est votre métier et que ce n'est pas le mien. Si vous avez un avis
+là-dessus, je le prendrai volontiers.
+
 L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine
 prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains ; et si
 le moment est mal choisi, dites-le-moi sans façon.
@@ -107,6 +116,19 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **⚠ L'INPI et la règle du 23 sept. — à vérifier par vous.** Vous aviez tranché : ne pas écrire « ils
+  sont en cours d'examen de brevetabilité », parce qu'annoncer une omission la désigne. Ce passage-ci
+  est compatible **à une condition**, et elle est respectée : il raconte un rendez-vous et ce que vous
+  en avez appris, et il **ne relie jamais cela à ce que la lettre ne dit pas**. Aucune phrase du type
+  « c'est pourquoi je ne détaille pas ». Si le lien apparaît dans la version complète de la semaine
+  prochaine, la règle saute.
+- **Ce qu'il dit exactement, et ce qu'il ne dit pas.** « C'est gris », « rien qui ferme la porte, rien
+  qui l'ouvre franchement non plus » : l'ingénieur n'a ni validé ni écarté, et la lettre ne lui fait pas
+  dire autre chose. Ne pas glisser vers « l'INPI a confirmé » — un avocat en brevets lirait la
+  surenchère immédiatement, et c'est précisément le lecteur qui sait à quoi ressemble un avis gris.
+- **« Si vous avez un avis là-dessus, je le prendrai volontiers »** : c'est son métier, vous le lui
+  reconnaissez, et cela ouvre une porte professionnelle sans rien demander. À retirer si vous préférez
+  ne pas solliciter d'avis gratuit.
 - **Rien ne dit plus qu'il a accepté, parce qu'il n'a rien accepté** (votre précision : intérêt
   implicite, léger, aucun engagement). Les versions successives disaient « vous m'aviez dit votre
   intérêt », puis « vous aviez bien voulu vous dire prêt », puis « j'avais cru comprendre que vous

@@ -14,8 +14,9 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Vous m'aviez dit votre intérêt à essayer l'outil de recherche d'antériorité dont nous avions parlé. Il
-sera prêt en début de semaine prochaine, et c'est ce qui me vaut de vous écrire aujourd'hui.
+Vous aviez bien voulu vous dire prêt à essayer l'outil de recherche d'antériorité dont nous avions parlé.
+Il devrait être prêt en début de semaine prochaine, et je me permets de vous écrire sur cette base — en
+espérant que cet intérêt tienne toujours.
 
 Je vous l'adresserai avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter.
 L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de l'ensemble non déposé,
@@ -106,6 +107,13 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **L'entrée aussi, sur le même registre.** « Vous m'aviez dit votre intérêt » énonçait son accord comme
+  un fait acquis, et « ce qui me vaut de vous écrire » s'en prévalait. Devenu « vous aviez bien voulu
+  vous dire prêt » (c'était une amabilité, pas un engagement), « je me permets de vous écrire sur cette
+  base », et surtout « en espérant que cet intérêt tienne toujours » — qui lui laisse la porte de
+  sortie. Un accord dont on se prévaut se retire mal ; un accord qu'on lui laisse reconfirmer tient.
+  La date est passée de « sera prêt » à « devrait être prêt » : un logiciel glisse, et promettre moins
+  coûte moins cher que d'expliquer un retard.
 - **Ton : trois corrections d'orgueil.** « Pour un cabinet, c'est la partie qui compte » disait à un
   avocat ce qui compte dans son métier — devenu « j'ai supposé que… ; vous me direz si je me suis
   trompé ». « Cela couvre ce que vous m'aviez demandé » affirmait un résultat non constaté — devenu

@@ -1280,8 +1280,14 @@ def test_the_press_says_which_leg_is_the_ranking():
 
     assert "Read the whole-disclosure query first" in body
     assert "it is the ranked list" in body
-    assert "The others are REACH, not " in body
-    assert "merging them measurably buries what the first one found" in body
+    # A measured claim in an auditor-facing document carries its date, so a reader months later can ask
+    # whether it still holds rather than assume. sealed-research has registered notifying this lane
+    # before any fusion result ships; until then the date is what lets the sentence age honestly.
+    assert "on a benchmark measured 2026-09-25" in body
+    assert "That date is part of the claim" in body
+    assert "it is a measurement, it can be superseded" in body
+    assert "The others are " in body and "REACH, not " in body   # the sentence wraps
+    assert "merging them measurably buries what the first " in body   # the sentence wraps
     # A focused or composed press has no whole-disclosure leg, so the sentence must be conditional.
     assert 'legs.some((l) => l.feature === "the disclosure as a whole")' in body
     assert "Read each on its own terms." in body

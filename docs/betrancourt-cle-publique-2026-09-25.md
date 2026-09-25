@@ -14,18 +14,17 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Je vous adresse en début de semaine prochaine le travail préparatoire dont nous avons parlé, avec un
+Vous m'aviez dit votre intérêt à l'essayer. C'est ce qui me permet de vous écrire aujourd'hui, et je vous
+en remercie.
+
+En début de semaine prochaine, je vous adresse le travail préparatoire dont nous avons parlé, avec un
 outil pour le traiter. L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de
 l'ensemble non déposé, et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
 
-Un mot sur ce qui arrive, puisque nous en avions parlé et que vous aviez bien voulu vous dire prêt à
-l'essayer.
-
-L'outil sera prêt **en début de semaine prochaine**. Il aura demandé plus de travail que je ne le
-pensais, et pas du côté où je l'attendais : l'essentiel des dernières semaines est passé non pas à
-produire le résultat, mais à le rendre contrôlable — à faire en sorte qu'un tiers puisse refaire les
-vérifications lui-même, sans avoir à nous croire sur parole. Pour un cabinet, c'est la partie qui compte,
-et c'est celle qui prend le temps.
+Il aura demandé plus de travail que je ne le pensais, et pas du côté où je l'attendais : l'essentiel des
+dernières semaines est passé non pas à produire le résultat, mais à le rendre contrôlable — à faire en
+sorte qu'un tiers puisse refaire les vérifications lui-même, sans avoir à nous croire sur parole. Pour un
+cabinet, c'est la partie qui compte, et c'est celle qui prend le temps.
 
 Deux choses seront vraies le jour où vous l'ouvrirez. La recherche s'exécute sans que l'invention non
 déposée quitte votre poste en clair — la difficulté même d'une recherche d'antériorité avant dépôt. Et
@@ -34,8 +33,10 @@ chaque recherche laisse une pièce datée, scellée, qu'un tiers peut revérifie
 Cela couvre ce que vous m'aviez demandé, et un peu plus. Je suis impatient que vous le mettiez à
 l'épreuve : à partir de là, c'est votre lecture qui dira si c'est utile, et je n'ai pas de meilleur juge.
 
-Il me faut donc votre **clé publique**, et c'est tout ce que demande cette lettre-ci. Vous n'avez rien à
-installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
+D'ici là, une seule chose de votre part, et je vous remercie par avance des quelques minutes qu'elle
+demande : il me faut votre **clé publique**, faute de quoi je ne peux rien vous adresser à vous seul.
+
+Vous n'avez rien à installer. Un fichier de quatre-vingt-dix lignes fait cela et rien d'autre :
 
 **https://inferroute.ai/client/cle-probant.py**
 
@@ -102,6 +103,11 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **L'entrée s'appuie sur son accord, et remercie avant de demander.** « Vous m'aviez dit votre intérêt
+  à l'essayer. C'est ce qui me permet de vous écrire aujourd'hui » : la demande découle de ce qu'il a
+  déjà accordé au lieu de tomber sans raison. Les remerciements sont placés devant l'effort demandé,
+  pas après — après, ils se lisent comme une formule. Deux ouvertures « Un mot » et deux « début de
+  semaine prochaine » se télescopaient dans la version précédente ; il n'en reste qu'une de chaque.
 - **« un outil pour le traiter », et non « l'outil qui l'a produit »** (votre correction). La nuance
   n'est pas de style : l'outil n'a pas fabriqué le travail préparatoire, il sert à le travailler. Le
   présenter comme la source de ce qu'il reçoit serait faux, et le placerait du mauvais côté — un

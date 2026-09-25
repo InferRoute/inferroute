@@ -1085,3 +1085,42 @@ def test_the_pack_says_where_to_get_the_wheel_it_was_built_by(tmp_path, V, kms, 
     assert "an unsigned URL we control proves nothing on its own" in v
     # And the 404, which is the case an auditor will actually hit on a version we did not publish.
     assert "A 404 means that exact version was not published, not that the record is wrong" in v
+
+
+def test_the_pack_ships_the_verifier_of_the_client_that_wrote_it(tmp_path, V, kms, no_anchors, monkeypatch):
+    """Round 1 of the audit loop, 25 Sep, found this and it is the worst defect of the night.
+
+    The pack shipped the verifier that came with the RECORD — written by whatever client exported it,
+    possibly months earlier — while reporting `client_version` for the client writing the PACK and linking
+    to that version's wheel. So the moment an auditor did what the brief asks and compared the two, they
+    mismatched by construction. One did: it diffed them, established version lag rather than tampering,
+    and cleared it, after real work our own packaging created.
+
+    Worse than a false alarm. The stale copy predated REPORT-TEMPLATE.md being declared stationery, so it
+    reported `present-but-unlisted ['REPORT-TEMPLATE.md']` and THE PACK FAILED ITS OWN INTEGRITY CHECK —
+    exit 1, on evidence that was entirely sound."""
+    from inferroute_cli import probant_export as E
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    # Make the record's copy differ, exactly as a months-old record's would.
+    stale = (rec / "verify_record.py").read_bytes()
+    (rec / "verify_record.py").write_bytes(b"# an older client's verifier\n" + stale)
+
+    monkeypatch.setattr(E, "_client_version", lambda: "0.9.34")
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    shipped = (pack / "verify_record.py").read_bytes()
+
+    import pathlib as _pl
+    installed = (_pl.Path(E.__file__).parent / "pi_attested" / "verify_record.py").read_bytes()
+    assert shipped == installed, "the pack ships the record's verifier, not its own"
+    assert shipped != (rec / "verify_record.py").read_bytes()
+
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert m["verify_record_sha256"] == E._sha256_hex(installed)
+    assert m["files"]["verify_record.py"] == m["verify_record_sha256"], \
+        "the manifest's two statements about the same file disagree"
+
+    # And the pack passes its own verification — the thing that actually broke.
+    code, out = _run(pack)
+    assert "PASS bundle integrity" in out, out[-500:]
+    assert "present-but-unlisted" not in out

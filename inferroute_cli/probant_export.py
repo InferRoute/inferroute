@@ -1443,6 +1443,16 @@ def anchor_block(ots_path: Path) -> Dict[str, Any]:
             "read_with": "ots --no-bitcoin verify trust-anchors/reference.json.ots"}
 
 
+def _installed_verifier() -> bytes:
+    """The verifier shipped by the client that is writing this pack — the one `client_version` names."""
+    src = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"
+    if not src.is_file():
+        from . import probant as S
+        raise S.ProbantError("the independent verifier (pi_attested/verify_record.py) is missing from this "
+                             "installation; refusing to write a pack whose brief tells the reader to run it")
+    return src.read_bytes()
+
+
 def _receipt_has(path: Path, field: str) -> bool:
     """Whether a receipt supports a given recomputation. An auditor on 24 Sep hand-built a six-row table of
     exactly this before it could score claim 7 at all; the pack knows it and was making them derive it.
@@ -1551,7 +1561,18 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
         "VERIFY.md": (src / "VERIFY.md").read_bytes(),
         "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
-        "verify_record.py": (src / "verify_record.py").read_bytes(),
+        # THIS CLIENT'S verifier, not the record bundle's. The pack reports `client_version` and links to
+        # that version's wheel; shipping the copy that came with the RECORD — written by whatever client
+        # exported it, possibly months earlier — guarantees a mismatch the moment an auditor does what the
+        # brief asks and compares the two. On 25 Sep one did: it diffed them, established the difference
+        # was version lag rather than tampering, and cleared it — after real work that our own packaging
+        # created.
+        #
+        # Worse than cosmetic. The stale copy predated REPORT-TEMPLATE.md being declared stationery, so it
+        # reported `present-but-unlisted ['REPORT-TEMPLATE.md']` and the pack FAILED ITS OWN INTEGRITY
+        # CHECK — exit 1, on evidence that was entirely sound. The version that writes the pack is the
+        # version that knows what belongs in it.
+        "verify_record.py": _installed_verifier(),
     }
     for name in sorted(p.name for p in src.iterdir()):
         if name.endswith(".evidence.json") or name == "unanswered.json":
@@ -1581,6 +1602,10 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # tells an auditor where to look, and proves nothing on its own. What makes the comparison
                 # worth anything is that the copy comes from somewhere this machine does not control.
                 "client_wheel_url": wheel_url_for(_client_version()),
+                # The shipped verifier's own hash, stated so step (b) can begin with a string comparison
+                # rather than an extraction. It is also in `files` below; repeating it here is where an
+                # auditor is already looking when they read client_version and the wheel link.
+                "verify_record_sha256": _sha256_hex(_installed_verifier()),
                 "reference_hint": src_manifest.get("reference_hint"),
                 # A stated count per kind, so that nothing here has to be inferred from an empty field.
                 # `document_reads: 0` means this matter did no document reads — it does not mean they went

@@ -14,8 +14,8 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Je vous adresse en début de semaine prochaine le travail préparatoire dont nous avons parlé, avec l'outil
-qui l'a produit. L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de
+Je vous adresse en début de semaine prochaine le travail préparatoire dont nous avons parlé, avec un
+outil pour le traiter. L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste — il porte de
 l'ensemble non déposé, et c'est la raison pour laquelle il ne part pas en pièce jointe ordinaire.
 
 Un mot sur ce qui arrive, puisque nous en avions parlé et que vous aviez bien voulu vous dire prêt à
@@ -102,6 +102,10 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
+- **« un outil pour le traiter », et non « l'outil qui l'a produit »** (votre correction). La nuance
+  n'est pas de style : l'outil n'a pas fabriqué le travail préparatoire, il sert à le travailler. Le
+  présenter comme la source de ce qu'il reçoit serait faux, et le placerait du mauvais côté — un
+  générateur à vérifier plutôt qu'un instrument entre ses mains.
 - **Le rappel produit : ce qu'il dit et ce qu'il ne dit pas.** Il reste au niveau des PROPRIÉTÉS (la
   recherche sans exposition, la pièce revérifiable), jamais des mécanismes — c'est exactement la limite
   posée le 22 sept. Pas de chiffre, pas de « état de l'art », pas de pourcentages de leviers, rien sur la

@@ -13,7 +13,8 @@ est imprimée, et c'est elle que vous renvoyez par courriel.
     python3 cle-probant.py
 
 Besoin : Python 3 et la bibliothèque `cryptography` (version 50 ou plus). Si elle manque, le script
-vous le dit et s'arrête sans rien écrire.
+vous le dit, vous donne la ligne qui l'installe à côté du Python du système, et s'arrête sans rien
+écrire.
 """
 import base64
 import datetime as dt
@@ -43,9 +44,14 @@ def main() -> int:
         from cryptography.hazmat.primitives.asymmetric import mlkem
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     except ImportError:
+        # `pip install` dans le Python du système échoue sur la plupart des machines récentes
+        # (PEP 668, « externally-managed-environment ») : macOS avec Homebrew, Debian, Ubuntu. On
+        # indique donc la forme qui marche partout, et qui ne touche pas au Python du système.
         sys.stderr.write(
-            "\n  Il manque la bibliothèque `cryptography` (version 50 ou plus).\n"
-            "      python3 -m pip install 'cryptography>=50'\n"
+            "\n  Il manque la bibliothèque `cryptography` (version 50 ou plus).\n\n"
+            "  Cette ligne l'installe à côté, sans rien changer à votre Python, et relance ce script :\n\n"
+            f"      python3 -m venv /tmp/cle && /tmp/cle/bin/pip install 'cryptography>=50' "
+            f"&& /tmp/cle/bin/python {sys.argv[0]}\n\n"
             "  Rien n'a été écrit.\n\n")
         return 1
 

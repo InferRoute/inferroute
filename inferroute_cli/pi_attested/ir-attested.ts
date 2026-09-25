@@ -1583,6 +1583,37 @@ export default function (pi: ExtensionAPI) {
 				blocks.push(hitsText(r.out, `Search ${n} — ${leg.feature}`, r.earlier));
 			}
 
+			// Computed BEFORE the record is written, because the record now carries whether this press
+			// asked for another round. `brief_emitted: Boolean(nextRound)` reading a `const` declared
+			// thirty lines further down is a temporal dead zone, and it threw at runtime — AFTER four
+			// sealed queries had been paid for and returned. Every test passed: they asserted the string
+			// was in the file, and not one of them ran the function.
+			const failed = results.filter((x) => x.status === "failed");
+			const empty = results.filter((x) => x.status === "empty");
+			// "Added nothing new" — NOT "saturated on one family". Collapsing siblings needs the family map,
+			// which lives on the search side; guessing it from publication numbers misses exactly the
+			// cross-jurisdiction siblings that are most of the duplication. Claim the weaker thing we can
+			// actually compute. A leg that returned hits but raised the union by zero is the whole test.
+			const spent = results.filter((x) => x.status === "ok" && (x.added ?? 0) === 0);
+			// The gaps, and whether another round is allowed. A round is worth asking for only when something
+			// went unreached: every leg contributing something is a survey that did its job, and asking for
+			// more then is an agent finding work rather than finding art.
+			const gaps = [...empty.map((x) => `${x.feature} (found nothing)`),
+			              ...spent.map((x) => `${x.feature} (only documents the other queries already had)`)];
+			const roundsLeft = DEEP_GENERATIONS - generation;
+			const nextRound = (gaps.length && roundsLeft > 0 && sent > 0)
+				? `NEXT ROUND — for you, the assistant, not for the professional to answer. ${gaps.length} of `
+					+ `${legs.length} queries reached nothing new: ${gaps.join("; ")}. You can see every document `
+					+ `above. Compose up to ${Math.min(DEEP_MAX, gaps.length + 2)} NEW sealed queries that go at `
+					+ `those gaps specifically — reword what found nothing, and go outward from the documents that `
+					+ `did come back rather than repeating them — then call deep_prior_art_search again with `
+					+ `queries=[...] and because="<one sentence: which gap each query is aimed at>". Put the `
+					+ `description in text as before. Do NOT ask permission: the professional approved sealed `
+					+ `searches on this matter, including ones you compose. ${roundsLeft} round(s) remain. If the `
+					+ `gaps are not closeable by rewording — a feature genuinely absent from the corpus — say so `
+					+ `instead of putting queries to have put them.`
+				: "";
+
 			disclosure.fanouts.push({
 				// Not a hash: the record is the professional's, and a value they cannot interpret is worse
 				// than a long one they can. It is also what makes the repeat check auditable after the fact.
@@ -1610,32 +1641,6 @@ export default function (pi: ExtensionAPI) {
 				const why = results.find((x) => x.why)?.why ?? "no sub-query completed";
 				throw new Error(`the deep search sent nothing: ${why}`);
 			}
-			const failed = results.filter((x) => x.status === "failed");
-			const empty = results.filter((x) => x.status === "empty");
-			// "Added nothing new" — NOT "saturated on one family". Collapsing siblings needs the family map,
-			// which lives on the search side; guessing it from publication numbers misses exactly the
-			// cross-jurisdiction siblings that are most of the duplication. Claim the weaker thing we can
-			// actually compute. A leg that returned hits but raised the union by zero is the whole test.
-			const spent = results.filter((x) => x.status === "ok" && (x.added ?? 0) === 0);
-			// The gaps, and whether another round is allowed. A round is worth asking for only when something
-			// went unreached: every leg contributing something is a survey that did its job, and asking for
-			// more then is an agent finding work rather than finding art.
-			const gaps = [...empty.map((x) => `${x.feature} (found nothing)`),
-			              ...spent.map((x) => `${x.feature} (only documents the other queries already had)`)];
-			const roundsLeft = DEEP_GENERATIONS - generation;
-			const nextRound = (gaps.length && roundsLeft > 0 && sent > 0)
-				? `NEXT ROUND — for you, the assistant, not for the professional to answer. ${gaps.length} of `
-					+ `${legs.length} queries reached nothing new: ${gaps.join("; ")}. You can see every document `
-					+ `above. Compose up to ${Math.min(DEEP_MAX, gaps.length + 2)} NEW sealed queries that go at `
-					+ `those gaps specifically — reword what found nothing, and go outward from the documents that `
-					+ `did come back rather than repeating them — then call deep_prior_art_search again with `
-					+ `queries=[...] and because="<one sentence: which gap each query is aimed at>". Put the `
-					+ `description in text as before. Do NOT ask permission: the professional approved sealed `
-					+ `searches on this matter, including ones you compose. ${roundsLeft} round(s) remain. If the `
-					+ `gaps are not closeable by rewording — a feature genuinely absent from the corpus — say so `
-					+ `instead of putting queries to have put them.`
-				: "";
-
 			const ledger = [
 				`Deep search over ${corpusPhrase(corpusId)}: ${sent} of ${legs.length} sealed queries completed, `
 					+ `${union.size} distinct documents.`,

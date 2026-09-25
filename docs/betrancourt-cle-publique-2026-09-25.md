@@ -29,8 +29,8 @@ l'ensemble non déposé, et ne peut donc pas partir en pièce jointe ordinaire.
 Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité
 avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 
-Il m'aura demandé plus de temps que prévu : produire le résultat, et le rendre vérifiable par un tiers,
-ont chacun demandé beaucoup de travail. Deux choses seront
+Il m'aura demandé plus de temps que prévu : produire des résultats performants, et les rendre
+vérifiables par un tiers, ont chacun demandé beaucoup de travail. Deux choses seront
 vraies : la recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, et chaque
 recherche laisse une pièce datée et scellée qu'un tiers peut revérifier sans nous. C'est une première
 version, avec ses angles morts ; je préfère vous le dire avant que vous les trouviez. Votre lecture dira
@@ -89,6 +89,14 @@ Henry Declety
   dater ferait croire que vous avez oublié l'appel). L'accord de confidentialité n'est pas réglé : la
   proposition reste, appuyée sur « ce dont nous étions convenus l'un et l'autre », ce qui est exact —
   27 août de votre part, 31 août de la sienne, jamais conclu depuis.
+- **« performants » plutôt que « compétitifs »** : compétitif appelle un contre qui, et c'est
+  exactement la comparaison que la revue du 22 sept. interdisait de faire (pas de « état de l'art », pas
+  de barre qu'on ne sait pas situer). Performant qualifie sans comparer — devant un lecteur qui
+  demandera un jour « par rapport à quoi ? », c'est la version qui tient.
+- **Une tension à connaître, à vous d'arbitrer** : la phrase affirme des résultats performants et, deux
+  phrases plus loin, la lettre annonce « une première version, avec ses angles morts ». Les deux peuvent
+  coexister — performant n'est pas parfait — mais c'est vous qui savez si le premier mot est mérité.
+  S'il devait être défendu un jour, il le serait sur le chiffre que cette lettre ne donne pas.
 - **Rien ne lui est dû sur ses deux questions du 4 septembre** (confirmé par vous). L'usage de l'IA de
   son côté trouve sa réponse dans l'envoi lui-même — lui remettre l'outil, c'est répondre à la question
   qu'il posait ; les éléments à garder secrets ont déjà été traités. Le paragraphe qui promettait d'y

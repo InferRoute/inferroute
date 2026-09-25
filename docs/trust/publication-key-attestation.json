@@ -1,0 +1,8 @@
+{
+  "schema": "inferroute.publication-key-attestation/1",
+  "statement": "The Ed25519 public key named below is the publication key InferRoute uses to sign the reference file that its sealed-search certificates are checked against. A reference signed by any other key is not ours, whatever it claims. This document is signed by a verified identity and recorded in a public append-only transparency log so that the binding can be checked by anyone, at any time, without asking InferRoute for anything.",
+  "publication_key": "748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204",
+  "reference_url": "https://inferroute.ai/reference/current.json",
+  "supersedes": null,
+  "note_on_scope": "This attests WHICH key is ours. It does not assert that any particular record is genuine, nor what the sealed software did with a text after decrypting it. Those are separate questions and no signature answers them."
+}

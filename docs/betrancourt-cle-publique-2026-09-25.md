@@ -17,11 +17,12 @@ je l'ai relue.
 J'ai rencontré un ingénieur de l'INPI pour faire examiner la brevetabilité de concepts figurant dans les
 dépôts provisoires. Sa réponse, en substance : c'est gris. Rien qui ferme la porte, rien qui l'ouvre
 franchement non plus — et il m'a expliqué pourquoi l'informatique, et l'IA en particulier, s'y prêtent
-mal. J'en suis ressorti avec des nuances que je n'avais pas, et avec l'idée qu'il valait mieux tenter
-que renoncer. C'est ce que nous allons faire.
+mal. J'en suis ressorti avec des nuances que je n'avais pas.
 
-Je vous en parle parce que c'est votre métier et que ce n'est pas le mien. Si vous avez un avis
-là-dessus, je le prendrai volontiers.
+Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provisoires ne seront pas
+valables et qu'il faut les reprendre. Mais cela me conforte plutôt qu'autre chose : c'est gris, donc
+cela se tente, et je vous confirme que je souhaite y aller. Je suis à votre disposition pour en
+reparler quand vous le voudrez.
 
 L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt en début de semaine
 prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains ; et si
@@ -131,9 +132,19 @@ Henry Declety
   qui l'ouvre franchement non plus » : l'ingénieur n'a ni validé ni écarté, et la lettre ne lui fait pas
   dire autre chose. Ne pas glisser vers « l'INPI a confirmé » — un avocat en brevets lirait la
   surenchère immédiatement, et c'est précisément le lecteur qui sait à quoi ressemble un avis gris.
-- **« Si vous avez un avis là-dessus, je le prendrai volontiers »** : c'est son métier, vous le lui
-  reconnaissez, et cela ouvre une porte professionnelle sans rien demander. À retirer si vous préférez
-  ne pas solliciter d'avis gratuit.
+- **DEUX accords distincts dans cette lettre, à ne pas confondre.** Le refaire-les-dépôts est **acquis**
+  — vous en étiez convenus — et la lettre le traite comme tel : elle confirme votre volonté, elle ne la
+  sollicite pas. L'essai de l'outil n'est **pas** acquis (intérêt implicite, léger), et la lettre s'y
+  tient à une offre avec porte de sortie. Si les deux registres se mélangeaient, le plus faible
+  emprunterait au plus fort et la demande deviendrait présomptueuse.
+- **La demande d'avis a disparu.** « Si vous avez un avis là-dessus, je le prendrai volontiers » avait
+  du sens tant que le sujet restait le vôtre ; dès lors que la reprise des dépôts est un dossier que
+  vous lui confiez, demander un avis gratuit sur ce même dossier sonne faux. Remplacé par « je suis à
+  votre disposition pour en reparler quand vous le voudrez », qui laisse l'initiative chez lui.
+- **Ce que l'INPI a changé, et ce qu'il n'a pas changé** : il n'est pas à l'origine de la décision de
+  reprendre les dépôts (elle est antérieure et tient à leur validité). Il conforte l'idée de tenter. La
+  lettre dit exactement cela — « cela ne change rien à ce dont nous étions convenus… mais cela me
+  conforte » — et ne lui fait pas porter plus que son poids.
 - **Rien ne dit plus qu'il a accepté, parce qu'il n'a rien accepté** (votre précision : intérêt
   implicite, léger, aucun engagement). Les versions successives disaient « vous m'aviez dit votre
   intérêt », puis « vous aviez bien voulu vous dire prêt », puis « j'avais cru comprendre que vous

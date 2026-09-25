@@ -125,6 +125,16 @@ Henry Declety
   dater ferait croire que vous avez oublié l'appel). L'accord de confidentialité n'est pas réglé : la
   proposition reste, appuyée sur « ce dont nous étions convenus l'un et l'autre », ce qui est exact —
   27 août de votre part, 31 août de la sienne, jamais conclu depuis.
+- **Rien ne lui est dû sur ses deux questions du 4 septembre** (confirmé par vous). L'usage de l'IA de
+  son côté trouve sa réponse dans l'envoi lui-même — lui remettre l'outil, c'est répondre à la question
+  qu'il posait ; les éléments à garder secrets ont déjà été traités. Le paragraphe qui promettait d'y
+  revenir est donc sorti, et ne doit pas être remis.
+- **Option non prise, à un mot près.** La lettre pourrait relier explicitement l'outil à sa question :
+  il demandait s'il pouvait passer vos textes à son IA, et la réponse est un outil qui le fait sans que
+  la matière quitte son poste. Ce serait la phrase la plus vendeuse de la lettre, parce qu'elle répond
+  à un besoin qu'il a formulé lui-même plutôt qu'à un besoin supposé. Je ne l'ai pas ajoutée : vous
+  avez dit que la réponse était implicite, et l'expliciter peut sonner comme un argumentaire. Dites
+  « ajoute » si vous la voulez.
 - **Ce que je ne peux pas retrouver** : l'appel lui-même. Pas de scope Calendar sur les jetons
   (annuaire, gmail.send, gmail.readonly), et en ajouter un suppose un consentement au navigateur. La
   boîte ne garde aucune trace côté Santarelli après le 7 septembre — cohérent avec un appel

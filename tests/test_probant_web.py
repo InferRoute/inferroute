@@ -1158,7 +1158,7 @@ def test_a_round_says_when_it_happened_and_which_job_it_was(client, tmp_path, mo
     b._write_round_log("work done")
     rows = [json.loads(x) for x in log.read_text().splitlines()]
     assert rows[0]["at"] <= rows[1]["at"]
-    # No label set (a session outside a portfolio run) is an empty string, never a missing key.
+    # No label set (a session outside a cluster run) is an empty string, never a missing key.
     monkeypatch.delenv("IR_ROUND_LABEL")
     b._write_round_log("work done")
     assert json.loads(log.read_text().splitlines()[-1])["label"] == ""

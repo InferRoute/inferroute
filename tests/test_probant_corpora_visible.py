@@ -21,10 +21,10 @@ def _home(tmp_path, monkeypatch):
 
 
 def _corpus(cid="20260923T212443Z-e741a3", **kw):
-    rec = {"schema": "inferroute.probant-corpus/1", "id": cid, "name": "InferRoute portfolio",
-           "client": "Portfolio", "from": "cc5a-c1a2-4753-ed9e", "known_contact": False,
+    rec = {"schema": "inferroute.probant-corpus/1", "id": cid, "name": "InferRoute cluster",
+           "client": "Cluster", "from": "cc5a-c1a2-4753-ed9e", "known_contact": False,
            "made_at": "2026-09-23T21:24:43Z", "files": ["MATTERS.txt"],
-           "matters": ["InferRoute/portfolio-test"]}
+           "matters": ["InferRoute/cluster-test"]}
     rec.update(kw)
     p = SH.corpora_record(cid)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -35,7 +35,7 @@ def _corpus(cid="20260923T212443Z-e741a3", **kw):
 def test_a_corpus_that_exists_can_be_listed():
     _corpus()
     rows = SH.corpora()
-    assert len(rows) == 1 and rows[0]["name"] == "InferRoute portfolio"
+    assert len(rows) == 1 and rows[0]["name"] == "InferRoute cluster"
 
 
 def test_corpora_come_back_newest_first():
@@ -52,7 +52,7 @@ def test_an_unreadable_record_is_skipped_rather_than_crashing_the_listing():
     assert [c["id"] for c in SH.corpora()] == ["20260923T212443Z-e741a3"]
 
 
-def _matter(client="Portfolio", matter="portfolio-test"):
+def _matter(client="Cluster", matter="cluster-test"):
     d = S.matters_dir() / client
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{matter}.json").write_text(json.dumps(
@@ -63,7 +63,7 @@ def _matter(client="Portfolio", matter="portfolio-test"):
 def test_listing_names_the_corpus_a_matter_arrived_in(capsys):
     _corpus()
     _matter()
-    SH.note_corpus_origin("Portfolio", "portfolio-test", "20260923T212443Z-e741a3", how="arrived in this corpus")
+    SH.note_corpus_origin("Cluster", "cluster-test", "20260923T212443Z-e741a3", how="arrived in this corpus")
     out = _list_output(capsys)
     assert "[20260923T212443Z-e741a3]" in out, "a matter must say which delivery it came from"
 
@@ -72,7 +72,7 @@ def test_the_listing_shows_the_delivery_its_documents_and_how_to_build_on_it(cap
     _corpus()
     out = _list_output(capsys)
     assert "Corpora" in out
-    assert "InferRoute portfolio" in out and "20260923T212443Z-e741a3" in out
+    assert "InferRoute cluster" in out and "20260923T212443Z-e741a3" in out
     assert "MATTERS.txt" in out, "the documents describing the delivery are the point of a corpus"
     assert "--from-corpus 20260923T212443Z-e741a3" in out, "it must say how to work from it"
 
@@ -101,7 +101,7 @@ def _list_output(capsys) -> str:
 
 def _payload(cid="20260923T213234Z-3f5730"):
     return {"note": "",
-            "corpus": {"id": cid, "name": "InferRoute portfolio", "made_at": "2026-09-23T21:32:34Z",
+            "corpus": {"id": cid, "name": "InferRoute cluster", "made_at": "2026-09-23T21:32:34Z",
                        "files": [{"name": "MATTERS.txt"}, {"name": "READING-GUIDE.txt"}]},
             "matters": [{"matter": "InferRoute/attest-dynamics"},
                         {"matter": "InferRoute/disclosure-diode"}]}
@@ -177,7 +177,7 @@ def test_the_share_COMMAND_records_the_delivery(tmp_path, monkeypatch):
     doc = tmp_path / "MATTERS.txt"
     doc.write_text("what this delivery holds\n", encoding="utf-8")
     assert S.main(["share", "them", "--matter", "Acme/battery", "--file", str(doc),
-                   "--corpus-name", "Acme portfolio"]) == 0
+                   "--corpus-name", "Acme cluster"]) == 0
     rows = SH.corpora()
     assert len(rows) == 1, "sharing left no record of itself"
     assert rows[0]["direction"] == "sent" and rows[0]["to"] == "them"

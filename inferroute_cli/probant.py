@@ -516,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
     sh = sub.add_parser("share", help="seal a corpus of claims to another Probant user")
     sh.add_argument("to")
     sh.add_argument("--matter", action="append", default=[], help="a matter to include (repeatable)")
-    sh.add_argument("--portfolio", action="append", default=[], help="a portfolio run's claims (repeatable)")
+    sh.add_argument("--cluster", action="append", default=[], help="a cluster run's claims (repeatable)")
     sh.add_argument("--all", dest="every", action="store_true", help="every matter on this installation")
     sh.add_argument("--no-copy", dest="keep_copy", action="store_false",
                     help="do not seal a copy to yourself (you then cannot reopen what you sent)")
@@ -529,21 +529,21 @@ def main(argv: list[str] | None = None) -> int:
     ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
     ik.add_argument("document")
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
-    pf = sub.add_parser("portfolio", help="read a folder of documents and cluster what it contains until it settles")
+    pf = sub.add_parser("cluster", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
     pf.add_argument("--budget", type=int, default=0, help="characters per reading job (default 60000)")
     pf.add_argument("--only", default="", help="only documents whose name contains this")
     pf.add_argument("--reader", default="", help="model for reading (its mistakes are checked: quotes, coverage, recall)")
     pf.add_argument("--thinker", default="", help="model for the synthesis (nothing can check its judgement)")
-    pf.add_argument("--resume", default="", help="a portfolio id: read only the documents that produced nothing")
+    pf.add_argument("--resume", default="", help="a cluster id: read only the documents that produced nothing")
     pf.add_argument("--holes", action="store_true",
                     help="with --resume: read again the stretches no quote evidences, not whole documents")
     pf.add_argument("--workers", type=int, default=1, help="reading sessions to run at once")
     pf.add_argument("--slice", dest="slice_of", default="", help=argparse.SUPPRESS)
-    pr2 = sub.add_parser("portfolio-report", help="the themes a portfolio run settled on")
+    pr2 = sub.add_parser("cluster-report", help="the themes a cluster run settled on")
     pr2.add_argument("id")
-    pm = sub.add_parser("portfolio-matters", help="the matter list a portfolio run produced, as plain text")
+    pm = sub.add_parser("cluster-matters", help="the matter list a cluster run produced, as plain text")
     pm.add_argument("id")
     pm.add_argument("-o", "--out", default="", help="where to write it (default: MATTERS.txt in the run)")
     pm.add_argument("--guide", action="store_true",
@@ -584,20 +584,20 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "identity":
             return cmd_identity(add=a.add, card_file=a.card_file, show=a.show)
         if a.cmd == "share":
-            return cmd_share(a.to, out=a.out, matters=a.matter, portfolios=a.portfolio,
+            return cmd_share(a.to, out=a.out, matters=a.matter, clusters=a.cluster,
                              every=a.every, note=a.note, keep_copy=a.keep_copy, files=a.file, corpus_name=a.corpus_name)
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web)
-        if a.cmd == "portfolio":
-            return cmd_portfolio(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
+        if a.cmd == "cluster":
+            return cmd_cluster(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
                                  reader=a.reader, thinker=a.thinker, resume=a.resume,
                                  workers=a.workers, slice_of=a.slice_of, holes=a.holes)
-        if a.cmd == "portfolio-report":
-            return cmd_portfolio_report(a.id)
-        if a.cmd == "portfolio-matters":
-            return cmd_portfolio_matters(a.id, a.out, a.guide)
+        if a.cmd == "cluster-report":
+            return cmd_cluster_report(a.id)
+        if a.cmd == "cluster-matters":
+            return cmd_cluster_matters(a.id, a.out, a.guide)
         if a.cmd == "proposals":
             return cmd_proposals(a.id)
         if a.cmd == "from-proposal":
@@ -677,7 +677,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
     return 0
 
 
-def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portfolios: Optional[List[str]] = None,
+def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clusters: Optional[List[str]] = None,
               every: bool = False, note: str = "", keep_copy: bool = True,
               files: Optional[List[str]] = None, corpus_name: str = "") -> int:
     """Seal a corpus of matters to another Probant user, signed so they know it is yours."""
@@ -690,8 +690,8 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portf
     for spec in (matters or []):
         client, m = _split_matter(spec)
         entries.append(SH.matter_payload(client, m))
-    for ident in (portfolios or []):
-        entries.append(SH.portfolio_payload(ident))
+    for ident in (clusters or []):
+        entries.append(SH.cluster_payload(ident))
     if every:
         seen = {e["matter"] for e in entries}
         for row in _every_matter():
@@ -699,7 +699,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, portf
                 client, m = _split_matter(row)
                 entries.append(SH.matter_payload(client, m))
     if not entries:
-        raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --portfolio <id>, or --all")
+        raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --cluster <id>, or --all")
     # Side documents travel INSIDE the seal. A matter list and a reading guide quote every filing and the
     # unfiled surplus; as email attachments they would be the disclosure this product exists to prevent.
     extra = SH.corpus_files([Path(f).expanduser() for f in (files or [])])
@@ -780,16 +780,16 @@ def cmd_open_share(path: str, client: str) -> int:
     return 0
 
 
-def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "", reader: str = "",
+def cmd_cluster(path: str, max_docs: int = 0, budget: int = 0, only: str = "", reader: str = "",
                   thinker: str = "", resume: str = "", workers: int = 1, slice_of: str = "",
                   holes: bool = False) -> int:
-    """Slice 1: read a portfolio and record what it asserts, with a verbatim quote for every assertion.
+    """Slice 1: read a cluster and record what it asserts, with a verbatim quote for every assertion.
 
     One sealed session per reading job, planned host-side. No clustering, no rounds: see
     docs/portfolio-analysis-proposal.md for why the loop was dropped.
     """
     import time
-    from . import probant_portfolio as PF
+    from . import probant_cluster as PF
     # Before anything is staged or any session is launched: a host already near the wall cannot run this,
     # and on a machine without ECC an out-of-memory kill is a reset rather than a failed job. A worker
     # checks too — it is the one that actually launches sessions.
@@ -807,7 +807,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     if max_docs:
         files = files[:max_docs]
     if resume:
-        # A re-run is a delta: keep what was found, read only what produced nothing. The corpus a portfolio
+        # A re-run is a delta: keep what was found, read only what produced nothing. The corpus a cluster
         # staged is fixed at staging, so resuming judges recall against the same denominator as the original.
         meta = PF.meta_of(resume)
         d = PF.path_of(resume)
@@ -826,7 +826,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             # the moment it should: returning the report here left a fully-read corpus with no matter list
             # and no way to ask for one (21 Sep).
             if (d / PF.THEMES).exists():
-                return cmd_portfolio_report(resume)
+                return cmd_cluster_report(resume)
             print("  the synthesis has not run over these findings yet — doing that now", flush=True)
     else:
         # What was staged, recorded with the run: the register's verdict is only meaningful over a corpus
@@ -838,7 +838,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         d = PF.path_of(meta["id"])
         jobs = PF.plan(meta["id"], budget or PF.JOB_CHARS)
     dup = len(meta.get("duplicates") or []) if not resume else 0
-    print(f"portfolio {meta['id']}: {len(meta['documents'])} distinct document(s), {meta['bytes'] / 1e6:.2f} MB, "
+    print(f"cluster {meta['id']}: {len(meta['documents'])} distinct document(s), {meta['bytes'] / 1e6:.2f} MB, "
           f"{len(jobs)} reading job(s)"
           + (f"  ({dup} exact duplicate(s) of another file, read once)" if dup else ""))
     # What the run is about to spend, by where the material lives, so a folder of process logs is a visible
@@ -857,13 +857,13 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     # shared by parallel sessions is a write race, and a lost line is a finding nobody knows was found.
     # Sequential, the corpus measures 24 s/KB on the reader that actually reads it — 55 hours for 8.3 MB.
     if workers > 1 and not slice_of:
-        return _portfolio_workers(meta["id"], src, workers, reader, thinker, budget, len(jobs), holes)
+        return _cluster_workers(meta["id"], src, workers, reader, thinker, budget, len(jobs), holes)
     if slice_of:
         i, n = (int(x) for x in slice_of.split("/"))
         jobs = jobs[i::n]
         print(f"  worker {i + 1}/{n}: {len(jobs)} job(s)", flush=True)
     out_file = d / (f"candidates-{slice_of.replace('/', '-')}.jsonl" if slice_of else PF.CANDIDATES)
-    register = next((c for c in (src / "portfolio" / "corpus.json", src / "corpus.json") if c.is_file()), None)
+    register = next((c for c in (src / "cluster" / "corpus.json", src / "corpus.json") if c.is_file()), None)
     if register:
         # Kept with the run: the answer key this run is judged against must be the one it was judged against,
         # not whatever the register says months later.
@@ -879,7 +879,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
         t0 = time.time()
         before = len(PF.candidates(meta["id"]))
         text = PF.instruction_for(job)
-        rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+        rc = _cluster_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
                               label=what)
         after = len(PF.candidates(meta["id"]))
         got = after - before
@@ -894,18 +894,18 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
             print(f"      the model account is refusing (usage cap); waiting {wait // 60} min", flush=True)
             time.sleep(wait)
             waited += wait
-            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+            rc = _cluster_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
                               label=what)
             after = len(PF.candidates(meta["id"]))
             got = after - before
         if PF.last_round_blocked(meta["id"]):
             print(f"\n  STOPPED: the account refused every attempt over {waited / 60:.0f} minutes.\n"
                   f"  {len(PF.candidates(meta['id']))} finding(s) are kept; resume with\n"
-                  f"    ir probant portfolio <folder> --resume {meta['id']}", flush=True)
+                  f"    ir probant cluster <folder> --resume {meta['id']}", flush=True)
             return 3
         if got == 0 and not PF.last_round_worked(meta["id"]):
             time.sleep(20)
-            rc = _portfolio_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
+            rc = _cluster_round(d, text, out={"IR_INTAKE_OUT": str(out_file)}, cwd=d, model=reader,
                               label=what)
             after = len(PF.candidates(meta["id"]))
             got = after - before
@@ -930,7 +930,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
     if slice_of:                      # a worker stops here; the parent synthesises over everyone's findings
         print(f"  worker {slice_of} done", flush=True)
         return 0
-    # The step that sees the WHOLE portfolio: not its 9.8 MB of text, which no context on this lane holds,
+    # The step that sees the WHOLE cluster: not its 9.8 MB of text, which no context on this lane holds,
     # but every finding drawn from it, in one session.
     shape = PF.write_findings(meta["id"])
     if shape["n"]:
@@ -938,7 +938,7 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
               f"~{shape['tokens_roughly'] / 1000:.0f}k tokens — one session, all of them", flush=True)
         t0 = time.time()
         # With a register, the synthesis produces the MATTER LIST — the inventions, mapped onto the filings
-        # and candidates the portfolio already indexes, which gives the host a denominator to check it
+        # and candidates the cluster already indexes, which gives the host a denominator to check it
         # against. Without one there is nothing to map to, so it draws themes as before.
         reg = d / "register.json"
         if reg.is_file():
@@ -949,22 +949,22 @@ def cmd_portfolio(path: str, max_docs: int = 0, budget: int = 0, only: str = "",
                 surplus=sum(1 for k in known if k["kind"] == "surplus"))
         else:
             instruction = PF.SYNTHESIS.format(n=shape["n"], docs=shape["documents"])
-        _portfolio_round(d, instruction, label="synthesis",
+        _cluster_round(d, instruction, label="synthesis",
                          out={"IR_CLUSTER_OUT": str(d / PF.THEMES)}, cwd=d, model=thinker)
         print(f"    done in {time.time() - t0:.0f}s")
     kept, drop = PF.candidates(meta["id"]), PF.dropped(meta["id"])
     print(f"\n  {len(kept)} item(s) kept, {drop} dropped (a quote not in the document it names), "
           f"{time.time() - started:.0f}s total")
-    return cmd_portfolio_report(meta["id"])
+    return cmd_cluster_report(meta["id"])
 
 
-def cmd_portfolio_matters(ident: str, out: str = "", guide: bool = False) -> int:
+def cmd_cluster_matters(ident: str, out: str = "", guide: bool = False) -> int:
     """The matter list as plain text, to a file by default.
 
     To a FILE, not a console: this is the client's material and whoever runs this may be an agent whose
     transcript leaves the machine — the same rule the rest of this pipeline keeps.
     """
-    from . import probant_portfolio as PF
+    from . import probant_cluster as PF
     text = PF.render_highlights(ident) if guide else PF.render_matters(ident)
     dest = (Path(out).expanduser() if out else
             PF.path_of(ident) / ("READING-GUIDE.txt" if guide else "MATTERS.txt"))
@@ -982,14 +982,14 @@ def cmd_portfolio_matters(ident: str, out: str = "", guide: bool = False) -> int
     return 0
 
 
-def cmd_portfolio_report(ident: str) -> int:
+def cmd_cluster_report(ident: str) -> int:
     """Counts and coverage to the terminal; the analysis itself to a file.
 
     Deliberately: the findings and themes are the client's confidential material, and whoever runs this may
     be an agent whose transcript leaves this machine. The terminal gets arithmetic — how many, how covered,
     how thin — and the reading happens in the Probant page or the file, not in a console someone is piping.
     """
-    from . import probant_portfolio as PF
+    from . import probant_cluster as PF
     kept = PF.candidates(ident)
     drawn = PF.themes(ident)
     if drawn["themes"]:
@@ -1056,7 +1056,7 @@ def cmd_portfolio_report(ident: str) -> int:
     return 0
 
 
-def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker: str, budget: int,
+def _cluster_workers(ident: str, src: Path, workers: int, reader: str, thinker: str, budget: int,
                        total_jobs: int, holes: bool = False) -> int:
     """Run the reading jobs in N sessions at once, then synthesise once over what they all found."""
     import subprocess
@@ -1066,7 +1066,7 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
     started = time.time()
     procs = []
     for i in range(n):
-        argv = [sys.executable, "-m", "inferroute_cli", "probant", "portfolio", str(src), "--resume", ident,
+        argv = [sys.executable, "-m", "inferroute_cli", "probant", "cluster", str(src), "--resume", ident,
                 "--slice", f"{i}/{n}", "--reader", reader or "", "--thinker", thinker or ""]
         argv += ["--budget", str(budget)] if budget else []
         # WITHOUT this the worker plans with the ordinary planner, finds nothing and exits in a second,
@@ -1076,15 +1076,15 @@ def _portfolio_workers(ident: str, src: Path, workers: int, reader: str, thinker
                                       stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT))
     for p in procs:
         p.wait()
-    from . import probant_portfolio as PF
+    from . import probant_cluster as PF
     print(f"  workers finished in {time.time() - started:.0f}s; {len(PF.candidates(ident))} finding(s) kept, "
           f"{len(PF.unread(ident))} document(s) never read", flush=True)
     # Back through the front door to synthesise over everyone's findings. NOT with holes: the workers have
     # just done that pass, and re-planning the stretches they narrowed would read for ever in one process.
-    return cmd_portfolio(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
+    return cmd_cluster(str(src), resume=ident, reader=reader, thinker=thinker, budget=budget)
 
 
-def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "",
+def _cluster_round(cluster_dir: Path, instruction: str, out: dict, cwd: Path, model: str = "",
                      label: str = "") -> int:
     """One sealed session, one turn, no search tool, ending itself when its turn ends.
 
@@ -1092,11 +1092,11 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     and the file its tool appends to lives here. Pointing the tool at a parent directory is a write the
     sandbox denies — which is how the first run produced nothing at all, with no error anywhere.
     """
-    os.environ["IR_INTAKE_DIR"] = str(portfolio_dir)
+    os.environ["IR_INTAKE_DIR"] = str(cluster_dir)
     os.environ["IR_ATTESTED_CONFINE"] = "require"
     for k in ("IR_INTAKE_OUT", "IR_CLUSTER_OUT"):
         os.environ.pop(k, None)
-    os.environ["IR_ROUND_LOG"] = str(portfolio_dir / "rounds.jsonl")
+    os.environ["IR_ROUND_LOG"] = str(cluster_dir / "rounds.jsonl")
     os.environ["IR_ROUND_LABEL"] = label        # which job the round log is about
     os.environ.update(out)
     os.chdir(cwd)
@@ -1107,5 +1107,5 @@ def _portfolio_round(portfolio_dir: Path, instruction: str, out: dict, cwd: Path
     # available. Quality is spent where failure would be invisible.
     args = ["--model", model] if model else []
     return confidential_mod.launch(args, agent="pi", probant={
-        "matter": f"portfolio · {portfolio_dir.name}", "mode": "intake", "web": True,
+        "matter": f"cluster · {cluster_dir.name}", "mode": "intake", "web": True,
         "oneshot": True, "instruction": instruction})

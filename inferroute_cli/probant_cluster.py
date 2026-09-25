@@ -1,15 +1,15 @@
-"""A portfolio read by sealed sessions, clustered round after round until the clustering stops moving.
+"""A cluster read by sealed sessions, clustered round after round until the clustering stops moving.
 
 One document becomes matters by reading it (probant_intake). A PORTFOLIO — dozens of filings, briefs and
 inventories, megabytes of them — does not: the same idea appears in six documents under six names, and what
-the professional wants out is not a list of everything but the few themes the portfolio actually turns on,
+the professional wants out is not a list of everything but the few themes the cluster actually turns on,
 and which of them most deserves a matter next.
 
 The shape, and which side does what:
 
 * **Extract** — one sealed session per document proposes candidate units, each with a verbatim quote. The
   HOST checks every quote against that document and drops the rest, counting the drops.
-* **Evidence** — the host checks each quote verbatim against the document it NAMES (not the portfolio: "this
+* **Evidence** — the host checks each quote verbatim against the document it NAMES (not the cluster: "this
   sentence exists somewhere in three megabytes" is not evidence that this filing says it), records where it
   sits, and reports the largest span of a document no quote evidences.
 
@@ -18,7 +18,7 @@ partition that agrees with itself measures the model's stability, not the corpus
 docs/portfolio-analysis-proposal.md; `movement()` survives as a diagnostic for comparing two groupings, not
 as a stopping rule.
 
-Nothing here creates a matter, and no session in this pipeline is given a search tool: a whole portfolio is
+Nothing here creates a matter, and no session in this pipeline is given a search tool: a whole cluster is
 in context, and none of it may leave for a search machine.
 """
 from __future__ import annotations
@@ -43,8 +43,8 @@ CANDIDATES = "candidates.jsonl"
 DOCS = "documents"
 
 
-def portfolio_root() -> Path:
-    return S.probant_root() / ".portfolio"
+def cluster_root() -> Path:
+    return S.probant_root() / ".cluster"
 
 
 def _write_readonly(path: Path, text: str) -> None:
@@ -131,7 +131,7 @@ def readable_text(path: Path) -> Tuple[bytes, str]:
 
 
 def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[str, Any]:
-    """Copy the portfolio's documents where a sealed session can read them, and nowhere else.
+    """Copy the cluster's documents where a sealed session can read them, and nowhere else.
 
     Copies rather than links: the session reads inside a sandbox, and a link out of it is either broken or a
     way back out. Each copy is read-only, and each document's sha256 is recorded, so a quote can later be
@@ -139,16 +139,16 @@ def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[st
     """
     files = [p for p in paths if p.is_file()]
     if not files:
-        raise S.ProbantError("no readable documents in that portfolio")
+        raise S.ProbantError("no readable documents in that cluster")
     if len(files) > MAX_FILES:
-        raise S.ProbantError(f"that portfolio has {len(files)} documents; this reads up to {MAX_FILES}")
+        raise S.ProbantError(f"that cluster has {len(files)} documents; this reads up to {MAX_FILES}")
     total = sum(p.stat().st_size for p in files)
     if total > MAX_BYTES:
-        raise S.ProbantError(f"that portfolio is {total / 1e6:.0f} MB; this reads up to {MAX_BYTES / 1e6:.0f} MB")
+        raise S.ProbantError(f"that cluster is {total / 1e6:.0f} MB; this reads up to {MAX_BYTES / 1e6:.0f} MB")
     ident = f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}"
-    d = portfolio_root() / ident
+    d = cluster_root() / ident
     (d / DOCS).mkdir(parents=True, exist_ok=False)
-    for p in (S.probant_root(), portfolio_root(), d, d / DOCS):
+    for p in (S.probant_root(), cluster_root(), d, d / DOCS):
         os.chmod(p, 0o700)
     documents = []
     seen: Dict[str, int] = {}
@@ -186,7 +186,7 @@ def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[st
             row["original_bytes"] = p.stat().st_size
             row["original_sha256"] = hashlib.sha256(p.read_bytes()).hexdigest()
         documents.append(row)
-    meta = {"schema": "inferroute.probant-portfolio/1", "id": ident, "name": _clean(name, 80) or "portfolio",
+    meta = {"schema": "inferroute.probant-cluster/1", "id": ident, "name": _clean(name, 80) or "cluster",
             "selection": selection or "whole corpus",
             "staged_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "documents": documents, "bytes": sum(x["bytes"] for x in documents),
@@ -198,10 +198,10 @@ def stage(paths: Sequence[Path], name: str = "", selection: str = "") -> Dict[st
 
 def path_of(ident: str) -> Path:
     if not re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{6}", ident or ""):
-        raise S.ProbantError("no such portfolio")
-    d = portfolio_root() / ident
+        raise S.ProbantError("no such cluster")
+    d = cluster_root() / ident
     if not (d / "meta.json").is_file():
-        raise S.ProbantError("no such portfolio")
+        raise S.ProbantError("no such cluster")
     return d
 
 
@@ -233,7 +233,7 @@ def _all_rows(d: Path) -> List[Dict[str, Any]]:
 def candidates(ident: str) -> List[Dict[str, Any]]:
     """The proposed units whose quote is really in the document they name.
 
-    A quote is checked against ITS OWN document, not against the portfolio: "this sentence exists somewhere
+    A quote is checked against ITS OWN document, not against the cluster: "this sentence exists somewhere
     in three megabytes" is not evidence that this filing says it.
     """
     d = path_of(ident)
@@ -310,10 +310,10 @@ def converged(history: List[List[frozenset]], threshold: float = 0.02) -> Tuple[
 JOB_CHARS = 60_000             # one session's reading: a few dozen pages, well inside the model's context
 OVERLAP = 2_000                # a range boundary must not cut an idea in half: ranges overlap by this much
 
-# The session works in the portfolio directory and the documents sit in documents/. Naming the path wrongly
+# The session works in the cluster directory and the documents sit in documents/. Naming the path wrongly
 # here is not a typo: the first run said "in this directory", the read failed with ENOENT, and the session
 # ended its turn cleanly having recorded nothing — a silent empty result (20 Sep).
-EXTRACT_MANY = ("Read brief.json first — it says what this portfolio is and what has been recorded from the "
+EXTRACT_MANY = ("Read brief.json first — it says what this cluster is and what has been recorded from the "
                 "other documents so far. Then read each of these in documents/, all of them, all the way "
                 "through: {names}. Record every distinct technical assertion they make with record_findings, "
                 "all the findings for a document in ONE call, giving `source` as that document's file name "
@@ -324,7 +324,7 @@ EXTRACT_MANY = ("Read brief.json first — it says what this portfolio is and wh
                 "many you recorded, from how "
                 "many documents. Nothing else.")
 
-EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and what has been recorded from the "
+EXTRACT_RANGE = ("Read brief.json first — it says what this cluster is and what has been recorded from the "
                  "other documents so far. Then read documents/{name} from character {start} to character "
                  "{end} — that range only, and all of it — and record every distinct technical assertion it "
                  "makes with record_findings, all of them in one call per part you read: `source` "
@@ -334,7 +334,7 @@ EXTRACT_RANGE = ("Read brief.json first — it says what this portfolio is and w
 
 
 def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
-    """What every reading session is told about the portfolio before it reads its own part.
+    """What every reading session is told about the cluster before it reads its own part.
 
     A session that sees one file out of 385 records what looks notable IN THAT FILE — trivia from a thin
     document, and half of a thing that only matters because six others circle it. This is the "together"
@@ -346,7 +346,7 @@ def brief(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
     meta = meta_of(ident)
     seen = candidates(ident)
     out: Dict[str, Any] = {
-        "portfolio": meta["name"],
+        "cluster": meta["name"],
         "documents": len(meta["documents"]),
         "documents_read_so_far": len({c["source"] for c in seen}),
         "recorded_so_far": [{"title": c["title"], "source": c["source"]} for c in seen][-400:],
@@ -410,7 +410,7 @@ def unchanged_since(ident: str, previous: str) -> Dict[str, str]:
 
 
 def plan(ident: str, budget: int = JOB_CHARS) -> List[Dict[str, Any]]:
-    """Split the portfolio into reading jobs: one per document, and a long document into overlapping ranges.
+    """Split the cluster into reading jobs: one per document, and a long document into overlapping ranges.
 
     Deterministic and host-side — no model decides what gets read. A range is not a chunk the session may
     skip: the instruction names its bounds, and `coverage()` afterwards says which parts of the document any
@@ -620,15 +620,15 @@ def coverage(ident: str) -> List[Dict[str, Any]]:
 THEMES = "themes.jsonl"
 
 SYNTHESIS = ("Read findings.json in this directory: every distinct assertion recorded from all {docs} "
-             "documents of this portfolio, {n} of them, each with the document it came from. This is the "
-             "whole portfolio's content in one place — the documents themselves are far too large to hold "
+             "documents of this cluster, {n} of them, each with the document it came from. This is the "
+             "whole cluster's content in one place — the documents themselves are far too large to hold "
              "at once, these are their findings. Read brief.json too if it is there; it holds the register "
-             "this portfolio keeps of its own filings and candidates.\n\n"
-             "Draw the themes the portfolio actually turns on, with propose_cluster, one call per theme. "
+             "this cluster keeps of its own filings and candidates.\n\n"
+             "Draw the themes the cluster actually turns on, with propose_cluster, one call per theme. "
              "`members` are the finding ids (f1, f2 …) the theme rests on — only ids that are in the file. "
              "`thesis` is one sentence a patent attorney could act on: the shared technical mechanism, not a "
              "topic name. `why` says what made you draw the line there, and name anything that sits badly.\n\n"
-             "Then stop with a short answer: what this portfolio is about, and what is thin in it — a theme "
+             "Then stop with a short answer: what this cluster is about, and what is thin in it — a theme "
              "resting on one document, or a claim asserted everywhere and evidenced nowhere. Nothing else.")
 
 
@@ -676,11 +676,11 @@ def refuse_if_memory_is_short(workers: int, floor_gb: float = MEMORY_FLOOR_GB) -
 
 MATTERS = (
     "Read findings.json in this directory: every distinct assertion recorded from the {docs} documents of "
-    "this portfolio, {n} of them, each with the document it came from. Read register.json too — it is this "
-    "portfolio's own index: `filed` are the {filed} filings already deposited (ids P1…, with their concepts) "
+    "this cluster, {n} of them, each with the document it came from. Read register.json too — it is this "
+    "cluster's own index: `filed` are the {filed} filings already deposited (ids P1…, with their concepts) "
     "and `surplus` are the {surplus} candidates not yet filed (ids like TA-L3, with mechanism, status, risk "
     "and whether they are EP-urgent).\n\n"
-    "Produce the MATTER LIST: the inventions this portfolio actually contains, one call to propose_cluster "
+    "Produce the MATTER LIST: the inventions this cluster actually contains, one call to propose_cluster "
     "per matter. A matter is one invention a patent attorney would prosecute as a unit — not a topic, and "
     "not one per document: a filing may hold several, and several documents may describe one.\n\n"
     "For each: `label` names the invention; `thesis` is one sentence giving its technical mechanism — what "
@@ -699,7 +699,7 @@ def matter_list(ident: str, register: Optional[Path] = None) -> Dict[str, Any]:
     """The matter list, with the one check the host can make on it: did it account for the register?
 
     A synthesis is the step nothing can verify — no computation says a matter is the right matter. What IS
-    computable is coverage of an index the portfolio already keeps: 9 filings and 27 candidates are a
+    computable is coverage of an index the cluster already keeps: 9 filings and 27 candidates are a
     denominator, so "every one of them appears in some matter" is arithmetic, and a list that quietly drops
     eleven of them cannot read as complete. Measured today on the themes run this replaces: 10 themes citing
     285 of 4,420 findings, which looked like an answer and was a sixteenth of one.
@@ -794,7 +794,7 @@ def disclosure_from_matter(ident: str, label: str, passages: int = 12) -> str:
     NO REFERENCE TO OUR OWN FILINGS. The first version opened with "Filed patents — P1 (FR2609630...)" and
     the lead concepts of each. This document is what the agent READS before searching, and our own
     applications are not prior art against us — naming them invites a search to chase our filing numbers or
-    to treat our own text as known art, and the date bound already carries priority. Portfolio bookkeeping
+    to treat our own text as known art, and the date bound already carries priority. Cluster bookkeeping
     belongs in the matter list, which is for the reader, not in the disclosure, which is for the search.
 
     NO DANGLING "... and 194 more". A truncated list with a raw count tells a reader nothing and reads as a
@@ -981,7 +981,7 @@ def write_findings(ident: str) -> Dict[str, Any]:
 
 def themes(ident: str) -> Dict[str, Any]:
     """The themes drawn over the findings, with the accounting: which findings were cited, which were not,
-    and which citations name nothing. A synthesis that quietly drops a third of the portfolio says so here."""
+    and which citations name nothing. A synthesis that quietly drops a third of the cluster says so here."""
     items = candidates(ident)
     ids = {f"f{i + 1}": c for i, c in enumerate(items)}
     out, cited, unknown = [], set(), []
@@ -1009,7 +1009,7 @@ def themes(ident: str) -> Dict[str, Any]:
 # ───────────────────────── did it find what we already know is there? ─────────────────────────
 
 def register_rows(register: Path) -> List[Dict[str, str]]:
-    """The known items a reading of this portfolio OUGHT to surface: the register's own filings, their lead
+    """The known items a reading of this cluster OUGHT to surface: the register's own filings, their lead
     concepts, and its candidates. Shape-tolerant on purpose — a register is a document, not an API."""
     try:
         data = json.loads(Path(register).read_text())
@@ -1046,12 +1046,12 @@ def register_rows(register: Path) -> List[Dict[str, str]]:
 
 def recall_against_register(ident: str, register: Path, floor: float = 0.6,
                             complete: bool = True) -> Dict[str, Any]:
-    """How much of what we ALREADY KNOW is in the portfolio did this run's findings surface?
+    """How much of what we ALREADY KNOW is in the cluster did this run's findings surface?
 
     Precision is checkable by construction — every finding carries a quote verified against its document.
-    Recall is not: nothing in a reading pass can say what the model chose not to record. But this portfolio
+    Recall is not: nothing in a reading pass can say what the model chose not to record. But this cluster
     keeps a register of its own filings and candidates, and that is an answer key. A run that misses a third
-    of the register did not read the portfolio, whatever its totals say, and this is the number that says so
+    of the register did not read the cluster, whatever its totals say, and this is the number that says so
     before anyone trusts the output.
 
     Matching is deliberately generous (the register's words against the findings' words, both canonical): a
@@ -1077,17 +1077,17 @@ def recall_against_register(ident: str, register: Path, floor: float = 0.6,
             misses.append({"register": row["id"], "title": row["title"], "best": round(score, 2)})
     total = len(hits) + len(misses)
     rate = (len(hits) / total) if total else 0.0
-    # The verdict belongs to a run that claims to have read the portfolio. Measured against a run that
+    # The verdict belongs to a run that claims to have read the cluster. Measured against a run that
     # staged 8 documents of 385 it reported 13% and "NOT ACCEPTED" — true, useless, and the kind of control
     # that fires every time and therefore stops being read. A partial run reports the number and says what
     # it is: an incomplete denominator, not a failure.
     return {"known": total, "found": len(hits), "missed": len(misses), "recall": round(rate, 3),
             "accepted": bool(total) and rate >= floor if complete else None,
             "complete": complete, "floor": floor, "misses": misses[:30],
-            "note": ("Recall against the register, not against the portfolio: it says how much of what we "
+            "note": ("Recall against the register, not against the cluster: it says how much of what we "
                      "already knew was surfaced. It cannot speak for anything the register does not list."
                      if complete else
-                     "This run did not read the whole portfolio, so the register is the wrong denominator "
+                     "This run did not read the whole cluster, so the register is the wrong denominator "
                      "for it: the number is shown, the verdict is not. Read the corpus in full, or resume "
                      "this run until every document has been read, before judging recall.")}
 

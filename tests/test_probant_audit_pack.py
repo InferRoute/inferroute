@@ -763,7 +763,7 @@ def test_the_product_does_not_tell_the_user_what_their_profession_is():
                         "inferroute_cli/", "inferroute_local/"], cwd=root, capture_output=True, text=True)
     hits = [ln for ln in r.stdout.splitlines() if ln.strip()]
     assert len(hits) == 2, "unexpected uses of 'attorney':\n" + "\n".join(hits)
-    assert all("probant_portfolio.py" in h for h in hits), hits
+    assert all("probant_cluster.py" in h for h in hits), hits
     assert all("a patent attorney could act on" in h or "a patent attorney would prosecute" in h for h in hits), hits
 
     # And the two documents an outside reader is handed must not presume it either.

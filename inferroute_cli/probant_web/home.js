@@ -842,11 +842,11 @@
             .then(() => toast("Copied.", "info")).catch(() => {})));
       } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }
     });
-    const corpusName = input("text", "e.g. InferRoute portfolio — 9 filings + surplus");
+    const corpusName = input("text", "e.g. InferRoute cluster — 9 filings + surplus");
     p.append(list);
     if ((d.documents || []).length) {
       p.append(el("h2", "section", "Documents about the whole corpus"),
-        el("p", "sub", "These describe the portfolio rather than any one matter — a matter list, a reading "
+        el("p", "sub", "These describe the cluster rather than any one matter — a matter list, a reading "
           + "guide. They quote the filings, so they are sealed with the matters, never attached to an email."),
         docBox);
     }

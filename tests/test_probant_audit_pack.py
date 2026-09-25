@@ -1230,3 +1230,80 @@ def _receipt_notes_via_bundle(E, b, tmp_path):
     finally:
         E.build_bundle, S.load_record = orig_build, orig_load
     return json.loads((out / "MANIFEST.json").read_text())["sessions"]
+
+
+def _manifest_via_bundle(E, S, b, tmp_path):
+    """The whole record manifest, with the bundle it would have assembled from disk replaced."""
+    import json as _j
+    ws = tmp_path / "ws2"
+    ws.mkdir(exist_ok=True)
+    full = dict(b, html="<p>x</p>", evidence={}, matter_cutoff=20260814)
+    full.setdefault("searches", [])
+    orig_build, orig_load = E.build_bundle, S.load_record
+    E.build_bundle = lambda c, m: full
+    S.load_record = lambda c, m: {"workspace": str(ws)}
+    try:
+        out = E.write_bundle("C", "M", str(tmp_path / "bundle2"))
+    finally:
+        E.build_bundle, S.load_record = orig_build, orig_load
+    return _j.loads((out / "MANIFEST.json").read_text())
+
+
+def test_the_exporter_accounts_for_operations_missing_from_this_record(tmp_path, monkeypatch):
+    """The verifier reports enclave-counter gaps as an observation and ends "ask the exporter to account
+    for them". Round 3 of the audit loop, 25 Sep, showed why that matters: 28 absent sequence numbers,
+    nothing in the folder able to say whose, and the auditor returned NOT VERIFIED on "nothing removed" —
+    the right call on what it had.
+
+    An enclave serves every matter on an installation, so a record of one matter is missing the others by
+    construction, and only the exporting machine can say so. Counts, never names: that another matter
+    exists is unavoidable in answering at all; which one, and what it searched, is not the auditor's."""
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant as S
+
+    root = tmp_path / "attested-records"
+    here = root / "C" / "M"
+    here.mkdir(parents=True)
+    (root / "C" / "Other").mkdir(parents=True)
+    monkeypatch.setattr(S, "records_dir", lambda c, m: root / c / m)
+
+    def rows(lid, seqs):
+        return [{"statement": {"lifetime_id": lid, "seq": n}} for n in seqs]
+
+    # This matter holds 1,2,5 of 1..5 — 3 and 4 are absent.
+    mine = rows("aa" * 16, [1, 2, 5])
+    # The other matter holds 3 but not 4, so one is explained and one is not.
+    (root / "C" / "Other" / "s.searches.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows("aa" * 16, [3])) + "\n"
+        # A torn line accounts for NOTHING and must not be allowed to claim it does.
+        + '{"statement": {"lifetime_id": "aaaa\n')
+
+    # THIS matter's own record file holds the very numbers that are absent from the export's `searches`
+    # list. If the scan failed to exclude its own directory it would explain the gap with itself, and
+    # every gap anywhere would read as accounted for.
+    (here / "s.searches.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows("aa" * 16, [3, 4])) + "\n")
+
+    out = E.enclave_gaps(S, "C", "M", mine)
+    assert len(out) == 1, out
+    g = out[0]
+    assert g["absent_from_this_record"] == 2
+    assert g["explained_other_matters_same_installation"] == 1
+    assert g["unaccounted"] == 1, "a torn line in another matter was counted as an explanation"
+    assert "never which matter or what it searched" in g["note"]
+
+    # No matter name, anywhere in the row.
+    assert "Other" not in json.dumps(g)
+
+    # A record with no gaps says nothing rather than an empty reassurance.
+    assert E.enclave_gaps(S, "C", "M", rows("bb" * 16, [1, 2, 3])) == []
+
+    # And it has to REACH the record's manifest, not merely be computable.
+    b = {"sessions": [], "searches": mine}
+    man = _manifest_via_bundle(E, S, b, tmp_path)
+    assert man["enclave_gaps"] and man["enclave_gaps"][0]["unaccounted"] == 1
+
+    import re
+    brief = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "the exporter answering the question the verifier tells you to ask it" in brief
+    assert "A non-zero `unaccounted` is still exactly that finding" in brief

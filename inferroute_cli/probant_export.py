@@ -775,6 +775,9 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                 # One row per session: how many sealed searches it ran, and which receipt covers it — or
                 # why none does. An auditor should never have to infer a gap from two file listings.
                 "sessions": receipt_notes,
+                # The verifier's enclave-counter observation ends "ask the exporter to account for them".
+                # This is the exporter answering, in counts and never in names.
+                "enclave_gaps": enclave_gaps(S, client, matter, b.get("searches") or []),
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
     files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
@@ -940,7 +943,18 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    dropped from the record wholesale** — per-session numbering is contiguous within each session that IS
    shown, so removing a whole one leaves every remaining sequence intact. An auditor on 25 Sep raised
    this; the caveat had named only the first case since it was written. Where the statements also carry an
-   enclave-wide counter, the verifier reports gaps in it as an observation — read that alongside this.
+   enclave-wide counter, the verifier reports gaps in it as an observation — read that alongside this, and
+   read `MANIFEST.json` → `enclave_gaps` with it.
+
+   **`enclave_gaps` is the exporter answering the question the verifier tells you to ask it.** An enclave
+   serves every matter on an installation, so a record of one matter is missing the others by
+   construction, and only the exporting machine can say so. Each row gives how many operations are absent
+   from this record, how many of those this installation's OTHER matters hold, and how many remain
+   unaccounted. Counts, never names — which matter, and what it searched, is not yours to see and is not
+   there. It is self-reported and unsigned like everything else this machine says about itself, so weigh
+   it as a claim; what it changes is that there is now a claim to weigh instead of a silence. An auditor
+   on 25 Sep returned NOT VERIFIED on this claim over 28 absent numbers nothing could explain — which was
+   the right call on what they had. **A non-zero `unaccounted` is still exactly that finding.**
 6. **Filters — what was given, and what the enclave says applying them did.** Each statement carries the
    filters it was given (`cutoff_date`, `from_date`, `offices`) and, from enclaves that report it, a
    matching object with counts over the candidates that filter saw — `cutoff_applied`, `from_date_applied`,
@@ -1502,6 +1516,70 @@ def anchor_block(ots_path: Path) -> Dict[str, Any]:
             "read_with": "ots --no-bitcoin verify trust-anchors/reference.json.ots"}
 
 
+def enclave_gaps(S, client: str, matter: str, searches: list) -> list:
+    """Account for operations that ran on the enclave and are not in THIS record.
+
+    The verifier reports those gaps as an observation and ends with "ask the exporter to account for
+    them". This is the exporter answering. An enclave serves every matter on an installation, so a record
+    of one matter is missing the others by construction — but only this machine can say so, and until it
+    did, an auditor was left with an unresolvable gap. On 25 Sep one escalated exactly that to NOT
+    VERIFIED on "nothing removed", correctly: 28 enclave sequence numbers were absent and nothing in the
+    folder could say whose they were.
+
+    Counts only, never names. That another matter exists is unavoidable in answering the question at all;
+    which matter, and what it searched, is not the auditor's business and is not here.
+
+    Self-reported and unsigned, like everything else this machine says about itself. What it converts is
+    an UNEXPLAINED gap into a STATED one — an auditor can weigh a claim; they cannot weigh a silence."""
+    import json as _json
+
+    mine = {}
+    for row in searches:
+        st = row.get("statement") if isinstance(row, dict) else None
+        if isinstance(st, dict) and st.get("lifetime_id") and isinstance(st.get("seq"), int):
+            mine.setdefault(str(st["lifetime_id"]), set()).add(int(st["seq"]))
+    if not mine:
+        return []
+
+    here = S.records_dir(client, matter).resolve()
+    root = here.parent.parent
+    elsewhere = {}
+    for f in sorted(root.glob("*/*/*.searches.jsonl")):
+        if f.parent.resolve() == here:
+            continue
+        for line in f.read_text(errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                st = (_json.loads(line) or {}).get("statement") or {}
+            except ValueError:
+                continue                       # a torn line accounts for nothing; it must not claim to
+            if st.get("lifetime_id") and isinstance(st.get("seq"), int):
+                elsewhere.setdefault(str(st["lifetime_id"]), set()).add(int(st["seq"]))
+
+    out = []
+    for lid, seen in sorted(mine.items()):
+        lo, hi = min(seen), max(seen)
+        missing = [n for n in range(lo, hi + 1) if n not in seen]
+        if not missing:
+            continue
+        others = elsewhere.get(lid, set())
+        accounted = [n for n in missing if n in others]
+        out.append({
+            "lifetime_id": lid,
+            "this_record_carries": f"{lo}..{hi}, {len(seen)} operations",
+            "absent_from_this_record": len(missing),
+            "explained_other_matters_same_installation": len(accounted),
+            "unaccounted": len(missing) - len(accounted),
+            "note": "operations that ran on this enclave and are not in this record. This machine has "
+                    "looked at its OWN other matters and reports how many of the absent numbers they "
+                    "hold — a count, never which matter or what it searched. Self-reported and unsigned: "
+                    "it converts an unexplained gap into a stated one, and any remainder is still open.",
+        })
+    return out
+
+
 def _installed_verifier() -> bytes:
     """The verifier shipped by the client that is writing this pack — the one `client_version` names."""
     src = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"
@@ -1671,6 +1749,7 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # unrecorded, and claim 8 is COULD NOT CHECK rather than verified when it is zero.
                 # Carried through from the record: which receipt covers which session, or why none does.
                 "sessions": src_manifest.get("sessions"),
+                "enclave_gaps": src_manifest.get("enclave_gaps"),
                 "contents": dict(_census(rows), session_receipts=len(receipts),
                                  receipts_with_attestation=sum(1 for n in receipts if _receipt_has(src / n, "attestation")),
                                  receipts_with_checked_with=sum(1 for n in receipts if _receipt_has(src / n, "checked_with")),

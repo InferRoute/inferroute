@@ -842,3 +842,30 @@ def test_receipt_saves_do_not_share_a_temporary_name(world, tmp_path):
     assert len(set(seen)) == 4, f"concurrent saves shared a temporary name: {seen}"
     # And the published file is one whole document, not a mixture of four.
     assert Receipt.load(r.path).session_id == "s1"
+
+
+def test_the_receipt_defines_what_its_counters_measure(world):
+    """An auditor on 25 Sep found `ciphertext_bytes_sent` was 26-42% of `plaintext_bytes_sealed_here` in
+    every session with traffic, could not tell from the receipt whether that was compression or two
+    different layers, and reported it as unexplained.
+
+    The answer is benign — `e2ee.seal` does `gzip.compress(body)` before encrypting, and the counter for
+    "sealed here" is `len(body)` BEFORE that. But a number whose units are not stated invites the reading
+    that something is missing, and "unexplained" in an audit report costs more than the lines that
+    prevent it."""
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    r = asyncio.run(s.open())
+
+    means = r.counters_mean
+    # Every counter that has ever been questioned is defined, and defined IN the receipt rather than in a
+    # document the auditor may not have.
+    for k in ("plaintext_bytes_sealed_here", "ciphertext_bytes_sent", "response_bytes_opened_here"):
+        assert k in means and len(means[k]) > 30, k
+        assert k in r.counters, f"{k} is defined but not counted"
+    assert "BEFORE gzip" in means["plaintext_bytes_sealed_here"]
+    # The sentence that actually stops the false report.
+    assert "compression, not loss" in means["ciphertext_bytes_sent"]
+
+    from inferroute_local.confidential.receipt import Receipt
+    assert Receipt.load(r.path).counters_mean == means, "the definitions did not reach the file"

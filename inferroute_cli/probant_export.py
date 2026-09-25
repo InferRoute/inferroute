@@ -923,6 +923,12 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    not carry a nonce — a second auditor read it that way the same day, reached the right conclusion by the
    wrong route, and would have reported a real difference as benign for a reason that is not true.
 
+   **`counters_mean` says what the counters measure — read it before reporting a ratio as odd.**
+   `ciphertext_bytes_sent` is typically a third to a half of `plaintext_bytes_sealed_here`, and that is
+   gzip, not loss: the body is compressed and then sealed. An auditor on 25 Sep reported the gap as
+   unexplained because the receipt did not define its own units. A receipt written before that has no
+   `counters_mean`; the same explanation holds, and say which you relied on.
+
    The receipt carries: fifteen named checks, the hardware measurements it pinned (`mrtd`, `rtmrs`), the
    hash of the encryption key the session sealed to, and — since 24 Sep — `attestation`: the evidence row
    this device verified. **Recompute the verdicts from it rather than reading them.** It holds the Intel

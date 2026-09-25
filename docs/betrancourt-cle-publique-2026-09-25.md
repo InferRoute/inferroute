@@ -14,33 +14,36 @@ Maître,
 Je vous adresse en début de semaine prochaine le client complet, avec les objets dont nous avons parlé.
 L'envoi sera chiffré à votre seule clé et s'ouvrira sur votre poste.
 
-Il me faut pour cela votre **clé publique**. Elle se produit sur votre machine en six commandes, que
-voici telles quelles :
+Il me faut pour cela votre **clé publique**. Elle se produit sur votre machine en trois commandes :
 
 ```
-curl -LO https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl
-curl -LO https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl.sha256
-sha256sum -c inferroute-0.9.50-py3-none-any.whl.sha256
 python3 -m venv ~/probant
-~/probant/bin/pip install "./inferroute-0.9.50-py3-none-any.whl[confidential]"
+~/probant/bin/pip install https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl cryptography
 ~/probant/bin/ir probant identity
 ```
 
-La troisième ligne vérifie que le fichier téléchargé est bien celui que nous publions ; elle doit
-répondre `OK`. Je vous la donne pour que rien ne se fasse à l'aveugle, en précisant ce qu'elle vaut :
-l'empreinte et le fichier viennent du même serveur, donc cette ligne écarte une altération en route,
-pas une tromperie de notre part. Ce qui écarte la seconde est plus bas.
+La première crée un dossier isolé, la deuxième y installe le programme, la troisième fabrique votre paire
+de clés et affiche la partie publique. Rien n'est touché ailleurs sur votre poste, et rien n'est envoyé :
+ces trois lignes ne font que créer deux clés sur votre disque et en imprimer une.
 
-La dernière commande affiche votre clé. Vous me renvoyez ce qu'elle imprime entre les deux lignes de
-tirets. **Elle ne contient que des clés publiques** : qui la lit n'apprend rien et ne peut rien ouvrir.
-Elle affiche aussi une empreinte courte, de la forme `1234-abcd-5678-ef90` ; nous la relirons de vive
-voix avant que quoi que ce soit ne parte.
+Vous me renvoyez ce que la dernière commande affiche entre les deux lignes de tirets. **Elle ne contient
+que des clés publiques** : qui la lit n'apprend rien et ne peut rien ouvrir. Elle affiche aussi une
+empreinte courte, de la forme `1234-abcd-5678-ef90`, que nous relirons de vive voix avant que quoi que ce
+soit ne parte.
 
-Rien de tout cela ne lance de recherche ni n'envoie quoi que ce soit : ces commandes installent le
-programme et fabriquent une paire de clés sur votre disque. Le programme est du Python en clair — il se
-lit entièrement, sans avoir à nous croire.
+Je ne vous envoie pas de script à exécuter : trois lignes que vous lisez valent mieux qu'un fichier qui
+en fait autant sans que vous le voyiez.
+
+Si `uv` est installé chez vous, une seule ligne suffit et fait exactement la même chose :
+
+```
+uvx --from https://inferroute.ai/client/inferroute-0.9.50-py3-none-any.whl --with cryptography ir probant identity
+```
 
 (Sous Windows les chemins diffèrent : dites-le-moi et je vous envoie l'équivalent.)
+
+Votre clé restera en place pour l'envoi de la semaine prochaine : elle s'écrit dans votre dossier
+personnel et non dans l'installation, de sorte que le client complet la retrouvera telle quelle.
 
 ## Une valeur à conserver dès maintenant
 
@@ -71,15 +74,20 @@ Henry Declety
   et il portait sur ce que la lettre *décrit* (l'offre, les documents qui citent l'ensemble non déposé,
   le chiffre et sa définition). Ce courrier ne décrit rien de tout cela. Il ne contient aucun mécanisme,
   aucun chiffre de performance, aucune référence aux documents. La revue PI ne s'y applique pas.
-- **Chaîne vérifiée de bout en bout le 25 sept. sur 0.9.50**, depuis un HOME vierge : les six commandes
-  passent, `sha256sum -c` répond `OK`, et `ir probant identity` imprime bien une carte de contact et une
-  empreinte courte. Ce n'est pas une chaîne recopiée d'un brouillon : elle a été exécutée telle quelle.
-- **La ligne `sha256sum -c` est nouvelle** par rapport au brouillon précédent, et elle n'aurait pas
-  fonctionné avant aujourd'hui : le fichier d'empreinte publié était écrit en format nu et faisait
-  échouer la commande d'une manière qui ressemble exactement à une altération. Corrigé ce matin, vérifié
-  depuis l'adresse publique.
-- **Ce que la ligne d'empreinte ne prouve pas** est dit dans le courrier, en une phrase. Ne pas le
-  retirer : un destinataire qui la croit indépendante se croira couvert par elle.
+- **Passé de six commandes à trois**, et vérifié dans les deux formes depuis un HOME vierge sur 0.9.50.
+  Ce qui a sauté : les deux `curl` (pip installe directement depuis l'adresse) et l'extra
+  `[confidential]`, qui tirait fastapi, uvicorn et httpx — **la fabrication de la clé n'a besoin que de
+  `cryptography`**. Testé explicitement : sans `cryptography` le programme refuse proprement et ne touche
+  à rien ; avec, et rien d'autre, il fonctionne.
+- **La ligne `sha256sum -c` a disparu avec les `curl`.** Elle valait moins qu'elle n'en avait l'air :
+  l'empreinte et le fichier viennent du même serveur, donc elle écartait une altération en route et rien
+  de plus. Le vrai contrôle est `ir probant audit-client`, qui compare la copie installée au fichier
+  publié — il appartient à la lettre complète, pas à celle-ci.
+- **La variante `uvx` en une ligne a été testée, y compris l'aller-retour** : la clé produite par la
+  forme éphémère est relue à l'identique par une installation normale (même empreinte). C'est ce qui
+  autorise à lui proposer les deux formes sans risque pour l'envoi de la semaine prochaine.
+- **Pas de script hébergé, délibérément.** Un `curl … | bash` ferait la même chose en moins de lignes et
+  serait exactement le contraire de ce que cette lettre promet. C'est dit dans le courrier en une phrase.
 - **0.9.50 est la version du jour.** Celle de la semaine prochaine sera plus récente ; la clé qu'il
   produit aujourd'hui reste valable, c'est une paire de clés sur son disque et non un artefact de version.
 - **Ce qu'il n'a pas** : aucune mention de l'offre, du calendrier de l'essai, ni des huit objets au-delà

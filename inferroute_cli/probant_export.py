@@ -303,6 +303,33 @@ def _load_sessions(S, client: str, matter: str) -> list:
             try:
                 rec = json.loads(f.read_text())
             except (OSError, ValueError) as e:
+                # A TRAILING FRAGMENT is recoverable, and throwing the whole file away over it costs the
+                # reader a session. Two interleaved writes leave a COMPLETE first document followed by a
+                # partial second one — the shared-tmp shape fixed on both sides on 24 Sep. `raw_decode`
+                # takes the whole document and stops; anything after it is the aborted write.
+                #
+                # Found on 25 Sep by two auditors independently: a session with five sealed searches and no
+                # receipt anywhere in the pack. Its record was exactly this — 7994 good bytes, 1118 of
+                # tail — and the intact half named a receipt that was sitting on disk the whole time.
+                #
+                # Recovered, never silently: what was recovered and what was dropped is recorded on the
+                # session, because a repaired record that does not say it was repaired is worse than a
+                # broken one.
+                try:
+                    rec, end = json.JSONDecoder().raw_decode(f.read_text())
+                    rec = dict(rec)
+                    rec["recovered"] = {
+                        "why": f"this session's record file did not parse whole ({type(e).__name__}); the "
+                               f"first {end} bytes are one complete document and were used, and "
+                               f"{max(0, f.stat().st_size - end)} trailing bytes were an aborted write and "
+                               "were discarded. Nothing signed lives in this file: the searches are a "
+                               "separate, intact file and are unaffected.",
+                    }
+                except (OSError, ValueError):
+                    rec = None
+                if rec is not None:
+                    sessions.append({"session_id": sid, "record": rec, "searches": searches})
+                    continue
                 # A session whose own metadata cannot be read used to be SKIPPED, silently, taking its
                 # searches with it. On 24 Sep that produced a record whose enclave-wide counter jumped from
                 # 9 to 15, and an auditor correctly returned NOT VERIFIED on "nothing removed" — operations
@@ -709,15 +736,29 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     # describes the model lane, verbatim from this device's receipt — but the receipt stayed on the device,
     # so a reader was asked to take the strongest sentence in the document on our word. It travels now.
     # It carries verdicts and hardware measurements, never a prompt, a query or an answer: checked.
+    # WHY A RECEIPT IS MISSING, never a silent skip. Both branches below used to `continue`, so a session
+    # that ran sealed searches could have no receipt in the record with nothing anywhere saying why. On
+    # 25 Sep two auditors independently found exactly that — five searches, no receipt — and neither could
+    # tell an absent AI lane from an omission, which is the one distinction claim 7 turns on.
+    receipt_notes = []
     for sess in b.get("sessions") or []:
+        sid = sess["session_id"]
+        n = sum(1 for _ in sess.get("searches") or [])
         rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
         if not rp:
+            receipt_notes.append({"session": sid, "searches": n, "receipt": "none",
+                                  "why": "this session's record names no receipt: the AI lane was never "
+                                         "opened in it, or its record could not be read whole"})
             continue
         try:
             raw = Path(rp).read_bytes()
-        except OSError:
+        except OSError as e:
+            receipt_notes.append({"session": sid, "searches": n, "receipt": "named but unreadable",
+                                  "why": f"the record names a receipt this device could not read "
+                                         f"({type(e).__name__}); it is not in this bundle"})
             continue
-        files[f"session-{sess['session_id']}.receipt.json"] = raw
+        receipt_notes.append({"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"})
+        files[f"session-{sid}.receipt.json"] = raw
     if b.get("unanswered"):
         files["unanswered.json"] = json.dumps(b["unanswered"], indent=1, ensure_ascii=False).encode("utf-8")
     for sha, content in b["evidence"].items():
@@ -731,6 +772,9 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                 "matter_cutoff": b["matter_cutoff"], "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "note": "an unsigned index of this bundle, not a seal; the enclave-signed statements in searches.json are the seal",
                 "reference_hint": _reference_hint(),
+                # One row per session: how many sealed searches it ran, and which receipt covers it — or
+                # why none does. An auditor should never have to infer a gap from two file listings.
+                "sessions": receipt_notes,
                 "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
     files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
@@ -988,6 +1032,14 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    rather than confirming that they do; and report any check whose `ok` is true but whose `why` does not
    support it. Say plainly in your
    report which of this you verified and which you read.
+
+   **`MANIFEST.json` → `sessions` says which receipt covers which session, or why none does.** Read it
+   before concluding a session went unattested: a session that ran sealed searches and has no receipt is
+   either one where the AI lane was never opened, or one whose record could not be read whole, and the
+   row says which. Two auditors on 25 Sep each found a session with five searches and no receipt, and
+   neither could tell those apart — the pack knew and was not saying. A row reading `"receipt": "none"`
+   is a stated absence; treat claim 7 as COULD NOT CHECK for that session and say so, rather than
+   reporting it as evidence withheld.
 
    **A matter can carry receipts from several sessions, written months apart by different versions of the
    client.** Each receipt names its own in `written_by`. When two receipts disagree — the same zero
@@ -1617,6 +1669,8 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # A stated count per kind, so that nothing here has to be inferred from an empty field.
                 # `document_reads: 0` means this matter did no document reads — it does not mean they went
                 # unrecorded, and claim 8 is COULD NOT CHECK rather than verified when it is zero.
+                # Carried through from the record: which receipt covers which session, or why none does.
+                "sessions": src_manifest.get("sessions"),
                 "contents": dict(_census(rows), session_receipts=len(receipts),
                                  receipts_with_attestation=sum(1 for n in receipts if _receipt_has(src / n, "attestation")),
                                  receipts_with_checked_with=sum(1 for n in receipts if _receipt_has(src / n, "checked_with")),

@@ -499,35 +499,57 @@ def test_the_receipt_carries_the_evidence_its_verdicts_were_computed_from():
 
 
 def test_an_unreadable_session_record_keeps_its_searches_and_says_so(tmp_path, monkeypatch):
-    """24 Sep, the most expensive finding of the day. An Opus audit returned NOT VERIFIED on "nothing
-    removed": the enclave-wide signed counter jumped 9 → 15 and the record did not account for operations
-    10-14. Nothing had been removed. One session's record file was corrupt — two concurrent writers, one
-    shared .tmp — and `_sessions()` caught ValueError and `continue`d, taking that session's five searches
-    out of the export with it.
+    """A session whose own metadata cannot be read used to be SKIPPED, silently, taking its searches with
+    it — which reads to an auditor as evidence removed. Two shapes now, and they are not the same:
 
-    So a write race became, to a careful reader, evidence of tampering. The searches are a separate file,
-    intact and individually signed; they stay, and the record says the session's own description is missing
-    rather than letting the gap speak for itself. A silent omission is indistinguishable from removal."""
+    RECOVERABLE — two interleaved writes leave a COMPLETE first document with an aborted one after it.
+    That is the shared-tmp shape fixed on both sides on 24 Sep, and throwing the file away over the tail
+    costs the reader a whole session. On 25 Sep two auditors independently found a session with five
+    sealed searches and no receipt anywhere; its record was 7994 good bytes plus 1118 of tail, and the
+    intact half named a receipt that had been on disk the whole time.
+
+    UNREADABLE — nothing parses at all. The searches still stay, and the record says what was lost.
+
+    Neither is ever silent: a repaired record that does not say it was repaired is worse than a broken one.
+    """
     from inferroute_cli import probant_export as E
+    from inferroute_cli import probant as S
+
     rdir = tmp_path / "recs"
     rdir.mkdir()
+    monkeypatch.setattr(S, "records_dir", lambda c, m: rdir)
+
     (rdir / "s1.json").write_text('{"session_id": "s1"}')
     (rdir / "s1.searches.jsonl").write_text('{"statement": {"seq": 1}}\n')
-    # A complete record followed by a fragment: exactly the shape the shared-tmp race leaves behind.
-    (rdir / "s2.json").write_text('{"session_id": "s2"}\n  "search_enclave": "saw 5 query(ies)"\n}\n')
+    # A whole document, then an aborted write: recoverable.
+    (rdir / "s2.json").write_text('{"session_id": "s2", "model_lane": {"receipt": "/x"}}\n  "oops"\n}\n')
     (rdir / "s2.searches.jsonl").write_text('{"statement": {"seq": 2}}\n{"statement": {"seq": 3}}\n')
-    got = E._load_sessions(SimpleNamespace(records_dir=lambda c, m: rdir), "C", "m")
-    ids = [s["session_id"] for s in got]
-    assert ids == ["s1", "s2"], f"a session vanished from the export: {ids}"
-    bad = [s for s in got if s["session_id"] == "s2"][0]
-    assert bad["record"].get("unreadable") is True
-    assert "could not be read" in bad["record"]["why"]
-    # The evidence survives: its searches are intact and signed independently of the record file.
-    assert [r["statement"]["seq"] for r in bad["searches"]] == [2, 3]
-    # And the sequence across the export has no hole to misread.
-    seqs = [r["statement"]["seq"] for s in got for r in s["searches"]]
-    assert seqs == [1, 2, 3]
+    # Nothing parses at all: unreadable.
+    (rdir / "s3.json").write_text('not json at all')
+    (rdir / "s3.searches.jsonl").write_text('{"statement": {"seq": 4}}\n')
 
+    out = E._load_sessions(S, "C", "M")
+    ids = [x["session_id"] for x in out]
+    assert ids == ["s1", "s2", "s3"], f"a session vanished from the export: {ids}"
+
+    ok, recovered, unreadable = out
+    assert "recovered" not in ok["record"] and not ok["record"].get("unreadable")
+
+    # The recovered one keeps the intact half — INCLUDING the receipt path, which is the whole point.
+    assert recovered["record"]["session_id"] == "s2"
+    assert recovered["record"]["model_lane"]["receipt"] == "/x"
+    assert "did not parse whole" in recovered["record"]["recovered"]["why"]
+    assert "trailing bytes were an aborted write" in recovered["record"]["recovered"]["why"]
+    assert not recovered["record"].get("unreadable"), "a recoverable record must not be called unreadable"
+    assert [r["statement"]["seq"] for r in recovered["searches"]] == [2, 3]
+
+    # The truly unreadable one still keeps its searches and says what was lost.
+    assert unreadable["record"].get("unreadable") is True
+    assert "could not be read" in unreadable["record"]["why"]
+    assert [r["statement"]["seq"] for r in unreadable["searches"]] == [4]
+
+    seqs = sorted(r["statement"]["seq"] for x in out for r in x["searches"])
+    assert seqs == [1, 2, 3, 4], "a signed search was dropped with its session's metadata"
 
 def test_the_brief_asks_for_one_plain_statement_about_confidentiality():
     """Henry, 24 Sep: "it would be nice to ask the audit agent to produce at the end a simple sentence
@@ -1149,3 +1171,62 @@ def test_the_brief_asks_for_observations_and_never_predicts_the_answer():
     assert "no longer tells you what your fetch will say" in b
     assert "An expected answer printed here is an anchor" in b
     assert "As of this writing the released versions on the index do **not** contain this file" not in E.AUDIT_MD
+
+
+def test_the_record_says_which_receipt_covers_which_session(tmp_path, monkeypatch):
+    """Two auditors on 25 Sep independently found a session with five sealed searches and no receipt
+    anywhere in the pack, and neither could tell an absent AI lane from an omission — which is the one
+    distinction claim 7 turns on. The cause was a record that would not parse whole, so the export took
+    the `continue` branch and said nothing.
+
+    Both branches now leave a row. A stated absence is a different artefact from a silent one: the first
+    is a COULD NOT CHECK an auditor can report, the second is a gap they must guess about."""
+    from inferroute_cli import probant_export as E
+
+    b = {"sessions": [
+        {"session_id": "has-one", "searches": [1, 2],
+         "record": {"model_lane": {"receipt": str(tmp_path / "r.json")}}},
+        {"session_id": "no-lane", "searches": [1, 2, 3, 4, 5], "record": {"model_lane": {}}},
+        {"session_id": "named-gone", "searches": [1],
+         "record": {"model_lane": {"receipt": str(tmp_path / "missing.json")}}},
+    ]}
+    (tmp_path / "r.json").write_text('{"session_id": "x"}')
+
+    notes = _receipt_notes_via_bundle(E, b, tmp_path)
+    by = {n["session"]: n for n in notes}
+    assert set(by) == {"has-one", "no-lane", "named-gone"}, "a session left no row at all"
+
+    assert by["has-one"]["receipt"] == "session-has-one.receipt.json"
+    assert by["has-one"]["searches"] == 2
+
+    # The case the auditors hit: searches, no receipt, and now a reason.
+    assert by["no-lane"]["receipt"] == "none" and by["no-lane"]["searches"] == 5
+    assert "AI lane was never opened" in by["no-lane"]["why"]
+    assert "could not be read whole" in by["no-lane"]["why"]
+
+    assert by["named-gone"]["receipt"] == "named but unreadable"
+    assert "could not read" in by["named-gone"]["why"]
+
+    import re
+    brief = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "says which receipt covers which session, or why none does" in brief
+    assert "rather than reporting it as evidence withheld" in brief
+
+
+def _receipt_notes_via_bundle(E, b, tmp_path):
+    """Drive write_bundle far enough to collect its per-session receipt rows, with the bundle it would
+    have assembled from disk replaced by the one under test."""
+    import json
+    from inferroute_cli import probant as S
+
+    ws = tmp_path / "ws"
+    ws.mkdir(exist_ok=True)
+    full = dict(b, html="<p>x</p>", searches=[], evidence={}, matter_cutoff=20260814)
+    orig_build, orig_load = E.build_bundle, S.load_record
+    E.build_bundle = lambda c, m: full
+    S.load_record = lambda c, m: {"workspace": str(ws)}
+    try:
+        out = E.write_bundle("C", "M", str(tmp_path / "bundle"))
+    finally:
+        E.build_bundle, S.load_record = orig_build, orig_load
+    return json.loads((out / "MANIFEST.json").read_text())["sessions"]

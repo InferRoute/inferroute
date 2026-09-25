@@ -1061,6 +1061,15 @@ other order would have been marked down by a rule this brief had broken itself.
      quote: PCK → PCK Platform CA → SGX Root CA. Check that one, and compare its root with Intel's own
      published certificate rather than with anything in this folder.
 
+     **That chain is the hardest parse in this folder, and getting it wrong produces a failure that looks
+     like ours.** It sits in the quote's signature data as certification-data type 6, which NESTS an
+     inner type 5 holding the PEM chain; a plausible reading that misses the nesting yields
+     `InvalidSignature` on the Quoting Enclave report — a result that reads as a defect in the record and
+     is a defect in the parse. An auditor's first attempt did exactly that on 25 Sep. This brief gives
+     exact byte offsets for the TD report body, which is the easy part, and used to give nothing here,
+     which is backwards by its own doctrine about failure signals. **If this step fails, suspect your
+     parse before you suspect the evidence**, and say in the report which of the two you concluded.
+
    **`attestation.checked_with` holds OUR side of those two, and did not exist before 24 Sep.** Until then
    the receipt kept a HASH of the encryption key and no challenge at all, so the second and fourth steps
    above asked for work the file could not support — an instruction to recompute something, over a file
@@ -1289,6 +1298,16 @@ What it may and may not say:
     hashes commit to texts you could not open.
   - Name the one thing a reader would otherwise assume and should not.
 
+**The verifier prints a block headed "You may write". It is NOT one of your verdicts, and it does not
+override this section.** It reports which sentences the EVIDENCE supports; whether to write one is still
+your judgement, and its wording is load-bearing. It licenses at most "no party outside the enclave was
+POSITIONED to read the text" — a claim about who had a channel. That is deliberately narrower than "was
+never exposed" or "could not have been read", which are claims about what happened and which nothing here
+can support. **If you find yourself paraphrasing the block's sentence into one of the forbidden ones, you
+have overshot, and the block did not authorise it.** Report that you found the two hard to tell apart:
+until 25 Sep this brief forbade those words on one page while a program in the same folder printed a
+near-synonym under the heading "You may write", and said nothing about the collision.
+
 No model paragraph is given. One used to be, and the auditor who met it on 25 Sep reported that their own
 closing had converged on its clause order — which is what the bullets above are for and what a worked
 example undoes. The self-disclosure section had its example removed for this reason; this one kept its
@@ -1401,11 +1420,26 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
    — then check the chain and the report signature with your own tools. Recompute REPORT_DATA from the
    runtime data, and the statement signature from the signer key.
 
+   **Then attack it with input you control.** Reading finds a check that is absent; only running finds a
+   check that is present and does not bite. Copy the pack somewhere else, break ONE specific thing, and
+   confirm the program notices — flip a bit in a hardware report, edit a field inside a signed statement,
+   change a byte of an archived policy, delete a file the manifest lists. Each should produce a named
+   FAIL. **A check that passes over evidence you have deliberately broken is the finding**, and it is
+   worth more than anything you will get from reading. Both of the serious defects found on 25 Sep came
+   from this and neither was visible by reading: a section that told the reader what they could write
+   went on saying it over 140 failed checks, and a policy nobody had committed to was read as though the
+   hardware had enforced it. Say in your report what you broke and what happened.
+
    **Work one directory up, and do not read what is already there.** The directory this folder sits in
    may hold earlier audits of this same pack — reports, verifier output, previous extractions — under
    names that say so. Do not open them. Your value here is an independent reading, and a verdict you have
    seen is no longer one you reached; if you have already seen one, say so in your report, because a
    reader weighing two agreeing audits needs to know whether they are two.
+
+   **If you `import` the verifier rather than running it, set `PYTHONDONTWRITEBYTECODE=1` first** — or
+   copy it out before importing. Reusing its parsers is the natural thing to do and CPython then writes
+   `__pycache__/` into this folder, where the integrity check cannot see it because that check does not
+   descend into subdirectories. An auditor did exactly this on 25 Sep and caught it only on a later pass.
 
    **Write nothing inside this folder.** Its integrity check lists every file AT THE TOP LEVEL, so a scratch
    file you leave there is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about

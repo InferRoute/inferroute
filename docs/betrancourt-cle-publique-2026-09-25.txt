@@ -8,7 +8,9 @@ L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt
 
 Comme nous en étions convenus l'un et l'autre, je vous propose de signer un accord de confidentialité avant cet envoi. Dites-moi si vous préférez le vôtre, ou si je vous en adresse un.
 
-Il m'aura demandé plus de temps que prévu : produire des résultats performants, et rendre la recherche elle-même vérifiable par un tiers, ont chacun demandé beaucoup de travail. Deux choses seront vraies : la recherche s'exécute sans que l'invention non déposée quitte votre poste en clair, et chaque recherche laisse une pièce datée et scellée qu'un tiers peut revérifier sans nous. C'est une première version, avec ses angles morts ; je préfère vous le dire avant que vous les trouviez. Votre lecture dira si c'est utile.
+Il m'aura demandé plus de temps que prévu : obtenir des résultats performants d'une part, pouvoir prouver comment ils ont été obtenus d'autre part, ont chacun demandé beaucoup de travail.
+
+Deux choses seront donc vraies. L'invention non déposée ne quitte pas votre poste en clair : la recherche s'exécute dans une enceinte matérielle scellée, et rien sur le trajet ne peut la lire. Et chaque recherche laisse une pièce qui atteste ce qui a été cherché, quand, sur quel corpus et avec quelle borne d'antériorité — revérifiable par un tiers des années plus tard, sans passer par nous. Cette pièce n'atteste pas que les résultats soient bons : cela restera votre jugement, et c'est une première version, avec ses angles morts. Je préfère vous le dire avant que vous les trouviez.
 
 Si vous êtes partant, il me faudrait une chose d'ici là : votre clé publique. Sans elle je ne peux rien vous adresser à vous seul.
 

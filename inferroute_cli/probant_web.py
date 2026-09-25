@@ -324,8 +324,22 @@ def audit_launch_script(pack: Path, command: str) -> Path:
     import tempfile
     d = Path(tempfile.mkdtemp(prefix="probant-audit-"))
     sh = d / "run-audit.sh"
+    # EVERY AUDIT GETS ITS OWN COPY OF THE PACK, and never the pack itself. Two reasons, both of them
+    # things that happened on 25 Sep when two audits were launched on one folder:
+    #   * one auditor filled the report template in where it lay, and the other — running concurrently in
+    #     the same directory — found the record failing its own integrity check and was one step from
+    #     filing evidence tampering that was really a colleague's scratch edit;
+    #   * anything an auditor writes in there is one more file the NEXT reader has to account for.
+    # The copy sits beside the original as `audit-run-<pack>-<pid>`, so a report written "one directory
+    # up" lands in the exports folder where every other report already is, and the original is never
+    # opened for writing by anyone.
+    run = pack.parent / f"audit-run-{pack.name}-{os.getpid()}"
     sh.write_text("#!/bin/bash\n"
-                  f"cd {shlex.quote(str(pack))} || exit 1\n"
+                  f"rm -rf {shlex.quote(str(run))}\n"
+                  f"cp -r {shlex.quote(str(pack))} {shlex.quote(str(run))} || exit 1\n"
+                  f"chmod -R u+w {shlex.quote(str(run))}\n"
+                  f"cd {shlex.quote(str(run))} || exit 1\n"
+                  f"printf 'Working on a copy: %s\\n(the original pack is untouched; write your report one directory up)\\n\\n' {shlex.quote(str(run))}\n"
                   f"{command}\n"
                   'printf "\\n[the audit session has ended — this window can be closed]\\n"\n'
                   "exec bash\n")

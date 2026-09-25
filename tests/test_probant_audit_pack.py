@@ -62,7 +62,11 @@ def test_the_pack_carries_no_word_of_the_invention_and_no_matter_name(tmp_path, 
     assert "client" not in m and "matter" not in m and m["schema"] == "inferroute.prior-art-audit-pack/1"
     assert (pack / "verify_record.py").read_bytes() == (rec / "verify_record.py").read_bytes()
     assert stat.S_IMODE(pack.stat().st_mode) == 0o700
-    assert all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in pack.iterdir() if p.is_file())
+    # 0600 for the evidence; the report template is 0400 because it is the one file an auditor is invited
+    # to fill in, and filling it in WHERE IT LIES broke a pack on 25 Sep.
+    modes = {p.name: stat.S_IMODE(p.stat().st_mode) for p in pack.iterdir() if p.is_file()}
+    assert modes.pop("REPORT-TEMPLATE.md") == 0o400, "the template is writable where it lies"
+    assert all(m == 0o600 for m in modes.values()), modes
 
 
 def test_the_pack_brings_the_brief_and_this_computers_trust_anchors(tmp_path, V, kms, monkeypatch):
@@ -804,7 +808,9 @@ def test_the_manifest_accounts_for_every_file_in_the_folder(tmp_path, V, kms, mo
     on_disk = {str(p.relative_to(pack)) for p in pack.rglob("*") if p.is_file()}
     # MANIFEST.json indexes the folder and cannot index itself; SHA256SUMS is DERIVED from the manifest,
     # so listing it inside would be circular too. Both are named here rather than silently tolerated.
-    accounted = set(m["files"]) | set(anchors) | {"MANIFEST.json", "SHA256SUMS"}
+    # ...plus the stationery, which is in the folder and deliberately NOT pinned: an auditor is invited to
+    # write to the report template, so a hash on it would fail by design the moment they did.
+    accounted = set(m["files"]) | set(anchors) | set(m["stationery"]) | {"MANIFEST.json", "SHA256SUMS"}
     assert on_disk == accounted, on_disk ^ accounted
 
     # Listing them must not be mistaken for vouching for them.
@@ -897,9 +903,21 @@ def test_the_pack_ships_a_report_skeleton_whose_headings_are_the_brief_s_claims(
     assert "VERIFIED is wrong while any part of the claim is unchecked" in tmpl
     assert "give the sample size" in tmpl
 
-    # It is indexed like everything else in the folder.
+    # It is accounted for, but as STATIONERY and without a hash. An auditor on 25 Sep filled it in where
+    # it lay and broke the pack's own SHA256SUMS — the check the brief tells them to run. The instrument
+    # built to stop one mistake was manufacturing a worse one.
     m = json.loads((pack / "MANIFEST.json").read_text())
-    assert m["files"]["REPORT-TEMPLATE.md"] == E._sha256_hex(tmpl.encode("utf-8"))
+    assert "REPORT-TEMPLATE.md" not in m["files"], "the template is pinned; filling it in would fail the pack"
+    assert "REPORT-TEMPLATE.md" not in (pack / "SHA256SUMS").read_text()
+    assert "not evidence" in m["stationery"]["REPORT-TEMPLATE.md"]
+
+    # Writing to it must leave the evidence check green. Asserted by DOING it, not by reading the manifest.
+    tmpl_path = pack / "REPORT-TEMPLATE.md"
+    tmpl_path.chmod(0o600)          # an auditor determined to ignore the instruction has to do this first
+    tmpl_path.write_text(tmpl + "\n\n**Verdict:** VERIFIED\n")
+    import subprocess
+    r = subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=pack, capture_output=True, text=True)
+    assert r.returncode == 0, f"filling in the template broke the pack:\n{r.stdout}{r.stderr}"
 
     # And the brief sends the auditor to it.
     assert "REPORT-TEMPLATE.md" in E.AUDIT_MD
@@ -973,3 +991,54 @@ def test_the_brief_says_what_the_recorded_block_is_worth_and_what_it_is_not():
     assert 'Expect the answer to be "some of each"' in v
     assert "later than 33 of the 58 searches and earlier than 25" in v
     assert "Give both counts." in v
+
+
+def test_the_template_cannot_be_filled_in_where_it_lies(tmp_path, V, kms, no_anchors):
+    """25 Sep, from the two auditors who ran on the same pack at once. One filled REPORT-TEMPLATE.md in
+    where it lay; the other ran `sha256sum -c SHA256SUMS` at the end, found the record failing, traced the
+    writer by pid, and reported plainly that had it been the later of the two it would have filed a
+    finding about evidence tampering that was really a colleague's scratch edit.
+
+    The instrument built to stop one mistake was manufacturing a worse one. Three things now have to hold
+    at once, and each covers a different way of getting there:
+      * the brief names the OUTPUT PATH, so the correct action and the non-destructive action are one act;
+      * the file is read-only, so ignoring that fails at the first keystroke and not at the check;
+      * it is out of the checked set, so even then nothing breaks."""
+    from inferroute_cli import probant_export as E
+    import re
+    import stat
+    import subprocess
+
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    tmpl = pack / "REPORT-TEMPLATE.md"
+
+    assert stat.S_IMODE(tmpl.stat().st_mode) == 0o400, "the template is writable where it lies"
+
+    brief = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md" in brief
+    assert "WHERE was the part the instruction left out" in brief
+    # The same instruction where the auditor is actually looking — inside the template itself.
+    assert "cp REPORT-TEMPLATE.md ../REPORT-<pack folder name>.md" in tmpl.read_text()
+    assert "Write nothing inside the evidence folder" in tmpl.read_text()
+
+    # Even so: an auditor who forces it past read-only must not break the record.
+    tmpl.chmod(0o600)
+    tmpl.write_text("# my report\n\n**Verdict:** VERIFIED\n")
+    r = subprocess.run(["sha256sum", "-c", "SHA256SUMS"], cwd=pack, capture_output=True, text=True)
+    assert r.returncode == 0, f"filling in the template broke the pack:\n{r.stdout}{r.stderr}"
+    code, out = _run(pack)
+    assert "PASS bundle integrity" in out, out[-400:]
+
+
+def test_claim_five_names_both_ways_a_removal_hides():
+    """An auditor on 25 Sep: claim 5's caveat mentioned only "one removed from the very end", but an
+    entire session or lifetime dropped wholesale is equally undetectable — per-session numbering stays
+    contiguous inside every session that IS shown. A verdict citing only the first overstates what was
+    checked, and the caveat had named only it since it was written."""
+    from inferroute_cli import probant_export as E
+    import re
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "TWO exceptions no counter can reveal" in b
+    assert "a verdict that names only the first is overstating what was checked" in b
+    assert "an entire session, or an entire enclave lifetime, dropped from the record wholesale" in b

@@ -1538,3 +1538,41 @@ def test_the_page_offers_to_continue_a_survey_only_once_one_is_on_screen():
         "once a survey is on screen, continuing it is exactly the right offer"
     # And with nothing set aside there is nothing to leave out, searches or not.
     assert "continue, leaving out" not in out["onlyRelevant"]
+
+
+def test_every_audit_runs_on_its_own_copy_of_the_pack(tmp_path):
+    """From the two auditors who ran on one folder at once, 25 Sep. One filled the report template in
+    where it lay; the other ran the integrity check at the end, found the record failing, traced the
+    writer by pid, and said plainly that had it been the later of the two it would have filed a finding
+    about evidence tampering that was really a colleague's scratch edit.
+
+    Its recommendation, adopted: give each auditor its own copy. The copy sits BESIDE the original rather
+    than in /tmp, so a report written "one directory up" lands in the exports folder where every other
+    report already is."""
+    pack = tmp_path / "exports" / "audit-pack-20260925T000000Z"
+    pack.mkdir(parents=True)
+    (pack / "AUDIT.md").write_text("brief")
+    sh = W.audit_launch_script(pack, "claude 'do the thing'")
+    body = sh.read_text()
+
+    assert f"cp -r {pack}" in body, "the audit still runs in the evidence folder itself"
+    assert str(pack) not in body.split("cd ", 1)[1].splitlines()[0], "it cd's into the original"
+    assert "audit-run-audit-pack-20260925T000000Z-" in body
+    # Beside the original, so "one directory up" is the exports folder.
+    assert f"{pack.parent}/audit-run-" in body
+    # The copy has to be writable: the pack's own files are 0600/0400 and a copy of a read-only template
+    # cannot be filled in either.
+    assert "chmod -R u+w" in body
+    # And the auditor is told which they are looking at.
+    assert "the original pack is untouched" in body
+
+    # Run it for real and check the original is untouched and the copy is complete.
+    import subprocess
+    before = {p.name: p.read_bytes() for p in pack.iterdir()}
+    r = subprocess.run(["bash", "-c", body.replace("exec bash", "true").replace("claude 'do the thing'", "true")],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-400:]
+    after = {p.name: p.read_bytes() for p in pack.iterdir()}
+    assert before == after, "the original pack changed"
+    runs = sorted(pack.parent.glob("audit-run-*"))
+    assert len(runs) == 1 and (runs[0] / "AUDIT.md").read_text() == "brief"

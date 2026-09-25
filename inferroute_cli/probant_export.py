@@ -890,7 +890,13 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
    reference's contents are true. VERIFY.md §4a has the commands.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
 5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
-   record (except one removed from the very end, which no counter can reveal).
+   record — with TWO exceptions no counter can reveal, and a verdict that names only the first is
+   overstating what was checked. One: a search removed from the very END of a lifetime or a session,
+   because nothing follows it to leave a hole. Two: **an entire session, or an entire enclave lifetime,
+   dropped from the record wholesale** — per-session numbering is contiguous within each session that IS
+   shown, so removing a whole one leaves every remaining sequence intact. An auditor on 25 Sep raised
+   this; the caveat had named only the first case since it was written. Where the statements also carry an
+   enclave-wide counter, the verifier reports gaps in it as an observation — read that alongside this.
 6. **Filters — what was given, and what the enclave says applying them did.** Each statement carries the
    filters it was given (`cutoff_date`, `from_date`, `offices`) and, from enclaves that report it, a
    matching object with counts over the candidates that filter saw — `cutoff_applied`, `from_date_applied`,
@@ -1005,8 +1011,17 @@ reference came from the machine whose records it validates, that is NOT VERIFIED
 
 ## Write your report by completing `REPORT-TEMPLATE.md`
 
-**That file is in this folder and its headings are already the eight claims.** Copy it, fill it in, and
-hand that back. Do not compose a report of your own shape around it: the numbering below has been asked
+**That file is in this folder and its headings are already the eight claims.** Do this, exactly:
+
+    cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md     # then fill in THAT copy
+
+Not "fill it in and hand it back" — WHERE was the part the instruction left out, and an auditor on 25 Sep
+filled it in where it lay. That broke the pack's own `SHA256SUMS`, and a second auditor working in the
+same folder found the record failing its integrity check and was one step from filing evidence tampering
+that was really a colleague's scratch edit. The copy is not politeness: it makes the correct action and
+the non-destructive action the same action. The template is read-only and outside the checked set so that
+ignoring this cannot break anything — but write your report one directory up regardless, along with
+everything else you produce. Do not compose a report of your own shape around it: the numbering below has been asked
 for in prose since 24 Sep and three of five auditors have still answered `verify_record.py`'s fifteen
 check names instead. One of them explained why in its own report — a mechanical requirement that creates
 no enforcement of its own is the kind of instruction that gets dropped once the work gets interesting. So
@@ -1313,6 +1328,14 @@ def report_template() -> str:
     claims = audit_claims()
     out = ["# Audit report — <pack folder name>",
            "",
+           "> Copy this file OUT of the evidence folder before filling it in:",
+           ">",
+           ">     cp REPORT-TEMPLATE.md ../REPORT-<pack folder name>.md",
+           ">",
+           "> This copy is read-only on purpose. Write nothing inside the evidence folder — another",
+           "> auditor may be reading it, and a file written there fails the integrity check you are",
+           "> about to run.",
+           "",
            "Auditor: <who you are> · Date: <date> · Verifier exit code: <code>",
            "",
            "Complete this file. The headings are the claims; do not renumber them, retitle them, add one, or",
@@ -1496,7 +1519,6 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
         "VERIFY.md": (src / "VERIFY.md").read_bytes(),
         "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
-        "REPORT-TEMPLATE.md": report_template().encode("utf-8"),
         "verify_record.py": (src / "verify_record.py").read_bytes(),
     }
     for name in sorted(p.name for p in src.iterdir()):
@@ -1548,6 +1570,16 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     if key:
         anchor_files["trust-anchors/publication-key.txt"] = (str(key).strip() + "\n").encode("utf-8")
     block = anchor_block(Path(str(ref) + ".ots")) if ref else {}
+    # STATIONERY, not evidence. The report template is the one file in this folder that is MEANT to be
+    # written to, so it must not sit in SHA256SUMS: an auditor on 25 Sep filled it in where it lay and
+    # broke the pack's own integrity check — the check the brief tells them to run. The instrument built
+    # to stop one mistake was manufacturing a worse one, and only a later look at the folder caught it.
+    # Listed here so nothing in the folder is unaccounted for, with no hash, because pinning a file we
+    # invite them to edit would just move the failure.
+    manifest["stationery"] = {
+        "REPORT-TEMPLATE.md": "yours to fill in — not evidence, deliberately not pinned in SHA256SUMS, "
+                              "and writing to it does not disturb the record",
+    }
     manifest["trust_anchors"] = {
         **({"reference_timestamp": block} if block else {}),
         "note": "this computer's own configuration, listed so the folder is fully accounted for — NOT "
@@ -1564,6 +1596,13 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     for name, data in files.items():
         (dest / name).write_bytes(data)
         os.chmod(dest / name, 0o600)
+
+    tmpl = dest / "REPORT-TEMPLATE.md"
+    tmpl.write_bytes(report_template().encode("utf-8"))
+    # READ-ONLY. Every other file here is 0600 and the template was too, so "fill it in" was a thing an
+    # auditor could simply do in place. Belt and braces with the manifest: the brief names an output path,
+    # this makes the wrong path fail at the first keystroke rather than at the integrity check.
+    os.chmod(tmpl, 0o400)
 
     anchors = dest / "trust-anchors"
     anchors.mkdir()

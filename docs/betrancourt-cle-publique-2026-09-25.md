@@ -14,11 +14,6 @@ Maître,
 Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un LLM, depuis mon ordinateur ;
 je l'ai relue.
 
-Pardon de ce silence depuis le 7 septembre : vous m'aviez laissé vous proposer un créneau, et je ne
-l'ai pas fait. Vos disponibilités de la semaine prochaine seront les miennes. Je reviens vers vous d'ici
-là sur vos deux questions du 4 septembre — l'usage de l'IA de votre côté, et les éléments que nous
-préférerions finalement garder secrets.
-
 J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts
 provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me
 semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment
@@ -32,7 +27,7 @@ L'outil de recherche d'antériorité dont nous avions parlé devrait être prêt
 prochaine. Si vous souhaitez y jeter un œil, j'aimerais beaucoup vous le mettre entre les mains.
 
 Il viendrait avec le travail préparatoire dont nous avons parlé, qu'il sert aussi à traiter — et qui
-répond notamment à votre question du 4 septembre sur l'ordre de préférence des regroupements. L'envoi
+revient notamment sur les regroupements. L'envoi
 est chiffré à votre seule clé et s'ouvre sur votre poste : il porte de l'ensemble non déposé, et c'est
 la raison pour laquelle il ne peut pas partir en pièce jointe ordinaire.
 
@@ -119,6 +114,25 @@ Henry Declety
 ---
 
 ## Notes pour Henry — ne pas envoyer
+
+- **⚠ Erreur de ma part, corrigée : j'avais écrit « pardon de ce silence depuis le 7 septembre ».**
+  J'avais déduit le silence de l'absence de courriels après le 7, sans voir qu'un appel avait eu lieu.
+  Une boîte aux lettres ne montre pas les appels, et l'absence de trace n'est pas l'absence de contact.
+  Retiré. **Trois phrases de la lettre dépendent encore de ce qui s'est dit à cet appel** — voir
+  ci-dessous.
+- **Deux phrases rendues indépendantes de ce qui s'est dit à l'appel**, faute de pouvoir le savoir :
+  les regroupements ne sont plus datés (« votre question du 4 septembre » ferait croire que vous avez
+  oublié l'appel s'il y a été question) ; l'accord de confidentialité s'appuie sur « ce dont nous étions
+  convenus l'un et l'autre », ce qui reste vrai que l'appel l'ait abordé ou non.
+- **Ce que je ne peux pas retrouver** : l'appel lui-même. Pas de scope Calendar sur les jetons
+  (annuaire, gmail.send, gmail.readonly), et en ajouter un suppose un consentement au navigateur. La
+  boîte ne garde aucune trace côté Santarelli après le 7 septembre — cohérent avec un appel
+  téléphonique. Si vous lui avez déjà donné l'ordre de préférence, ou déjà signé un accord, dites-le et
+  je coupe la phrase correspondante.
+- **Le rendez-vous INPI est daté par un courriel** : confirmation de Philippe Benoist (INPI) le
+  14 septembre pour une consultation de 30 minutes avec un ingénieur brevets **le 15/09 à 10h40**. Je ne
+  l'ai pas mis dans la lettre — dites-moi si vous préférez « le 15 septembre » plutôt que le récit sans
+  date, c'est vérifiable de son côté et cela ancre le propos.
 
 - **Version à coller : `betrancourt-cle-publique-2026-09-25.txt`.** Ce fichier-ci est en Markdown ; les
   `**gras**`, les `##` et les blocs de code ne s'affichent pas dans un client de messagerie, ils s'y

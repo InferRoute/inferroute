@@ -712,15 +712,17 @@ STATEMENT_CONFIDENTIAL = (
 # session receipts, which this program deliberately does not parse. An auditor on 25 Sep found three
 # things there that bear directly on these sentences and that nothing here can see, so they are named
 # rather than left to be discovered:
+# These NAME the fields and ask the question. They used to print the answers too, and an auditor on
+# 25 Sep reported confirming a sentence it had been handed rather than working it out -- one of the three
+# word for word. A pointer with the key attached is a quiz, not a pointer.
 AI_LANE_CONDITIONS = (
-    "every AI instance a session actually used is attested, not only the last one it pinned "
-    "(a receipt with counters.instance_switches > 0 attests ONE instance; requests that went to the "
-    "others have no attestation in the pack)",
-    "the session receipt is bound to the searches it is offered as covering by something SIGNED "
-    "(today the join is the exporter's unsigned filename stem: the receipt's session_id is a UUID and "
-    "the signed statement's is an unrelated 32-hex value)",
-    "no request was served by an instance that later failed its own re-verification "
-    "(receipts carry a pinned-failed-reverify event for exactly that, and still read `confidential`)",
+    "that every AI instance a session actually used is attested, not only one of them — read "
+    "`counters.instance_switches` and `events` against the `attestation` block, and against the times "
+    "of the searches that session covers",
+    "what actually BINDS a receipt to the searches it is offered as covering, and whether that binding "
+    "is signed — compare the identifiers in the receipt, in searches.json, and in the signed statements",
+    "that no request was served by an instance the device itself later stopped trusting — read `events` "
+    "and `refusal` against the request timings, and against the receipt's own verdict",
 )
 
 

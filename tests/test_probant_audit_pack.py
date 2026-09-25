@@ -1614,3 +1614,42 @@ def test_the_brief_points_at_the_surfaces_that_produced_the_findings():
     # and they must not hand over what was found there
     for answer in ("allow_stdio_access", "four instances", "UUID and", "1,120,000"):
         assert answer not in brief, f"the brief now supplies the finding: {answer}"
+
+
+def test_the_brief_reconciles_itself_with_the_verifiers_licence_block():
+    """The brief forbids "could not have been read"; the verifier prints a near-synonym under the heading
+    "You may write". Until 25 Sep the two never acknowledged each other, so an auditor could read a table
+    of PASS rows as authorisation to write the sentence the brief had just forbidden."""
+    brief = E.AUDIT_MD
+    assert "It is NOT one of your verdicts" in brief
+    i = brief.index("It is NOT one of your verdicts")
+    window = brief[i - 400:i + 1200]
+    assert "POSITIONED" in window and "have overshot" in window
+
+
+def test_the_brief_tells_the_auditor_to_break_something_and_re_run():
+    """Reading finds an absent check; only running finds a check that is present and does not bite. Both
+    serious findings of 25 Sep came from mutating evidence, and neither was visible by reading."""
+    brief = E.AUDIT_MD
+    assert "attack it with input you control" in brief
+    i = brief.index("attack it with input you control")
+    window = brief[i:i + 1000]
+    assert "deliberately broken is the finding" in window
+    for how in ("flip a bit", "archived policy", "delete a file"):
+        assert how in window, how
+
+
+def test_the_brief_warns_about_the_bytecode_it_causes_you_to_write():
+    """Importing the verifier to reuse its parsers makes CPython write __pycache__/ into the evidence
+    folder, which the integrity check cannot see because it does not descend."""
+    # Whitespace-normalised: these assertions match prose that wraps, and a rewrap moving a line break
+    # into the middle of a pinned phrase would otherwise fail a sentence that is perfectly correct.
+    flat = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "PYTHONDONTWRITEBYTECODE=1" in flat
+    assert "does not descend into subdirectories" in flat[flat.index("PYTHONDONTWRITEBYTECODE=1"):][:400]
+
+
+def test_the_hard_parse_warns_that_a_wrong_read_looks_like_our_failure():
+    flat = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "suspect your parse before you suspect the evidence" in flat
+    assert "type 6" in flat and "type 5" in flat

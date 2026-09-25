@@ -1171,8 +1171,15 @@ def test_the_licensed_sentences_are_scoped_to_the_search_lane(V):
     assert "SEARCHES in this record remained confidential" in V.STATEMENT_CONFIDENTIAL
     assert len(V.AI_LANE_CONDITIONS) == 3
     joined = " ".join(V.AI_LANE_CONDITIONS)
-    for must in ("instance_switches", "SIGNED", "pinned-failed-reverify"):
-        assert must in joined, must
+    # It must NAME the fields to read...
+    for field in ("counters.instance_switches", "events", "refusal", "searches.json"):
+        assert field in joined, f"the pointer no longer names {field}"
+    # ...and must NOT hand over what is found there. An auditor on 25 Sep reported confirming a sentence
+    # it had been given rather than computing it, one of the three word for word. A pointer carrying its
+    # own answer is a quiz: the auditor agrees instead of checking, and the agreement proves nothing.
+    for answer in ("pinned-failed-reverify", "unsigned filename stem", "attests ONE instance",
+                   "32-hex", "UUID"):
+        assert answer not in joined, f"the pointer still supplies the finding: {answer}"
 
 
 # --- The licence block must be downstream of whether anything verified ------------------------------

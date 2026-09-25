@@ -15,8 +15,9 @@ Un mot d'abord, comme la dernière fois : cette lettre a été préparée par un
 je l'ai relue.
 
 J'ai rencontré un ingénieur de l'INPI au sujet de la brevetabilité de concepts figurant dans les dépôts
-provisoires. Ces matières — l'informatique, et l'IA en particulier — sont délicates, et l'échange m'a été
-utile : j'en suis ressorti avec des nuances que je n'avais pas.
+provisoires. Ces matières — l'informatique, et l'IA en particulier — peuvent être délicates ; il me
+semble néanmoins que les nôtres se situent plutôt du bon côté, et l'ingénieur partageait le sentiment
+qu'il fallait tenter. L'échange m'a été utile : j'en suis ressorti avec des nuances que je n'avais pas.
 
 Cela ne change rien à ce dont nous étions convenus, puisque ces dépôts provisoires ne seront pas valables
 et qu'il faut les reprendre. Je vous confirme ma volonté d'y aller, et je suis à votre disposition pour
@@ -139,13 +140,17 @@ Henry Declety
   du sens tant que le sujet restait le vôtre ; dès lors que la reprise des dépôts est un dossier que
   vous lui confiez, demander un avis gratuit sur ce même dossier sonne faux. Remplacé par « je suis à
   votre disposition pour en reparler quand vous le voudrez », qui laisse l'initiative chez lui.
-- **Le verdict de l'entretien n'est plus caractérisé** (votre instruction : retirer « c'est gris. Rien
-  qui ferme la porte, rien qui l'ouvre franchement non plus »). Il ne reste que ce qui vous appartient :
-  vous avez consulté, la matière est délicate, l'échange vous a servi, et vous y allez. Rien n'est
-  remplacé par un synonyme — « mitigé », « sans réponse tranchée » diraient la même chose autrement.
-  La raison paraît juste : on ne remet pas à un conseil que l'on s'apprête à mandater un avis tiède sur
-  la matière même qu'on va lui confier, et « gris » était de toute façon votre raccourci, pas une
-  citation.
+- **Qui dit quoi, dans ce paragraphe — c'est le point à relire.** Trois affirmations, trois sources
+  différentes, et la phrase les garde séparées à dessein :
+  « ces matières **peuvent** être délicates » = général, et non un verdict sur les vôtres (c'était
+  « sont délicates », corrigé) ;
+  « **il me semble** que les nôtres se situent plutôt du bon côté » = **votre** appréciation, donnée
+  comme telle, pas celle de l'INPI ;
+  « **l'ingénieur partageait le sentiment qu'il fallait tenter** » = ce que lui a dit, et rien de plus.
+  Si ces trois-là se fondaient en une seule voix, la lettre ferait dire à l'INPI que vos concepts sont
+  brevetables — ce qu'il n'a pas dit, et ce que votre lecteur vérifierait.
+- Le verdict de l'entretien n'est toujours pas caractérisé, et pas davantage par un synonyme
+  (« mitigé », « sans réponse tranchée » diraient la même chose autrement).
 - **Ce que l'INPI a changé, et ce qu'il n'a pas changé** : il n'est pas à l'origine de la décision de
   reprendre les dépôts — elle est antérieure et tient à leur validité. La lettre ne lui fait porter que
   ce qu'il porte : un entretien utile, des nuances acquises.

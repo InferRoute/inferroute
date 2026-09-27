@@ -1541,6 +1541,17 @@ def test_the_confidentiality_section_gives_no_paragraph_to_copy():
     assert "The shape, not a form of words to copy" not in brief
 
 
+def test_the_final_confidentiality_statement_limits_the_recipient_match_claim():
+    """A matching signed recipient hash is meaningful, but does not prove there was no other copy/path."""
+    brief = E.AUDIT_MD
+    i = brief.index("## Last: one plain statement about confidentiality")
+    window = brief[i:i + 2400]
+    assert "signed recipient matches recorded key" in window
+    assert "Report the verifier's count" in window
+    assert "does not prove those things" in window
+    assert "recipient-match count and its limit" in E.report_template()
+
+
 # --- Round three, 25 Sep. Two of these are plain factual errors in the brief; the third is a command the
 #     brief gives as "do this, exactly" that cannot succeed as written.
 

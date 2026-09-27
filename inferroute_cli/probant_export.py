@@ -1324,6 +1324,10 @@ the line you would defend on its own.
 What it may and may not say:
 
   - Say who could read the invention IN TRANSIT and where it went. That is what the evidence covers.
+  - Report the verifier's count for `signed recipient matches recorded key`. Say that a PASS binds the
+    enclave-signed recipient hash to the public key recorded in that search row. Do NOT turn this into
+    "sealed to one recipient", "no second copy", or a claim that another disclosure channel did not exist;
+    this comparison does not prove those things or independently prove how the key was created or used.
   - Do NOT say the invention "was never exposed", "could not have been read", or "remained confidential".
     No attestation establishes what software did with a text after decrypting it. The operator holds the
     disk key; the receipt's own limitations say so.
@@ -1710,7 +1714,8 @@ def report_template() -> str:
             "",
             "## One plain statement about confidentiality",
             "",
-            "<two or three plain sentences, written LAST, from the verdicts above and nothing else>",
+            "<two or three plain sentences, written LAST, from the verdicts above and nothing else; report the",
+            "recipient-match count and its limit, and do not claim it proves exclusivity>",
             ""]
     return "\n".join(out)
 

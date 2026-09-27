@@ -687,6 +687,96 @@ def _policy_external_dependencies(text: str) -> List[str]:
     return sorted(set(dependencies))
 
 
+# --- What the PLATFORM adds, named rather than left as "unresolved" ---------------------------------
+#
+# An ACI policy always references Microsoft's infrastructure fragment, and it cannot not: excluding it
+# leaves the platform unable to mount its own layers and the container group never starts (tested
+# 2026-09-28 against a real Confidential group -- rule "mount_device", "deviceHash not found").
+#
+# So "unresolved external dependency" is the wrong thing to tell a reader. It suggests nobody looked.
+# Somebody looked. Every published version of that fragment was fetched from MCR and read: its
+# containers are declared with allow_stdio_access TRUE, without exception, and most with
+# allow_elevated true. They are the platform's own mount and network sidecars.
+#
+# Naming that is strictly more honest than "unresolved" in BOTH directions. It stops understating what
+# we know, and it stops the permission rows above from reading as though they covered the whole policy.
+# The census below is a MEASUREMENT BY THE AUDITED PARTY, which is not evidence on its own -- so the
+# digests are given, and an auditor who wants to check fetches the blob and counts for themselves.
+PLATFORM_DEPENDENCIES: Dict[str, Dict[str, Any]] = {
+    "mcr.microsoft.com/aci/aci-cc-infra-fragment": {
+        "who": "Microsoft, as the Azure Container Instances platform",
+        "issuer": ("did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s"
+                   "::eku:1.3.6.1.4.1.311.76.59.1.3"),
+        "min_svn": 4,
+        "measured": {
+            "sha256:924bba1607f65439a26e22532312c75a327415507f3b884e0d56b679bac55089":
+                {"tag": "int_svn_20250602.1", "containers": 12, "stdio_true": 12, "elevated_true": 9},
+            "sha256:0a70feb8c295": {"tag": "int_svn_20250320.1", "containers": 12,
+                                    "stdio_true": 12, "elevated_true": None},
+        },
+        "measured_utc": "2026-09-28",
+        "says": ("every published version declares ALL of its containers with allow_stdio_access true "
+                 "(12 of 12 in 2025 builds, 6 of 6 in 2023 builds; none set it false), and most with "
+                 "allow_elevated true"),
+    },
+}
+
+
+def _fragment_entries(text: str) -> Optional[List[Dict[str, Any]]]:
+    """The policy's fragment declarations as objects, or None when it does not admit one reading."""
+    assignments = list(re.finditer(r"(?m)^[ \t]*fragments[ \t]*:=", text))
+    if len(assignments) != 1 or re.search(r"(?m)^[ \t]*default[ \t]+fragments\b", text):
+        return None
+    start = assignments[0].end()
+    while start < len(text) and text[start].isspace():
+        start += 1
+    if start >= len(text) or text[start] != "[":
+        return None
+    depth, in_str, esc = 0, False, False
+    for j in range(start, len(text)):
+        ch = text[j]
+        if in_str:
+            esc = (ch == "\\") if not esc else False
+            if not esc and ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    out = json.loads(text[start:j + 1])
+                except ValueError:
+                    return None
+                return out if isinstance(out, list) and all(isinstance(x, dict) for x in out) else None
+    return None
+
+
+def platform_dependency_disclosure(policy_text: str) -> Optional[Dict[str, Any]]:
+    """Describe the policy's dependencies when EVERY one is a platform dependency we have measured.
+
+    Returns None if any dependency is unknown, mis-issued, below its version floor, or unparseable --
+    in that case the honest report really is "unresolved", and the caller must not soften it.
+    """
+    entries = _fragment_entries(policy_text)
+    if not entries:
+        return None
+    known: List[Dict[str, Any]] = []
+    for item in entries:
+        pin = PLATFORM_DEPENDENCIES.get(str(item.get("feed") or ""))
+        if pin is None or str(item.get("issuer") or "") != pin["issuer"]:
+            return None
+        try:
+            if int(str(item.get("minimum_svn"))) < pin["min_svn"]:
+                return None
+        except (TypeError, ValueError):
+            return None
+        known.append({"feed": item["feed"], **pin})
+    return {"dependencies": known} if known else None
+
 def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Optional[bool]]:
     """Report each permission that bears on whether anything outside the enclave could observe the work.
     Returns {condition: True/False/None}; None is "the document does not say", which is NOT satisfied."""
@@ -844,6 +934,11 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "binding to the measured image were not verified",
      "the supplied reference names source code, but this verifier did not check its availability "
      "or verify a build matching the recorded program"),
+    ("platform containers supplied by the cloud provider are part of the effective policy and are "
+     "not ours to constrain",
+     "the machine runs alongside containers supplied by the cloud platform itself; this record "
+     "identifies them but cannot constrain them, and they are permitted to use their own input and "
+     "output streams"),
     ("client-side sealing, exclusive key custody, runtime egress/retention and application "
      "non-disclosure were not established; closing the configuration gaps alone is insufficient",
      "this verifier did not establish encryption before sending, who held the keys, or whether the "
@@ -986,6 +1081,25 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
                                      authenticated=authenticated, record_ok=True, policy_committed=True)
         reach = min(reach, r)
         blockers.extend(f"policy {hd[:16]}: {item}" for item in b)
+        # Name what the platform adds. This SOFTENS NOTHING -- the dependency still blocks, and the
+        # blocker below is added, not removed. It stops the report implying nobody looked, and stops
+        # the permission rows above reading as though they covered the whole effective policy.
+        # `pol` here is BASE64, not policy text. Passing it straight in silently disclosed nothing:
+        # no fragments are found in base64, so it returned None and read exactly like a policy with no
+        # platform dependency at all. Decode first, and fail closed if it will not decode.
+        try:
+            _pol_text = base64.b64decode(pol).decode("utf-8", "replace") if pol else ""
+        except Exception:                                    # noqa: BLE001
+            _pol_text = ""
+        disclosure = platform_dependency_disclosure(_pol_text)
+        if disclosure:
+            for dep in disclosure["dependencies"]:
+                print(f"    DISCLOSED platform dependency {dep['feed']} — supplied by {dep['who']}, "
+                      f"pinned to its signing identity and minimum_svn {dep['min_svn']}. Measured "
+                      f"{dep['measured_utc']}: {dep['says']}. The permission rows above cover OUR "
+                      f"containers only; fetch the fragment by digest and count for yourself.")
+                blockers.append(f"policy {hd[:16]}: platform containers supplied by the cloud provider "
+                                "are part of the effective policy and are not ours to constrain")
     print()
     print("  You may write:")
     print(f"    1. {STATEMENT_SEALED}")

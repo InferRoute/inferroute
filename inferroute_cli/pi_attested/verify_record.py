@@ -717,7 +717,14 @@ PLATFORM_DEPENDENCIES: Dict[str, Dict[str, Any]] = {
         "measured_utc": "2026-09-28",
         "says": ("every published version declares ALL of its containers with allow_stdio_access true "
                  "(12 of 12 in 2025 builds, 6 of 6 in 2023 builds; none set it false), and most with "
-                 "allow_elevated true"),
+                 "allow_elevated true, which means they run with elevated privileges inside the same "
+                 "protected machine as the search"),
+        # The pin is a FLOOR, so the version actually in force may be one no measurement here covers.
+        # Without this the census reads as a statement about what ran; it is a statement about what was
+        # published up to the measurement date.
+        "floor_caveat": ("the policy pins a MINIMUM version, so the version actually in force may be "
+                         "newer than any measured here; this census describes what Microsoft had "
+                         "published by the measurement date, not necessarily what ran"),
     },
 }
 
@@ -803,10 +810,28 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # what is IN THIS FILE, so when a fragment can add containers, the rows are a floor and not a census.
     dependencies = _policy_external_dependencies(text)
     out["self_contained"] = not dependencies
+    # A policy on ACI can never be self-contained: the platform cannot mount its own layers without its
+    # infrastructure fragment, and the group does not start (tested 2026-09-28). A condition nothing can
+    # satisfy is not a safety property. What the condition was FOR is knowing what else is in force, and
+    # that is answerable: identified by feed, signing identity and version floor, with its contents
+    # measured and disclosed. An UNIDENTIFIED dependency still fails -- that is the case where we really
+    # do not know.
+    #
+    # This does not widen what the rows below cover. They are computed over the literal containers, which
+    # are ours; the platform's are not in that array and never were. The gate was never keeping the
+    # platform's containers out of the rows -- it was flagging that the rows are silent about them. The
+    # honest fix is to say so in the sentence, which STATEMENT_ENCLOSED now does.
+    disclosed = platform_dependency_disclosure(text)
+    out["dependencies_identified"] = bool(out["self_contained"] or disclosed)
     c.add(out["self_contained"], "policy is self-contained",
           "no external fragments or imports found" if out["self_contained"] else
           f"unresolved external policy dependency/dependencies: {', '.join(dependencies[:5])} — "
           "the permission rows below cover only the literal containers in this document, not the effective policy")
+    if not out["self_contained"]:
+        c.add(out["dependencies_identified"], "every external dependency is identified",
+              "each is pinned by feed, signing identity and a version floor, and its contents are "
+              "disclosed below" if out["dependencies_identified"] else
+              "at least one dependency is NOT identified, so what else is in force is unknown")
 
     for key, per_container, wanted, name, bears_on in CONFIDENTIALITY_POSTURE:
         if per_container:
@@ -851,10 +876,13 @@ STATEMENT_SEALED = (
     "This does not establish encryption on the user's device, secrecy of private keys, or absence "
     "of other plaintext copies.")
 STATEMENT_ENCLOSED = (
-    "For those archived SEARCH operations, the hardware-committed policy documents list image layer "
-    "roots and empty exec_processes, and set stdio access, elevated execution, runtime logging, stack "
-    "dumps and unencrypted scratch to false. The configured firmware-floor and ASK-revocation checks "
-    "passed. These are checks of specified controls, not proof that every disclosure channel is closed.")
+    "For those archived SEARCH operations, the containers INFERROUTE CONTROLS are listed in the "
+    "hardware-committed policy with image layer roots and empty exec_processes, and with stdio access, "
+    "elevated execution, runtime logging, stack dumps and unencrypted scratch set to false. The "
+    "configured firmware-floor and ASK-revocation checks passed. The cloud platform supplies further "
+    "containers alongside them, identified and disclosed above and NOT constrained by these settings. "
+    "These are checks of specified controls over our own containers, not proof that every disclosure "
+    "channel is closed.")
 STATEMENT_CONFIDENTIAL = (
     "Privacy throughout is NOT ESTABLISHED: this verifier does not prove client-side sealing, "
     "exclusive key custody, the application's handling of plaintext, all runtime output and retention "
@@ -897,7 +925,8 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
     1: ("The saved search statements have valid signatures linked to hardware evidence for a protected computer, "
-        "and the recorded settings passed the listed protection checks.",
+        "and the containers we control passed the listed protection checks. The cloud platform runs further "
+        "containers alongside them that we identify but do not control.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
 }
@@ -936,9 +965,10 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "or verify a build matching the recorded program"),
     ("platform containers supplied by the cloud provider are part of the effective policy and are "
      "not ours to constrain",
-     "the machine runs alongside containers supplied by the cloud platform itself; this record "
-     "identifies them but cannot constrain them, and they are permitted to use their own input and "
-     "output streams"),
+     "most of what runs on that machine is not ours: the cloud platform supplies further containers "
+     "alongside the program, and they run with elevated privileges inside the same protected machine "
+     "as your search. This record identifies them; it cannot constrain them, and the checks above "
+     "cover only our own containers"),
     ("client-side sealing, exclusive key custody, runtime egress/retention and application "
      "non-disclosure were not established; closing the configuration gaps alone is insufficient",
      "this verifier did not establish encryption before sending, who held the keys, or whether the "
@@ -1019,6 +1049,16 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
         blockers.append("the policy does not pin the image that ran")
     if posture.get("no_exec") is not True:
         blockers.append("the policy does not establish an empty additional-exec allowlist")
+    # NOT dependencies_identified. Identification is a BOOKKEEPING property -- we wrote the foreign
+    # code down -- and this gate exists for a SECURITY property: no foreign code inside the trust
+    # boundary. Substituting one for the other moves the rung without moving the boundary. SEV-SNP's
+    # boundary is the VM, not the container: the platform's 9 elevated containers share the UVM with the
+    # workload. Knowing their names does not stop them. An earlier version of this file made that
+    # substitution; an adversarial review called it an overclaim by redefinition and was right.
+    #
+    # It also could not fail. On ACI the only external dependency is Microsoft's fragment, which is
+    # always pinnable and always disclosable, so the branch was satisfied by construction -- a pin that
+    # cannot fail the gate grades nothing.
     if posture.get("self_contained") is not True:
         blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
                         "omit effective rules — resolve and verify every dependency")
@@ -1097,7 +1137,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
                 print(f"    DISCLOSED platform dependency {dep['feed']} — supplied by {dep['who']}, "
                       f"pinned to its signing identity and minimum_svn {dep['min_svn']}. Measured "
                       f"{dep['measured_utc']}: {dep['says']}. The permission rows above cover OUR "
-                      f"containers only; fetch the fragment by digest and count for yourself.")
+                      f"containers only; fetch the fragment by digest and count for yourself. "
+                      f"{dep['floor_caveat']}.")
                 blockers.append(f"policy {hd[:16]}: platform containers supplied by the cloud provider "
                                 "are part of the effective policy and are not ours to constrain")
     print()

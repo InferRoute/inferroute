@@ -264,9 +264,48 @@ def check_publishable(ref: Dict[str, Any], *, at: Optional[dt.datetime] = None, 
         raise ReferenceError("refusing to sign:\n    - " + "\n    - ".join(problems))
 
 
+# A firmware floor and a source pointer are fields the VERIFIER already reads, and until now there was no
+# way to put either into a reference. The verifier's own blocker text tells the operator to "put min_tcb in
+# the published reference"; `reference build` offered no option to do it. An instrument that names a remedy
+# has to provide it, or the remedy is advice.
+def parse_min_tcb(specs: List[str]) -> Dict[str, Dict[str, int]]:
+    """`Genoa=snpSPL:23,ucodeSPL:84` -> {"Genoa": {"snpSPL": 23, "ucodeSPL": 84}}.
+
+    A floor of all zeros is refused. Every firmware in existence is at or above zero, so such a floor
+    passes whatever it is shown and reads, in the record, exactly like a floor that was checked.
+    """
+    out: Dict[str, Dict[str, int]] = {}
+    for spec in specs:
+        product, _, rest = spec.partition("=")
+        product, rest = product.strip(), rest.strip()
+        if not product or not rest:
+            raise ReferenceError(f"--min-tcb {spec!r}: expected PRODUCT=level:N[,level:N], e.g. "
+                                 "Genoa=snpSPL:23,ucodeSPL:84")
+        levels: Dict[str, int] = {}
+        for part in rest.split(","):
+            name, sep, num = part.partition(":")
+            name, num = name.strip(), num.strip()
+            if not sep or not name:
+                raise ReferenceError(f"--min-tcb {spec!r}: {part!r} is not level:N")
+            try:
+                levels[name] = int(num)
+            except ValueError:
+                raise ReferenceError(f"--min-tcb {spec!r}: {num!r} is not a whole number") from None
+            if levels[name] < 0:
+                raise ReferenceError(f"--min-tcb {spec!r}: {name} cannot be negative")
+        if not any(levels.values()):
+            raise ReferenceError(
+                f"refusing an all-zero firmware floor for {product}: every firmware ever shipped is at or "
+                "above zero, so this would pass whatever it is shown while reading like a check that held. "
+                "Pin the level actually deployed, or omit --min-tcb and let the row stay a visible SKIP.")
+        out[product] = levels
+    return out
+
+
 def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, valid_from: Optional[str] = None,
           valid_to: Optional[str] = None, source: Optional[str] = None, supersede: bool = False,
-          note: Optional[str] = None) -> Dict[str, Any]:
+          note: Optional[str] = None, min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+          image_source: Optional[str] = None) -> Dict[str, Any]:
     """Create or extend a reference.
 
     `supersede` closes EVERY non-retired entry at `valid_from` — setting valid_to to the earlier of its
@@ -331,6 +370,14 @@ def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, val
     if note:
         ref["note"] = note
     ref.setdefault("source", "InferRoute")
+    # Both are merged, not replaced wholesale, so extending a reference for one product does not silently
+    # drop the floor pinned for another.
+    if min_tcb:
+        floors = dict(ref.get("min_tcb") or {})
+        floors.update(min_tcb)
+        ref["min_tcb"] = floors
+    if image_source:
+        ref["image_source"] = image_source
     ref["published_at"] = _utcnow()
     return ref
 
@@ -541,6 +588,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     b.add_argument("--valid-to", default=None)
     b.add_argument("--supersede", action="store_true", help="close every still-open window at --valid-from")
     b.add_argument("--source", default=None, help="where a reader is told to get this (engagement letter, release note)")
+    b.add_argument("--min-tcb", action="append", default=[], metavar="PRODUCT=level:N,...",
+                   help="firmware floor, e.g. Genoa=snpSPL:23,ucodeSPL:84 (repeatable per product)")
+    b.add_argument("--image-source", default=None, metavar="URL",
+                   help="where the program that ran can be read; naming it does NOT verify a build")
     b.add_argument("--note", default=None)
     b.add_argument("--out", default=None)
 
@@ -591,7 +642,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if given:
                     vals[f] = given.lower()
             ref = build(vals, merge=_read(a.merge) if a.merge else None, valid_from=a.valid_from,
-                        valid_to=a.valid_to, source=a.source, supersede=a.supersede, note=a.note)
+                        valid_to=a.valid_to, source=a.source, supersede=a.supersede, note=a.note,
+                        min_tcb=parse_min_tcb(a.min_tcb) if a.min_tcb else None,
+                        image_source=a.image_source)
             _write(ref, a.out)
             if a.from_offer:
                 print(f"  derived from {a.from_offer}: policy_sha256 is HOST_DATA as the hardware reported it")

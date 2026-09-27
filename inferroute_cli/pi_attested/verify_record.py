@@ -25,8 +25,9 @@ What it re-derives, per sealed search, from the bundle alone:
   policy    HOST_DATA in the report == SHA-256(the container policy), when the policy is in the bundle
   content   query_sha256 == SHA-256(request_id ‖ canonical(query text)); result_sha256 == SHA-256(request_id
             ‖ canonical(result)); hits_n == len(hits); cutoff_date == the matter's date bound
-  recipient the enclave's signed reply_to_sha256 == SHA-256(the one-time public key this machine made for
-            that search), so the result went to that address and no second copy was sealed to anyone else
+  recipient the enclave's signed reply_to_sha256 == SHA-256(the public key recorded in this search row).
+            This binds the signed destination to the row; it does NOT establish that no other copy or
+            disclosure channel existed, or independently prove how the recorded key was created or used.
 
   identity  ONLY WITH --reference: HOST_DATA (the container policy hash) and the index / encoder manifest
             hashes equal values obtained from InferRoute OUT OF BAND. Without this the bundle proves a genuine
@@ -68,6 +69,7 @@ import base64
 import hashlib
 import json
 import os
+import datetime as dt
 import re
 import struct
 import sys
@@ -641,13 +643,25 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # auditor on 25 Sep fetched the fragment this record names and found ten more containers, eight of
     # them allowing elevated execution and one with a non-empty exec_processes. Every row below counts
     # what is IN THIS FILE, so when a fragment can add containers, the rows are a floor and not a census.
-    fragments = re.findall(r'"feed"\s*:\s*"([^"]+)"', text)
-    includes_containers = '"containers"' in text and bool(fragments)
-    out["self_contained"] = not includes_containers
+    # Detect ANY construct that could bring in containers from outside this document, and refuse on
+    # sight rather than reasoning about whether it actually does. The first version keyed on the literal
+    # `"feed"` string and on `"containers"` appearing in an includes list; probing it on 27 Sep found two
+    # ways through — a fragment object using some other key for its source, and a bare `import` — each of
+    # which returned self-contained and unblocked the strong sentences. A permission set computed over a
+    # subset of what is enforced is wrong in the PERMISSIVE direction, the one direction a fail-closed
+    # audit may never be wrong in, so the test is now "is there any import surface at all", not "can I
+    # prove this particular one adds containers".
+    frag_block = re.search(r"\bfragments\s*:=\s*\[(.*?)\]", text, re.S)
+    frag_nonempty = bool(frag_block and frag_block.group(1).strip())
+    imports = [ln.strip() for ln in text.splitlines()
+               if re.match(r"\s*import\s+(?!future\.keywords)", ln)]
+    feeds = re.findall(r'"feed"\s*:\s*"([^"]+)"', text)
+    out["self_contained"] = not (frag_nonempty or imports)
+    fragments = feeds or ([frag_block.group(1).strip()[:60]] if frag_nonempty else []) or imports
     c.add(out["self_contained"], "policy is self-contained",
           "no external fragment contributes containers" if out["self_contained"] else
-          f"the policy imports {len(fragments)} fragment(s) that may contribute further containers "
-          f"({', '.join(sorted(set(fragments))[:3])}) — every permission row below counts only the "
+          f"the policy carries {len(fragments)} external-import construct(s) that may contribute further "
+          f"containers ({', '.join(sorted(set(fragments))[:3])}) — every permission row below counts only the "
           f"{len(containers)} container(s) written in this document, so they are a FLOOR, not a census. "
           "Fetch the fragment and read it before relying on them.")
 
@@ -916,8 +930,19 @@ def check_revocation(c: Checks, chains: List[Tuple[str, Any, Any]], *, timeout: 
 # command that checks it, and never claims the check was done. A row that said "attested" on the strength
 # of a file in the same folder would be the circularity it exists to break, wearing a better word.
 
+def _attestation_time(bundle_path: str) -> Optional[str]:
+    """When the transparency log integrated the attestation. Read from the bundle rather than from any
+    claim beside it, because the point of the thing is that the log says when, not that we do."""
+    try:
+        te = json.load(open(bundle_path))["verificationMaterial"]["tlogEntries"][0]
+        return dt.datetime.fromtimestamp(int(te["integratedTime"]),
+                                         dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_path: Optional[str],
-                          key_hex: Optional[str]) -> None:
+                          key_hex: Optional[str], started: Optional[List[str]] = None) -> None:
     if not bundle_path or not attestation_path:
         c.add(None, "publication key attested out of band",
               "no attestation in this folder — the key rests on however you obtained it, and if that was "
@@ -936,8 +961,27 @@ def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_pat
               f"the attestation names {named[:16]}… but the key in use is {key_hex[:16]}… — they are "
               "different keys, and that is a finding, not a formatting difference")
         return
+    # WHEN the attestation was made decides what it can speak for, and an auditor on 27 Sep returned
+    # exactly this: "the bundle exists but IN ANY CASE POST-DATES THE RECORD". On the record in hand it
+    # post-dated every one of the 70 searches by nearly 18 hours, so it closed back-dating for none of
+    # them. The prose around this artifact said "closes substitution and back-dating" in four places
+    # without that qualification, which was wrong in the flattering direction. Compute it per record
+    # rather than assert it: an artifact that POST-DATES what it vouches for vouches for nothing.
+    when = _attestation_time(bundle_path)
+    cover = ""
+    if when and started:
+        after = [t for t in started if t > when]
+        cover = (f" It was logged at {when}, which is AFTER every operation in this record, so it closes "
+                 f"back-dating for NONE of them — a reference could still have been minted to fit a "
+                 f"record that already existed. It speaks only for records made after that moment."
+                 if not after else
+                 f" It was logged at {when}, before {len(after)} of {len(started)} operations here and "
+                 f"after {len(started) - len(after)} — it closes back-dating for the former only.")
+    elif when:
+        cover = f" It was logged at {when}; compare that with the operation times yourself."
+
     c.add(None, "publication key attested out of band",
-          f"an attestation naming {named[:16]}… and a signature bundle are present, and THIS PROGRAM HAS "
+          f"an attestation naming {named[:16]}… and a signature bundle are present.{cover} THIS PROGRAM HAS "
           "NOT CHECKED THEM — verifying a Sigstore bundle needs Fulcio and Rekor roots this verifier "
           "deliberately does not carry. Run it yourself; it asks the audited party for nothing:\n"
           "         cosign verify-blob --bundle <bundle> --certificate-identity <the identity> \\\n"
@@ -1443,25 +1487,26 @@ def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
 
 
 def check_recipient(c: Checks, st: Dict[str, Any], row: Dict[str, Any]) -> None:
-    """WHO ELSE COULD OPEN IT. The enclave signs the recipient key; the user's own proxy recorded the key
-    it made. Equal, and the answer went to that one address: a copy sealed to anyone else would have a
-    different signed recipient. This is the difference between "only you can open it" as our word and as your
-    arithmetic. Statements from before the field existed get a SKIP that says what is therefore unchecked —
-    an absent check must never read as a passed one."""
+    """Compare the enclave-signed recipient hash with the public key recorded in the search row.
+
+    A match binds the signed destination to that recorded key. It does not prove that the key was the only
+    destination, rule out another copy or disclosure channel, or independently establish how the key was
+    created or used. Statements from before the field existed get a SKIP that says what is unchecked."""
     rt, want = st.get("reply_to_sha256"), row.get("reply_to")
     if rt is None:
-        c.add(None, "sealed to one recipient",
+        c.add(None, "signed recipient matches recorded key",
               "this statement predates the signed recipient key; nothing here rules out a second recipient")
     elif not isinstance(want, str) or not want:
-        c.add(None, "sealed to one recipient",
+        c.add(None, "signed recipient matches recorded key",
               "the statement names a recipient but the record kept no reply key to compare it against")
     else:
         try:
             same = sha256_hex(bytes.fromhex(want)) == rt
         except ValueError:
             same = False
-        c.add(same, "sealed to one recipient",
-              "the signed recipient is the one-time key this machine made for this operation — no second copy"
+        c.add(same, "signed recipient matches recorded key",
+              ("the signed hash matches the public key recorded in this search row; this does not rule out "
+               "another copy or disclosure channel, or prove how that key was created or used")
               if same else "the signed recipient is NOT the key this record says was used")
 
 
@@ -1681,8 +1726,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_reference_signature(c0, reference, a.reference_key)
         _att = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.json")
         _bun = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.bundle")
-        check_key_attestation(c0, _bun if os.path.isfile(_bun) else None,
-                              _att if os.path.isfile(_att) else None, a.reference_key)
+        _att_paths = (_bun if os.path.isfile(_bun) else None,
+                      _att if os.path.isfile(_att) else None)
     c0.dump()
     fails = len(c0.failed)
     try:
@@ -1788,6 +1833,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         fails += len(c.failed)
     if searches:
         cc = Checks()
+        # Run here, not with the reference rows above: what the attestation can SPEAK FOR depends on the
+        # operation times, and those are not loaded until the record is read.
+        check_key_attestation(cc, _att_paths[0], _att_paths[1], a.reference_key,
+                              sorted(r["statement"]["started_utc"] for r in searches
+                                     if isinstance(r, dict) and isinstance(r.get("statement"), dict)
+                                     and r["statement"].get("started_utc")) or None)
         # Read only if the manifest listed it — an attacker-supplied side file must not be able to narrate a
         # gap it created. Membership is already enforced both ways, so an unlisted unanswered.json fails the
         # bundle before we get here.

@@ -23,7 +23,7 @@ PASSING = """Verifying record in /home/henry/Probant/Acme/exports/cooling-prior-
   PASS UVM root is Microsoft's: fingerprint matches
   PASS enclave identity (InferRoute's policy, index, encoders): policy_sha256 caf68014… current at search time
   PASS reference signature: verifies under the publication key 748e4c8e4ca334c5… you recorded at first use
-  PASS sealed to one recipient: the reply was sealed to the key this client generated
+  PASS signed recipient matches recorded key: signed hash matches the public key recorded in this search row; this does not rule out another copy or disclosure channel
   PASS query text is the one searched: sha256 of the query matches the signed statement
   PASS completeness (per-session sequence): 3 searches, seq 1..3, no gap
 

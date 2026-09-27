@@ -507,22 +507,22 @@ def _remanifest(d):
     (d / "MANIFEST.json").write_text(json.dumps({"files": files, "matter_cutoff": 20200115}))
 
 
-def test_the_bundle_shows_whether_a_second_copy_could_have_been_sealed(tmp_path, V, kms):
-    """The enclave signs the recipient; the attorney's own proxy recorded the key it made. Equal, and the
-    answer went to that one address. This is "only you can open it" as arithmetic rather than our word."""
+def test_the_bundle_binds_the_signed_recipient_to_the_recorded_key_without_claiming_exclusivity(tmp_path, V, kms):
+    """The enclave-signed hash matches the key in the row, but this cannot rule out other disclosure paths."""
     d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1])
     ref = _ref(tmp_path, "r.json", [host])
     # This fixture's evidence commits to its own runtime data, so the bundle never reaches exit 0 — assert
     # on the ROW, which is what this test is about. A code assertion here would be testing the fixture.
     code, out = _run(d, "--reference", str(ref))
-    assert "PASS sealed to one recipient" in out
+    assert "PASS signed recipient matches recorded key" in out
+    assert "does not rule out another copy or disclosure channel" in out
 
     rows = json.loads((d / "searches.json").read_text())
     rows[0]["reply_to"] = "aa" * 32                       # as if the answer had gone to a different address
     (d / "searches.json").write_text(json.dumps(rows))
     _remanifest(d)
     code, out = _run(d, "--reference", str(ref))
-    assert "FAIL sealed to one recipient" in out and code == 1
+    assert "FAIL signed recipient matches recorded key" in out and code == 1
     assert "NOT the key this record says was used" in out
     assert "PASS statement signature" in out, "only the recipient check may move; the statement is untouched"
 
@@ -534,7 +534,7 @@ def test_a_record_made_before_the_field_existed_skips_and_says_so(tmp_path, V, k
     (sealed-research tests/test_search_verifier.py)."""
     d, host, rd = _multi_bundle(tmp_path, V, kms, seqs=[1], omit_recipient=True)
     code, out = _run(d, "--reference", str(_ref(tmp_path, "r2.json", [host])))
-    assert "SKIP sealed to one recipient" in out
+    assert "SKIP signed recipient matches recorded key" in out
     assert "predates the signed recipient key" in out
     assert "PASS statement signature" in out, "the older statement must still be a VALID statement"
 
@@ -1253,3 +1253,41 @@ def test_unsigned_reference_is_not_called_authenticated_by_confidentiality_block
     assert not seen[-1]["authenticated"]
     assert V.main([str(d), f"--reference={signed}", f"--reference-key={pub}"]) == 0
     assert seen[-1]["authenticated"] and seen[-1]["record_ok"]
+
+
+# --- Fragment detection must fail CLOSED ---------------------------------------------------------
+# The real ACI policy in a live record declares a Microsoft fragment contributing ten further
+# containers, eight of them allowing elevated execution. A permission set computed over the three
+# containers written in the document is therefore FALSE over the thirteen enforced — and wrong in the
+# permissive direction, which is the one direction a fail-closed audit may never be wrong in. The first
+# detector keyed on the literal `"feed"` string; probing on 27 Sep walked through it two ways.
+
+@pytest.mark.parametrize("name,rego,expect_self_contained", [
+    ("clean policy", 'package policy\nimport future.keywords.every\nallow_runtime_logging := false\n', True),
+    ("empty fragments list", 'package policy\nfragments := []\n', True),
+    ("standard ACI fragment", 'package policy\nfragments := [{"feed":"mcr/x","includes":["containers"]}]\n', False),
+    ("includes omits containers", 'package policy\nfragments := [{"feed":"mcr/x","includes":["fragments"]}]\n', False),
+    ("fragment with no feed key", 'package policy\nfragments := [{"source":"mcr/x","includes":["containers"]}]\n', False),
+    ("bare import", 'package policy\nimport data.aci.infra\n', False),
+])
+def test_any_external_import_surface_blocks_policy_assurance(V, name, rego, expect_self_contained):
+    body = (rego + 'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+                   '"exec_processes":[],"layers":["aa"]}]\n')
+    c = V.Checks()
+    out = V.check_policy_posture(c, base64.b64encode(body.encode()).decode())
+    assert out["self_contained"] is expect_self_contained, name
+    if not expect_self_contained:
+        # and it must actually block the strong sentences, not merely note it
+        reach, blockers = V.confidentiality_reach(out, floor_pinned=True, revocation_checked=True,
+                                                  image_published=True, authenticated=True)
+        assert reach == 0 and any("fragment" in b or "import" in b for b in blockers), name
+
+
+def test_future_keywords_imports_are_not_treated_as_an_import_surface(V):
+    """Every real ACI policy opens with `import future.keywords.*`. Treating those as external imports
+    would block every policy ever written, which is refusing rather than checking."""
+    body = ('package policy\nimport future.keywords.every\nimport future.keywords.in\n'
+            'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+            '"exec_processes":[],"layers":["aa"]}]\n')
+    c = V.Checks()
+    assert V.check_policy_posture(c, base64.b64encode(body.encode()).decode())["self_contained"] is True

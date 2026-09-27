@@ -128,3 +128,52 @@ def test_unestablished_coverage_does_not_call_an_intact_record_corrupt(capsys):
     out = capsys.readouterr().out
     assert "REFUSED" in out and m.plain_statement(-1)[0] in out
     assert "record did not check out" not in out
+
+
+# --- the reasons, in plain words ----------------------------------------------------------------------
+
+
+def test_each_known_blocker_becomes_plain_words():
+    m = _mod()
+    known = [
+        "policy 80c5424d: the policy does not satisfy: policy denies host access to the enclave's stdio",
+        "policy 80c5424d: the policy has unresolved external fragments/imports, so the permission rows may omit effective rules",
+    ]
+    out = m.plain_blockers(known)
+    assert any("attach to the program" in r for r in out)
+    assert any("kept elsewhere" in r for r in out)
+    assert not any("policy 80c5424d" in r for r in out), "technical prefix leaked into plain words"
+
+
+def test_an_unrecognised_blocker_is_kept_not_dropped():
+    """INVERSION: silence and nothing-to-say must not look alike, and silence is the stronger claim."""
+    m = _mod()
+    out = m.plain_blockers(["policy abc: some future blocker nobody has worded yet"])
+    assert len(out) == 1
+    assert "some future blocker nobody has worded yet" in out[0]
+    assert "could not establish" in out[0]
+
+
+def test_no_blockers_prints_no_reasons_section():
+    m = _mod()
+    out = io.StringIO()
+    with redirect_stdout(out):
+        m.report_plain(1, [])
+    assert "In this record, specifically" not in out.getvalue()
+
+
+def test_reasons_are_printed_under_a_positive_level():
+    m = _mod()
+    out = io.StringIO()
+    with redirect_stdout(out):
+        m.report_plain(0, ["policy x: the policy does not satisfy: policy denies host access to the enclave's stdio"])
+    text = out.getvalue()
+    assert "In this record, specifically" in text
+    assert "attach to the program" in text
+
+
+def test_duplicate_blockers_across_policies_are_said_once():
+    m = _mod()
+    dupes = ["policy a: ... policy denies host access to the enclave's stdio",
+             "policy b: ... policy denies host access to the enclave's stdio"]
+    assert len(m.plain_blockers(dupes)) == 1

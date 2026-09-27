@@ -818,6 +818,47 @@ PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confid
                    "every time it answers", "the program is published", "could not attach to it")
 
 
+# A caveat that says "this does not show who could read your text" is true and tells the reader nothing
+# they can act on. The REASON is already computed -- it is the blocker list -- and a client can understand
+# it if it is said in words. Rendering the reasons rather than fixing prose has a second property that
+# matters more: when a deployment closes stdio or resolves its fragments, the plain caveat shrinks by
+# itself. Nobody has to rewrite a sentence, which is the step where an overclaim gets reintroduced.
+PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("policy denies host access to the enclave's stdio",
+     "the machine's settings let whoever operates it attach to the program while it was running"),
+    ("unresolved external fragments/imports",
+     "part of the machine's rulebook was kept elsewhere and could not be checked from this record"),
+    ("firmware floor",
+     "the machine's firmware was not checked against a minimum version"),
+    ("certificate revocation",
+     "the chip maker was not asked whether this machine's certificate had been withdrawn"),
+    ("does not name a source for the image",
+     "the program that ran is not tied to published source code you could read"),
+    ("client-side sealing",
+     "whether your own computer locked the text before sending, who else held the key, and what the "
+     "program did with your text after opening it are all outside what this record can show"),
+)
+
+
+def plain_blockers(blockers: List[str]) -> List[str]:
+    """Plain-word reasons, in the blockers' own order. An unrecognised blocker is kept, never dropped.
+
+    Dropping one would make a record with an unknown blocker read exactly like a record with none --
+    the reader cannot tell silence from nothing-to-say, and the quieter output is the stronger claim.
+    """
+    out: List[str] = []
+    for blocker in dict.fromkeys(blockers):
+        tail = blocker.split(": ", 1)[-1]
+        for needle, words in PLAIN_BLOCKER_WORDS:
+            if needle in tail:
+                if words not in out:
+                    out.append(words)
+                break
+        else:
+            out.append(f"something this record could not establish, in its own words: {tail}")
+    return out
+
+
 def plain_statement(reach: int) -> Optional[Tuple[str, str]]:
     """One sentence and its caveat for this reach level, or None if no sentence is written for it."""
     pair = PLAIN_BY_REACH.get(reach)
@@ -829,7 +870,7 @@ def plain_statement(reach: int) -> Optional[Tuple[str, str]]:
     return pair
 
 
-def report_plain(reach: int) -> None:
+def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
     print()
     print("  In plain words, for a reader who will not read the table above")
     pair = plain_statement(reach)
@@ -841,6 +882,11 @@ def report_plain(reach: int) -> None:
     headline, caveat = pair
     print(f"    {headline}")
     print(f"    {caveat}")
+    reasons = plain_blockers(blockers or [])
+    if reasons:
+        print("    In this record, specifically:")
+        for reason in reasons:
+            print(f"      - {reason}")
 
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
@@ -941,7 +987,7 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
           "binding checks, NOT a sufficient privacy checklist:")
     for cond in AI_LANE_CONDITIONS:
         print(f"    - {cond}")
-    report_plain(reach)
+    report_plain(reach, blockers)
 
 
 # --- Revocation ---------------------------------------------------------------------------------------

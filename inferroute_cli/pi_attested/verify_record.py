@@ -724,7 +724,9 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
             got = all(v is wanted for v in vals) if vals else None
             n_bad = sum(1 for v in vals if v is not wanted)
             detail = (f"all {len(vals)} container(s) set {key}={str(wanted).lower()}" if got else
-                      f"{n_bad} of {len(vals)} container(s) set {key}={str(not wanted).lower()} — {bears_on}")
+                      f"{n_bad} of {len(vals)} container(s) do not explicitly set {key}={str(wanted).lower()} "
+                      f"({sum(v is (not wanted) for v in vals)} explicitly set it to {str(not wanted).lower()}); "
+                      f"when enabled, {bears_on}")
         else:
             v = _policy_flag(text, key)
             got = (v is wanted)
@@ -824,38 +826,46 @@ PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confid
 # matters more: when a deployment closes stdio or resolves its fragments, the plain caveat shrinks by
 # itself. Nobody has to rewrite a sentence, which is the step where an overclaim gets reintroduced.
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
-    ("policy denies host access to the enclave's stdio",
-     "the machine's settings let whoever operates it attach to the program while it was running"),
-    ("unresolved external fragments/imports",
-     "part of the machine's rulebook was kept elsewhere and could not be checked from this record"),
-    ("firmware floor",
-     "the machine's firmware was not checked against a minimum version"),
-    ("certificate revocation",
-     "the chip maker was not asked whether this machine's certificate had been withdrawn"),
-    ("does not name a source for the image",
-     "the program that ran is not tied to published source code you could read"),
-    ("client-side sealing",
-     "whether your own computer locked the text before sending, who else held the key, and what the "
-     "program did with your text after opening it are all outside what this record can show"),
+    ("the policy does not satisfy: policy denies host access to the enclave's stdio",
+     "the checked settings do not establish that operator access to the program's input and output "
+     "streams was disabled; this does not show that anyone accessed them or that they contained your text"),
+    ("the policy has unresolved external fragments/imports, so the permission rows may "
+     "omit effective rules — resolve and verify every dependency",
+     "this verifier could not establish the complete rules because policy dependencies remain unresolved"),
+    ("a configured firmware floor did not PASS for every archived operation",
+     "a minimum firmware version was not successfully verified for every saved operation"),
+    ("certificate revocation was not checked successfully (pass --check-revocation)",
+     "a successful certificate-withdrawal check was not established for every relevant signing chain; "
+     "this does not mean a certificate was withdrawn"),
+    ("the reference does not name a source for the image; source-to-image verification is absent",
+     "the supplied reference does not name the program's source, and this verifier did not verify "
+     "a match between source code and the recorded program"),
+    ("image_source is only a reference field; availability, a reproducible build and its "
+     "binding to the measured image were not verified",
+     "the supplied reference names source code, but this verifier did not check its availability "
+     "or verify a build matching the recorded program"),
+    ("client-side sealing, exclusive key custody, runtime egress/retention and application "
+     "non-disclosure were not established; closing the configuration gaps alone is insufficient",
+     "this verifier did not establish encryption before sending, who held the keys, or whether the "
+     "program disclosed or retained your text; fixing the listed settings alone does not establish privacy"),
 )
 
 
 def plain_blockers(blockers: List[str]) -> List[str]:
-    """Plain-word reasons, in the blockers' own order. An unrecognised blocker is kept, never dropped.
+    """Translate exact known reasons; preserve unknown reasons verbatim, including their scope.
 
-    Dropping one would make a record with an unknown blocker read exactly like a record with none --
-    the reader cannot tell silence from nothing-to-say, and the quieter output is the stronger claim.
+    Substring matches can swallow a new qualifier or a different failure using familiar words.
+    Exact matches deliberately fall back when the technical reason changes. These are verification
+    gaps, not a count of disclosure paths or a statement that a disclosure happened.
     """
     out: List[str] = []
+    translations = dict(PLAIN_BLOCKER_WORDS)
     for blocker in dict.fromkeys(blockers):
-        tail = blocker.split(": ", 1)[-1]
-        for needle, words in PLAIN_BLOCKER_WORDS:
-            if needle in tail:
-                if words not in out:
-                    out.append(words)
-                break
-        else:
-            out.append(f"something this record could not establish, in its own words: {tail}")
+        tail = re.sub(r"^policy [A-Za-z0-9]+: ", "", blocker, count=1)
+        words = translations.get(tail)
+        reason = words if words is not None else f"a verification gap, in its original words: {blocker}"
+        if reason not in out:
+            out.append(reason)
     return out
 
 
@@ -882,9 +892,12 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
     headline, caveat = pair
     print(f"    {headline}")
     print(f"    {caveat}")
+    print("    These are gaps identified by this verifier, not a complete list of risks or ways text could "
+          "be disclosed. A shorter or empty list does not establish privacy. Fixes to a future deployment "
+          "do not change what was enforced for these saved operations.")
     reasons = plain_blockers(blockers or [])
     if reasons:
-        print("    In this record, specifically:")
+        print("    Gaps identified in this record:")
         for reason in reasons:
             print(f"      - {reason}")
 

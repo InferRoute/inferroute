@@ -1518,3 +1518,53 @@ def test_no_reference_refuses_cleanly_and_reports_actual_attestation_files(tmp_p
         assert "no attestation in this folder" not in out
     else:
         assert "no attestation in this folder" in out
+
+
+@pytest.mark.parametrize('floors,accepted', [
+    ({'Milan': {'snpSPL': 8}}, True),
+    ({'Milan': {'snpSPL': 255}}, False),
+    ({'Genoa': {'snpSPL': 1}}, False),
+    ({}, False), (None, False), ([], False),
+    ({'Milan': {'snpSPL': True}}, False),
+    ({'Milan': {'snpSPL': '8'}}, False),
+    ({'Milan': {'snpSPL': 0}}, False),
+    ({'Milan': {'notAnSPL': 8}}, False),
+    ({'Milan': {'snpSPL': 256}}, False),
+])
+def test_declared_reference_firmware_is_enforced_before_sealing(V, kms, floors, accepted):
+    c = V.Checks()
+    V.check_reference_firmware_before_sealing(c, kms, {'min_tcb': floors})
+    assert len(c.rows) == 1
+    assert (c.rows[0][0] == 'PASS') is accepted
+    assert c.rows[0][1] == 'reference firmware floor before sealing'
+
+
+def test_absent_floor_creates_no_firmware_pass(V, kms):
+    c = V.Checks()
+    V.check_reference_firmware_before_sealing(c, kms, {})
+    assert c.rows == []
+
+
+def test_firmware_gate_authenticates_report_not_just_level_bytes(V, kms):
+    raw = bytearray(base64.b64decode(kms['evidence']))
+    raw[0x90] ^= 1
+    c = V.Checks()
+    V.check_reference_firmware_before_sealing(c, {**kms, 'evidence': base64.b64encode(raw).decode()},
+                                            {'min_tcb': {'Milan': {'snpSPL': 8}}})
+    assert c.failed == ['reference firmware floor before sealing']
+
+
+def test_verify_offer_cannot_ignore_reference_floor_or_weaken_it_with_argument(V, kms):
+    c = V.verify_offer(kms, reference={'min_tcb': {'Milan': {'snpSPL': 255}}},
+                       min_tcb={'Milan': {'snpSPL': 1}})
+    assert 'reference firmware floor before sealing' in c.failed
+
+
+def test_archive_refuses_malformed_reference_floor_instead_of_dropping_it(tmp_path, V, kms):
+    d = _synthetic_bundle(tmp_path, V, kms)
+    p = tmp_path / 'reference.json'
+    ref = json.loads(p.read_text())
+    ref['min_tcb'] = {'Milan': {'snpSPL': '8'}}
+    p.write_text(json.dumps(ref))
+    code, out = _run(d, '--reference', str(p))
+    assert code == 2 and 'invalid reference firmware requirement' in out

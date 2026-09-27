@@ -1450,6 +1450,14 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
    Exit code: 0 = every check passed under production roots; 1 = something failed; 2 = refused to run;
    3 = test roots; 4 = passed but the reference was not authenticated.
+
+   Then run it a SECOND time with `--check-revocation` added. The first run is offline and
+   deterministic, which is what makes it reproducible; the second asks AMD whether the signing
+   certificates have been withdrawn, which needs the network. Without the second run the record
+   prints "certificate revocation was not checked successfully" as an open gap — not because the
+   check is unavailable, but because it was never asked for. A fetch that fails is reported as
+   not-checked, never as revoked: "I could not reach AMD" and "this certificate is revoked" must
+   not produce the same row, and they do not.
 3. **This is the part that carries the audit — not step 2.** Everything the verifier reports is
    downstream of trusting the verifier. Pick at least two searches and redo claims 1, 2 and 4 yourself with
    your own tools, so that those three stand on arithmetic you performed:

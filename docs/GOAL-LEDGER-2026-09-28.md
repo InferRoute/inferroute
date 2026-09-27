@@ -152,3 +152,36 @@ accurately, has something to do.
 `tests/test_probant_first_key.py::test_the_cli_exposes_show` fails in full-suite runs and passes in
 isolation — a working-directory pollution from another test, confirmed pre-existing by re-running with
 all three of my test files excluded.
+
+---
+
+## Iteration 6 — shipped the statement; the gate caught a failed round; a self-inflicted blocker closed
+
+**0.9.61 published.** Question-first plain block, verified behaviourally from inside the wheel rather
+than by label: answers the reader's question in its first line; the ask appears with the stdio gap and
+vanishes without it; states what the fix does not buy; none of the warmth words caught across five
+reader rounds survive; level -1 no longer calls an intact record corrupt; R5 decoy still reads the
+enforced array; all-zero firmware floor refused. Served bytes confirmed
+`d0071989d232032373b6e5f247601c51d53e6431b58a8556b574924fe06f5d7f`.
+
+**The transcript gate earned itself.** Rounds 0961-r1 and -r2 both died on
+`502 All providers exhausted` after 37 events, 0 tool turns, $0.00 — and the harness exited 0 both
+times with a 1-line report file. Before the gate, each would have been banked as a clean round with no
+findings, which reads as *the auditor found nothing wrong*. Both were refused with rc=5.
+
+**The ir lane is down, measured rather than assumed.** 502 from two machines and two clients, using the
+short ids the API itself advertises; `/v1/models` healthy, so the control plane is up; `/v1/usage`
+shows a $43.81 balance, so it is not a credit state. Henry reported it back up; from this key it was
+still 502 on re-probe. Not resolved — the loop probes cheaply and launches the staged round on the
+first success.
+
+**Stop condition 4 was violated by our own instructions.** Every record printed "certificate revocation
+was not checked successfully". Not because the check is unavailable — it works, and round 3 used it —
+but because `--check-revocation` appeared NOWHERE in AUDIT.md or VERIFY.md. The product printed a
+blocker its own brief caused. Fixed: the brief now asks for a second run and explains why there are
+two, and states that a failed fetch reports not-checked and never revoked. Measured on the real pack:
+the row becomes PASS and printed gaps drop from 7 to 6. Shipped as 0.9.62.
+
+**Condition 4 status after this.** The only remaining gaps that could be closed and have not been are
+the firmware floor and the image source, both needing the offline publication key. Everything closable
+from this seat is closed.

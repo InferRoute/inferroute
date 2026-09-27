@@ -787,6 +787,66 @@ AI_LANE_CONDITIONS = (
 )
 
 
+# --- The same verdict, in words a client can read ------------------------------------------------------
+#
+# A professional hands this record to someone who will not read a posture table. That reader needs one
+# sentence. The danger is that simplification is where an overclaim comes back: "your search was private"
+# and "nobody could read it" both read as fine and are false, because each asserts a negative over every
+# channel, which no evidence here reaches.
+#
+# So this is a RENDERING of confidentiality_reach's level, never a second opinion. It takes the level that
+# was already computed and looks up one sentence. If a level ever appears that has no sentence written for
+# it -- a future level 2, say -- it prints nothing and says so, rather than falling back to the nearest
+# sentence it has, which would be the strongest one.
+PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
+    -1: ("This record did not check out, so there is nothing to say in its favour.",
+         "Do not rely on it. The checks above say which parts failed."),
+    0: ("Your search ran inside a sealed computer that proves what it is every time it answers, and every "
+        "answer is signed by that machine — so no one hosting it or carrying the message was in a position "
+        "to read your text.",
+        "What this does not show: what the program inside did with your text once it opened it, and "
+        "anything about your own computer. The program is published so you or your own expert can read it."),
+    1: ("Your search ran inside a sealed computer that proves what it is every time it answers, every answer "
+        "is signed by that machine, and it was set up so that whoever runs it could not attach to it, add "
+        "programs to it, or write your text to unprotected storage — so no one hosting it or carrying the "
+        "message was in a position to read your text.",
+        "What this does not show: what the program inside did with your text once it opened it, and "
+        "anything about your own computer. The program is published so you or your own expert can read it."),
+}
+
+# Words that make a plain sentence claim more than the evidence reaches. Checked against the rendered text
+# rather than trusted to review, because this is exactly the layer where such a phrase gets added later by
+# someone making it "clearer".
+PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confidential", "was private",
+                   "completely private", "nobody can see", "no one can see", "we cannot see",
+                   "guaranteed private", "proof of privacy")
+
+
+def plain_statement(reach: int) -> Optional[Tuple[str, str]]:
+    """One sentence and its caveat for this reach level, or None if no sentence is written for it."""
+    pair = PLAIN_BY_REACH.get(reach)
+    if pair is None:
+        return None
+    for phrase in PLAIN_FORBIDDEN:
+        if any(phrase in part.lower() for part in pair):
+            raise AssertionError(f"plain statement for reach {reach} contains an overclaim: {phrase!r}")
+    return pair
+
+
+def report_plain(reach: int) -> None:
+    print()
+    print("  In plain words, for a reader who will not read the table above")
+    pair = plain_statement(reach)
+    if pair is None:
+        print(f"    No plain statement is written for reach level {reach}, so none is given. This is "
+              "deliberate: the nearest available sentence would be a stronger claim than this level "
+              "licenses.")
+        return
+    headline, caveat = pair
+    print(f"    {headline}")
+    print(f"    {caveat}")
+
+
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
                           revocation_checked: bool, image_published: bool,
                           authenticated: bool, record_ok: bool,
@@ -841,12 +901,15 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
     print("  (these rows do NOT affect the exit code above, which is about the record's integrity)")
     if not record_ok:
         print("  REFUSED — this record did not verify; no sentence is licensed.")
+        report_plain(-1)
         return
     if not production_roots:
         print("  REFUSED — test or unestablished trust roots cannot license production claims.")
+        report_plain(-1)
         return
     if not policies or committed is None or set(hd for hd, _ in policies) != committed:
         print("  REFUSED — archived policies do not cover every hardware policy commitment in this record.")
+        report_plain(-1)
         return
     try:
         matched = all(sha256_hex(base64.b64decode(pol, validate=True)) == hd for hd, pol in policies)
@@ -854,6 +917,7 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         matched = False
     if not matched:
         print("  REFUSED — archived policy bytes do not match their supplied commitments.")
+        report_plain(-1)
         return
     reach, blockers = 1, []
     for hd, pol in policies:
@@ -881,6 +945,7 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
           "binding checks, NOT a sufficient privacy checklist:")
     for cond in AI_LANE_CONDITIONS:
         print(f"    - {cond}")
+    report_plain(reach)
 
 
 # --- Revocation ---------------------------------------------------------------------------------------

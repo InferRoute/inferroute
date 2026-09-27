@@ -1430,6 +1430,61 @@ def check_identity(c: "Checks", rd: Dict[str, Any], p: Optional[Dict[str, Any]],
 
 
 
+def reference_firmware_floors(reference: Optional[Dict[str, Any]]) -> Optional[Dict[str, Dict[str, int]]]:
+    """Read declared firmware requirements without silently dropping malformed values.
+
+    Absence is not a floor. A present but unusable declaration is an error, not permission to continue
+    without the requested check. This validates the requirement's shape, not its security adequacy.
+    """
+    if reference is None or "min_tcb" not in reference:
+        return None
+    floors = reference["min_tcb"]
+    if not isinstance(floors, dict) or not floors:
+        raise ValueError("min_tcb must be a non-empty product-to-level mapping")
+    out: Dict[str, Dict[str, int]] = {}
+    for product, levels in floors.items():
+        if not isinstance(product, str) or not product.strip() or not isinstance(levels, dict) or not levels:
+            raise ValueError("min_tcb needs a named product and non-empty levels")
+        if any(key not in OID_TCB or type(value) is not int or not 0 <= value <= 255
+               for key, value in levels.items()):
+            raise ValueError("min_tcb levels must be known SPL names with integer values from 0 to 255")
+        if not any(levels.values()):
+            raise ValueError("an all-zero min_tcb floor cannot constrain firmware")
+        out[product] = dict(levels)
+    return out
+
+
+def check_reference_firmware_before_sealing(c: Checks, offer: Dict[str, Any],
+                                            reference: Optional[Dict[str, Any]], *,
+                                            pins: Optional[Dict[str, str]] = None) -> None:
+    """Enforce a declared reference floor against authenticated AMD evidence before disclosure.
+
+    The caller authenticates the reference and verifies the full offer separately. This check does
+    not replace identity, runtime-data/key binding, Microsoft endorsements, or revocation checks.
+    An explicit check for a DIFFERENT product is not a successful check for the offered machine.
+    """
+    name = "reference firmware floor before sealing"
+    try:
+        floors = reference_firmware_floors(reference)
+        if floors is None:
+            return  # No new success row for a reference that requested no firmware check.
+        from cryptography.hazmat.primitives import serialization
+        report = parse_report(base64.b64decode(offer["evidence"], validate=True))
+        certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
+        pem = lambda cs: b"".join(cert.public_bytes(serialization.Encoding.PEM) for cert in cs)
+        checked = Checks()
+        check_amd(checked, report, pem(certs[:1]), pem(certs[1:]),
+                  pins if pins is not None else AMD_ARK_SPKI_SHA256, floors)
+        floor_rows = [(status, detail) for status, step, detail in checked.rows
+                      if step == "firmware TCB at or above minimum"]
+        ok = not checked.failed and len(floor_rows) == 1 and floor_rows[0][0] == "PASS"
+        c.add(ok, name, "the authenticated report meets the reference's declared minimum for this product"
+              if ok else "refusing to seal: the declared firmware requirement was not verified for this "
+              "machine; " + "; ".join(checked.failed + [detail for _, detail in floor_rows]))
+    except Exception as exc:  # noqa: BLE001 — missing/unreadable/malformed evidence must refuse before send
+        c.add(False, name, f"refusing to seal: firmware requirement or evidence is invalid ({type(exc).__name__})")
+
+
 def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None, uvm_root: Optional[str] = None,
                  uvm_min_svn: int = UVM_MIN_SVN, reference: Optional[Dict[str, Any]] = None,
                  policy_b64: Optional[str] = None, at: Optional[str] = None,
@@ -1443,7 +1498,7 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     AVAILABLE — here there is no statement yet, so there is nothing to bind a query or a result to, and the
     reference's validity windows are asked about NOW rather than about a search's own time.
 
-    Returns Checks; `Checks.failed` empty means every question that could be asked was answered yes. The
+    Returns Checks; `Checks.failed` empty means no performed check failed; SKIP is not verification. The
     caller must treat any failure as "do not seal" — a sealed query cannot be recalled.
     """
     c = Checks()
@@ -1490,6 +1545,7 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     except Exception:                                       # noqa: BLE001
         p = None
     check_identity(c, rd, p, reference, at)
+    check_reference_firmware_before_sealing(c, offer or {}, reference, pins=pins)
     return c
 
 
@@ -1876,10 +1932,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     min_tcb = _parse_min_tcb(a.min_tcb)
     # A firmware floor may also travel IN the reference, so a firm does not have to know SPL numbers to hold
     # one. A floor given on the command line wins, and a reference that pins none leaves the check a SKIP.
-    if not min_tcb and isinstance(reference, dict) and isinstance(reference.get("min_tcb"), dict):
-        from_ref = {str(product): {str(k): int(v) for k, v in levels.items() if isinstance(v, int)}
-                    for product, levels in reference["min_tcb"].items() if isinstance(levels, dict)}
-        min_tcb = {p: lv for p, lv in from_ref.items() if lv}
+    try:
+        reference_floors = reference_firmware_floors(reference)
+    except ValueError as exc:
+        print(f"REFUSED: invalid reference firmware requirement: {exc}")
+        return 2
+    if not min_tcb:
+        min_tcb = reference_floors or {}
     listed = set((manifest.get("files") or {}).keys())
     # A record can legitimately hold no search and still hold evidence: the sealed SESSION with the AI
     # machine (AUDIT.md claim 7). Such a pack became producible on 23 Sep, which made this branch reachable

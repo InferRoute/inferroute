@@ -1493,3 +1493,28 @@ def test_revocation_failure_precedes_result_and_suppresses_claims(tmp_path, V, k
     assert out.index("test: revoked ASK") < out.index("RESULT: FAILED")
     assert "RESULT: no failing record checks" not in out
     assert "You may write:" not in out
+
+
+@pytest.mark.parametrize("attestation_present", [False, True])
+def test_no_reference_refuses_cleanly_and_reports_actual_attestation_files(tmp_path, V, kms, attestation_present):
+    d = _synthetic_bundle(tmp_path, V, kms)
+    if attestation_present:
+        anchors = d / "trust-anchors"
+        anchors.mkdir()
+        att = anchors / "publication-key-attestation.json"
+        att.write_text(json.dumps({"publication_key": "ab" * 32}))
+        bundle = anchors / "publication-key-attestation.bundle"
+        bundle.write_text('{}')
+        manifest_path = d / "MANIFEST.json"
+        manifest = json.loads(manifest_path.read_text())
+        for path in (att, bundle):
+            manifest["files"][str(path.relative_to(d))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        manifest_path.write_text(json.dumps(manifest))
+    code, out = _run(d)
+    assert code == 1 and "NO REFERENCE SUPPLIED" in out
+    assert "Traceback" not in out and "You may write:" not in out
+    if attestation_present:
+        assert "Coverage WITHHELD" in out
+        assert "no attestation in this folder" not in out
+    else:
+        assert "no attestation in this folder" in out

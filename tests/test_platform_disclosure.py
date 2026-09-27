@@ -85,3 +85,37 @@ def test_the_plain_rendering_does_not_claim_anyone_read_anything():
     text = m.plain_blockers([f"policy abc123: {key}"])[0].lower()
     for overclaim in ("was read", "were read", "accessed your", "exposed"):
         assert overclaim not in text
+
+
+def test_identifying_a_dependency_does_not_raise_the_level():
+    """The gate is a SECURITY property (no foreign code in the trust boundary), not a bookkeeping one
+    (we wrote the foreign code down). An adversarial review called the substitution an overclaim by
+    redefinition. SEV-SNP's boundary is the VM: the platform's elevated containers share the UVM."""
+    m = _m()
+    base = {k: True for k, *_ in m.CONFIDENTIALITY_POSTURE}
+    base.update({"image_pinned": True, "no_exec": True,
+                 "self_contained": False, "dependencies_identified": True})
+    reach, _ = m.confidentiality_reach(base, floor_pinned=True, revocation_checked=True,
+                                       image_published=False, authenticated=True,
+                                       record_ok=True, policy_committed=True)
+    assert reach == 0, "an identified but non-self-contained policy must not reach the controls level"
+    base["self_contained"] = True
+    reach, _ = m.confidentiality_reach(base, floor_pinned=True, revocation_checked=True,
+                                       image_published=False, authenticated=True,
+                                       record_ok=True, policy_committed=True)
+    assert reach == 1, "a genuinely self-contained policy still reaches it"
+
+
+def test_the_disclosure_says_the_measured_version_may_not_be_the_running_one():
+    """The pin is a FLOOR. Without this the census reads as a statement about what ran."""
+    dep = _m().PLATFORM_DEPENDENCIES["mcr.microsoft.com/aci/aci-cc-infra-fragment"]
+    assert "newer than any measured here" in dep["floor_caveat"]
+
+
+def test_the_plain_wording_states_privilege_and_proportion():
+    m = _m()
+    key = ("platform containers supplied by the cloud provider are part of the effective policy and "
+           "are not ours to constrain")
+    text = m.plain_blockers([f"policy x: {key}"])[0].lower()
+    assert "elevated privileges" in text, "understating privilege hides the actual risk"
+    assert "not ours" in text, "the reader must learn most of what runs is not ours"

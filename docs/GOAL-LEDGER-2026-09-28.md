@@ -47,3 +47,60 @@ wheel*, the R5 decoy still reads the enforced array, and the plain-language laye
 
 **Carried forward.** "Is it shipped?" must be asked against the published artifact, never the tree or
 a sibling copy. Added to the loop's standing checks.
+
+---
+
+## Iteration 2 — "unresolved" was telling the reader nobody looked
+
+**Symptom.** Every record printed "unresolved external fragments/imports — resolve and verify every
+dependency". An ACI policy must reference Microsoft's infrastructure fragment (excluding it was tested:
+the group cannot start), so that line appears forever and reads as ignorance.
+
+**Root cause.** Wrong in both directions. It understated what we know — the fragment had been fetched
+from MCR and read — and it let the permission rows read as though they covered the whole policy, when
+they are computed over the literal container array, which holds only our three.
+
+**Fix.** A DISCLOSED row naming the feed, its signing identity, its version floor and the measured
+census; and client-facing words for it. Disclosure ADDS a blocker rather than removing one, with a test
+pinning that the list cannot shorten.
+
+**Bug found in my own fix.** The first wiring passed the BASE64 policy where the text was wanted. It
+found no fragments, returned None, and read exactly like a policy with no platform dependency at all —
+silence that looked like a clean result. Regression test added.
+
+**Evidence.** 9 tests; 245 across suites. Commit `5746506`.
+
+---
+
+## Iteration 3 — I built an overclaim, attacked it, and reverted it
+
+**Hypothesis.** `self_contained` can never be true on ACI, so level 1 was permanently unreachable.
+Reading the code seemed to justify replacing it with `dependencies_identified`: the rows only ever
+covered our containers, so the gate was flagging silence rather than keeping the platform out.
+
+**Built it.** Verified it moved only where intended — future record reaches 1, the 70 historical
+records stay 0, an unidentified dependency still blocks. While scoping it I caught a companion defect:
+the plain level-1 sentence said "the recorded settings passed the listed protection checks" with no
+scope, which would have created at the client layer the overclaim I was fixing at the technical layer.
+
+**Attacked it, and it failed.** An adversarial review: *the old gate encoded a security property — no
+foreign code inside the trust boundary — and the new one encodes a bookkeeping property, that we wrote
+the foreign code down. The rung moved; the trust boundary did not.* Three specifics:
+- SEV-SNP's boundary is the VM, not the container. The platform's 9 elevated containers share the UVM
+  with the workload. I had twice filed this as "open". It is decisive.
+- The pin is a FLOOR, so the fragment in force may be a version no measurement covers.
+- The gate could not fail: on ACI the one dependency is always pinnable, so it was satisfied by
+  construction. A pin that cannot fail the gate grades nothing.
+
+**Reverted.** `self_contained` restored, reasoning left at the call site. Kept the disclosure, the
+scoped sentences, and a corrected plain wording — the review also caught that "permitted to use their
+own input and output streams" understated privilege and hid the proportion.
+
+**Evidence.** 12 disclosure tests including one pinning that identification must NOT raise the level.
+Commit `6708839`. Nothing published; the bad version never left the tree.
+
+**Stop condition corrected.** Condition 1 was "reach >= 1", a proxy for "useful". On ACI that is
+unreachable without an overclaim, so meeting it would mean bending the system to satisfy my own success
+criterion. Dropped. The reader tests agree: the naive reader never complained about the level, they
+complained the text was unreadable and nobody answered their question. "Useful" must be earned at
+level 0 through clarity, or by leaving ACI — a platform decision, not a wording one.

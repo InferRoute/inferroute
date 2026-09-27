@@ -1734,12 +1734,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     if test_roots:
         print("!!! NON-PRODUCTION ROOTS PINNED (--i-am-testing): this run verifies a TEST enclave, never Azure. Exit code 3 at best. !!!")
     c0, manifest = check_manifest(a.bundle)
+    # Looked up unconditionally. Deriving these only when a reference was supplied made the row say "no
+    # attestation in this folder" for a folder that plainly contained one — absence and not-having-looked
+    # wearing the same words. What is on disk does not depend on which flags were passed.
+    _att = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.json")
+    _bun = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.bundle")
+    _att_paths = (_bun if os.path.isfile(_bun) else None,
+                  _att if os.path.isfile(_att) else None)
     if reference is not None:
         check_reference_signature(c0, reference, a.reference_key)
-        _att = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.json")
-        _bun = os.path.join(a.bundle, "trust-anchors", "publication-key-attestation.bundle")
-        _att_paths = (_bun if os.path.isfile(_bun) else None,
-                      _att if os.path.isfile(_att) else None)
     c0.dump()
     fails = len(c0.failed)
     try:

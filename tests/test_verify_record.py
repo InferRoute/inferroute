@@ -1230,7 +1230,8 @@ def test_a_policy_that_imports_fragments_is_reported_as_a_floor(V):
     c = V.Checks()
     out = V.check_policy_posture(c, pol)
     assert out["self_contained"] is False
-    assert any("FLOOR, not a census" in d for _, _, d in c.rows)
+    assert any("unresolved external policy dependency" in d and
+               "not the effective policy" in d for _, _, d in c.rows)
     reach, blockers = V.confidentiality_reach(out, floor_pinned=True, revocation_checked=True,
                                               image_published=True, authenticated=True)
     assert reach == 0 and any("fragments" in b for b in blockers)
@@ -1291,3 +1292,80 @@ def test_future_keywords_imports_are_not_treated_as_an_import_surface(V):
             '"exec_processes":[],"layers":["aa"]}]\n')
     c = V.Checks()
     assert V.check_policy_posture(c, base64.b64encode(body.encode()).decode())["self_contained"] is True
+
+
+def test_prefixed_container_array_cannot_decoy_the_policy_posture(V):
+    body = ('package policy\n'
+            'sidecar_containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+            '"exec_processes":[],"layers":["decoy"]}]\n'
+            'allow_runtime_logging := false\nallow_dump_stacks := false\n'
+            'allow_unencrypted_scratch := false\n'
+            'containers := [{"allow_elevated":true,"allow_stdio_access":false,'
+            '"exec_processes":[{"command":["sh"]}],"layers":[]}]\n')
+    c = V.Checks()
+    out = V.check_policy_posture(c, base64.b64encode(body.encode()).decode())
+    statuses = {name: status for status, name, _ in c.rows}
+    assert out["self_contained"] is True
+    assert out["allow_elevated"] is False
+    assert out["no_exec"] is False
+    assert out["image_pinned"] is False
+    assert statuses["policy denies elevated execution"] == "FAIL"
+    assert statuses["policy allows no arbitrary execution"] == "FAIL"
+    assert statuses["policy pins the image that ran"] == "FAIL"
+
+
+def test_duplicate_container_arrays_refuse_to_choose_one(V):
+    body = ('package policy\n'
+            'allow_runtime_logging := false\nallow_dump_stacks := false\n'
+            'allow_unencrypted_scratch := false\n'
+            'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+            '"exec_processes":[],"layers":["a"]}]\n'
+            'containers := [{"allow_elevated":true,"allow_stdio_access":false,'
+            '"exec_processes":[{"command":["sh"]}],"layers":[]}]\n')
+    c = V.Checks()
+    out = V.check_policy_posture(c, base64.b64encode(body.encode()).decode())
+    statuses = {name: status for status, name, _ in c.rows}
+    assert out["image_pinned"] is None
+    assert statuses["policy permissions"] == "FAIL"
+    assert "policy denies elevated execution" not in statuses
+
+
+def test_defaulted_privacy_flag_is_not_guessed_from_one_rule(V):
+    body = ('package policy\n'
+            'default allow_runtime_logging := false\nallow_runtime_logging := true\n'
+            'allow_dump_stacks := false\nallow_unencrypted_scratch := false\n'
+            'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+            '"exec_processes":[],"layers":["a"]}]\n')
+    c = V.Checks()
+    out = V.check_policy_posture(c, base64.b64encode(body.encode()).decode())
+    statuses = {name: status for status, name, _ in c.rows}
+    assert out["allow_runtime_logging"] is False
+    assert statuses["policy denies runtime logging"] == "FAIL"
+
+
+@pytest.mark.parametrize("array_rule", ["containers := array.concat(a, b)", "containers := []"])
+def test_expression_or_empty_container_array_never_passes(V, array_rule):
+    body = ('package policy\nallow_runtime_logging := false\nallow_dump_stacks := false\n'
+            'allow_unencrypted_scratch := false\n' + array_rule + '\n')
+    c = V.Checks()
+    out = V.check_policy_posture(c, base64.b64encode(body.encode()).decode())
+    statuses = {name: status for status, name, _ in c.rows}
+    assert out["image_pinned"] is not True
+    assert out["no_exec"] is not True
+    assert statuses.get("policy pins the image that ran") != "PASS"
+    assert statuses.get("policy allows no arbitrary execution") != "PASS"
+
+
+def test_unverified_bundle_prints_no_log_time_or_operation_coverage(V, tmp_path):
+    import json
+    bundle = tmp_path / "unverified.bundle"
+    bundle.write_text(json.dumps({"verificationMaterial":{"tlogEntries":[{"integratedTime":123}]}}))
+    att = tmp_path / "attestation.json"
+    att.write_text(json.dumps({"publication_key":"ab" * 32}))
+    c = V.Checks()
+
+    V.check_key_attestation(c, str(bundle), str(att), "ab" * 32)
+    status, _, detail = c.rows[-1]
+    assert status == "SKIP"
+    assert "computes no authenticated log time or operation coverage" in detail
+    assert "1970-01-01" not in detail

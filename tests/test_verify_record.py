@@ -1132,14 +1132,14 @@ def test_a_flag_the_policy_omits_is_not_read_as_denied(V):
 
 
 def _reach(V, posture, **kw):
-    opts = {"floor_pinned": True, "revocation_checked": True, "image_published": True, "authenticated": True}
+    opts = {"floor_pinned": True, "revocation_checked": True, "image_published": True, "authenticated": True, "record_ok": True, "policy_committed": True}
     opts.update(kw)
     return V.confidentiality_reach(posture, **opts)
 
 
-def test_the_strong_sentence_needs_every_condition(V):
+def test_all_configuration_checks_still_do_not_prove_confidentiality(V):
     _, clean = _posture(V)
-    assert _reach(V, clean)[0] == 2
+    assert _reach(V, clean)[0] == 1
     # and the inversion on each condition that is not the policy's
     for missing in ("floor_pinned", "revocation_checked", "image_published", "authenticated"):
         reach, blockers = _reach(V, clean, **{missing: False})
@@ -1154,11 +1154,11 @@ def test_a_permissive_policy_cannot_reach_even_the_middle_sentence(V):
     assert any("stdio" in b for b in blockers), blockers
 
 
-def test_only_the_policy_conditions_gate_the_middle_sentence(V):
-    """floor and revocation gate it too -- but a published image and an authenticated reference are about
-    claim 3 and inspectability, not about who was positioned to observe, and must not block sentence 2."""
+def test_configuration_claim_requires_floor_revocation_and_reference_signature(V):
+    """Source availability alone cannot establish behavior or authentication."""
     _, clean = _posture(V)
-    assert _reach(V, clean, image_published=False, authenticated=False)[0] == 1
+    assert _reach(V, clean, image_published=False)[0] == 1
+    assert _reach(V, clean, authenticated=False)[0] == 0
     assert _reach(V, clean, floor_pinned=False)[0] == 0
 
 
@@ -1168,7 +1168,9 @@ def test_the_licensed_sentences_are_scoped_to_the_search_lane(V):
     receipt-to-search join, and a request served by an instance that later failed re-verification. A
     block that licensed "remained confidential" without naming them would overclaim on the strength of
     the lane it DOES check."""
-    assert "SEARCHES in this record remained confidential" in V.STATEMENT_CONFIDENTIAL
+    assert "NOT ESTABLISHED" in V.STATEMENT_CONFIDENTIAL
+    assert "archived SEARCH" in V.STATEMENT_SEALED
+    assert "archived SEARCH" in V.STATEMENT_ENCLOSED
     assert len(V.AI_LANE_CONDITIONS) == 3
     joined = " ".join(V.AI_LANE_CONDITIONS)
     # It must NAME the fields to read...
@@ -1198,12 +1200,12 @@ def test_a_record_that_did_not_verify_licenses_nothing(V):
     posture = _clean_posture(V)
     reach, blockers = V.confidentiality_reach(
         posture, floor_pinned=True, revocation_checked=True, image_published=True,
-        authenticated=True, record_ok=False)
-    assert reach == 0
+        authenticated=True, record_ok=False, policy_committed=True)
+    assert reach == -1
     assert len(blockers) == 1 and "did not verify" in blockers[0]
     # the inversion: with everything else identical and the record intact, it reaches the top
     assert V.confidentiality_reach(posture, floor_pinned=True, revocation_checked=True,
-                                   image_published=True, authenticated=True, record_ok=True)[0] == 2
+                                   image_published=True, authenticated=True, record_ok=True, policy_committed=True)[0] == 1
 
 
 def test_a_policy_the_hardware_did_not_commit_to_licenses_nothing(V):
@@ -1213,7 +1215,7 @@ def test_a_policy_the_hardware_did_not_commit_to_licenses_nothing(V):
     reach, blockers = V.confidentiality_reach(
         posture, floor_pinned=True, revocation_checked=True, image_published=True,
         authenticated=True, record_ok=True, policy_committed=False)
-    assert reach == 0
+    assert reach == -1
     assert any("HOST_DATA" in b for b in blockers)
 
 
@@ -1233,7 +1235,7 @@ def test_a_policy_that_imports_fragments_is_reported_as_a_floor(V):
     assert any("unresolved external policy dependency" in d and
                "not the effective policy" in d for _, _, d in c.rows)
     reach, blockers = V.confidentiality_reach(out, floor_pinned=True, revocation_checked=True,
-                                              image_published=True, authenticated=True)
+                                              image_published=True, authenticated=True, record_ok=True, policy_committed=True)
     assert reach == 0 and any("fragments" in b for b in blockers)
     # inversion: the same policy without the fragment block reaches the top
     assert _clean_posture(V)["self_contained"] is True
@@ -1280,7 +1282,7 @@ def test_any_external_import_surface_blocks_policy_assurance(V, name, rego, expe
     if not expect_self_contained:
         # and it must actually block the strong sentences, not merely note it
         reach, blockers = V.confidentiality_reach(out, floor_pinned=True, revocation_checked=True,
-                                                  image_published=True, authenticated=True)
+                                                  image_published=True, authenticated=True, record_ok=True, policy_committed=True)
         assert reach == 0 and any("fragment" in b or "import" in b for b in blockers), name
 
 
@@ -1310,8 +1312,8 @@ def test_prefixed_container_array_cannot_decoy_the_policy_posture(V):
     assert out["no_exec"] is False
     assert out["image_pinned"] is False
     assert statuses["policy denies elevated execution"] == "FAIL"
-    assert statuses["policy allows no arbitrary execution"] == "FAIL"
-    assert statuses["policy pins the image that ran"] == "FAIL"
+    assert statuses["policy lists no additional exec processes"] == "FAIL"
+    assert statuses["policy lists pinned image layers"] == "FAIL"
 
 
 def test_duplicate_container_arrays_refuse_to_choose_one(V):
@@ -1352,8 +1354,8 @@ def test_expression_or_empty_container_array_never_passes(V, array_rule):
     statuses = {name: status for status, name, _ in c.rows}
     assert out["image_pinned"] is not True
     assert out["no_exec"] is not True
-    assert statuses.get("policy pins the image that ran") != "PASS"
-    assert statuses.get("policy allows no arbitrary execution") != "PASS"
+    assert statuses.get("policy lists pinned image layers") != "PASS"
+    assert statuses.get("policy lists no additional exec processes") != "PASS"
 
 
 def test_unverified_bundle_prints_no_log_time_or_operation_coverage(V, tmp_path):
@@ -1367,5 +1369,127 @@ def test_unverified_bundle_prints_no_log_time_or_operation_coverage(V, tmp_path)
     V.check_key_attestation(c, str(bundle), str(att), "ab" * 32)
     status, _, detail = c.rows[-1]
     assert status == "SKIP"
-    assert "computes no authenticated log time or operation coverage" in detail
+    assert "Coverage WITHHELD: no authenticated log time, operation count, or historical coverage is reported" in detail
     assert "1970-01-01" not in detail
+
+
+# --- Attack the mapping from true evidence checks to licensed English ------------------------------
+
+def _report_claims(V, policy=None, **overrides):
+    pol = policy or _policy()
+    hd = hashlib.sha256(base64.b64decode(pol)).hexdigest()
+    options = dict(reference={"image_source": {"url": "https://example.invalid/unverified-source"}},
+                   floor_pinned=True, revocation_checked=True, authenticated=True, record_ok=True,
+                   committed={hd}, production_roots=True)
+    options.update(overrides)
+    V.report_confidentiality([(hd, pol)], **options)
+
+
+def test_pinned_application_can_disclose_with_every_checked_control_true(V, capsys):
+    # No attack on signatures/parser: the approved main program itself can send the plaintext.
+    # This is a policy/reach reproduction, not a forged hardware report or an executed disclosure.
+    body = base64.b64decode(_policy()).decode()
+    containers = V._policy_containers(body)
+    for cont in containers:
+        cont["command"] = ["python", "-c", "send_plaintext_to_operator(query)"]
+    body = body[:body.index("containers :=")] + "containers := " + json.dumps(containers) + "\n"
+    pol = base64.b64encode(body.encode()).decode()
+    c = V.Checks()
+    posture = V.check_policy_posture(c, pol)
+    assert all(status == "PASS" for status, _, _ in c.rows)
+    reach, blockers = _reach(V, posture)
+    assert reach == 1 and any("non-disclosure" in b for b in blockers)
+    _report_claims(V, pol)
+    out = capsys.readouterr().out
+    licensed = out.split("You may write:")[1].split("You may NOT write")[0]
+    for forbidden in ("POSITIONED", "every channel", "remained confidential", "3.",
+                      "text was sealed on the professional's own computer"):
+        assert forbidden not in licensed
+    assert "Privacy throughout is NOT ESTABLISHED" in out
+
+
+@pytest.mark.parametrize("image_source", ["nonempty", {"url": "not-a-build-proof"}, None])
+def test_source_pointer_never_licenses_confidentiality(V, capsys, image_source):
+    _report_claims(V, reference={"image_source": image_source})
+    out = capsys.readouterr().out
+    assert "    3." not in out
+    assert "NOT ESTABLISHED" in out
+
+
+@pytest.mark.parametrize("overrides", [
+    {"record_ok": False}, {"production_roots": False}, {"committed": None},
+    {"committed": set()}, {"committed": {"00" * 32}},
+])
+def test_absent_or_failed_claim_prerequisites_license_nothing(V, capsys, overrides):
+    _report_claims(V, **overrides)
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and "You may write:" not in out
+
+
+def test_one_archived_policy_cannot_speak_for_another_unarchived_policy(V, capsys):
+    pol = _policy()
+    hd = hashlib.sha256(base64.b64decode(pol)).hexdigest()
+    _report_claims(V, pol, committed={hd, "ff" * 32})
+    assert "You may write:" not in capsys.readouterr().out
+
+
+def test_scope_precedes_every_licensed_sentence_and_ai_conditions_are_not_sufficient(V, capsys):
+    _report_claims(V)
+    out = capsys.readouterr().out
+    assert out.index("AI session receipts are NOT VERIFIED") < out.index("You may write:")
+    assert "NOT a sufficient privacy checklist" in out
+
+
+def test_each_policy_retains_its_own_blockers(V, capsys):
+    p1, p2 = _policy(stdio=True), _policy(logging_=True)
+    pairs = [(hashlib.sha256(base64.b64decode(p)).hexdigest(), p) for p in (p1, p2)]
+    V.report_confidentiality(pairs, reference=None, floor_pinned=True, revocation_checked=True,
+                            authenticated=True, record_ok=True, production_roots=True,
+                            committed={hd for hd, _ in pairs})
+    out = capsys.readouterr().out.split("What is missing:")[1]
+    assert "policy denies host access" in out and "policy denies runtime logging" in out
+
+
+def test_floor_for_another_product_is_not_counted_as_checked(tmp_path, V, kms, monkeypatch):
+    # Use real production AMD evidence for the missing-floor check; stub unrelated operation checks
+    # so this tests aggregation by main(), not synthetic signatures against the real report.
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = _ref(tmp_path, "reference.json", [host])
+    def hardware_only(row, ev, **kw):
+        c = V.Checks()
+        certs = V.load_certs(base64.b64decode(kms["endorsements"]))
+        V.check_amd(c, V.parse_report(base64.b64decode(kms["evidence"])),
+                    _pem(certs[:1]), _pem(certs[1:]), V.AMD_ARK_SPKI_SHA256, kw["min_tcb"])
+        assert not c.failed
+        return c
+    monkeypatch.setattr(V, "verify_search", hardware_only)
+    seen = []
+    monkeypatch.setattr(V, "report_confidentiality", lambda *a, **kw: seen.append(kw))
+    assert V.main([str(d), "--reference", str(ref), "--min-tcb", "Genoa=snpSPL:1"]) == 0
+    assert seen[-1]["floor_pinned"] is False
+    assert V.main([str(d), "--reference", str(ref), "--min-tcb", "Milan=snpSPL:1"]) == 0
+    assert seen[-1]["floor_pinned"] is True
+
+
+def test_malformed_policy_refuses_instead_of_crashing_or_licensing(V, capsys):
+    V.report_confidentiality([('aa', '%%%')], reference=None, floor_pinned=True,
+                            revocation_checked=True, authenticated=True, record_ok=True,
+                            committed={'aa'}, production_roots=True)
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and "You may write:" not in out
+
+
+def test_revocation_failure_precedes_result_and_suppresses_claims(tmp_path, V, kms, monkeypatch, capsys):
+    # Isolate main's aggregation/order; no network or fabricated successful hardware verification.
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = _ref(tmp_path, "reference.json", [host])
+    monkeypatch.setattr(V, "verify_search", lambda *a, **kw: V.Checks())
+    def revoked(c, chains):
+        c.add(False, "certificate revocation", "test: revoked ASK")
+        return False
+    monkeypatch.setattr(V, "check_revocation", revoked)
+    assert V.main([str(d), "--reference", str(ref), "--check-revocation"]) == 1
+    out = capsys.readouterr().out
+    assert out.index("test: revoked ASK") < out.index("RESULT: FAILED")
+    assert "RESULT: no failing record checks" not in out
+    assert "You may write:" not in out

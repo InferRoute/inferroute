@@ -736,43 +736,37 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
 
     layered = [cont for cont in containers if isinstance(cont.get("layers"), list) and cont["layers"]]
     out["image_pinned"] = len(layered) == len(containers) and bool(containers)
-    c.add(out["image_pinned"], "policy pins the image that ran",
+    c.add(out["image_pinned"], "policy lists pinned image layers",
           f"{len(layered)} of {len(containers)} container(s) pin their filesystem layer roots"
           + ("" if out["image_pinned"] else " — an unpinned container can be any image"))
 
     no_exec = [cont for cont in containers if cont.get("exec_processes") == []]
     out["no_exec"] = len(no_exec) == len(containers) and bool(containers)
-    c.add(out["no_exec"], "policy allows no arbitrary execution",
+    c.add(out["no_exec"], "policy lists no additional exec processes",
           f"{len(no_exec)} of {len(containers)} container(s) set exec_processes: []"
           + ("" if out["no_exec"] else " — a permitted exec can run code the measurement never covered"))
     return out
 
 
-# --- Which confidentiality sentence this evidence licenses ---------------------------------------------
-#
-# The three sentences a reader most wants -- "was never exposed", "could not have been read", "remained
-# confidential" -- were flatly forbidden by the audit brief, on the correct ground that attestation shows
-# WHICH code ran and not what it did. But "forbidden" is the wrong shape for it: what actually blocks them
-# is a finite list of conditions, most of which are ours to close. Enumerating them turns a prohibition
-# into a score, so a reader can see what is missing and we can see what to fix.
-#
-# None of this changes the exit code. The exit code answers "is this record intact". These answer "how far
-# does the intact record reach", which is a different question and must not be able to mask the first.
+# --- Claims supported by the archived evidence --------------------------------------------------------
+# Passing configuration checks does not prove runtime non-disclosure. In particular, a pinned,
+# reproducibly built application can itself send plaintext over the network. None of the flags below
+# prohibits that. Keep each licensed sentence bounded by what this program actually checks.
 
 STATEMENT_SEALED = (
-    "The text was sealed on the professional's own computer to a key a genuine, non-debuggable "
-    "confidential machine's hardware report commits to, so no relay, host or platform operator between "
-    "the two could read it in transit.")
+    "For the archived SEARCH operations checked here, statement signatures verify under keys bound "
+    "to AMD hardware reports with debugging disabled, under the configured production trust roots. "
+    "This does not establish encryption on the user's device, secrecy of private keys, or absence "
+    "of other plaintext copies.")
 STATEMENT_ENCLOSED = (
-    "In addition: the policy the hardware enforced pins the image that ran, permits no arbitrary "
-    "execution, and denies the operator every channel by which the work could be observed from outside "
-    "-- so no party outside the enclave was POSITIONED to read the text at any point in this record.")
+    "For those archived SEARCH operations, the hardware-committed policy documents list image layer "
+    "roots and empty exec_processes, and set stdio access, elevated execution, runtime logging, stack "
+    "dumps and unencrypted scratch to false. The configured firmware-floor and ASK-revocation checks "
+    "passed. These are checks of specified controls, not proof that every disclosure channel is closed.")
 STATEMENT_CONFIDENTIAL = (
-    "In addition: the image those measurements pin is published and its identity reproducible from "
-    "source, so what the code does with the text is open to inspection rather than taken on trust. "
-    "Together with the above, and with an auditor's own reading of that source, this is what supports "
-    "saying the SEARCHES in this record remained confidential -- that their text could not have been "
-    "read outside the enclave.")
+    "Privacy throughout is NOT ESTABLISHED: this verifier does not prove client-side sealing, "
+    "exclusive key custody, the application's handling of plaintext, all runtime output and retention "
+    "channels, or the AI conversation's confidentiality.")
 
 # The scope line matters as much as the sentences. This program checks the SEARCH lane (AMD SEV-SNP).
 # The conversation with the AI machine is a different machine on different hardware, attested in the
@@ -795,24 +789,18 @@ AI_LANE_CONDITIONS = (
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
                           revocation_checked: bool, image_published: bool,
-                          authenticated: bool, record_ok: bool = True,
-                          policy_committed: bool = True) -> Tuple[int, List[str]]:
-    """How far the evidence reaches, and what is holding it back. Every blocker is phrased as the thing
-    someone must DO, because each one is somebody's to close -- ours, the operator's, or the auditor's.
+                          authenticated: bool, record_ok: bool,
+                          policy_committed: bool) -> Tuple[int, List[str]]:
+    """Return -1 for invalid evidence, 0 for hardware bindings, 1 for specified controls.
 
-    `record_ok` and `policy_committed` are the two that were MISSING until 25 Sep, and their absence made
-    this whole section unsound. An auditor set the DEBUG bit in all 70 reports -- 140 FAILs, exit 1 --
-    and this function still licensed "a genuine, non-debuggable confidential machine". They then rewrote
-    allow_stdio_access to false in all 70 archived policies, breaking SHA-256(policy) == HOST_DATA 70
-    times, and it licensed "the policy the hardware enforced ... denies the operator every channel".
-    An attacker needed no valid hardware evidence at all, only a policy_b64 that reads well. A section
-    that tells a reader what they may write MUST be downstream of whether anything verified."""
-    if not record_ok:
-        return 0, ["this record did not verify — see the FAIL lines above. Nothing below is licensed by "
-                   "evidence that failed its own checks, and no sentence here may be written at all."]
-    if not policy_committed:
-        return 0, ["the archived policy is NOT the one the hardware committed to (SHA-256(policy) != "
-                   "HOST_DATA), so what it permits says nothing about what was enforced"]
+    Level 2 (confidentiality throughout) is deliberately unreachable: even authentic, reproducible
+    code and a fully passing policy can intentionally disclose plaintext. Source availability is not
+    source-to-image verification or a proof about its behavior. Keep missing evidence visible.
+    """
+    if record_ok is not True:
+        return -1, ["this record did not verify — no sentence is licensed"]
+    if policy_committed is not True:
+        return -1, ["the archived policy is not established as the hardware-committed policy (HOST_DATA)"]
     blockers: List[str] = []
     for key, _per, _want, name, _bears in CONFIDENTIALITY_POSTURE:
         if posture.get(key) is not True:
@@ -820,78 +808,77 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
     if posture.get("image_pinned") is not True:
         blockers.append("the policy does not pin the image that ran")
     if posture.get("no_exec") is not True:
-        blockers.append("the policy permits arbitrary execution inside the enclave")
+        blockers.append("the policy does not establish an empty additional-exec allowlist")
     if posture.get("self_contained") is not True:
         blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
                         "omit effective rules — resolve and verify every dependency")
-    enclosed = not blockers
     if not floor_pinned:
-        blockers.append("no firmware floor is pinned, so a downgraded-firmware machine would pass "
-                        "(put min_tcb in the published reference)")
+        blockers.append("a configured firmware floor did not PASS for every archived operation")
     if not revocation_checked:
-        blockers.append("certificate revocation was not checked (pass --check-revocation, needs network)")
-    enclosed = enclosed and floor_pinned and revocation_checked
-    if not image_published:
-        blockers.append("the reference does not name a published, reproducible source for the image these "
-                        "measurements pin, so what the code DOES with the text cannot be inspected")
+        blockers.append("certificate revocation was not checked successfully (pass --check-revocation)")
     if not authenticated:
-        blockers.append("the reference was not authenticated against a key obtained outside this record")
-    if enclosed and image_published and authenticated:
-        return 2, []
-    return (1 if enclosed else 0), blockers
+        blockers.append("the reference signature was not verified under a supplied key; independently "
+                        "establishing who owns that key remains the reader's responsibility")
+    controls_checked = not blockers
+    blockers.append("image_source is only a reference field; availability, a reproducible build and its "
+                    "binding to the measured image were not verified" if image_published else
+                    "the reference does not name a source for the image; source-to-image verification is absent")
+    blockers.append("client-side sealing, exclusive key custody, runtime egress/retention and application "
+                    "non-disclosure were not established; closing the configuration gaps alone is insufficient")
+    return (1 if controls_checked else 0), blockers
 
 
 def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Optional[Dict[str, Any]],
                            floor_pinned: bool, revocation_checked: bool, authenticated: bool,
-                           record_ok: bool, committed: Optional[set] = None) -> None:
-    """`policies` is [(host_data_hex, policy_b64)] as actually seen, deduplicated by the caller."""
+                           record_ok: bool, committed: Optional[set] = None,
+                           production_roots: bool = False) -> None:
+    """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
+    print("  SCOPE — archived SEARCH operations only. AI session receipts are NOT VERIFIED here; "
+          "no statement below covers the conversation, omitted operations, or future requests.")
+    print("  Reference signatures are relative to the supplied key; its independent provenance is not established here.")
     print("  (these rows do NOT affect the exit code above, which is about the record's integrity)")
-    if not policies:
-        print("  SKIP no policy archived in this record — the posture below cannot be read")
-        return
-    if len(policies) > 1:
-        print(f"  NOTE {len(policies)} DISTINCT policies across this record; each is reported separately")
     if not record_ok:
-        print("  REFUSED — this record did not verify (see the FAIL lines above). This section says what "
-              "the evidence licenses; evidence that failed its own checks licenses nothing, so nothing "
-              "is printed here.")
+        print("  REFUSED — this record did not verify; no sentence is licensed.")
         return
-    reach, blockers = 2, []
+    if not production_roots:
+        print("  REFUSED — test or unestablished trust roots cannot license production claims.")
+        return
+    if not policies or committed is None or set(hd for hd, _ in policies) != committed:
+        print("  REFUSED — archived policies do not cover every hardware policy commitment in this record.")
+        return
+    try:
+        matched = all(sha256_hex(base64.b64decode(pol, validate=True)) == hd for hd, pol in policies)
+    except (ValueError, TypeError):
+        matched = False
+    if not matched:
+        print("  REFUSED — archived policy bytes do not match their supplied commitments.")
+        return
+    reach, blockers = 1, []
     for hd, pol in policies:
-        if len(policies) > 1:
-            print(f"  policy {hd[:16]}…")
+        print(f"  policy {hd[:16]}…")
         c = Checks()
         posture = check_policy_posture(c, pol)
-        c.dump(indent="    " if len(policies) > 1 else "  ")
-        image_published = bool(isinstance(reference, dict) and reference.get("image_source"))
+        c.dump(indent="    ")
         r, b = confidentiality_reach(posture, floor_pinned=floor_pinned,
                                      revocation_checked=revocation_checked,
-                                     image_published=image_published, authenticated=authenticated,
-                                     record_ok=True,
-                                     policy_committed=(committed is None or hd in committed))
-        if r < reach:
-            reach, blockers = r, b
-        elif r == reach:
-            blockers = blockers or b
+                                     image_published=bool(isinstance(reference, dict) and reference.get("image_source")),
+                                     authenticated=authenticated, record_ok=True, policy_committed=True)
+        reach = min(reach, r)
+        blockers.extend(f"policy {hd[:16]}: {item}" for item in b)
     print()
     print("  You may write:")
     print(f"    1. {STATEMENT_SEALED}")
     if reach >= 1:
         print(f"    2. {STATEMENT_ENCLOSED}")
-    if reach >= 2:
-        print(f"    3. {STATEMENT_CONFIDENTIAL}")
-    if reach < 2:
-        print("  You may NOT write that the text was never exposed, could not have been read, or remained "
-              "confidential. What is missing:")
-        for b in blockers:
-            print(f"    - {b}")
-    print("  In every case: no evidence of this kind establishes what the enclave's own code did with the "
-          "text after decrypting it beyond what reading that code shows.")
-    print("  SCOPE — these sentences are about the SEARCH lane only. The conversation with the AI machine "
-          "ran on different hardware, attested in the session receipts, which this program does not parse. "
-          "Before extending any of the above to the conversation, establish by hand that:")
+    print("  You may NOT write that the text was never exposed, could not have been read, or remained "
+          "confidential. What is missing:")
+    for blocker in dict.fromkeys(blockers):
+        print(f"    - {blocker}")
+    print(f"  {STATEMENT_CONFIDENTIAL}")
+    print("  AI receipts require a separate verification and privacy argument. The following are necessary "
+          "binding checks, NOT a sufficient privacy checklist:")
     for cond in AI_LANE_CONDITIONS:
         print(f"    - {cond}")
 
@@ -1005,7 +992,8 @@ def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_pat
         return
     c.add(None, "publication key attested out of band",
           f"an attestation naming {named[:16]}… and a signature bundle are present, but THIS PROGRAM HAS "
-          "NOT VERIFIED THE BUNDLE and computes no authenticated log time or operation coverage. "
+          "NOT VERIFIED THE BUNDLE. Coverage WITHHELD: no authenticated log time, operation count, "
+          "or historical coverage is reported. "
           "Verifying it needs Fulcio and Rekor roots this verifier "
           "deliberately does not carry. Run it yourself; it asks the audited party for nothing:\n"
           "         cosign verify-blob --bundle <bundle> --certificate-identity <the identity> \\\n"
@@ -1795,6 +1783,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     seen_policies: Dict[str, str] = {}
     seen_chains: Dict[Tuple[str, bytes], Tuple[str, Any, Any]] = {}
     seen_host_data: set = set()
+    firmware_floor_results: List[bool] = []
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
             print(f"\nSearch {i}: FAIL malformed row")
@@ -1855,6 +1844,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         c.dump()
         fails += len(c.failed)
+        firmware_floor_results.append(any(status == "PASS" and name == "firmware TCB at or above minimum"
+                                          for status, name, _ in c.rows))
     if searches:
         cc = Checks()
         check_key_attestation(cc, _att_paths[0], _att_paths[1], a.reference_key)
@@ -1876,25 +1867,6 @@ def main(argv: Optional[List[str]] = None) -> int:
             fails += len(cc.failed)
     if a.extract:
         extract(a.bundle, a.extract, [r for r in searches if isinstance(r, dict)])
-    print()
-    if fails == 1 and absent_searches:
-        print("RESULT: NOTHING VERIFIED — this record contains no sealed search, so there was nothing for "
-              "this program to check. Not a pass, and not a finding against the evidence.")
-    elif fails:
-        print(f"RESULT: FAILED — {fails} check(s) did not pass; see FAIL lines above")
-    elif test_roots:
-        print("RESULT: all checks passed UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
-    else:
-        if isinstance(reference, dict) and reference.get("sig") and not a.reference_key:
-            print("RESULT: every check PASSED, but this reference was NOT authenticated (exit 4)")
-            print("        The identity above was checked against a signed file nobody verified. Obtain InferRoute's "
-                  "publication key from your engagement letter and pass --reference-key to close this.")
-        else:
-            print("RESULT: every check PASSED under production roots" + ("" if reference else " — but identity FAILED above"))
-    print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
-          "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
-    print("Not redone here: confinement of the machine that made this record (self-reported); fetching anything"
-          + ("" if a.check_revocation else "; certificate revocation") + ".")
     revocation_failed = False
     if searches and a.check_revocation:
         rc_checks = Checks()
@@ -1902,18 +1874,38 @@ def main(argv: Optional[List[str]] = None) -> int:
         rc_checks.dump()
         revocation_failed = not revocation_ok
         fails += len(rc_checks.failed)
+    print()
+    if fails == 1 and absent_searches:
+        print("RESULT: NOTHING VERIFIED — this record contains no sealed search, so there was nothing for "
+              "this program to check. Not a pass, and not a finding against the evidence.")
+    elif fails:
+        print(f"RESULT: FAILED — {fails} check(s) did not pass; see FAIL lines above")
+    elif test_roots:
+        print("RESULT: no failing record checks UNDER TEST ROOTS — this is not a verification of an Azure enclave (exit 3)")
+    else:
+        if isinstance(reference, dict) and reference.get("sig") and not a.reference_key:
+            print("RESULT: no failing record checks, but this reference was NOT authenticated (exit 4); SKIP rows remain unverified")
+            print("        The identity above was checked against a signed file nobody verified. Obtain InferRoute's "
+                  "publication key from your engagement letter and pass --reference-key to close this.")
+        else:
+            print("RESULT: no failing record checks under production roots; SKIP rows remain unverified" + ("" if reference else " — but identity FAILED above"))
+    print("Completeness: with sequence numbers the record shows every search of each enclave SHOWN, in order — not that every enclave is shown, "
+          "and not a search dropped from the very end of a lifetime; without them, only what it shows.")
+    print("Not redone here: confinement of the machine that made this record (self-reported); fetching anything"
+          + ("" if a.check_revocation else "; certificate revocation") + ".")
     if searches:
         report_confidentiality(
             [(hd, pol) for hd, pol in seen_policies.items()],
             reference=reference,
-            floor_pinned=bool(min_tcb),
+            floor_pinned=(len(firmware_floor_results) == len(searches) and all(firmware_floor_results)),
             revocation_checked=bool(a.check_revocation and not revocation_failed),
             # An unsigned reference remains usable as manually supplied expected measurements, but
             # this program has not authenticated its provenance. A supplied key alone proves nothing;
             # the signature must exist and the earlier signature check must pass (record_ok below).
             authenticated=bool(isinstance(reference, dict) and reference.get("sig") and a.reference_key),
             record_ok=(fails == 0),
-            committed=seen_host_data or None)
+            committed=seen_host_data,
+            production_roots=not test_roots)
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

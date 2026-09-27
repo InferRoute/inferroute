@@ -1688,7 +1688,8 @@ def test_the_attestation_travels_with_the_pack_and_is_not_claimed_as_checked():
     # rewrap moved a "+" or a line break into the middle of a pinned phrase, on text that was correct.
     verifier = re.sub(r'"\s*\n\s*"', "", raw)
     assert "def check_key_attestation" in verifier
-    assert "THIS PROGRAM HAS NOT CHECKED THEM" in verifier
+    assert "THIS PROGRAM HAS NOT VERIFIED THE BUNDLE" in verifier
+    assert "Coverage WITHHELD" in verifier
     assert "cosign verify-blob" in verifier
     # and it must keep saying what the attestation does not do
     assert "independent of its owner" in verifier

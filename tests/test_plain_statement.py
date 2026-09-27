@@ -10,7 +10,7 @@ from contextlib import redirect_stdout
 
 import pytest
 
-from tests.test_verify_record import _load
+from tests.test_verify_record import _load, _policy, _report_claims
 
 
 def _mod():
@@ -73,8 +73,8 @@ def test_higher_level_says_strictly_more_than_lower():
     one = m.plain_statement(1)[0]
     assert one != zero
     # level 1 is the one that earned the controls clause; level 0 must not carry it
-    assert "could not attach to it" in one
-    assert "could not attach to it" not in zero
+    assert "listed protection checks" in one
+    assert "listed protection checks" not in zero
 
 
 @pytest.mark.parametrize("level", (0, 1))
@@ -83,3 +83,48 @@ def test_every_positive_level_keeps_the_caveat(level):
     caveat = _mod().plain_statement(level)[1]
     assert "does not show" in caveat.lower()
     assert "own computer" in caveat.lower()
+
+
+@pytest.mark.parametrize("image_source", [None, {"url": "not-a-verified-publication"}])
+def test_plain_level_zero_with_stdio_allowed_makes_no_host_secrecy_claim(capsys, image_source):
+    """The real record permits host stdio: valid hardware evidence cannot license host exclusion."""
+    m = _mod()
+    _report_claims(m, _policy(stdio=True), reference={"image_source": image_source})
+    out = capsys.readouterr().out
+    plain = out.split("In plain words, for a reader")[1]
+    assert m.plain_statement(0)[0] in plain
+    assert "in a position to read" not in plain
+    assert "every time it answers" not in plain
+    assert "The program is published" not in plain
+    assert "does not show who could read your text" in plain
+    assert "AI conversation" in plain
+    assert "publication and behavior were not verified" in plain
+
+
+def test_all_controls_passing_does_not_restore_plain_disclosure_guarantee(capsys):
+    m = _mod()
+    _report_claims(m)
+    out = capsys.readouterr().out
+    plain = out.split("In plain words, for a reader")[1]
+    assert m.plain_statement(1)[0] in plain
+    assert "listed protection checks" in plain
+    assert "does not show who could read your text" in plain
+    assert "could not attach" not in plain
+
+
+@pytest.mark.parametrize("phrase", ["No one hosting it was in a position to read your text.",
+                                     "The program is published.",
+                                     "It proves what it is every time it answers."])
+def test_lint_rejects_the_specific_0958_overclaims(phrase):
+    m = _mod()
+    m.PLAIN_BY_REACH = {0: (phrase, "")}
+    with pytest.raises(AssertionError, match="overclaim"):
+        m.plain_statement(0)
+
+
+def test_unestablished_coverage_does_not_call_an_intact_record_corrupt(capsys):
+    m = _mod()
+    _report_claims(m, committed=None)
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and m.plain_statement(-1)[0] in out
+    assert "record did not check out" not in out

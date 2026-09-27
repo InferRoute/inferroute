@@ -799,27 +799,23 @@ AI_LANE_CONDITIONS = (
 # it -- a future level 2, say -- it prints nothing and says so, rather than falling back to the nearest
 # sentence it has, which would be the strongest one.
 PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
-    -1: ("This record did not check out, so there is nothing to say in its favour.",
-         "Do not rely on it. The checks above say which parts failed."),
-    0: ("Your search ran inside a sealed computer that proves what it is every time it answers, and every "
-        "answer is signed by that machine — so no one hosting it or carrying the message was in a position "
-        "to read your text.",
-        "What this does not show: what the program inside did with your text once it opened it, and "
-        "anything about your own computer. The program is published so you or your own expert can read it."),
-    1: ("Your search ran inside a sealed computer that proves what it is every time it answers, every answer "
-        "is signed by that machine, and it was set up so that whoever runs it could not attach to it, add "
-        "programs to it, or write your text to unprotected storage — so no one hosting it or carrying the "
-        "message was in a position to read your text.",
-        "What this does not show: what the program inside did with your text once it opened it, and "
-        "anything about your own computer. The program is published so you or your own expert can read it."),
+    -1: ("This verifier cannot give a privacy assurance from this record.",
+         "The details above explain which evidence is missing, failed, or outside this verifier's scope."),
+    0: ("The saved search statements have valid signatures linked to hardware evidence for a protected computer.",
+        "This does not show who could read your text or verify protection of your own computer or the AI "
+        "conversation. The program's publication and behavior were not verified."),
+    1: ("The saved search statements have valid signatures linked to hardware evidence for a protected computer, "
+        "and the recorded settings passed the listed protection checks.",
+        "This does not show who could read your text or verify protection of your own computer or the AI "
+        "conversation. The program's publication and behavior were not verified."),
 }
 
-# Words that make a plain sentence claim more than the evidence reaches. Checked against the rendered text
-# rather than trusted to review, because this is exactly the layer where such a phrase gets added later by
-# someone making it "clearer".
+# A lint for known bad phrases, NOT a semantic safety check. A synonym can overclaim without matching
+# any entry here. Evidence-configuration regressions and review must establish what each sentence says.
 PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confidential", "was private",
                    "completely private", "nobody can see", "no one can see", "we cannot see",
-                   "guaranteed private", "proof of privacy")
+                   "guaranteed private", "proof of privacy", "in a position to read",
+                   "every time it answers", "the program is published", "could not attach to it")
 
 
 def plain_statement(reach: int) -> Optional[Tuple[str, str]]:

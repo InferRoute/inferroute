@@ -137,11 +137,12 @@ def test_each_known_blocker_becomes_plain_words():
     m = _mod()
     known = [
         "policy 80c5424d: the policy does not satisfy: policy denies host access to the enclave's stdio",
-        "policy 80c5424d: the policy has unresolved external fragments/imports, so the permission rows may omit effective rules",
+        "policy 80c5424d: the policy has unresolved external fragments/imports, so the permission rows may "
+        "omit effective rules — resolve and verify every dependency",
     ]
     out = m.plain_blockers(known)
-    assert any("attach to the program" in r for r in out)
-    assert any("kept elsewhere" in r for r in out)
+    assert any("operator access" in r for r in out)
+    assert any("dependencies remain unresolved" in r for r in out)
     assert not any("policy 80c5424d" in r for r in out), "technical prefix leaked into plain words"
 
 
@@ -151,7 +152,7 @@ def test_an_unrecognised_blocker_is_kept_not_dropped():
     out = m.plain_blockers(["policy abc: some future blocker nobody has worded yet"])
     assert len(out) == 1
     assert "some future blocker nobody has worded yet" in out[0]
-    assert "could not establish" in out[0]
+    assert "verification gap" in out[0]
 
 
 def test_no_blockers_prints_no_reasons_section():
@@ -159,7 +160,7 @@ def test_no_blockers_prints_no_reasons_section():
     out = io.StringIO()
     with redirect_stdout(out):
         m.report_plain(1, [])
-    assert "In this record, specifically" not in out.getvalue()
+    assert "Gaps identified in this record" not in out.getvalue()
 
 
 def test_reasons_are_printed_under_a_positive_level():
@@ -168,12 +169,75 @@ def test_reasons_are_printed_under_a_positive_level():
     with redirect_stdout(out):
         m.report_plain(0, ["policy x: the policy does not satisfy: policy denies host access to the enclave's stdio"])
     text = out.getvalue()
-    assert "In this record, specifically" in text
-    assert "attach to the program" in text
+    assert "Gaps identified in this record" in text
+    assert "operator access" in text
 
 
 def test_duplicate_blockers_across_policies_are_said_once():
     m = _mod()
-    dupes = ["policy a: ... policy denies host access to the enclave's stdio",
-             "policy b: ... policy denies host access to the enclave's stdio"]
+    dupes = ["policy a: the policy does not satisfy: policy denies host access to the enclave's stdio",
+             "policy b: the policy does not satisfy: policy denies host access to the enclave's stdio"]
     assert len(m.plain_blockers(dupes)) == 1
+
+
+@pytest.mark.parametrize("blockers", [[], ["future check not implemented"]])
+def test_non_exhaustive_scope_survives_empty_and_unknown_lists(capsys, blockers):
+    m = _mod()
+    m.report_plain(1, blockers)
+    text = capsys.readouterr().out
+    assert "not a complete list of risks" in text
+    assert "shorter or empty list does not establish privacy" in text
+    assert "future deployment" in text and "saved operations" in text
+
+
+def test_missing_stdio_does_not_turn_into_permission_or_observed_access(capsys):
+    import base64
+    import json
+    m = _mod()
+    policy = base64.b64decode(_policy()).decode()
+    containers = m._policy_containers(policy)
+    for container in containers:
+        del container["allow_stdio_access"]
+    policy = policy[:policy.index("containers :=")] + "containers := " + json.dumps(containers) + "\n"
+    pol = base64.b64encode(policy.encode()).decode()
+    _report_claims(m, pol)
+    text = capsys.readouterr().out
+    plain = text.split("In plain words, for a reader")[1]
+    assert "do not establish that operator access" in plain
+    assert "does not show that anyone accessed" in plain
+    assert "let whoever operates it attach" not in plain
+    assert "0 explicitly set it to true" in text
+    assert "set allow_stdio_access=true" not in text
+
+
+def test_fixing_stdio_removes_only_that_gap_and_keeps_privacy_boundary(capsys):
+    m = _mod()
+    _report_claims(m, _policy(stdio=True))
+    before = capsys.readouterr().out.split("In plain words, for a reader")[1]
+    _report_claims(m, _policy(stdio=False))
+    after = capsys.readouterr().out.split("In plain words, for a reader")[1]
+    assert "operator access" in before and "operator access" not in after
+    assert "not a complete list of risks" in before and "not a complete list of risks" in after
+    assert "whether the program disclosed or retained" in after
+    assert "does not establish privacy" in after
+
+
+def test_unsuccessful_revocation_and_partial_floor_do_not_mean_no_attempt(capsys):
+    m = _mod()
+    _report_claims(m, floor_pinned=False, revocation_checked=False)
+    plain = capsys.readouterr().out.split("In plain words, for a reader")[1]
+    assert "not successfully verified for every saved operation" in plain
+    assert "successful certificate-withdrawal check was not established" in plain
+    assert "was not asked" not in plain and "machine's certificate" not in plain
+
+
+@pytest.mark.parametrize("blocker", [
+    "new reason: certificate revocation was checked but the log is missing",
+    "policy abc: the policy does not satisfy: policy denies host access to the enclave's stdio; additional scope unknown",
+    "future reason: first part: second part",
+])
+def test_familiar_substrings_and_colons_do_not_swallow_unknown_qualifiers(blocker):
+    m = _mod()
+    reasons = m.plain_blockers([blocker])
+    assert len(reasons) == 1 and blocker in reasons[0]
+    assert "original words" in reasons[0]

@@ -69,7 +69,6 @@ import base64
 import hashlib
 import json
 import os
-import datetime as dt
 import re
 import struct
 import sys
@@ -580,12 +579,15 @@ CONFIDENTIALITY_POSTURE = (
 
 
 def _policy_containers(text: str) -> Optional[List[Dict[str, Any]]]:
-    """The containers array out of the Rego document, by bracket matching — the file is Rego, so it cannot
-    simply be json.loads'd, and a regex over 9.5 KB of nested JSON would be guesswork."""
-    i = text.find("containers := [")
-    if i < 0:
+    """Read exactly one top-level containers array; ambiguous policies are not auditable."""
+    assignments = list(re.finditer(r"(?m)^[ \t]*containers[ \t]*:=", text))
+    if len(assignments) != 1:
         return None
-    start = text.index("[", i)
+    start = assignments[0].end()
+    while start < len(text) and text[start].isspace():
+        start += 1
+    if start >= len(text) or text[start] != "[":
+        return None
     depth, in_str, esc = 0, False, False
     for j in range(start, len(text)):
         ch = text[j]
@@ -608,15 +610,81 @@ def _policy_containers(text: str) -> Optional[List[Dict[str, Any]]]:
                     out = json.loads(text[start:j + 1])
                 except ValueError:
                     return None
-                return out if isinstance(out, list) else None
+                return out if isinstance(out, list) and all(isinstance(x, dict) for x in out) else None
     return None
 
 
 def _policy_flag(text: str, name: str) -> Optional[bool]:
-    """A top-level `name := true/false` assignment. None when the document does not carry it at all,
-    which must not read the same as false."""
-    m = re.search(r"^\s*" + re.escape(name) + r"\s*:=\s*(true|false)\s*$", text, re.M)
-    return None if not m else (m.group(1) == "true")
+    """Read one unambiguous simple rule; defaults and duplicate rules are not evaluated here."""
+    ident = re.escape(name)
+    if re.search(r"(?m)^[ \t]*default[ \t]+" + ident + r"\b", text):
+        return None
+    matches = re.findall(r"(?m)^[ \t]*" + ident + r"[ \t]*:=[ \t]*(true|false)[ \t]*$", text)
+    return (matches[0] == "true") if len(matches) == 1 else None
+
+
+def _policy_external_dependencies(text: str) -> List[str]:
+    """Conservatively find CCE fragment arrays and non-language Rego imports.
+
+    Unknown, malformed, or duplicate fragment declarations block the self-contained claim.
+    """
+    dependencies: List[str] = []
+    assignments = list(re.finditer(r"(?m)^[ \t]*fragments[ \t]*:=", text))
+    defaults = list(re.finditer(r"(?m)^[ \t]*default[ \t]+fragments\b", text))
+    if len(assignments) > 1 or defaults:
+        dependencies.append("<ambiguous fragments assignment>")
+    elif assignments:
+        start = assignments[0].end()
+        while start < len(text) and text[start].isspace():
+            start += 1
+        if start >= len(text) or text[start] != "[":
+            dependencies.append("<unparseable fragments assignment>")
+        else:
+            depth, in_string, escaped = 0, False, False
+            parsed = None
+            for end in range(start, len(text)):
+                ch = text[end]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif ch == "\\":
+                        escaped = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                elif ch == "[":
+                    depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            parsed = json.loads(text[start:end + 1])
+                        except (TypeError, ValueError):
+                            parsed = None
+                        break
+            if not isinstance(parsed, list):
+                dependencies.append("<unparseable fragments assignment>")
+            else:
+                for i, item in enumerate(parsed):
+                    label = None
+                    if isinstance(item, dict):
+                        label = item.get("feed") or item.get("source_uri") or item.get("uri")
+                    dependencies.append(str(label or f"fragment[{i}]"))
+
+    for line in text.splitlines():
+        code = line.split("#", 1)[0]
+        if not re.match(r"^\s*import\b", code):
+            continue
+        match = re.match(r"^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\b", code)
+        if not match:
+            dependencies.append("<unparseable import>")
+            continue
+        module = match.group(1)
+        if module != "future.keywords" and not module.startswith("future.keywords."):
+            dependencies.append(f"import {module}")
+    return sorted(set(dependencies))
 
 
 def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Optional[bool]]:
@@ -643,27 +711,12 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # auditor on 25 Sep fetched the fragment this record names and found ten more containers, eight of
     # them allowing elevated execution and one with a non-empty exec_processes. Every row below counts
     # what is IN THIS FILE, so when a fragment can add containers, the rows are a floor and not a census.
-    # Detect ANY construct that could bring in containers from outside this document, and refuse on
-    # sight rather than reasoning about whether it actually does. The first version keyed on the literal
-    # `"feed"` string and on `"containers"` appearing in an includes list; probing it on 27 Sep found two
-    # ways through — a fragment object using some other key for its source, and a bare `import` — each of
-    # which returned self-contained and unblocked the strong sentences. A permission set computed over a
-    # subset of what is enforced is wrong in the PERMISSIVE direction, the one direction a fail-closed
-    # audit may never be wrong in, so the test is now "is there any import surface at all", not "can I
-    # prove this particular one adds containers".
-    frag_block = re.search(r"\bfragments\s*:=\s*\[(.*?)\]", text, re.S)
-    frag_nonempty = bool(frag_block and frag_block.group(1).strip())
-    imports = [ln.strip() for ln in text.splitlines()
-               if re.match(r"\s*import\s+(?!future\.keywords)", ln)]
-    feeds = re.findall(r'"feed"\s*:\s*"([^"]+)"', text)
-    out["self_contained"] = not (frag_nonempty or imports)
-    fragments = feeds or ([frag_block.group(1).strip()[:60]] if frag_nonempty else []) or imports
+    dependencies = _policy_external_dependencies(text)
+    out["self_contained"] = not dependencies
     c.add(out["self_contained"], "policy is self-contained",
-          "no external fragment contributes containers" if out["self_contained"] else
-          f"the policy carries {len(fragments)} external-import construct(s) that may contribute further "
-          f"containers ({', '.join(sorted(set(fragments))[:3])}) — every permission row below counts only the "
-          f"{len(containers)} container(s) written in this document, so they are a FLOOR, not a census. "
-          "Fetch the fragment and read it before relying on them.")
+          "no external fragments or imports found" if out["self_contained"] else
+          f"unresolved external policy dependency/dependencies: {', '.join(dependencies[:5])} — "
+          "the permission rows below cover only the literal containers in this document, not the effective policy")
 
     for key, per_container, wanted, name, bears_on in CONFIDENTIALITY_POSTURE:
         if per_container:
@@ -769,8 +822,8 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
     if posture.get("no_exec") is not True:
         blockers.append("the policy permits arbitrary execution inside the enclave")
     if posture.get("self_contained") is not True:
-        blockers.append("the policy imports fragments that may add containers this program did not read, "
-                        "so its permission rows are a floor and not a census — fetch them and read them")
+        blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
+                        "omit effective rules — resolve and verify every dependency")
     enclosed = not blockers
     if not floor_pinned:
         blockers.append("no firmware floor is pinned, so a downgraded-firmware machine would pass "
@@ -930,19 +983,8 @@ def check_revocation(c: Checks, chains: List[Tuple[str, Any, Any]], *, timeout: 
 # command that checks it, and never claims the check was done. A row that said "attested" on the strength
 # of a file in the same folder would be the circularity it exists to break, wearing a better word.
 
-def _attestation_time(bundle_path: str) -> Optional[str]:
-    """When the transparency log integrated the attestation. Read from the bundle rather than from any
-    claim beside it, because the point of the thing is that the log says when, not that we do."""
-    try:
-        te = json.load(open(bundle_path))["verificationMaterial"]["tlogEntries"][0]
-        return dt.datetime.fromtimestamp(int(te["integratedTime"]),
-                                         dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    except Exception:                                       # noqa: BLE001
-        return None
-
-
 def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_path: Optional[str],
-                          key_hex: Optional[str], started: Optional[List[str]] = None) -> None:
+                          key_hex: Optional[str]) -> None:
     if not bundle_path or not attestation_path:
         c.add(None, "publication key attested out of band",
               "no attestation in this folder — the key rests on however you obtained it, and if that was "
@@ -961,28 +1003,10 @@ def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_pat
               f"the attestation names {named[:16]}… but the key in use is {key_hex[:16]}… — they are "
               "different keys, and that is a finding, not a formatting difference")
         return
-    # WHEN the attestation was made decides what it can speak for, and an auditor on 27 Sep returned
-    # exactly this: "the bundle exists but IN ANY CASE POST-DATES THE RECORD". On the record in hand it
-    # post-dated every one of the 70 searches by nearly 18 hours, so it closed back-dating for none of
-    # them. The prose around this artifact said "closes substitution and back-dating" in four places
-    # without that qualification, which was wrong in the flattering direction. Compute it per record
-    # rather than assert it: an artifact that POST-DATES what it vouches for vouches for nothing.
-    when = _attestation_time(bundle_path)
-    cover = ""
-    if when and started:
-        after = [t for t in started if t > when]
-        cover = (f" It was logged at {when}, which is AFTER every operation in this record, so it closes "
-                 f"back-dating for NONE of them — a reference could still have been minted to fit a "
-                 f"record that already existed. It speaks only for records made after that moment."
-                 if not after else
-                 f" It was logged at {when}, before {len(after)} of {len(started)} operations here and "
-                 f"after {len(started) - len(after)} — it closes back-dating for the former only.")
-    elif when:
-        cover = f" It was logged at {when}; compare that with the operation times yourself."
-
     c.add(None, "publication key attested out of band",
-          f"an attestation naming {named[:16]}… and a signature bundle are present.{cover} THIS PROGRAM HAS "
-          "NOT CHECKED THEM — verifying a Sigstore bundle needs Fulcio and Rekor roots this verifier "
+          f"an attestation naming {named[:16]}… and a signature bundle are present, but THIS PROGRAM HAS "
+          "NOT VERIFIED THE BUNDLE and computes no authenticated log time or operation coverage. "
+          "Verifying it needs Fulcio and Rekor roots this verifier "
           "deliberately does not carry. Run it yourself; it asks the audited party for nothing:\n"
           "         cosign verify-blob --bundle <bundle> --certificate-identity <the identity> \\\n"
           "             --certificate-oidc-issuer https://accounts.google.com <attestation.json>\n"
@@ -1833,12 +1857,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         fails += len(c.failed)
     if searches:
         cc = Checks()
-        # Run here, not with the reference rows above: what the attestation can SPEAK FOR depends on the
-        # operation times, and those are not loaded until the record is read.
-        check_key_attestation(cc, _att_paths[0], _att_paths[1], a.reference_key,
-                              sorted(r["statement"]["started_utc"] for r in searches
-                                     if isinstance(r, dict) and isinstance(r.get("statement"), dict)
-                                     and r["statement"].get("started_utc")) or None)
+        check_key_attestation(cc, _att_paths[0], _att_paths[1], a.reference_key)
         # Read only if the manifest listed it — an attacker-supplied side file must not be able to narrate a
         # gap it created. Membership is already enforced both ways, so an unlisted unanswered.json fails the
         # bundle before we get here.

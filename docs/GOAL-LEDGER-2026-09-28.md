@@ -104,3 +104,51 @@ unreachable without an overclaim, so meeting it would mean bending the system to
 criterion. Dropped. The reader tests agree: the naive reader never complained about the level, they
 complained the text was unreadable and nobody answered their question. "Useful" must be earned at
 level 0 through clarity, or by leaving ACI — a platform decision, not a wording one.
+
+---
+
+## Iterations 4–5 — the statement now answers the question the reader actually has
+
+**Symptom.** Every tested version left a non-technical reader unable to repeat anything, with no action,
+and phoning the professional who ran the tool to ask the one question the document never addressed:
+could anyone have read my text.
+
+**Method.** Five candidate wordings, each on a fresh naive reader, measured rather than reviewed:
+
+| | belief | would repeat | read in full | action |
+|---|---|---|---|---|
+| baseline 09-27 | accurate | **nothing** | no, stopped at "certificate-withdrawal" | none |
+| D | accurate | nothing | no | yes |
+| E | accurate | **quotes it verbatim** | yes | yes |
+| F | accurate, said so | yes | **yes, skimmed nothing** | yes |
+| G | accurate | yes | yes | yes, sharper |
+| H | accurate | yes | yes | four concrete actions |
+
+**Root cause of the original failure.** The block was organised around what the verifier checked — the
+auditor's frame. The reader's frame is a question. It now answers it in the first line.
+
+**Every round caught a different word borrowing warmth it had not earned**: "sealed", then "honest",
+then "we would rather say so plainly", then "honest" again. Removing one grew another elsewhere. Those
+words are now pinned by test, because the pull reasserts itself wherever it is not actively watched.
+
+**Kept generated, not written in.** The ask ("switch off the setting that lets whoever runs the machine
+watch what goes in and out") appears while that gap is open and disappears when it closes. It also says
+what it does NOT buy — without that a reader believes one setting bought privacy, when it removes one
+reason for doubt out of several.
+
+**Two defects of my own, both familiar shapes.** The ask silently never printed because I matched the
+trigger against the RENDERED text rather than the raw blocker. And level -1 said "this record did not
+check out", which calls an intact record corrupt when the real state is evidence that could not be
+established — caught by a Codex test I had not read. I restored the level headline rather than edit
+their failing tests to fit my change.
+
+**Stop conditions 2 corrected, twice.** "Reader is NOT less confident" would force an overclaim: these
+readers were wrongly confident beforehand, and becoming less confident is accurate updating. "Would not
+need to phone" is also wrong: a client with an unfiled invention SHOULD phone, and the win is the call
+getting sharper. The surviving criteria are: reads it fully, believes something true, can repeat it
+accurately, has something to do.
+
+**Evidence.** 13 new tests, 255 in the affected suites, 964 across the repo. Commit `a940a98`.
+`tests/test_probant_first_key.py::test_the_cli_exposes_show` fails in full-suite runs and passes in
+isolation — a working-directory pollution from another test, confirmed pre-existing by re-running with
+all three of my test files excluded.

@@ -241,3 +241,56 @@ def test_familiar_substrings_and_colons_do_not_swallow_unknown_qualifiers(blocke
     reasons = m.plain_blockers([blocker])
     assert len(reasons) == 1 and blocker in reasons[0]
     assert "original words" in reasons[0]
+
+
+# --- the question-first block, shaped by five rounds of naive-reader testing -------------------------
+
+STDIO_BLOCKER = "policy x: the policy does not satisfy: policy denies host access to the enclave's stdio"
+
+
+def _plain(reach, blockers):
+    out = io.StringIO()
+    with redirect_stdout(out):
+        _mod().report_plain(reach, blockers)
+    return out.getvalue()
+
+
+def test_the_block_answers_the_readers_question_first():
+    """Readers arrive with one question and left to phone their attorney to ask it. Answer it first."""
+    text = _plain(0, [STDIO_BLOCKER])
+    first = [l.strip() for l in text.splitlines() if l.strip()][1]
+    assert first.startswith("No —"), f"the first line must answer the question, got: {first[:60]}"
+
+
+def test_the_ask_appears_only_while_the_gap_is_open():
+    """Generated, not written in: when the setting is closed the ask must disappear by itself.
+    Rewriting the sentence by hand is where every overclaim in this codebase came from."""
+    assert "one setting switched off" in _plain(0, [STDIO_BLOCKER])
+    assert "one setting switched off" not in _plain(0, ["policy x: some unrelated gap"])
+
+
+def test_the_ask_says_what_it_does_not_buy():
+    """Tested: without this a reader believes flipping one setting buys privacy."""
+    text = _plain(0, [STDIO_BLOCKER])
+    assert 'does not get you to "yes"' in text
+    assert 'would still be "cannot tell"' in text
+
+
+def test_the_block_separates_a_fact_about_the_record_from_a_fact_about_privacy():
+    """A reader said of an earlier draft: 'it sounds like a bank vault... but it is about whether the
+    report is honest, not whether my invention stayed private.'"""
+    text = _plain(0, [STDIO_BLOCKER])
+    assert "It is not a fact about whether your text stayed private." in text
+
+
+@pytest.mark.parametrize("word", ["honest", "sealed", "we would rather say so plainly"])
+def test_no_word_borrows_warmth_it_has_not_earned(word):
+    """Every reader round caught a DIFFERENT warm word: sealed, then honest, then the self-praise,
+    then honest again. Removing one grew another, so they are pinned."""
+    assert word not in _plain(0, [STDIO_BLOCKER]).lower()
+
+
+def test_an_unwritten_level_answers_nothing():
+    text = _plain(7, [STDIO_BLOCKER])
+    assert "No plain statement is written" in text
+    assert "cannot rule out" not in text

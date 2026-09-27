@@ -1005,6 +1005,41 @@ def plain_statement(reach: int) -> Optional[Tuple[str, str]]:
     return pair
 
 
+# The reader arrives with ONE question -- could anyone have read my text -- and five rounds of testing
+# on non-technical readers said the old block never addressed it. They left less confident, could repeat
+# nothing, and said they would phone the professional who ran it to ask. So the block answers it first.
+#
+# Every round also caught a different word borrowing warmth it had not earned: "sealed", then "honest",
+# then "we would rather say so plainly", then "honest" again. Removing one grew another somewhere else.
+# That pull is why this text is measured on readers rather than reviewed by me.
+PLAIN_ANSWER: Dict[int, str] = {
+    # NOT "this record did not check out": level -1 covers evidence that could not be ESTABLISHED as
+    # well as evidence that failed, and calling an intact record corrupt is its own false statement.
+    # Codex's test_unestablished_coverage_does_not_call_an_intact_record_corrupt caught this.
+    -1: "This record cannot answer that question. The details above say which evidence is missing, "
+        "failed, or outside what this program checks.",
+    0: "No — this record cannot rule out that someone with access to the machine could have read your text.",
+    1: "No — this record cannot rule out that someone with access to the machine could have read your "
+       "text, though the containers we control passed the checks listed above.",
+}
+
+# Said once, plainly, so the reader is not left to infer it from a list that happens to be short today.
+PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search really did run on the "
+                  "machine this record describes, and the record has not been altered since. That is a "
+                  "fact about the record. It is not a fact about whether your text stayed private.")
+
+# A reader who is told only what is wrong has nothing to do. A reader told what to ask for does.
+# Derived from the blockers rather than written in, so it disappears when the gap is closed.
+PLAIN_ASK = ("You can ask for a record made with one setting switched off: the setting that lets whoever "
+             "runs the machine watch what goes into the program and what comes out. Your provider can "
+             "make that change. It would apply to future searches, not this one.")
+PLAIN_ASK_TRIGGER = "policy denies host access to the enclave's stdio"   # the RAW blocker text
+
+# Tested: without this a reader believes flipping that one setting buys privacy. It buys one fewer
+# reason for doubt. The remaining reasons are the generated list, so this cannot go stale.
+PLAIN_WHAT_IT_BUYS = ("That removes one reason this record cannot answer your question. It does not get "
+                      "you to \"yes\". The answer would still be \"cannot tell\", for the reasons below.")
+
 def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
     print()
     print("  In plain words, for a reader who will not read the table above")
@@ -1014,13 +1049,31 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
               "deliberate: the nearest available sentence would be a stronger claim than this level "
               "licenses.")
         return
-    headline, caveat = pair
+    headline, caveat = pair           # pair is still the LEVEL GUARD: an unwritten level prints nothing
+    reasons = plain_blockers(blockers or [])
+    answer = PLAIN_ANSWER.get(reach)
+    if answer is None:
+        print(f"    No plain statement is written for reach level {reach}, so none is given. This is "
+              "deliberate: the nearest available sentence would be a stronger claim than this level "
+              "licenses.")
+        return
+    print(f"    {answer}")
+    if reach >= 0:
+        print()
+        print(f"    {PLAIN_NARROWER}")
+        if any(PLAIN_ASK_TRIGGER in r for r in (blockers or [])):
+            print()
+            print(f"    {PLAIN_ASK}")
+            print(f"    {PLAIN_WHAT_IT_BUYS}")
+    print()
+    # The licensed technical sentence still reaches this reader. It restates the answer above in the
+    # verifier's own terms, which is mild redundancy -- and the alternative was editing another
+    # session's failing tests to fit my change, which is how a gate gets weakened.
     print(f"    {headline}")
     print(f"    {caveat}")
     print("    These are gaps identified by this verifier, not a complete list of risks or ways text could "
           "be disclosed. A shorter or empty list does not establish privacy. Fixes to a future deployment "
           "do not change what was enforced for these saved operations.")
-    reasons = plain_blockers(blockers or [])
     if reasons:
         print("    Gaps identified in this record:")
         for reason in reasons:

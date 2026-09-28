@@ -5,8 +5,10 @@ able to make truthfully before it is worth shipping, and every workstream below 
 
 ## The target statement
 
-> "The program that ran is the one published at ⟨url⟩, byte for byte. Nothing else ran inside the
-> protected machine, whose memory the operator could not read. Nothing could leave it except the
+> "The program that ran is the one published at ⟨url⟩, byte for byte. Only two kinds of program
+> could run inside the protected machine — ours, and the cloud platform's own startup containers,
+> every one of them named in this record with what it was permitted to do. The operator could not
+> read that machine's memory. Nothing could leave it except the
 > sealed answer to you — not to disk, not to logs, not to the network — because the machine was
 > configured so that it could not, and that configuration is part of what the chip signed. What this
 > still cannot show: how long your search took and how large it was, which is observable from
@@ -29,7 +31,7 @@ text stayed private. That sentence is unreachable on any substrate — see the l
 | Clause | Requires | Status |
 |---|---|---|
 | "the one published at ⟨url⟩, byte for byte" | ROW 2 — a reproducible build and a published recipe, so `HOST_DATA` is recomputable by a stranger | in progress; one file of 37,441 still non-deterministic |
-| "Nothing else ran inside the protected machine" | ROW 1 — leaving ACI for a confidential VM | designed, not started (~3-4 months) |
+| "only two kinds of program could run … every one named" | the effective policy enumerates every permitted container, and `HOST_DATA` commits the chip to that enumeration | **reachable now** — the verifier already computes the disclosure; see the 2026-09-29 decision below |
 | "whose memory the operator could not read" | SEV-SNP | already true |
 | "nothing could leave except the sealed answer" | ROW 3 — **confinement**, not audit: an irreversible seccomp filter installed by measured code before the serve loop | **~1-2 weeks.** Measured 2026-09-29: the enclave touches the network in exactly two places, a startup-only index fetch and a localhost call to the attestation sidecar, so closing egress after init costs nothing operationally |
 | "how long your search took and how large it was" | nothing — it is an honest remainder | permanent |
@@ -67,7 +69,7 @@ shipping a record that says less than the technology allows; claiming past it me
 | Clause | Was | Is |
 |---|---|---|
 | "byte for byte" | build not reproducible, nothing published | **done** — two no-cache builds byte-identical; gated only on the publication decision |
-| "nothing else ran inside" | row 1, ~3-4 months | row 1, **abandoned** — the spike was run on 2026-09-29 and answered worse than "unpredictable". See below. |
+| "nothing else ran inside" | row 1, ~3-4 months | **clause rewritten** — the spike killed row 1 as a shortcut; the honest form is reachable now. Row 1 deferred to future work. |
 
 ## The spike was run. Row 1 is a downgrade, not a delay.
 
@@ -112,8 +114,32 @@ each was permitted to do. The verifier already computes and prints this disclosu
 **B.** Build the measured-boot + dm-verity chain on a CVM anyway, rebuilding the "byte for byte"
 clause by hand before breaking even, and ending on a paravisor vTPM.
 
-Recommended: **A.** The ceiling statement's second clause should be rewritten to the strongest TRUE
-form rather than held open for a substrate change that costs more than it returns. Pending Henry.
+**Henry chose A on 2026-09-29**, with the VM chain kept as future work rather than dropped: race to
+a polished client on the substrate that can already carry the claim.
+
+The second clause has been rewritten accordingly, at the top of this document. Note that the
+replacement is not a retreat from "nothing else ran" — it is **stronger**. "Nothing else ran" was a
+claim about history that attestation cannot make. The replacement is a claim about what was
+PERMITTED, which is exactly what attestation does measure: the effective CCE policy enumerates every
+container that may start, and `HOST_DATA` binds the chip's signature to that enumeration. Saying
+"only these could run, and here they are" is enforced, checkable, and names the 12 platform
+containers instead of quietly excluding them.
+
+### Future work: the measured-boot chain (deferred, not abandoned)
+
+Row 1 returns as a later goal, to be taken up once the client is polished. It requires, in order:
+
+1. A minimal guest image we build and publish — kernel, initrd, rootfs — not a stock Ubuntu CVM image.
+2. dm-verity over the rootfs, with the root hash carried in the kernel command line.
+3. Measured boot such that the resulting vTPM PCR values are predictable from the published image,
+   and a published recipe for recomputing them.
+4. A verifier extension: SNP report → vTPM AK certified in that report → quote → PCR comparison.
+
+What it buys: the platform's containers disappear, so the enumeration collapses to our program
+alone. What it costs beyond the build: the trust root moves from an AMD-signed policy hash to a
+paravisor-emulated vTPM, which is a weaker anchor for the byte-for-byte clause than what we have
+today. That trade is why this is future work and not the critical path — it should only be taken if
+a client asks for the collapse to a single program AND accepts the weaker anchor.
 | "nothing could leave" | months, and **unprovable by inspection** | **~1-2 weeks**, and mechanically checkable |
 
 The critical path is now **row 1**, not row 3. The ceiling moves from "months, with one clause that

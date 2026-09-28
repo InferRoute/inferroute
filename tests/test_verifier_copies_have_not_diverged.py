@@ -46,10 +46,10 @@ CAPABILITIES: tuple[tuple[str, str], ...] = (
 # gate live for a THIRD divergence instead of going permanently red and being ignored — but the list
 # cannot rot: an entry that has stopped drifting FAILS, forcing its removal.
 KNOWN_OPEN_DRIFT: dict[str, str] = {
-    "platform fragment disclosure": (
-        "In the shipped client only; the sibling does not disclose the pinned ACI infra fragment's "
-        "containers. Found by this test on its first run, not by a human. The other session owns it."
-    ),
+    # EMPTY, and that is the correct state: the copies are in sync as of 2026-09-29, after the
+    # sealed-research session re-vendored on canonical 1740188. An entry here is an EXEMPTION, and
+    # the anti-rot test below fails when one outlives the drift it exempted — which is what emptied
+    # this dict: it fired twice, once per closed drift, and refused to let a stale entry sit.
 }
 
 

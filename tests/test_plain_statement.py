@@ -259,7 +259,13 @@ def test_the_block_answers_the_readers_question_first():
     """Readers arrive with one question and left to phone their attorney to ask it. Answer it first."""
     text = _plain(0, [STDIO_BLOCKER])
     first = [l.strip() for l in text.splitlines() if l.strip()][1]
-    assert first.startswith("No —"), f"the first line must answer the question, got: {first[:60]}"
+    # An auditor read the bare "No —" as answering "was your text private?" (a question this
+    # evidence cannot answer either way) rather than "can this record prove it?". The PROPERTY
+    # pinned here, not the phrasing: the first line carries the refusal AND the other bound, so
+    # it can be read neither as a clean bill of health nor as evidence of a breach.
+    assert re.search(r"\bNo\b", first), f"the first line must answer the question, got: {first[:60]}"
+    assert "does not show that anyone did" in first, f"the first line must not read as a breach: {first}"
+    assert len(first) < 220, f"the answer must be short enough to survive a skim, got {len(first)} chars"
 
 
 
@@ -333,7 +339,7 @@ def test_the_gap_list_names_what_it_cannot_contain():
     """An auditor called the 'not a complete list' preamble honest but fragile: a reader who skims it
     and dives into the bullets treats them as a census. Name the categories the instrument cannot see."""
     text = _plain(0, [STDIO_BLOCKER])
-    assert "It cannot see, and so never lists" in text
+    assert _mod().PLAIN_CANNOT_SEE in text
     for category in ("how long your search took", "left in the machine's memory",
                      "layer underneath", "once it had it"):
         assert category in text, category
@@ -350,7 +356,7 @@ def test_the_computed_ask_is_actually_RENDERED():
 def test_the_uncaptured_categories_survive_an_EMPTY_blocker_list():
     """They lived inside `if reasons:`, so they vanished exactly when the list was empty — the most
     reassuring state, and the one where reading the list as a census is most wrong."""
-    assert "It cannot see, and so never lists" in _plain(0, [])
+    assert _mod().PLAIN_CANNOT_SEE in _plain(0, [])
 
 
 def test_the_record_is_not_described_as_never_expiring():

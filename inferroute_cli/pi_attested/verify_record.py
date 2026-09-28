@@ -1018,11 +1018,19 @@ PLAIN_ANSWER: Dict[int, str] = {
     # Codex's test_unestablished_coverage_does_not_call_an_intact_record_corrupt caught this.
     -1: "This record cannot answer that question. The details above say which evidence is missing, "
         "failed, or outside what this program checks.",
-    0: "No — this record cannot rule out that someone with access to the machine could have read your "
-       "text. It also does not show that anyone did.",
-    1: "No — this record cannot rule out that someone with access to the machine could have read your "
-       "text, though the containers we control passed the checks listed above.",
+    0: "Can this record prove your text stayed private? No. It cannot rule out that someone with "
+       "access to the machine could have read it, and it does not show that anyone did.",
+    1: "Can this record prove your text stayed private? No. It cannot rule out that someone with "
+       "access to the machine could have read it, and it does not show that anyone did, though the "
+       "containers we control passed the checks listed above.",
 }
+
+PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
+                    "list of what it cannot see; the following are examples, not all of it. It never "
+                    "sees how long your search took and how large it was, which someone outside the "
+                    "machine can observe; what was left in the machine's memory afterwards; what the "
+                    "layer underneath the protected machine could do; or what the program did with "
+                    "your text once it had it.")
 
 # Said once, plainly, so the reader is not left to infer it from a list that happens to be short today.
 PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search ran on the "
@@ -1114,8 +1122,8 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "attach to their input and output, and permits most of them to run with raised "
                   "powers. Your provider does not control those and this record does not constrain "
                   "them. Nothing here establishes what passed through those streams, or that your "
-                  "text reached them. None of that shows anyone used those "
-                  "powers. It means the settings above describe one part of the machine, not the "
+                  "text reached them. This record does not show whether anyone used "
+                  "those powers. It means the settings above describe one part of the machine, not the "
                   "whole of it.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
@@ -1151,10 +1159,7 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         # abstract disclaimer into something a reader can actually picture.
     if True:  # printed whether or not there are blockers: an EMPTY list is the strongest invitation
               # to read it as a census, so the warning must not disappear with it.
-        print("    Any such list can only hold things this check looks at. It cannot see, and so never "
-              "lists: how long your search took and how large it was, which someone outside the machine "
-              "can observe; what was left in the machine's memory afterwards; what the layer underneath "
-              "the protected machine could do; or what the program did with your text once it had it.")
+        print("    " + PLAIN_CANNOT_SEE)
 
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,

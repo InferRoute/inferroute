@@ -268,7 +268,9 @@ def test_the_block_separates_a_fact_about_the_record_from_a_fact_about_privacy()
     """A reader said of an earlier draft: 'it sounds like a bank vault... but it is about whether the
     report is honest, not whether my invention stayed private.'"""
     text = _plain(0, [STDIO_BLOCKER])
-    assert "It is not a fact about whether your text stayed private." in text
+    # wording changed after a reader said "has not been altered sounds like security; it is just
+    # the receipt being intact" — the PROPERTY pinned here is the separation, not the phrasing.
+    assert "does not mean your text stayed private" in text
 
 
 @pytest.mark.parametrize("word", ["honest", "sealed", "we would rather say so plainly"])

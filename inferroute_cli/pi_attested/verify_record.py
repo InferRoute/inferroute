@@ -1026,8 +1026,8 @@ PLAIN_ANSWER: Dict[int, str] = {
 
 # Said once, plainly, so the reader is not left to infer it from a list that happens to be short today.
 PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search ran on the "
-                  "machine this record describes, and the record has not been altered since. That is a "
-                  "fact about the record. It is not a fact about whether your text stayed private.")
+                  "machine this record describes, and the record has not been altered since. That "
+                  "means this receipt is intact. It does not mean your text stayed private.")
 
 # A reader who is told only what is wrong has nothing to do. A reader told what to ask for does.
 # Derived from the blockers rather than written in, so it disappears when the gap is closed.
@@ -1056,7 +1056,7 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
     ("allow_elevated",
      "no raised privileges"),
     ("allow_runtime_logging",
-     "host-visible logging as off"),
+     "the logging that would otherwise show what happened to whoever runs the machine as off"),
 )
 
 # Second: always leave the reader a next step, even when it is "nothing, this time". Ordered by what a
@@ -1110,17 +1110,22 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
             print()
             print("    For the containers your provider controls, the policy document records "
                   + _join_plain(shut) + ". But the same document lets the cloud platform run further "
-                  "containers inside the same protected area, permits those to use their own input and "
+                  "containers inside the same protected machine, permits those to use their own input and "
                   "output, and permits most of them to run with raised powers. Your provider does not "
-                  "control those and this record does not constrain them. So the settings above are "
-                  "what the document says about one part of the machine, not about the whole of it.")
+                  "control those and this record does not constrain them. None of that shows anyone used those "
+                  "powers. It means the settings above describe one part of the machine, not the "
+                  "whole of it.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         print()
         # NOT "assume it was disclosed": that instructs a legal posture the evidence does not support,
         # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
-        print("    What you can do: take that uncertainty to someone qualified before deciding what it "
-              "means for your filing. This record cannot settle it either way.")
+        # A tested reader rejected "ask someone qualified" as the only step: "that costs money, and
+        # I'd be paying someone to tell me the same can't-know". Lead with something free and real.
+        print("    What you can do: keep this record with your filing papers. It is the evidence of "
+              "what was and was not established, it does not expire, and it costs nothing to keep. "
+              "If the uncertainty bears on what you are filing, that part is a question for someone "
+              "qualified — this record cannot settle it either way.")
     print()
     # The licensed technical sentence still reaches this reader. It restates the answer above in the
     # verifier's own terms, which is mild redundancy -- and the alternative was editing another

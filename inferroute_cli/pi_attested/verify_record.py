@@ -1110,9 +1110,11 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
             print()
             print("    For the containers your provider controls, the policy document records "
                   + _join_plain(shut) + ". But the same document lets the cloud platform run further "
-                  "containers inside the same protected machine, permits those to use their own input and "
-                  "output, and permits most of them to run with raised powers. Your provider does not "
-                  "control those and this record does not constrain them. None of that shows anyone used those "
+                  "containers inside the same protected machine, permits whoever operates the machine to "
+                  "attach to their input and output, and permits most of them to run with raised "
+                  "powers. Your provider does not control those and this record does not constrain "
+                  "them. Nothing here establishes what passed through those streams, or that your "
+                  "text reached them. None of that shows anyone used those "
                   "powers. It means the settings above describe one part of the machine, not the "
                   "whole of it.")
         raw = blockers or []
@@ -1122,10 +1124,15 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
         # A tested reader rejected "ask someone qualified" as the only step: "that costs money, and
         # I'd be paying someone to tell me the same can't-know". Lead with something free and real.
-        print("    What you can do: keep this record with your filing papers. It is the evidence of "
-              "what was and was not established, it does not expire, and it costs nothing to keep. "
-              "If the uncertainty bears on what you are filing, that part is a question for someone "
-              "qualified — this record cannot settle it either way.")
+        print("    What you can do: keep this record with your filing papers. It sets down what was and "
+              "was not established on the day it was made, and it costs nothing to keep. It is not a "
+              "clean bill of health, and re-checking it later can give a different answer — the check "
+              "asks the chip maker about certificates as they stand on the day you run it. If the "
+              "uncertainty bears on what you are filing, that part is a question for someone qualified; "
+              "this record cannot settle it either way.")
+        if ask:
+            print(f"    For future searches: {ask}. That is a change your provider can make. It cannot "
+                  "change this one, and it would not by itself make the answer yes.")
     print()
     # The licensed technical sentence still reaches this reader. It restates the answer above in the
     # verifier's own terms, which is mild redundancy -- and the alternative was editing another
@@ -1142,7 +1149,9 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         # An auditor called the preamble "honest but fragile": a reader who skims it and dives into the
         # bullets treats them as a census. Naming the CATEGORIES the instrument cannot see turns an
         # abstract disclaimer into something a reader can actually picture.
-        print("    That list can only hold things this check looks at. It cannot see, and so never "
+    if True:  # printed whether or not there are blockers: an EMPTY list is the strongest invitation
+              # to read it as a census, so the warning must not disappear with it.
+        print("    Any such list can only hold things this check looks at. It cannot see, and so never "
               "lists: how long your search took and how large it was, which someone outside the machine "
               "can observe; what was left in the machine's memory afterwards; what the layer underneath "
               "the protected machine could do; or what the program did with your text once it had it.")

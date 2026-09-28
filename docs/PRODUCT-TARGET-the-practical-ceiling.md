@@ -67,7 +67,53 @@ shipping a record that says less than the technology allows; claiming past it me
 | Clause | Was | Is |
 |---|---|---|
 | "byte for byte" | build not reproducible, nothing published | **done** — two no-cache builds byte-identical; gated only on the publication decision |
-| "nothing else ran inside" | row 1, ~3-4 months | row 1, **4-6 weeks**, gated on a days-long spike: can the launch measurement be predicted? |
+| "nothing else ran inside" | row 1, ~3-4 months | row 1, **abandoned** — the spike was run on 2026-09-29 and answered worse than "unpredictable". See below. |
+
+## The spike was run. Row 1 is a downgrade, not a delay.
+
+**2026-09-29, measured on a real `Standard_DC2as_v5` confidential VM in eastus.** Evidence:
+`sealed-research/docs/FINDING-cvm-spike-2026-09-29.md` (commit 72004e3).
+
+The question this row was gated on was "can the launch measurement be predicted by a third party?"
+The answer is that the question does not arise, because **the launch measurement does not cover our
+software at all**. `MEASUREMENT` is Azure's CVM firmware; it does not change when our code changes.
+And `HOST_DATA` — the field that carries `sha256(CCE policy)` on the confidential-container path we
+already run, and which is what makes "byte for byte" checkable by a stranger — is **32 zero bytes**
+on a CVM.
+
+Making `HOST_DATA` non-empty would not rescue it. On ACI that value means something *because the
+platform enforces the policy it hashes*. A CVM has no policy engine, so a value we placed there
+would be a label we chose for ourselves, committing the host to nothing. The conclusion therefore
+does not rest on proving that Azure exposes no knob to set it — that negative was neither proven
+nor needed.
+
+The only binding to our code available on a CVM runs through the vTPM: report → AK → quote → PCRs →
+measured boot → dm-verity root. That chain must be built from scratch, requires predicting PCRs from
+our published image, and terminates in a vTPM emulated by the paravisor rather than in silicon.
+
+**So row 1 does not dominate the current path — it trades clauses:**
+
+| clause | confidential containers (today) | confidential VM |
+|---|---|---|
+| "the program that ran is the one published, byte for byte" | **provable now** | **not provable** without building the whole measured-boot chain first |
+| "nothing else ran inside the protected machine" | **false** — 12 platform containers, all `allow_stdio_access`, 9 `allow_elevated` | achievable, since we would own the whole image |
+
+Note this inverts the reasoning in "Why row 2 is the precondition" above. That section argued row 2
+makes row 1's launch measurement predictable. It does not: on Azure the launch measurement is
+Microsoft's firmware, and no amount of reproducibility on our side reaches it.
+
+### The open decision (with Henry, asked 2026-09-29)
+
+**A.** Keep the containers substrate and stop claiming "nothing else ran". Say instead what is true
+and checkable: that the platform's own startup containers ran alongside ours, naming them and what
+each was permitted to do. The verifier already computes and prints this disclosure
+(`platform_dependency_disclosure`). Days, not months.
+
+**B.** Build the measured-boot + dm-verity chain on a CVM anyway, rebuilding the "byte for byte"
+clause by hand before breaking even, and ending on a paravisor vTPM.
+
+Recommended: **A.** The ceiling statement's second clause should be rewritten to the strongest TRUE
+form rather than held open for a substrate change that costs more than it returns. Pending Henry.
 | "nothing could leave" | months, and **unprovable by inspection** | **~1-2 weeks**, and mechanically checkable |
 
 The critical path is now **row 1**, not row 3. The ceiling moves from "months, with one clause that

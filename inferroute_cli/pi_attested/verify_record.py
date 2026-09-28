@@ -367,7 +367,8 @@ def report_signature_ok(p: Dict[str, Any], cert) -> bool:
 
 
 def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, pins: Dict[str, str],
-              min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> None:
+              min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+              floor_source: str = "configured", floor_skip: Optional[str] = None) -> None:
     import datetime as dt
     # The comparison is done before the f-string, not inside it: a backslash in an f-string expression is
     # a syntax error before Python 3.12, and this file has to run wherever the auditor's firm is.
@@ -412,11 +413,18 @@ def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, p
     # A minimum firmware TCB, same shape as the UVM SVN floor: a VCEK that agrees with the report still
     # passes on known-vulnerable firmware unless a floor is pinned.
     floor = (min_tcb or {}).get(product)
-    if floor:
+    if floor_skip:
+        c.add(None, "configured firmware TCB floor", floor_skip + f"; reported {want}")
+    elif floor:
         low = {k: (want.get(k), v) for k, v in floor.items() if want.get(k) is None or want[k] < v}
-        c.add(not low, "firmware TCB at or above minimum", f"minimum {floor}" + ("" if not low else f"; BELOW on {low}"))
+        # A PASS establishes only that the observed TCB is not below the signed reference's declared
+        # threshold, not that the threshold is AMD's recommended minimum or an independent baseline.
+        c.add(not low, "configured firmware TCB floor",
+              f"{floor_source} threshold {floor}; this comparison does not verify the threshold's source or vendor guidance"
+              + ("" if not low else f"; BELOW on {low}"))
     else:
-        c.add(None, "firmware TCB at or above minimum", f"no minimum pinned for {product} (pass --min-tcb {product}=snpSPL:N,ucodeSPL:N); reported {want}")
+        c.add(None, "configured firmware TCB floor",
+              f"no minimum pinned for {product} (pass --min-tcb {product}=snpSPL:N,ucodeSPL:N); reported {want}")
     ok = report_signature_ok(p, vcek)
     c.add(ok, "report signature", "ECDSA P-384 over the report verifies under the VCEK" if ok else "does NOT verify under the VCEK")
 
@@ -1656,7 +1664,9 @@ def _counted(rows: List[Tuple[Any, str]]) -> str:
 
 def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes, *, pins: Dict[str, str],
                    uvm_root: str, uvm_min_svn: int, policy_b64: Optional[str] = None,
-                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Optional[Dict[str, Any]]:
+                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+                   floor_skip: Optional[str] = None,
+                   floor_source: str = "configured") -> Optional[Dict[str, Any]]:
     """The AMD and Microsoft half: REPORT_DATA binds this runtime data, the report verifies under a VCEK
     that chains to a PINNED AMD root, the utility VM is endorsed by Microsoft and its measurement is the
     one in the report, and any policy shipped alongside hashes to HOST_DATA. Returns the parsed report."""
@@ -1676,7 +1686,8 @@ def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_by
             certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
             from cryptography.hazmat.primitives import serialization
             pem = lambda cs: b"".join(x.public_bytes(serialization.Encoding.PEM) for x in cs)  # noqa: E731
-            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins, min_tcb)
+            check_amd(c, p, pem(certs[:1]), pem(certs[1:]), pins, min_tcb,
+                      floor_source=floor_source, floor_skip=floor_skip)
         except Exception as exc:                            # noqa: BLE001
             c.add(False, "AMD endorsements", f"missing or unparsable ({type(exc).__name__})")
         try:
@@ -1746,6 +1757,34 @@ def reference_firmware_floors(reference: Optional[Dict[str, Any]]) -> Optional[D
     if reference is None or "min_tcb" not in reference:
         return None
     floors = reference["min_tcb"]
+    # Windowed declarations are kept as entries so their validity is evaluated against each
+    # statement's signed started_utc, just like policy and manifest identities.
+    if isinstance(floors, list):
+        if not floors:
+            raise ValueError("min_tcb entries must be a non-empty list")
+        combined: Dict[str, Dict[str, int]] = {}
+        for entry in floors:
+            if not isinstance(entry, dict) or not isinstance(entry.get("value"), dict):
+                raise ValueError("windowed min_tcb entries need a product mapping in value")
+            vf = _parse_time(entry.get("valid_from"))
+            vt_raw = entry.get("valid_to")
+            vt = _parse_time(vt_raw) if vt_raw else None
+            if vf is None or (vt_raw is not None and vt is None):
+                raise ValueError("windowed min_tcb entries need parseable valid_from and optional valid_to")
+            if vt is not None and vt < vf:
+                raise ValueError("min_tcb valid_to must not precede valid_from")
+            if "retired" in entry and type(entry["retired"]) is not bool:
+                raise ValueError("min_tcb retired must be a boolean when present")
+            parsed = _validate_firmware_floor_mapping(entry["value"])
+            for product, levels in parsed.items():
+                dst = combined.setdefault(product, {})
+                for key, value in levels.items():
+                    dst[key] = max(dst.get(key, 0), value)
+        return combined
+    return _validate_firmware_floor_mapping(floors)
+
+
+def _validate_firmware_floor_mapping(floors: Any) -> Dict[str, Dict[str, int]]:
     if not isinstance(floors, dict) or not floors:
         raise ValueError("min_tcb must be a non-empty product-to-level mapping")
     out: Dict[str, Dict[str, int]] = {}
@@ -1758,6 +1797,76 @@ def reference_firmware_floors(reference: Optional[Dict[str, Any]]) -> Optional[D
         if not any(levels.values()):
             raise ValueError("an all-zero min_tcb floor cannot constrain firmware")
         out[product] = dict(levels)
+    return out
+
+
+def reference_firmware_floor_at(reference: Optional[Dict[str, Any]], at_iso: Optional[str]
+                                ) -> Tuple[Optional[Dict[str, Dict[str, int]]], Optional[str]]:
+    """Return only the authenticated firmware floor active when this operation ran.
+
+    Flat legacy values lack a validity start and cannot establish a historical threshold. valid_from
+    and valid_to are inclusive UTC instants; absent/null valid_to is open-ended. A normal end preserves
+    applicability within the old window. retired=true is an explicit retroactive revocation and removes
+    that entry from every window.
+    """
+    if reference is None or "min_tcb" not in reference:
+        return None, None
+    raw = reference["min_tcb"]
+    if isinstance(raw, dict):
+        _validate_firmware_floor_mapping(raw)
+        return None, "reference firmware floor has no validity window; historical applicability is unproven"
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("min_tcb must be a product mapping or a non-empty list of windowed entries")
+    at = _parse_time(at_iso)
+    if at is None:
+        return None, f"reference firmware floor cannot be time-scoped because started_utc {at_iso!r} is not parseable"
+    active: List[Dict[str, Dict[str, int]]] = []
+    reasons: List[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict) or not isinstance(entry.get("value"), dict):
+            raise ValueError("windowed min_tcb entries need a product mapping in value")
+        _validate_firmware_floor_mapping(entry["value"])
+        if "retired" in entry and type(entry["retired"]) is not bool:
+            raise ValueError("min_tcb retired must be a boolean when present")
+        if entry.get("retired", False):
+            reasons.append("floor entry is retired")
+            continue
+        vf_raw, vt_raw = entry.get("valid_from"), entry.get("valid_to")
+        vf = _parse_time(vf_raw) if vf_raw else None
+        vt = _parse_time(vt_raw) if vt_raw else None
+        if not vf_raw or vf is None or (vt_raw is not None and vt is None):
+            reasons.append("floor entry has a missing or invalid validity window")
+        elif vt is not None and vt < vf:
+            reasons.append("floor entry valid_to precedes valid_from")
+        elif at < vf:
+            reasons.append(f"search predates floor valid_from {vf_raw}")
+        elif vt is not None and at > vt:
+            reasons.append(f"search is after floor valid_to {vt_raw}")
+        else:
+            active.append(_validate_firmware_floor_mapping(entry["value"]))
+    if not active:
+        return None, "no authenticated firmware floor was active at this search time" + (
+            ": " + "; ".join(reasons) if reasons else "")
+    merged: Dict[str, Dict[str, int]] = {}
+    for floors in active:
+        for product, levels in floors.items():
+            dst = merged.setdefault(product, {})
+            for key, value in levels.items():
+                dst[key] = max(dst.get(key, 0), value)
+    return merged, None
+
+def effective_firmware_floors(reference_floors: Optional[Dict[str, Dict[str, int]]],
+                              explicit_floors: Optional[Dict[str, Dict[str, int]]]) -> Dict[str, Dict[str, int]]:
+    """Combine reference and CLI floors without allowing a CLI value to weaken the signed reference.
+
+    TCB levels are compared componentwise, so the effective requirement for each product/level is
+    the maximum of the supplied minima. A CLI floor may add a product or tighten a requirement.
+    """
+    out = {product: dict(levels) for product, levels in (reference_floors or {}).items()}
+    for product, levels in (explicit_floors or {}).items():
+        target = out.setdefault(product, {})
+        for level, value in levels.items():
+            target[level] = max(target.get(level, value), value)
     return out
 
 
@@ -1783,7 +1892,7 @@ def check_reference_firmware_before_sealing(c: Checks, offer: Dict[str, Any],
         check_amd(checked, report, pem(certs[:1]), pem(certs[1:]),
                   pins if pins is not None else AMD_ARK_SPKI_SHA256, floors)
         floor_rows = [(status, detail) for status, step, detail in checked.rows
-                      if step == "firmware TCB at or above minimum"]
+                      if step == "configured firmware TCB floor"]
         ok = not checked.failed and len(floor_rows) == 1 and floor_rows[0][0] == "PASS"
         c.add(ok, name, "the authenticated report meets the reference's declared minimum for this product"
               if ok else "refusing to seal: the declared firmware requirement was not verified for this "
@@ -1907,8 +2016,17 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     # 3-4. hardware and identity, asked by the same code the live client asks them with. `at` is this
     # statement's own time: a reference entry's window must have been current WHEN THE SEARCH RAN, not now.
     at = st.get("started_utc") if isinstance(st.get("started_utc"), str) else None
+    # The floor is resolved AT THIS STATEMENT'S TIME. A floor signed after a search ran did not
+    # constrain it, so it must SKIP rather than PASS: measured 2026-09-28, the live signed reference
+    # carried a FLAT floor and every delivered search predates it by three days.
+    reference_floor, floor_skip = reference_firmware_floor_at(reference, at)
+    operation_floor = (effective_firmware_floors(reference_floor, min_tcb)
+                       if reference_floor is not None else min_tcb)
+    floor_source = ("operator-declared authenticated reference" if reference_floor is not None
+                    else "explicit verifier configuration")
     p = check_hardware(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
-                       policy_b64=(evidence or {}).get("policy_b64"), min_tcb=min_tcb)
+                       policy_b64=(evidence or {}).get("policy_b64"), min_tcb=operation_floor,
+                       floor_skip=floor_skip, floor_source=floor_source)
     check_identity(c, rd, p, reference, at)
 
     # 5. content bindings — what this operation was, and that the record shows exactly what was signed.
@@ -2333,7 +2451,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         c.dump()
         fails += len(c.failed)
-        firmware_floor_results.append(any(status == "PASS" and name == "firmware TCB at or above minimum"
+        firmware_floor_results.append(any(status == "PASS" and name == "configured firmware TCB floor"
                                           for status, name, _ in c.rows))
     if searches:
         cc = Checks()

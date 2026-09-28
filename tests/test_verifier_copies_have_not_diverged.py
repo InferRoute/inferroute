@@ -46,11 +46,6 @@ CAPABILITIES: tuple[tuple[str, str], ...] = (
 # gate live for a THIRD divergence instead of going permanently red and being ignored — but the list
 # cannot rot: an entry that has stopped drifting FAILS, forcing its removal.
 KNOWN_OPEN_DRIFT: dict[str, str] = {
-    "windowed firmware floor": (
-        "In the sibling only. Porting it BEFORE Henry re-signs a windowed min_tcb would flip the "
-        "delivered pack's firmware row PASS->SKIP, because the live signed reference carries a FLAT "
-        "min_tcb. Closes when the re-sign and the port land together, in one signing."
-    ),
     "platform fragment disclosure": (
         "In the shipped client only; the sibling does not disclose the pinned ACI infra fragment's "
         "containers. Found by this test on its first run, not by a human. The other session owns it."

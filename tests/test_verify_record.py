@@ -88,13 +88,20 @@ def test_real_amd_chain_and_uvm_verify_under_production_pins(V, kms):
                  "AMD certificates in date"):
         assert must in names
     # a firmware-TCB floor is SKIP when none is pinned, PASS when met, FAIL when not
-    assert ("SKIP", "firmware TCB at or above minimum") in {(s, n) for s, n, _ in c.rows}
+    assert ("SKIP", "configured firmware TCB floor") in {(s, n) for s, n, _ in c.rows}
     c2 = V.Checks()
     V.check_amd(c2, p, _pem(certs[:1]), _pem(certs[1:]), V.AMD_ARK_SPKI_SHA256, min_tcb={"Milan": {"snpSPL": 8, "ucodeSPL": 115}})
-    assert "firmware TCB at or above minimum" not in c2.failed
+    assert "configured firmware TCB floor" not in c2.failed
     c3 = V.Checks()
     V.check_amd(c3, p, _pem(certs[:1]), _pem(certs[1:]), V.AMD_ARK_SPKI_SHA256, min_tcb={"Milan": {"snpSPL": 99}})
-    assert "firmware TCB at or above minimum" in c3.failed
+    assert "configured firmware TCB floor" in c3.failed
+    # A floor_skip wins over a pinned floor: if no floor was in force at the search's time, the row
+    # must SKIP rather than compare against a threshold that did not apply.
+    c4 = V.Checks()
+    V.check_amd(c4, p, _pem(certs[:1]), _pem(certs[1:]), V.AMD_ARK_SPKI_SHA256,
+                min_tcb={"Milan": {"snpSPL": 99}}, floor_skip="no floor was active at this search time")
+    assert "configured firmware TCB floor" not in c4.failed
+    assert ("SKIP", "configured firmware TCB floor") in {(s, n) for s, n, _ in c4.rows}
 
 
 def test_real_host_data_is_the_policy(V):
@@ -811,15 +818,50 @@ def test_a_firmware_floor_can_travel_in_the_reference(tmp_path, V, kms):
     covered by the reference's own signature."""
     d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
     ref = json.loads(_ref(tmp_path, "r.json", [host]).read_text())
-    ref["min_tcb"] = {"Milan": {"snpSPL": 99, "ucodeSPL": 1}}
+    # The floor must be WINDOWED and current at the statement's time to be enforced at all. A flat
+    # floor is no longer enforced anywhere (see the SKIP test below): its applicability was never
+    # established, so it cannot constrain a search that ran before anyone declared it.
+    def _windowed(levels):
+        return [{"value": {"Milan": levels}, "valid_from": "2000-01-01T00:00:00Z",
+                 "valid_to": None, "retired": False}]
+    ref["min_tcb"] = _windowed({"snpSPL": 99, "ucodeSPL": 1})
     p = tmp_path / "floor.json"
     p.write_text(json.dumps(ref))
     _, out = _run(d, "--reference", str(p))
-    assert "FAIL firmware TCB at or above minimum" in out
-    ref["min_tcb"] = {"Milan": {"snpSPL": 1, "ucodeSPL": 1}}
+    assert "FAIL configured firmware TCB floor" in out
+    ref["min_tcb"] = _windowed({"snpSPL": 1, "ucodeSPL": 1})
     p.write_text(json.dumps(ref))
     _, out = _run(d, "--reference", str(p))
-    assert "PASS firmware TCB at or above minimum" in out
+    assert "PASS configured firmware TCB floor" in out
+
+
+def test_a_FLAT_floor_is_not_enforced_and_says_why(tmp_path, V, kms):
+    """The change that matters for already-delivered records. A floor with no validity window cannot
+    be shown to have been in force when the search ran, so it SKIPS rather than PASSING. Measured
+    2026-09-28: the live signed reference carried a flat floor and all 70 delivered searches predate
+    its signing by three days — every one of those rows was a PASS that nothing supported."""
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = json.loads(_ref(tmp_path, "r.json", [host]).read_text())
+    ref["min_tcb"] = {"Milan": {"snpSPL": 1, "ucodeSPL": 1}}
+    p = tmp_path / "flat.json"
+    p.write_text(json.dumps(ref))
+    _, out = _run(d, "--reference", str(p))
+    assert "SKIP configured firmware TCB floor" in out
+    assert "no validity window" in out
+    assert "PASS configured firmware TCB floor" not in out
+
+
+def test_a_floor_whose_window_opens_AFTER_the_search_skips(tmp_path, V, kms):
+    """A signature made today cannot establish that a floor was in force last week."""
+    d, host = _ops_bundle(tmp_path, V, kms, [{"session": "s1", "seq": 1}])
+    ref = json.loads(_ref(tmp_path, "r.json", [host]).read_text())
+    ref["min_tcb"] = [{"value": {"Milan": {"snpSPL": 1, "ucodeSPL": 1}},
+                       "valid_from": "2099-01-01T00:00:00Z", "valid_to": None, "retired": False}]
+    p = tmp_path / "future.json"
+    p.write_text(json.dumps(ref))
+    _, out = _run(d, "--reference", str(p))
+    assert "SKIP configured firmware TCB floor" in out
+    assert "predates floor valid_from" in out
 
 
 # ───────────────── the filters: what was GIVEN, and what the enclave says applying it did ─────────────────

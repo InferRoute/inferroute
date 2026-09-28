@@ -1505,7 +1505,10 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 - The AMD root certificate is self-signed. All roots are. What matters is that it's AMD's.
 - The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The container is
   identified by HOST_DATA, checked against the reference.
-- A SKIP for "firmware TCB at or above minimum" means no minimum firmware level was pinned, not that the
+- A SKIP for "configured firmware TCB floor" means no floor was in force AT THE SEARCH'S TIME —
+  either none was pinned, or the reference's floor carries no validity window covering it. It
+  does not mean the firmware was old. A PASS establishes only that the observed TCB is not
+  below the declared threshold, not that the threshold is AMD guidance or an independent
   firmware is old. Report the levels you see.
 - The two SKIPs for the withheld texts (above) are by design.
 - Each `*.evidence.json` carries a `checks` array of its own, all `ok: true`. That is the client's own log

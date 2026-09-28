@@ -81,12 +81,38 @@ def test_divergence_is_reported_in_both_directions():
     )
 
 
-def test_the_capability_list_actually_discriminates():
-    """A marker that is present in EVERY file cannot detect anything. Each marker must be absent
-    from a text that lacks the capability, or this whole gate is a control that always passes."""
-    for name, marker in CAPABILITIES:
-        assert marker not in "", name
-        assert marker in OURS.read_text() or SIBLING.exists(), name
+def test_no_capability_has_vanished_from_BOTH_copies():
+    """The hole the other session found in my first version, which read:
+
+        assert marker not in ""                              # true of every string, always
+        assert marker in OURS.read_text() or SIBLING.exists() # passes whenever the sibling is on disk
+
+    Both assertions were decoration. The second is the dangerous one: on the machine where the
+    sibling checkout exists — the machine where deploys are cut — it passed for EVERY marker
+    regardless of the file's contents.
+
+    The real hazard it was meant to cover: a capability removed from BOTH copies. The divergence
+    tests compare the two sets and see no difference, so they stay green while the client quietly
+    loses a check. A marker present in neither copy means either a deliberate removal (delete the
+    row) or a silent regression (restore the code). Both need a human."""
+    ours = OURS.read_text()
+    theirs = SIBLING.read_text() if SIBLING.exists() else ""
+    vanished = [name for name, marker in CAPABILITIES if marker not in ours and marker not in theirs]
+    assert not vanished, (
+        f"these capabilities are in NEITHER copy: {vanished}. Either they were dropped on purpose — "
+        f"then delete the row from CAPABILITIES — or they were lost, and no divergence test can see "
+        f"it because both sides lost them together."
+    )
+
+
+def test_that_check_can_actually_FAIL():
+    """A guard is worth what it refuses. Feed the same predicate a marker neither copy contains and
+    confirm it is reported, rather than trusting that it would be."""
+    ours = OURS.read_text()
+    theirs = SIBLING.read_text() if SIBLING.exists() else ""
+    fake = "a-capability-marker-no-verifier-has-4f2a9c"
+    vanished = [n for n, mk in (("invented", fake),) if mk not in ours and mk not in theirs]
+    assert vanished == ["invented"], "the vanished-capability predicate cannot detect a missing marker"
 
 
 @pytest.mark.skipif(not SIBLING.exists(), reason=f"sibling verifier not on this machine: {SIBLING}")

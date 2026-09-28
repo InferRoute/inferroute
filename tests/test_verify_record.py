@@ -1562,8 +1562,24 @@ def test_no_reference_refuses_cleanly_and_reports_actual_attestation_files(tmp_p
         assert "no attestation in this folder" in out
 
 
+# A FLAT floor is no longer accepted at sealing time: it cannot be shown to have been in force, so
+# the check refuses rather than comparing against a threshold whose applicability is unproven. The
+# accepted case is therefore a WINDOWED floor whose window is open now.
+_OPEN = [{'value': {'Milan': {'snpSPL': 8}}, 'valid_from': '2000-01-01T00:00:00Z',
+          'valid_to': None, 'retired': False}]
+_CLOSED = [{'value': {'Milan': {'snpSPL': 8}}, 'valid_from': '2000-01-01T00:00:00Z',
+            'valid_to': '2001-01-01T00:00:00Z', 'retired': False}]
+_FUTURE = [{'value': {'Milan': {'snpSPL': 8}}, 'valid_from': '2099-01-01T00:00:00Z',
+            'valid_to': None, 'retired': False}]
+
+
 @pytest.mark.parametrize('floors,accepted', [
-    ({'Milan': {'snpSPL': 8}}, True),
+    (_OPEN, True),
+    ({'Milan': {'snpSPL': 8}}, False),   # flat: no window, so sealing refuses
+    (_CLOSED, False),                    # window already closed
+    (_FUTURE, False),                    # window not yet open
+    ([{'value': {'Milan': {'snpSPL': 8}}, 'valid_from': '2000-01-01T00:00:00Z',
+       'valid_to': None, 'retired': True}], False),   # retroactively revoked
     ({'Milan': {'snpSPL': 255}}, False),
     ({'Genoa': {'snpSPL': 1}}, False),
     ({}, False), (None, False), ([], False),

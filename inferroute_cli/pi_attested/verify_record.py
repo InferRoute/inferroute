@@ -1881,9 +1881,17 @@ def check_reference_firmware_before_sealing(c: Checks, offer: Dict[str, Any],
     """
     name = "reference firmware floor before sealing"
     try:
-        floors = reference_firmware_floors(reference)
-        if floors is None:
+        if reference is None or "min_tcb" not in reference:
             return  # No new success row for a reference that requested no firmware check.
+        # AT OFFER TIME, not flattened: sealing to a live enclave must compare against the floor in
+        # force right now. The flattened maximum could refuse a current offer over a window that has
+        # not opened, or accept one under a window that has closed.
+        import datetime
+        floors, floor_skip = reference_firmware_floor_at(
+            reference, datetime.datetime.now(datetime.timezone.utc).isoformat())
+        if floor_skip or floors is None:
+            c.add(False, name, "refusing to seal: " + (floor_skip or "no active firmware floor"))
+            return
         from cryptography.hazmat.primitives import serialization
         report = parse_report(base64.b64decode(offer["evidence"], validate=True))
         certs = load_certs(base64.b64decode(offer["endorsements"], validate=True))
@@ -2362,8 +2370,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ValueError as exc:
         print(f"REFUSED: invalid reference firmware requirement: {exc}")
         return 2
-    if not min_tcb:
-        min_tcb = reference_floors or {}
+    # Reference floors are selected PER STATEMENT in verify_search, at that statement's own time.
+    # Keeping the CLI floor separate is what stops a later reference threshold being applied
+    # retroactively to an older run — merging the flattened all-window maximum here did exactly that.
+    _ = reference_floors   # parsed above so a malformed reference still REFUSES; not used as a floor
     listed = set((manifest.get("files") or {}).keys())
     # A record can legitimately hold no search and still hold evidence: the sealed SESSION with the AI
     # machine (AUDIT.md claim 7). Such a pack became producible on 23 Sep, which made this branch reachable

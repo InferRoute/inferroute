@@ -528,3 +528,83 @@ Codex as the highest-value spend if they hold round budget.
 
 **Stop condition 3 remains the only one open**: attacks are named in every
 round, but no round has yet reported *no defect* in the plain statement.
+
+---
+
+## Iteration 12 — the other session moved, and the deepest defect surfaced
+
+### Codex's memfd route: validated on real hardware
+
+They proposed keeping combined coverage by holding `claims.bin` in a sealed
+guest **memfd** with a 52 GB container request, and asked for `/proc/self/fd`
+and memory behaviour to be verified before any re-sign. Done, in a live
+confidential group in eastus2:
+
+- **52 GB deploys** — `MemTotal 52,466,976 kB`, no swap, no regional refusal
+  (that was the risk I had flagged; it did not materialise).
+- **memfd needs no mount**, which is why their idea beats the tmpfs one I had:
+  the CCE mount rules never come into it. `PROC-PATH-OPEN-OK`, and
+  `RANDOM-READ-VIA-PATH-OK` — offset addressing, exactly what `claims.bin` does.
+- **20 GiB written and read back** at ~5 GB/s. Two independent accountings agree:
+  MemAvailable fell 20.04 GiB, `Shmem` rose to 20.00 GiB.
+
+Consequence: claims (15.49 GB) to memfd leaves **41.74 GB on disk** against the
+50 GB cap. Combined coverage without the encrypted-fs sidecar, without managed
+HSM, and without adding MAA as a trust party.
+
+**My first probe was green and wrong.** It reported `GROW-FINAL 15 GiB in 0s`
+with MemAvailable barely moving. 15 GiB cannot be written in zero seconds — it
+touched one page per GiB, so `ftruncate` left the memfd sparse and it measured
+apparent size, not allocation. The tell was the impossible number, not a failure.
+Rewritten to write every page. Flagged in crosstalk so the sparse version is not
+reused and passed for the wrong reason.
+
+### Their windowed min_tcb breaks the reference Henry already signed
+
+Verified by execution, not by reading their description. Their 6 floor tests
+pass. Then their own `reference_firmware_floor_at()` against the LIVE signed
+reference: `min_tcb` is a **flat dict**, so it returns `None` with "reference
+firmware floor has no validity window" — **the firmware row goes PASS → SKIP**.
+Henry re-signed at 00:00:28Z specifically to make that row PASS.
+
+Not an argument against their change — SKIP is the right verdict for an
+unwindowed floor, and I recommended exactly that. It is a **sequencing** point,
+and since every index route also needs a re-sign, the two must be ONE signing:
+windowed `min_tcb` + whatever the memfd route changes. Schema requested from them.
+
+Also found: their change lives in `sealed-research/sealedresearch/verify_record.py`
+and is **absent from the shipped client** — zero occurrences of "floor valid_from"
+in the served 0.9.65 bytes. The two verifier copies have now drifted twice.
+
+### The deepest wording defect, and it was ours
+
+Their proposed opening tested **worse on both axes** and was not shipped: the
+anxious reader lands on "someone probably did"; the complacent reader collapses
+it to "Says nobody read my text" and never parses the second sentence.
+
+But rejecting it exposed a defect in wording **we have shipped since 0.9.61**:
+"it does not show that anyone read it" reads as a **finding** — it implies a sign
+WOULD exist if someone had. Absence of evidence dressed as a result, through four
+audit rounds, each of which asked "is this sentence true?" — and it is. The
+defect is in what the form implies.
+
+Verified before acting: every verifier row concerns what was PERMITTED, none
+observes an access event, `allow_runtime_logging` is denied. No read-visibility
+at all. Two intermediate candidates were tested and rejected on measurement — a
+standalone "No." "lands as a verdict"; "who read what" presupposes readers exist;
+"in either direction" is the same cancel-out lever as the old "either".
+
+Shipped in **0.9.66** (`e674eae8…`): *"This record cannot tell you whether your
+text stayed private: it records what was permitted, not whether anyone read your
+text, so on that question it says nothing."* Ranked first for both personas —
+"the first version whose failure mode is not a lie". The positive anchor is the
+part every earlier version lacked; saying only what an instrument cannot do
+leaves a vacuum the reader fills with their prior.
+
+Tests re-pinned for the FOURTH time, now to invariants rather than phrases, plus
+a new test that forbids null-finding language outright and requires the anchor.
+
+**Honesty:** these reader rounds are simulated and say so. Audit budget is spent
+($13.32/$15), so this ships **audit-unconfirmed**. Residual risk named for the
+next round: "what was permitted → only permitted people → fine" — an inference
+from a true statement rather than a false one, better but still not licensed.

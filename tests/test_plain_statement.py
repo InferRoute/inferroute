@@ -263,15 +263,19 @@ def test_the_block_answers_the_readers_question_first():
     # evidence cannot answer either way) rather than "can this record prove it?". The PROPERTY
     # pinned here, not the phrasing: the first line carries the refusal AND the other bound, so
     # it can be read neither as a clean bill of health nor as evidence of a breach.
-    assert re.search(r"\bNo\b", first), f"the first line must answer the question, got: {first[:60]}"
-    # BOTH bounds, in the first line. Two audit rounds pushed this in opposite directions: one read a
-    # bare "No" as "the evidence shows it was NOT private"; the next read "No. It cannot rule out..." as
-    # "disclosure is probable" ("'cannot rule out' is logically weaker than 'possibly happened', but in
-    # common speech they converge"). Neither clause may lead the reader to a lean, so the symmetry is
-    # stated outright rather than left to be inferred from clause order.
-    assert re.search(r"does not show that anyone read", first), (
-        f"the first line must not read as a breach: {first}")
-    assert "silent both ways" in first, f"the first line must state the symmetry outright: {first}"
+    # FOURTH re-pinning. Each earlier version pinned a PHRASE ("No —", "cannot rule out",
+    # "silent both ways") and went red the moment the phrase changed, having no opinion about the
+    # claim. These are the invariants instead:
+    #   (i)   the sentence's subject is THE RECORD, so the refusal is scoped to the document rather
+    #         than read as a verdict on the reader's situation;
+    #   (ii)  it refuses the privacy claim;
+    #   (iii) it refuses the OPPOSITE claim too, so neither reader direction is licensed;
+    #   (iv)  it does not use evidence-shaped null-finding language (see the test below).
+    assert re.search(r"[Tt]his record|\bNo\b", first), f"the refusal must be scoped to the record: {first}"
+    assert re.search(r"cannot tell you whether|cannot rule out|cannot prove|stayed private\? No", first), (
+        f"the first line must refuse the privacy claim: {first}")
+    assert re.search(r"says nothing|silent both ways|either direction|does not show that anyone read", first), (
+        f"the first line must also refuse the opposite claim: {first}")
     assert len(first) < 220, f"the answer must be short enough to survive a skim, got {len(first)} chars"
 
 
@@ -320,9 +324,9 @@ def test_the_answer_states_BOTH_bounds():
     # ("cannot prove it stayed private") and the lower ("no sign anyone read it") each guard against
     # the opposite misreading; a round found each of those misreadings in turn.
     import re as _re
-    assert _re.search(r"cannot rule out|cannot prove|prove your text stayed private\? No", text), (
+    assert _re.search(r"cannot tell you whether|cannot rule out|cannot prove|stayed private\? No", text), (
         "the block must refuse the privacy claim explicitly")
-    assert _re.search(r"does not show that anyone (did|read)", text), (
+    assert _re.search(r"says nothing|silent both ways|either direction|does not show that anyone (did|read)", text), (
         "the block must also refuse the opposite claim, that disclosure occurred")
 
 
@@ -446,3 +450,23 @@ def test_the_platform_streams_are_not_the_readers_own_text():
     assert "attach to their input and output" not in para, (
         "'their' is read as the READER's input; name the containers the permission is about")
     assert "those containers' own input and output" in para
+
+
+def test_the_answer_does_not_report_a_null_FINDING_about_reads():
+    """The deepest defect found in this block, and it survived four audit rounds. "It does not show
+    that anyone read it" reads as a FINDING: it implies a sign WOULD exist if someone had read the
+    text, so the absence becomes evidence. It is not. Verified against this verifier: every row
+    concerns what was PERMITTED (allow_stdio_access, "in a position to read"), none observes an
+    access event, and runtime logging is denied by policy — the record has no read-visibility at all.
+    So the block must state the MECHANISM (what it records) rather than report a null result."""
+    m = _mod()
+    for reach, answer in m.PLAIN_ANSWER.items():
+        if reach < 0:
+            continue
+        for banned in ("no sign that anyone", "shows no sign", "does not show that anyone read"):
+            assert banned not in answer, (
+                f"reach {reach}: {banned!r} dresses absence of evidence as a finding; say what the "
+                f"record DOES record instead")
+        assert "records what was permitted" in answer, (
+            f"reach {reach}: the answer needs the positive anchor — what the record actually is — or "
+            f"the reader fills the vacuum with their prior")

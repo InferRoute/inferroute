@@ -434,3 +434,15 @@ def test_the_record_is_not_called_a_receipt():
     connotation of completion."""
     text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True}).lower()
     assert "receipt" not in text, "'receipt' connotes a settled, satisfactory transaction"
+
+
+def test_the_platform_streams_are_not_the_readers_own_text():
+    """An anxious reader called this the sentence they "read three times", and mapped it onto
+    themselves: "Whoever operates the machine can attach to input and output. My invention description
+    was the input." The pronoun's referent is the PLATFORM's containers, not the reader's search, and
+    ambiguity here converts a permission on other containers into an implied live tap on their text."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    para = next(l for l in text.splitlines() if "run further" in l)
+    assert "attach to their input and output" not in para, (
+        "'their' is read as the READER's input; name the containers the permission is about")
+    assert "those containers' own input and output" in para

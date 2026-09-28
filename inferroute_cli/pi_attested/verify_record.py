@@ -1125,7 +1125,7 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
             print("    For the containers your provider controls, the policy document records this: "
                   + _join_plain(shut) + ". But the same document lets the cloud platform run further "
                   "containers inside the same protected machine, permits whoever operates the machine to "
-                  "attach to their input and output, and permits most of them to run with raised "
+                  "attach to those containers' own input and output, and permits most of them to run with raised "
                   # The neutraliser sits AGAINST the alarming clause, not after it. An auditor: "the
                   # saving clause is present, but it arrives after the scary description. A reader who
                   # reads to the end gets the correction; a reader who stops midway does not." What the

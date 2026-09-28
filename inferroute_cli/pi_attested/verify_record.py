@@ -367,7 +367,7 @@ def report_signature_ok(p: Dict[str, Any], cert) -> bool:
 
 
 def check_amd(c: Checks, p: Dict[str, Any], vcek_pem: bytes, chain_pem: bytes, pins: Dict[str, str],
-              min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+              min_tcb: Optional[Dict[str, Dict[str, int]]] = None, *,
               floor_source: str = "configured", floor_skip: Optional[str] = None) -> None:
     import datetime as dt
     # The comparison is done before the f-string, not inside it: a backslash in an f-string expression is
@@ -961,8 +961,8 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     ("the policy has unresolved external fragments/imports, so the permission rows may "
      "omit effective rules — resolve and verify every dependency",
      "this verifier could not establish the complete rules because policy dependencies remain unresolved"),
-    ("a configured firmware floor did not PASS for every archived operation",
-     "a minimum firmware version was not successfully verified for every saved operation"),
+    ("a contemporaneous configured firmware floor did not PASS for every archived operation",
+     "no firmware floor shown to be active at the time of every saved search was checked and passed"),
     ("certificate revocation was not checked successfully (pass --check-revocation)",
      "a successful certificate-withdrawal check was not established for every relevant signing chain; "
      "this does not mean a certificate was withdrawn"),
@@ -1216,7 +1216,7 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
         blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
                         "omit effective rules — resolve and verify every dependency")
     if not floor_pinned:
-        blockers.append("a configured firmware floor did not PASS for every archived operation")
+        blockers.append("a contemporaneous configured firmware floor did not PASS for every archived operation")
     if not revocation_checked:
         blockers.append("certificate revocation was not checked successfully (pass --check-revocation)")
     if not authenticated:
@@ -1441,6 +1441,8 @@ def check_key_attestation(c: Checks, bundle_path: Optional[str], attestation_pat
 def _ref_windowed(reference: Dict[str, Any]) -> bool:
     """True when ANY reference entry carries a validity window or a retired flag. With none, the whole
     windowing apparatus is inert for this reference and no row may imply a time was checked."""
+    if isinstance(reference.get("min_tcb"), list):
+        return True          # a windowed floor is a list of entries, not the _ref_entries shape
     for field in ("policy_sha256", "index_manifest_sha256", "model_manifest_sha256"):
         for e in _ref_entries(reference, field):
             if e.get("valid_from") or e.get("valid_to") or e.get("retired"):

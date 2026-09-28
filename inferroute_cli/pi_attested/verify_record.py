@@ -1020,11 +1020,11 @@ PLAIN_ANSWER: Dict[int, str] = {
     # Codex's test_unestablished_coverage_does_not_call_an_intact_record_corrupt caught this.
     -1: "This record cannot answer that question. The details above say which evidence is missing, "
         "failed, or outside what this program checks.",
-    0: "Can this record prove your text stayed private? No \u2014 and it does not show that anyone read "
-       "it either. On that question this record is silent both ways.",
-    1: "Can this record prove your text stayed private? No \u2014 and it does not show that anyone read "
-       "it either. On that question this record is silent both ways, though the containers we control "
-       "passed the checks listed above.",
+    0: "This record cannot tell you whether your text stayed private: it records what was permitted, "
+       "not whether anyone read your text, so on that question it says nothing.",
+    1: "This record cannot tell you whether your text stayed private: it records what was permitted, "
+       "not whether anyone read your text, so on that question it says nothing \u2014 though the "
+       "permissions on the containers we control passed the checks listed above.",
 }
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "

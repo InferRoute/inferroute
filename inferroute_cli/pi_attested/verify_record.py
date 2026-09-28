@@ -921,10 +921,12 @@ AI_LANE_CONDITIONS = (
 PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
     -1: ("This verifier cannot give a privacy assurance from this record.",
          "The details above explain which evidence is missing, failed, or outside this verifier's scope."),
-    0: ("The saved search statements have valid signatures linked to hardware evidence for a protected computer.",
+    0: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
+        "computer \u2014 which establishes that this receipt is genuine, not that your text was protected.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
-    1: ("The saved search statements have valid signatures linked to hardware evidence for a protected computer, "
+    1: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
+        "computer \u2014 which establishes that this receipt is genuine, not that your text was protected \u2014 "
         "and the containers we control passed the listed protection checks. The cloud platform runs further "
         "containers alongside them that we identify but do not control.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
@@ -1058,13 +1060,17 @@ PLAIN_WHAT_IT_BUYS = ("That removes one reason this record cannot answer your qu
 # up as silence. "If the setting was fixed, tell me that — it's the only good news the report could
 # have carried." These are scoped deliberately: a closed control is one specific way in shut, never a
 # statement that the text stayed private.
+# SHORT AND PARALLEL, because this is the sentence a reader stops at. A non-technical tester read the
+# previous version -- one sentence carrying three nested relative clauses -- and said "my eyes slid off
+# it... I jumped ahead looking for a plain verdict", skipping the paragraph that follows and does the
+# real work. Each phrase is now a clause with one subject and one verb.
 PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
     ("allow_stdio_access",
-     "access by whoever runs the machine to the program's input and output as off"),
+     "whoever runs the machine cannot watch what goes into the program or what comes out"),
     ("allow_elevated",
-     "no raised privileges"),
+     "the program does not run with raised powers"),
     ("allow_runtime_logging",
-     "the logging that would otherwise show what happened to whoever runs the machine as off"),
+     "whoever runs the machine cannot collect a log of what happened"),
 )
 
 # Second: always leave the reader a next step, even when it is "nothing, this time". Ordered by what a
@@ -1116,7 +1122,7 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         shut = [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
         if shut:
             print()
-            print("    For the containers your provider controls, the policy document records "
+            print("    For the containers your provider controls, the policy document records this: "
                   + _join_plain(shut) + ". But the same document lets the cloud platform run further "
                   "containers inside the same protected machine, permits whoever operates the machine to "
                   "attach to their input and output, and permits most of them to run with raised "

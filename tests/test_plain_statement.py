@@ -373,3 +373,28 @@ def test_the_platform_prose_names_the_actor_and_stops_there():
     text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
     assert "whoever operates the machine to attach" in text
     assert "what passed through those streams" in text
+
+
+def test_the_one_reassuring_line_carries_its_own_limit():
+    """A non-technical tester called this "the one positive-sounding sentence", landing exactly where a
+    skimmer's eye lands after the technical paragraph: they read "valid", "signatures", "hardware
+    evidence", "protected" and took it as "certified protected, therefore my text was protected". The
+    qualifier existed, but in the NEXT sentence — "the reader has already been reassured by the time
+    they reach it". So the limit must live in the SAME sentence, before the first full stop."""
+    m = _mod()
+    for reach, (headline, _caveat) in m.PLAIN_BY_REACH.items():
+        if reach < 0:
+            continue
+        first = headline.split(". ")[0]
+        assert "not that your text was protected" in first, (
+            f"reach {reach}: the reassuring clause must carry its limit before the first full stop, "
+            f"or a skimmer stops at the reassurance: {first!r}")
+
+
+def test_the_closed_controls_read_as_separate_clauses():
+    """The same tester's eyes "slid off" the closed-controls sentence when each item was a long noun
+    phrase with nested relative clauses. Each item must be a short clause with its own subject."""
+    m = _mod()
+    for key, phrase in m.PLAIN_CLOSED_WORDS:
+        assert len(phrase.split()) <= 15, f"{key}: too long to read in passing ({len(phrase.split())} words)"
+        assert " as off" not in phrase, f"{key}: 'X as off' is the config's grammar, not a reader's"

@@ -110,3 +110,71 @@ def test_a_legacy_flat_floor_is_not_handed_a_window_retroactively():
                  min_tcb={"Genoa": {"snpSPL": 23}}, valid_from="2026-09-28T00:00:28Z")
     assert len(ref["min_tcb"]) == 1, "the legacy flat floor must be dropped, not silently windowed"
     assert ref["min_tcb"][0]["value"] == {"Genoa": {"snpSPL": 23}}
+
+
+# ── a later floor must never be applied retroactively ─────────────────────────────────────────────
+# Found by the sealed-research session reviewing my port (b144c32): I ported the time-scoped
+# resolver but left two call sites using the FLATTENED all-window maximum. Proven before fixing:
+# with windows of snpSPL 20 (closed) and 25 (current), a record from the old window reporting 20 was
+# checked against 25 and refused. Valid old records rejected; the opposite of what windowing is for.
+
+_TWO_WINDOWS = {"min_tcb": [
+    {"value": {"Milan": {"snpSPL": 20}}, "valid_from": "2026-01-01T00:00:00Z",
+     "valid_to": "2026-06-01T00:00:00Z", "retired": False},
+    {"value": {"Milan": {"snpSPL": 25}}, "valid_from": "2026-06-01T00:00:00Z",
+     "valid_to": None, "retired": False},
+]}
+
+
+def _vr():
+    import importlib.util
+    import pathlib
+    p = pathlib.Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested" / "verify_record.py"
+    s = importlib.util.spec_from_file_location("vr_floors", p)
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m
+
+
+def test_the_floor_active_at_an_OLD_search_is_the_old_one():
+    m = _vr()
+    floor, skip = m.reference_firmware_floor_at(_TWO_WINDOWS, "2026-03-01T00:00:00Z")
+    assert skip is None
+    assert floor == {"Milan": {"snpSPL": 20}}, (
+        "a search inside the first window must be judged by the floor that was in force then, not by "
+        "a later, stricter one")
+
+
+def test_the_flattened_floor_is_STRICTER_than_any_single_window():
+    """Why flattening is not a safe default: the combined view is the maximum across every window,
+    including windows that had not opened when the search ran."""
+    m = _vr()
+    flattened = m.reference_firmware_floors(_TWO_WINDOWS)
+    active_then = m.reference_firmware_floor_at(_TWO_WINDOWS, "2026-03-01T00:00:00Z")[0]
+    assert flattened["Milan"]["snpSPL"] == 25
+    assert active_then["Milan"]["snpSPL"] == 20
+    assert flattened["Milan"]["snpSPL"] > active_then["Milan"]["snpSPL"]
+
+
+def test_main_does_not_seed_the_cli_floor_from_the_reference():
+    """The actual defect, pinned at its source. main() used to default min_tcb to the flattened
+    reference floor; the per-statement path then merged that in as though the operator had typed it,
+    so the later window won. The CLI floor must carry only what was typed."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "inferroute_cli" / "pi_attested" / "verify_record.py").read_text()
+    assert "min_tcb = reference_floors or {}" not in src, (
+        "main() is seeding the CLI floor from the reference again; that applies a later reference "
+        "threshold retroactively to older searches")
+
+
+def test_sealing_resolves_the_floor_at_offer_time():
+    """The second call site: sealing to a LIVE enclave must use the floor in force now, not the
+    flattened maximum, which could refuse a current offer over a window that has not opened."""
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "inferroute_cli" / "pi_attested" / "verify_record.py").read_text()
+    seal = src[src.index("def check_reference_firmware_before_sealing"):]
+    seal = seal[:seal.index("\ndef ", 10)]
+    assert "reference_firmware_floor_at(" in seal, "sealing must resolve the floor at offer time"
+    assert "floors = reference_firmware_floors(reference)" not in seal, "sealing still flattens"

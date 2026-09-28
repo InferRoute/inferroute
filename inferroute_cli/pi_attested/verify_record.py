@@ -922,11 +922,11 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
     -1: ("This verifier cannot give a privacy assurance from this record.",
          "The details above explain which evidence is missing, failed, or outside this verifier's scope."),
     0: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
-        "computer \u2014 which establishes that this receipt is genuine, not that your text was protected.",
+        "computer \u2014 which establishes that this record is genuine, not that your text was protected.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
     1: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
-        "computer \u2014 which establishes that this receipt is genuine, not that your text was protected \u2014 "
+        "computer \u2014 which establishes that this record is genuine, not that your text was protected \u2014 "
         "and the containers we control passed the listed protection checks. The cloud platform runs further "
         "containers alongside them that we identify but do not control.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
@@ -1020,11 +1020,11 @@ PLAIN_ANSWER: Dict[int, str] = {
     # Codex's test_unestablished_coverage_does_not_call_an_intact_record_corrupt caught this.
     -1: "This record cannot answer that question. The details above say which evidence is missing, "
         "failed, or outside what this program checks.",
-    0: "Can this record prove your text stayed private? No. It cannot rule out that someone with "
-       "access to the machine could have read it, and it does not show that anyone did.",
-    1: "Can this record prove your text stayed private? No. It cannot rule out that someone with "
-       "access to the machine could have read it, and it does not show that anyone did, though the "
-       "containers we control passed the checks listed above.",
+    0: "Can this record prove your text stayed private? No \u2014 and it does not show that anyone read "
+       "it either. On that question this record is silent both ways.",
+    1: "Can this record prove your text stayed private? No \u2014 and it does not show that anyone read "
+       "it either. On that question this record is silent both ways, though the containers we control "
+       "passed the checks listed above.",
 }
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
@@ -1037,7 +1037,7 @@ PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. The
 # Said once, plainly, so the reader is not left to infer it from a list that happens to be short today.
 PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search ran on the "
                   "machine this record describes, and the record has not been altered since. That "
-                  "means this receipt is intact. It does not mean your text stayed private.")
+                  "is a fact about the record. It is not a fact about whether your text stayed private.")
 
 # A reader who is told only what is wrong has nothing to do. A reader told what to ask for does.
 # Derived from the blockers rather than written in, so it disappears when the gap is closed.
@@ -1126,11 +1126,15 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   + _join_plain(shut) + ". But the same document lets the cloud platform run further "
                   "containers inside the same protected machine, permits whoever operates the machine to "
                   "attach to their input and output, and permits most of them to run with raised "
-                  "powers. Your provider does not control those and this record does not constrain "
-                  "them. Nothing here establishes what passed through those streams, or that your "
-                  "text reached them. This record does not show whether anyone used "
-                  "those powers. It means the settings above describe one part of the machine, not the "
-                  "whole of it.")
+                  # The neutraliser sits AGAINST the alarming clause, not after it. An auditor: "the
+                  # saving clause is present, but it arrives after the scary description. A reader who
+                  # reads to the end gets the correction; a reader who stops midway does not." What the
+                  # document PERMITS is not a record of what HAPPENED, and that has to be said here.
+                  "powers. That is what the document allows, not a record of what happened: nothing "
+                  "here establishes what passed through those streams, or that your text reached them, "
+                  "and this record does not show whether anyone used those powers. Your provider does "
+                  "not control those containers and this record does not constrain them. It means the "
+                  "settings above describe one part of the machine, not the whole of it.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         print()

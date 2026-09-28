@@ -264,7 +264,14 @@ def test_the_block_answers_the_readers_question_first():
     # pinned here, not the phrasing: the first line carries the refusal AND the other bound, so
     # it can be read neither as a clean bill of health nor as evidence of a breach.
     assert re.search(r"\bNo\b", first), f"the first line must answer the question, got: {first[:60]}"
-    assert "does not show that anyone did" in first, f"the first line must not read as a breach: {first}"
+    # BOTH bounds, in the first line. Two audit rounds pushed this in opposite directions: one read a
+    # bare "No" as "the evidence shows it was NOT private"; the next read "No. It cannot rule out..." as
+    # "disclosure is probable" ("'cannot rule out' is logically weaker than 'possibly happened', but in
+    # common speech they converge"). Neither clause may lead the reader to a lean, so the symmetry is
+    # stated outright rather than left to be inferred from clause order.
+    assert re.search(r"does not show that anyone read", first), (
+        f"the first line must not read as a breach: {first}")
+    assert "silent both ways" in first, f"the first line must state the symmetry outright: {first}"
     assert len(first) < 220, f"the answer must be short enough to survive a skim, got {len(first)} chars"
 
 
@@ -274,9 +281,11 @@ def test_the_block_separates_a_fact_about_the_record_from_a_fact_about_privacy()
     """A reader said of an earlier draft: 'it sounds like a bank vault... but it is about whether the
     report is honest, not whether my invention stayed private.'"""
     text = _plain(0, [STDIO_BLOCKER])
-    # wording changed after a reader said "has not been altered sounds like security; it is just
-    # the receipt being intact" — the PROPERTY pinned here is the separation, not the phrasing.
-    assert "does not mean your text stayed private" in text
+    # The PROPERTY pinned here is the SEPARATION, not the phrasing — this assertion has been rewritten
+    # twice already because it was pinned to a sentence rather than to what the sentence must do.
+    import re as _re
+    assert _re.search(r"(not a fact about whether|does not mean) your text stayed private", text), (
+        "the integrity claim must be separated from the privacy claim in so many words")
 
 
 @pytest.mark.parametrize("word", ["honest", "sealed", "we would rather say so plainly"])
@@ -307,8 +316,14 @@ def test_the_answer_states_BOTH_bounds():
     """'Cannot rule out' alone let a reader supply the lower bound themselves and lean to 'probably no'.
     Telling them to assume disclosure is the same defect with the sign reversed."""
     text = _plain(0, [STDIO_BLOCKER])
-    assert "cannot rule out" in text
-    assert "does not show that anyone did" in text
+    # Both bounds must be present SOMEWHERE in the block, however they are phrased. The upper bound
+    # ("cannot prove it stayed private") and the lower ("no sign anyone read it") each guard against
+    # the opposite misreading; a round found each of those misreadings in turn.
+    import re as _re
+    assert _re.search(r"cannot rule out|cannot prove|prove your text stayed private\? No", text), (
+        "the block must refuse the privacy claim explicitly")
+    assert _re.search(r"does not show that anyone (did|read)", text), (
+        "the block must also refuse the opposite claim, that disclosure occurred")
 
 
 def test_it_never_instructs_the_reader_to_assume_disclosure():
@@ -398,3 +413,24 @@ def test_the_closed_controls_read_as_separate_clauses():
     for key, phrase in m.PLAIN_CLOSED_WORDS:
         assert len(phrase.split()) <= 15, f"{key}: too long to read in passing ({len(phrase.split())} words)"
         assert " as off" not in phrase, f"{key}: 'X as off' is the config's grammar, not a reader's"
+
+
+def test_a_permission_is_not_an_event():
+    """An auditor found the platform-container disclosure "arrives after the scary description. A reader
+    who reads to the end gets the correction; a reader who stops midway does not." The clause that says
+    a PERMISSION is not an EVENT must sit inside the same sentence run as the permissions themselves,
+    not trail the paragraph."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    para = next(l for l in text.splitlines() if "run further" in l)
+    scary = para.index("permits most of them to run with raised powers")
+    cure = para.index("not a record of what happened")
+    assert cure - scary < 120, (
+        f"the neutraliser sits {cure - scary} chars after the alarming clause; it must be adjacent")
+
+
+def test_the_record_is_not_called_a_receipt():
+    """"Receipt" primes a reassuring frame: in everyday English it is proof of a COMPLETED, satisfactory
+    transaction. An auditor asked for "record" or "document" because the evidence has not earned the
+    connotation of completion."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True}).lower()
+    assert "receipt" not in text, "'receipt' connotes a settled, satisfactory transaction"

@@ -305,6 +305,7 @@ def parse_min_tcb(specs: List[str]) -> Dict[str, Dict[str, int]]:
 def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, valid_from: Optional[str] = None,
           valid_to: Optional[str] = None, source: Optional[str] = None, supersede: bool = False,
           note: Optional[str] = None, min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+          backdate_reason: Optional[str] = None,
           image_source: Optional[str] = None) -> Dict[str, Any]:
     """Create or extend a reference.
 
@@ -373,9 +374,44 @@ def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, val
     # Both are merged, not replaced wholesale, so extending a reference for one product does not silently
     # drop the floor pinned for another.
     if min_tcb:
-        floors = dict(ref.get("min_tcb") or {})
-        floors.update(min_tcb)
-        ref["min_tcb"] = floors
+        if valid_from or valid_to:
+            # WINDOWED floor. Schema agreed with the sealed-research session 2026-09-28: valid_from is
+            # REQUIRED and inclusive; valid_to may be absent/null for an open window and is inclusive
+            # when present; `retired: true` is a RETROACTIVE revocation, distinct from ordinary
+            # supersession (which closes the old window with valid_to and leaves retired false).
+            if not valid_from:
+                raise ValueError("a windowed firmware floor needs --valid-from: an entry with no start "
+                                 "cannot be time-scoped, and the verifier will SKIP it")
+            existing = ref.get("min_tcb")
+            entries = list(existing) if isinstance(existing, list) else []
+            if isinstance(existing, dict) and existing:
+                # A legacy flat floor cannot be handed a window after the fact. Its applicability was
+                # never established, which is exactly why the verifier SKIPs it; inventing a start date
+                # now would assert something this signature cannot support. Drop it and say so.
+                entries = []
+            # THE BACK-DATING GUARD. A floor signed today did not constrain a search that ran last week.
+            # The temptation is real and specific: back-dating valid_from is the only way to turn an
+            # already-delivered record's firmware row from SKIP to PASS, and doing so would manufacture
+            # a threshold that did not exist when the search ran. Refuse it unless it is stated
+            # deliberately, with a reason that lands in the signed document.
+            prior = str(ref.get("published_at") or "")
+            if prior and valid_from < prior and not backdate_reason:
+                raise ValueError(
+                    f"refusing to back-date the firmware floor: valid_from {valid_from} precedes this "
+                    f"reference's previous published_at {prior}. A signature made now cannot establish "
+                    f"that a floor was in force earlier, and searches before it must SKIP. Pass "
+                    f"--backdate-floor-reason if the floor genuinely took effect then; the reason is "
+                    f"recorded in the signed reference.")
+            entry = {"value": min_tcb, "valid_from": valid_from, "valid_to": valid_to, "retired": False}
+            if backdate_reason:
+                entry["backdated_because"] = backdate_reason
+            ref["min_tcb"] = entries + [entry]
+        else:
+            floors = dict(ref.get("min_tcb") or {})
+            if not isinstance(ref.get("min_tcb"), dict):
+                floors = {}
+            floors.update(min_tcb)
+            ref["min_tcb"] = floors
     if image_source:
         ref["image_source"] = image_source
     ref["published_at"] = _utcnow()
@@ -590,6 +626,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     b.add_argument("--source", default=None, help="where a reader is told to get this (engagement letter, release note)")
     b.add_argument("--min-tcb", action="append", default=[], metavar="PRODUCT=level:N,...",
                    help="firmware floor, e.g. Genoa=snpSPL:23,ucodeSPL:84 (repeatable per product)")
+    b.add_argument("--backdate-floor-reason", default=None, metavar="WHY",
+                   help="state why a firmware floor genuinely took effect BEFORE this reference was "
+                        "published. Recorded in the signed document. Without it, back-dating is refused: "
+                        "a signature made now cannot establish that a floor was in force earlier.")
     b.add_argument("--image-source", default=None, metavar="URL",
                    help="where the program that ran can be read; naming it does NOT verify a build")
     b.add_argument("--note", default=None)
@@ -644,6 +684,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             ref = build(vals, merge=_read(a.merge) if a.merge else None, valid_from=a.valid_from,
                         valid_to=a.valid_to, source=a.source, supersede=a.supersede, note=a.note,
                         min_tcb=parse_min_tcb(a.min_tcb) if a.min_tcb else None,
+                        backdate_reason=getattr(a, "backdate_floor_reason", None),
                         image_source=a.image_source)
             _write(ref, a.out)
             if a.from_offer:

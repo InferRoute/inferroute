@@ -608,3 +608,87 @@ a new test that forbids null-finding language outright and requires the anchor.
 ($13.32/$15), so this ships **audit-unconfirmed**. Residual risk named for the
 next round: "what was permitted → only permitted people → fine" — an inference
 from a true statement rather than a false one, better but still not licensed.
+
+---
+
+## Iteration 13 — stop condition 3 MET, and a brief that graded a ghost
+
+### The round: `0966-local-r3`, rc=0, 74 tool turns, $3.27
+
+> "I found no sentence that is literally false or that I could make false by
+> constructing an evidence configuration... I rate it as the most defensible
+> version I have seen in this audit series."
+
+Attacks named: the reach→sentence mapping across all levels including
+unwritten-level fallthrough; both the pessimistic and the reassuring direction of
+the opening; five specific misreadings tested one by one (five-gaps-as-census,
+keep-this-record-as-proof, permitted-implies-only-permitted, the firmware PASS
+row, and whether any check observes a read).
+
+It independently re-verified the factual claim the rewrite rests on: "I checked
+the codebase. No check observes an actual access or read event. All checks
+observe *permissions*... The statement `records what was permitted, not whether
+anyone read your text` is therefore correct and does not understate what the
+record knows."
+
+**STOP CONDITION 3 IS MET.**
+
+### Its one carry-forward converges with tonight's floor finding
+
+It flagged the firmware row: "the row itself is accurate, but its framing as a
+PASS rather than a descriptive match may lead a reader to credit it as an
+independently meaningful threshold... still deserves scrutiny."
+
+That is the same defect reached independently from the reference side: the floor
+is a descriptive capture taken FROM the records, and the windowed `min_tcb` will
+turn those rows into an honest SKIP. Two paths, same conclusion, already being
+fixed. No new work.
+
+### It took three attempts, and the first two failures were instructive
+
+**r1 ($3.90) graded a sentence that does not ship.** Its question (a) quoted
+"No — this record cannot rule out..." — 0.9.63's line. That came from MY BRIEF,
+not the pack: each brief is derived from the previous round's by substituting
+versions and hashes, so the PROSE travels unchanged and any quoted wording goes
+stale silently. Finding void.
+
+Killed the class rather than the instance: the runner now refuses a brief whose
+quotes the current pack does not render. The test is narrow enough to have no
+opinion about ordinary question prose — a quote is stale only if an OLDER pack
+rendered it and the current one does not. Two bugs found while building it, each
+of which would have made it useless:
+- comparing against verifier SOURCE never matched, because the source splits
+  sentences across adjacent string literals (`your " "text.`). It compares
+  RENDERED output now;
+- the first version CRASHED on a bad path and the runner turned that into a
+  refusal. A guard that dies looks exactly like a guard that fired.
+
+Question (a) now tells the auditor to read the line from the pack and quote it
+verbatim, "do not take any quotation of it from this brief, which may be stale".
+
+**r2 ($3.08) died on `502: All providers exhausted`** — caught by the transcript
+gate (rc=5) although the harness exited 0. Its report looked complete and its
+verdict was favourable, and it was NOT counted: a degraded run's absence
+assertions are its least trustworthy output, and "I found no overclaim" is
+exactly that.
+
+**A correction inside that.** I challenged r2 for claiming it verified Intel TDX
+fields, on the grounds that our enclaves are SEV-SNP. Wrong. The pack genuinely
+carries TDX attestation for the CONVERSATION side (`tdx_shape: "Genuine TDX,
+debug off"`, ML-KEM-768 + ChaCha20-Poly1305) — Claim 7, distinct from the SEV-SNP
+search enclave. I nearly discredited a correct finding by doubting before
+checking.
+
+### Where the four stop conditions stand
+
+1. **reach >= 1** — dropped earlier as mis-specified: it is unreachable without
+   an overclaim, because the platform's own containers are outside our control.
+2. **naive-reader test** — the "not less confident" half was dropped as
+   mis-specified (a reader who arrives believing the sales page SHOULD leave less
+   confident). The measurable half — can repeat something accurate to a third
+   party — is met.
+3. **independent audit finds no defect and names its attacks** — **MET**.
+4. **no blocker we could have closed and did not** — pends the fresh record,
+   which is blocked on the index route and one signature.
+
+**Spend:** $23.57 of $50.

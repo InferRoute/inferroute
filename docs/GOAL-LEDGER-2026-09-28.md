@@ -291,3 +291,48 @@ prints its own message.
 **0.9.63 published** with findings 1 and 2 addressed, verified behaviourally from inside the wheel.
 
 **Spend:** $7.43 of $15 on audits; roughly $2 of Azure across five enclave attempts.
+
+---
+
+## Iteration 9 — the other session read the SERVED wheel and found two pieces of dead code
+
+Codex returned and reviewed 0.9.63. I confirmed every finding by downloading and EXECUTING the
+published wheel rather than reading the tree. All four held.
+
+1. **The blocker-specific ask was computed and never printed.** `PLAIN_ASKS` had three entries, none
+   rendered; `"keep this record"` printed unconditionally. I dropped the `if ask:` branch when
+   reworking the action after a reader test. Two releases shipped a forward-looking step no reader
+   saw. **I would not have found this by re-reading my own diff** — it needed someone executing the
+   artifact.
+2. **The uncaptured-channel categories vanished with an EMPTY blocker list**, because they sat inside
+   `if reasons:`. The sentence that stops a reader treating the list as a census disappeared exactly
+   when the list looked cleanest. The better of the two catches.
+3. **"It does not expire"** conflated an unchanged receipt with an unchanging verdict: the verifier
+   checks certificate validity against today and fetches a current CRL, so a later re-check can
+   answer differently.
+4. **The platform prose did not name the actor.** `allow_stdio_access` permits WHOEVER OPERATES THE
+   MACHINE to attach to those streams, and establishes nothing about what passed through them.
+
+All four fixed in e624313, verified behaviourally, 251 tests.
+
+**CONFIRMED AND NOT FIXED — the firmware floor is not windowed.** Measured on the live reference and
+the served verifier: `min_tcb` is a flat product-to-levels map while `policy_sha256` entries carry
+`valid_from`/`valid_to`, and `reference_firmware_floors` takes no time argument. A floor signed at
+2026-09-28T00:00:28Z is therefore applied to searches from 22-25 Sep and prints a bare PASS. The
+comparison is arithmetically true and the row implies the floor was IN FORCE. Same shape as the OTS
+post-dating finding. Left for the session that owns the claim ladder, with the recommendation that a
+floor post-dating a search should read SKIP with the reason rather than PASS.
+
+**Codex fixed the INDEX_ROOT default** in sealed-research: implicit US-only default removed, fail-fast
+config check, and an Azure blob-existence check before build or deploy.
+
+**Enclave, still unresolved.** Past the 404, but the search container still terminates with Error —
+and with the stdio-closed policy the container logs are empty BY DESIGN, so the failure is invisible.
+Checked the cheap hypothesis first rather than spending a run: the tar's top-level directory is
+`sealed-patent-root-usall-epwo/`, matching INDEX_SUBDIR, so that is not the cause. A control with
+stdio enabled is running to make the logs readable.
+
+**Audit machines remain the bottleneck.** ade dropped at launch (89 bytes of output: just the ssh
+error), mac-papa has timed out repeatedly mid-transfer. mgld could run a round — it has node, pi and
+ir 0.9.63 — but the auditor would then have our repositories in reach, which weakens exactly the
+independence the round exists to provide. Using it only as a last resort, and it would be stated.

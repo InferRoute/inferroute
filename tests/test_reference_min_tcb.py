@@ -178,3 +178,36 @@ def test_sealing_resolves_the_floor_at_offer_time():
     seal = seal[:seal.index("\ndef ", 10)]
     assert "reference_firmware_floor_at(" in seal, "sealing must resolve the floor at offer time"
     assert "floors = reference_firmware_floors(reference)" not in seal, "sealing still flattens"
+
+
+def test_a_bare_min_tcb_writes_a_flat_floor_and_SAYS_it_enforces_nothing(capsys):
+    """A bare --min-tcb still composes per-product, which is deliberate -- but the result is a flat
+    floor, and a flat floor is never enforced. The composition is left alone; the SILENCE is not."""
+    ref = build(dict(GOOD), min_tcb={"Genoa": {"snpSPL": 23}})
+    assert isinstance(ref["min_tcb"], dict), "per-product composition semantics are unchanged"
+    warned = capsys.readouterr().out
+    assert "enforces nothing" in warned, f"got: {warned!r}"
+    assert "--valid-from" in warned, "the warning must name what fixes it"
+
+
+def test_a_build_that_inherits_a_FLAT_floor_says_it_enforces_nothing(capsys):
+    """How the live reference came to enforce nothing (measured 2026-09-29): the changeover build
+    windowed policy_sha256, index_manifest_sha256 and model_manifest_sha256, but did not re-supply
+    --min-tcb, so a pre-existing flat floor passed through untouched and silently. It reads as
+    protection and protects nothing, on every record past and future."""
+    legacy = build(dict(GOOD))
+    legacy["min_tcb"] = {"Genoa": {"snpSPL": 23}}          # the legacy flat shape
+    capsys.readouterr()
+    out = build(dict(GOOD), merge=legacy, valid_from="2026-09-28T00:00:28Z")
+    assert isinstance(out["min_tcb"], dict), "this test is about the flat floor SURVIVING the build"
+    warned = capsys.readouterr().out
+    assert "enforces nothing" in warned, f"a surviving flat floor must be called out, got: {warned!r}"
+    assert "--valid-from" in warned, "the warning must name what fixes it"
+
+
+def test_a_WINDOWED_floor_draws_no_warning(capsys):
+    """The inversion: the warning must distinguish. A windowed floor IS enforced, so warning about it
+    would train the operator to ignore the line that matters."""
+    ref = build(dict(GOOD), min_tcb={"Genoa": {"snpSPL": 23}}, valid_from="2026-09-28T00:00:28Z")
+    assert isinstance(ref["min_tcb"], list)
+    assert "enforces nothing" not in capsys.readouterr().out

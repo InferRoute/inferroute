@@ -415,6 +415,18 @@ def build(values: Dict[str, str], *, merge: Optional[Dict[str, Any]] = None, val
     if image_source:
         ref["image_source"] = image_source
     ref["published_at"] = _utcnow()
+    # A flat floor can SURVIVE a build that never touched it: the 2026-09-28 changeover windowed the
+    # three digest fields but did not re-supply --min-tcb, so the legacy flat floor passed through
+    # untouched and went on enforcing nothing, on every record past and future. Nothing said so. Say so.
+    if isinstance(ref.get("min_tcb"), dict) and ref["min_tcb"]:
+        products = ", ".join(sorted(ref["min_tcb"]))
+        print(f"  WARNING: the firmware floor in this reference ({products}) enforces nothing.")
+        print("  Having no validity window, it cannot be shown to have been in force when any search")
+        print("  ran, so the verifier SKIPs that row for every record, past and future. It reads as")
+        print("  protection and is not. Give it a window by re-supplying it with --valid-from:")
+        print("    --min-tcb " + " --min-tcb ".join(
+            f"{prod}=" + ",".join(f"{k}:{v}" for k, v in sorted(levels.items()))
+            for prod, levels in sorted(ref["min_tcb"].items())))
     return ref
 
 

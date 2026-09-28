@@ -437,3 +437,94 @@ gap and tells the client what to ask for — and build the US-only record when h
 can sign.
 
 **Spend:** $10.23 of $15 on audits; ~$3 of Azure across seven enclave attempts.
+
+---
+
+## Iteration 11 — the pendulum, and a number I asserted without checking
+
+### Round 0964-local: the findings inverted direction
+
+37,907 events, 48 tool turns, **$3.09**, rc=0, on the published 0.9.64 pack.
+
+Six named attacks on the verifier, **all failing closed**: tampered `reply_to`
+(only that search's recipient row FAILs, statement signature stays VALID, exit
+1); unparseable `started_utc`; statement time outside the window; a misleading
+policy *comment* claiming stdio disabled; a Rego `default` rule instead of an
+explicit container field; mixed container values. Its words: "I found **no
+correctness defect** in the verifier's cryptographic checks, windowing logic,
+revocation handling, or tamper detection."
+
+It also downloaded the wheel and `.sha256` from inferroute.ai independently,
+confirmed `sha256sum -c` passes and that the wheel's verifier matches the pack's
+byte-for-byte. **The provenance gap earlier rounds raised is closed** (PyPI
+remains absent, recorded as informational).
+
+**The plain-statement findings reversed direction.** Every earlier round pushed
+against over-confidence; this one found **pessimism bias** — an anxious reader
+latching onto "cannot rule out" and landing on "disclosure is probable", which
+the evidence supports no better than its opposite. "'Cannot rule out' is
+logically weaker than 'possibly happened', but in common speech they converge."
+
+The auditor proposed leading with the reassuring clause. **Not taken** — that is
+the exact placement a reader round already caught failing the other way, so it
+would have relocated the defect rather than removed it. Instead neither clause
+leads and the symmetry is stated outright: "No — and it does not show that
+anyone read it either. On that question this record is silent both ways."
+
+A free reader round then adjudicated the call: "an improvement without
+overshooting", with residual over-reassurance confined to a reader who stops
+after the first line, which the later paragraphs close. That reader still leaned
+pessimistic, for a reason no wording repairs — "when I don't know and the
+downside is my whole company, I round to the bad answer" — and noticed their own
+lean while leaning anyway. That is a prior, not a misreading; the text should
+not be bent to flatter it.
+
+Also fixed (`320f43d`, `0.9.65`):
+- the permission-is-not-an-event clause now sits **82 chars** from the alarming
+  clause instead of trailing the paragraph ("a reader who stops midway" missed it);
+- "receipt" removed — it connotes a *completed, satisfactory* transaction; the
+  new test caught a second occurrence written earlier the same day and missed;
+- "attach to **their** input and output" → "those containers' own", after a
+  reader mapped the pronoun onto themselves: "my invention description was the
+  input", concluding an operator had a live tap.
+
+**Two self-inflicted items, recorded rather than smoothed over:**
+- Swapping out "receipt" produced a **tautology** ("the record has not been
+  altered since. That means this document has not been altered"). Caught by the
+  existing separation test.
+- A reader reaction — reading a gap line as "the door was unlocked" — was **not**
+  acted on: it came from the raw-fallback rendering that my own test input
+  triggered. The real blocker renders in plain words. Verified before concluding.
+
+**0.9.65 published**, `2e8d9f65…`, verified by hash AND by executing the served
+wheel.
+
+### The 50 GB cap: asserted, then actually checked
+
+Henry asked where it came from. It came from **one comment written 2026-09-14
+with no measurement cited** — and I had, an hour earlier, corrected the
+*adjacent line of that same comment* for being wrong by 5×, then put a decision
+to him resting on the unverified neighbour. That is the failure: a number is not
+more reliable for sitting next to one you just disproved.
+
+Now verified against Microsoft's resource-and-quota-limits page, table
+"Confidential Container Resources": Max CPU 31, Max Memory 180 GB, **Storage 50
+GB**, "These maximums are hard limits and can't be increased." Storage is absent
+from the changeable-limits table, so no quota request raises it; standard
+non-confidential groups are also 50 GB, so it is not a confidential-computing
+penalty. We request 3 CPU / 28 GB against 31 / 180 — **storage is the only
+binding constraint**. Citation now in the code (sealed-research `aad522c`).
+
+One unexplored lever named for Codex: ACI permits 20 volumes per group, so an
+Azure Files mount could carry the index outside the 50 GB — but it is
+host-managed storage outside the encrypted boundary, and the volume enters the
+CCE policy, so it needs the same re-sign as the US-only route.
+
+### Budget
+
+**$13.32 of $15** on audits. That was the last fundable round, so 0.9.65's three
+plain-statement fixes ship **audit-suggested but audit-unconfirmed**. Flagged to
+Codex as the highest-value spend if they hold round budget.
+
+**Stop condition 3 remains the only one open**: attacks are named in every
+round, but no round has yet reported *no defect* in the plain statement.

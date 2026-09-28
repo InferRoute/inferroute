@@ -337,3 +337,33 @@ def test_the_gap_list_names_what_it_cannot_contain():
     for category in ("how long your search took", "left in the machine's memory",
                      "layer underneath", "once it had it"):
         assert category in text, category
+
+
+def test_the_computed_ask_is_actually_RENDERED():
+    """It was computed and never printed for two releases: I dropped the branch when reworking the
+    action and left PLAIN_ASKS as dead code. Found by the other session reading the served wheel."""
+    m = _mod()
+    text = _plain(0, [STDIO_BLOCKER])
+    assert any(a[:40] in text for _, a in m.PLAIN_ASKS), "the ask is computed but never rendered"
+
+
+def test_the_uncaptured_categories_survive_an_EMPTY_blocker_list():
+    """They lived inside `if reasons:`, so they vanished exactly when the list was empty — the most
+    reassuring state, and the one where reading the list as a census is most wrong."""
+    assert "It cannot see, and so never lists" in _plain(0, [])
+
+
+def test_the_record_is_not_described_as_never_expiring():
+    """'It does not expire' conflates an unchanged receipt with an unchanging verdict: the check asks
+    the chip maker about certificates as they stand on the day it is run."""
+    text = _plain(0, [STDIO_BLOCKER])
+    assert "does not expire" not in text
+    assert "different answer" in text
+
+
+def test_the_platform_prose_names_the_actor_and_stops_there():
+    """allow_stdio_access permits the OPERATOR to attach to container streams. It establishes nothing
+    about what passed through them."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    assert "whoever operates the machine to attach" in text
+    assert "what passed through those streams" in text

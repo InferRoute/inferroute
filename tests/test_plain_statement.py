@@ -327,3 +327,13 @@ def test_no_reassurance_about_encryption_of_working_storage():
     reassures about precisely the vector that is open."""
     text = _plain(0, [STDIO_BLOCKER], {"allow_unencrypted_scratch": True}).lower()
     assert "encrypted" not in text
+
+
+def test_the_gap_list_names_what_it_cannot_contain():
+    """An auditor called the 'not a complete list' preamble honest but fragile: a reader who skims it
+    and dives into the bullets treats them as a census. Name the categories the instrument cannot see."""
+    text = _plain(0, [STDIO_BLOCKER])
+    assert "It cannot see, and so never lists" in text
+    for category in ("how long your search took", "left in the machine's memory",
+                     "layer underneath", "once it had it"):
+        assert category in text, category

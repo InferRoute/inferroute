@@ -1139,6 +1139,13 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         print("    Gaps identified in this record:")
         for reason in reasons:
             print(f"      - {reason}")
+        # An auditor called the preamble "honest but fragile": a reader who skims it and dives into the
+        # bullets treats them as a census. Naming the CATEGORIES the instrument cannot see turns an
+        # abstract disclaimer into something a reader can actually picture.
+        print("    That list can only hold things this check looks at. It cannot see, and so never "
+              "lists: how long your search took and how large it was, which someone outside the machine "
+              "can observe; what was left in the machine's memory afterwards; what the layer underneath "
+              "the protected machine could do; or what the program did with your text once it had it.")
 
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,

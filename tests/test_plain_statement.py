@@ -226,7 +226,7 @@ def test_unsuccessful_revocation_and_partial_floor_do_not_mean_no_attempt(capsys
     m = _mod()
     _report_claims(m, floor_pinned=False, revocation_checked=False)
     plain = capsys.readouterr().out.split("In plain words, for a reader")[1]
-    assert "not successfully verified for every saved operation" in plain
+    assert "shown to be active at the time of every saved search" in plain
     assert "successful certificate-withdrawal check was not established" in plain
     assert "was not asked" not in plain and "machine's certificate" not in plain
 

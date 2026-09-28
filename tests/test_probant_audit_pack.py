@@ -838,7 +838,11 @@ def test_the_manifest_accounts_for_every_file_in_the_folder(tmp_path, V, kms, mo
     # so listing it inside would be circular too. Both are named here rather than silently tolerated.
     # ...plus the stationery, which is in the folder and deliberately NOT pinned: an auditor is invited to
     # write to the report template, so a hash on it would fail by design the moment they did.
-    accounted = set(m["files"]) | set(anchors) | set(m["stationery"]) | {"MANIFEST.json", "SHA256SUMS"}
+    # ...plus the build inputs, indexed under their own heading for the same reason as the anchors:
+    # they are material for REPRODUCING the program, not evidence of what was searched, so mixing
+    # them into SHA256SUMS would change what `sha256sum -c` means to a reader checking the record.
+    accounted = (set(m["files"]) | set(anchors) | set(m["stationery"])
+                 | set(m.get("build_inputs", {}).get("files", {})) | {"MANIFEST.json", "SHA256SUMS"})
     assert on_disk == accounted, on_disk ^ accounted
 
     # Listing them must not be mistaken for vouching for them.

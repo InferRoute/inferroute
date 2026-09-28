@@ -2067,6 +2067,51 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "files": {name: _sha256_hex(data) for name, data in sorted(anchor_files.items())},
     }
 
+    # THE BUILD INPUTS, so an auditor can close the chain locally instead of fetching anything.
+    # In the PACK and not in the published wheel, deliberately: the wheel is anonymously fetchable
+    # (verified), so shipping sources there would PUBLISH them, while the pack goes only to whoever
+    # receives the record. Same verification, private distribution.
+    # Listed in their own manifest section rather than in SHA256SUMS, for the reason stated above
+    # that list: a reader running `sha256sum -c SHA256SUMS` is checking the RECORD, and build inputs
+    # are material for reproducing the program, not evidence of what was searched.
+    build_files: Dict[str, bytes] = {}
+    src_root = Path(os.environ.get("IR_ENCLAVE_SOURCE_ROOT",
+                                   str(Path.home() / "workspaces" / "inferroute" / "sealed-research")))
+    dockerfile = src_root / "enclave" / "azure" / "Dockerfile.m2"
+    build_note = f"not included: no enclave source tree at {src_root}"
+    if dockerfile.is_file():
+        wanted = [dockerfile, src_root / "enclave" / "azure" / "requirements.txt", src_root / ".dockerignore"]
+        # The COPY list is parsed FROM the Dockerfile, so this set cannot drift from what the build
+        # actually consumes — a hand-maintained list would, and silently.
+        for line in dockerfile.read_text().splitlines():
+            if line.startswith("COPY ") and "requirements.txt" not in line:
+                wanted.append(src_root / line.split()[1])
+        missing = [w.name for w in wanted if not w.is_file()]
+        if missing:
+            build_note = f"not included: {len(missing)} build input(s) missing from the source tree: {missing[:4]}"
+        else:
+            for w in wanted:
+                # KEEP THE RELATIVE PATH. Flattening to the basename collided sealedresearch/,
+                # enclave/ and enclave/azure/__init__.py into one entry and silently dropped two
+                # files the build needs — caught because a test counts the folder rather than
+                # trusting the writer.
+                rel = w.relative_to(src_root).as_posix()
+                build_files["build/" + (rel if rel != ".dockerignore" else "dockerignore")] = w.read_bytes()
+            build_note = ("the inputs the enclave image is built from. A reproducible build was measured "
+                          "2026-09-28: two independent no-cache builds produced byte-identical layers. "
+                          "With these plus the deployment template you could regenerate the policy and "
+                          "recompute the HOST_DATA the chip signed, without trusting us for any of it.")
+    for name, data in build_files.items():
+        (dest / name).parent.mkdir(parents=True, exist_ok=True)
+        (dest / name).write_bytes(data)
+    manifest["build_inputs"] = {
+        "note": build_note,
+        "deployment_template": "NOT in this pack. Without it the policy cannot be regenerated, so the "
+                               "chain from these files to the signed HOST_DATA cannot be walked from "
+                               "this folder alone. Ask your provider for it.",
+        "files": {name: _sha256_hex(data) for name, data in sorted(build_files.items())},
+    }
+
     files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
     # SHA256SUMS stays the EVIDENCE list, in the shape `sha256sum -c` expects from the folder root. The
     # anchors are in MANIFEST.json under their own heading rather than mixed in here, because a reader

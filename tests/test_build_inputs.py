@@ -1,5 +1,6 @@
 """The credential boundary between our deployment template and a client's record pack."""
 import json
+import pathlib
 
 import pytest
 
@@ -66,3 +67,29 @@ def test_the_test_fixture_actually_contains_a_secret():
     """A sanitiser test whose fixture is already clean passes for the wrong reason."""
     assert "REAL-ACR-PW" in json.dumps(_live_shaped())
     assert "sig=" in json.dumps(_live_shaped())
+
+
+def test_build_inputs_are_OFF_by_default(tmp_path, monkeypatch):
+    """Shipping the enclave source makes the pack sensitive for US. The pack is otherwise the
+    shareable artifact — the client's own disclosure is already stripped from it — so a recipient
+    can forward it without thinking. It must not carry our source unless someone chose that.
+
+    The consistency argument matters more than the sensitivity one: after confinement lands, the
+    verification chain needs only the few lines that install the seccomp filter, never the ranking
+    code. Shipping everything to the first client sets an expectation the architecture does not
+    require of the next."""
+    monkeypatch.delenv("IR_INCLUDE_BUILD_INPUTS", raising=False)
+    import inferroute_cli.probant_export as E
+    src = (pathlib.Path(E.__file__)).read_text()
+    # The gate must be an equality against an explicit opt-in, not a truthiness check that "0" passes.
+    assert 'os.environ.get("IR_INCLUDE_BUILD_INPUTS") == "1"' in src
+    code = [l for l in src.splitlines() if "IR_INCLUDE_BUILD_INPUTS" in l and not l.lstrip().startswith("#")]
+    assert len(code) == 1, f"one gate only; a second site can diverge from it: {code}"
+
+
+def test_the_default_pack_SAYS_they_are_available_rather_than_staying_silent():
+    """Absence with no explanation reads as an oversight, and a reader cannot ask for what they do
+    not know exists."""
+    import inferroute_cli.probant_export as E
+    src = pathlib.Path(E.__file__).read_text()
+    assert "available on request" in src

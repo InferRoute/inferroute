@@ -1091,6 +1091,18 @@ PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
     ("does not name a source for the image",
      "ask your provider to publish the program's source and tie it to the exact version that ran, so "
      "someone you trust can read what it does with your text"),
+    # LEFT ALONE DELIBERATELY, after an adversarial review said the "improvement" was a regression.
+    # The build is now reproducible and the recipe is published, so I rewrote this to name the two
+    # inputs still missing — the application sources and the deployment template. The review called
+    # it BLOCKING: "with both you can rebuild and recompute the identifying value yourself" implies
+    # those two items SUFFICE, when the reader would still need the Azure policy tooling and the
+    # skill to drive it. It also put "deployment template" and "identifying value" in front of
+    # someone who has just been told their invention's privacy cannot be confirmed, and read as
+    # though the provider were withholding rather than making an IP decision. Its verdict on the
+    # substance: "For this reader, the old sentence is better... adds detail without making the
+    # request easier to understand."
+    # The specifics belong where a technical adviser looks. inferroute.ai/build/ names both missing
+    # inputs exactly. This line stays simple, because its reader is not that adviser.
     ("image_source is only a reference field",
      "ask your provider to show that the published source was built into the exact program that ran, "
      "not merely that a source exists"),

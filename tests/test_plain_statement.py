@@ -248,10 +248,10 @@ def test_familiar_substrings_and_colons_do_not_swallow_unknown_qualifiers(blocke
 STDIO_BLOCKER = "policy x: the policy does not satisfy: policy denies host access to the enclave's stdio"
 
 
-def _plain(reach, blockers):
+def _plain(reach, blockers, closed=None):
     out = io.StringIO()
     with redirect_stdout(out):
-        _mod().report_plain(reach, blockers)
+        _mod().report_plain(reach, blockers, closed)
     return out.getvalue()
 
 
@@ -262,18 +262,6 @@ def test_the_block_answers_the_readers_question_first():
     assert first.startswith("No —"), f"the first line must answer the question, got: {first[:60]}"
 
 
-def test_the_ask_appears_only_while_the_gap_is_open():
-    """Generated, not written in: when the setting is closed the ask must disappear by itself.
-    Rewriting the sentence by hand is where every overclaim in this codebase came from."""
-    assert "one setting switched off" in _plain(0, [STDIO_BLOCKER])
-    assert "one setting switched off" not in _plain(0, ["policy x: some unrelated gap"])
-
-
-def test_the_ask_says_what_it_does_not_buy():
-    """Tested: without this a reader believes flipping one setting buys privacy."""
-    text = _plain(0, [STDIO_BLOCKER])
-    assert 'does not get you to "yes"' in text
-    assert 'would still be "cannot tell"' in text
 
 
 def test_the_block_separates_a_fact_about_the_record_from_a_fact_about_privacy():
@@ -294,3 +282,46 @@ def test_an_unwritten_level_answers_nothing():
     text = _plain(7, [STDIO_BLOCKER])
     assert "No plain statement is written" in text
     assert "cannot rule out" not in text
+
+
+# --- what survived two adversarial passes -----------------------------------------------------------
+
+
+def test_the_block_always_leaves_a_next_step():
+    """A reader given only gaps has nothing to say to anyone: 'like being told after surgery which
+    instruments weren't sterilised'. There is always a next step, even when it is only 'take it to
+    someone qualified'."""
+    for blockers in ([STDIO_BLOCKER], [], ["policy x: something unrecognised"]):
+        assert "What you can do" in _plain(0, blockers)
+
+
+def test_the_answer_states_BOTH_bounds():
+    """'Cannot rule out' alone let a reader supply the lower bound themselves and lean to 'probably no'.
+    Telling them to assume disclosure is the same defect with the sign reversed."""
+    text = _plain(0, [STDIO_BLOCKER])
+    assert "cannot rule out" in text
+    assert "does not show that anyone did" in text
+
+
+def test_it_never_instructs_the_reader_to_assume_disclosure():
+    """Steering a client's legal posture on evidence that does not support it is a defect in either
+    direction; the downside here is a panic filing or an abandoned application."""
+    text = _plain(0, [STDIO_BLOCKER]).lower()
+    for phrase in ("treat this text as having been shown", "assume it was read", "assume disclosure"):
+        assert phrase not in text
+
+
+def test_platform_containers_are_described_as_PERMITTED_not_unchecked():
+    """We measured them: all permit operator access to their streams, most run elevated, inside the same
+    boundary. Reporting that as 'not checked' turns a known adverse fact into an unexamined unknown,
+    which is an overclaim by omission."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_stdio_access": True, "allow_elevated": True})
+    assert "raised powers" in text
+    assert "does not check" not in text
+
+
+def test_no_reassurance_about_encryption_of_working_storage():
+    """SEV-SNP encrypts against the HOST; the platform's containers share the key domain. 'Encrypted'
+    reassures about precisely the vector that is open."""
+    text = _plain(0, [STDIO_BLOCKER], {"allow_unencrypted_scratch": True}).lower()
+    assert "encrypted" not in text

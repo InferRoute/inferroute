@@ -185,3 +185,58 @@ the row becomes PASS and printed gaps drop from 7 to 6. Shipped as 0.9.62.
 **Condition 4 status after this.** The only remaining gaps that could be closed and have not been are
 the firmware floor and the image source, both needing the offline publication key. Everything closable
 from this seat is closed.
+
+---
+
+## Iteration 7 — the reference is signed and live; the fresh record is close but not landed
+
+**Signed and installed.** Henry signed with the offline key. The live reference at
+`/home/henry/inferroute-publication/reference/current.json` now carries a WINDOWED changeover —
+historical `80c5424d…` valid until 2026-09-28T00:00:28Z, new `011b8b1a…` valid from then — plus the
+firmware floor `Genoa snpSPL:23, ucodeSPL:84, blSPL:10`.
+
+**The tool refused the first attempt and was right to.** Two entries current at once means two
+different enclaves both pass identity forever, including the old stdio-open policy. `--allow-overlap`
+would have silenced that rather than fixed it. Following the refusal produced a strictly better
+reference. Verified against real search times: the historical hash is current at a 09-24 search and
+REFUSED after the cutover; the new hash is refused before it and current after; an unparsable
+statement time fails closed.
+
+**Measured effect on the delivered pack:** firmware floor SKIP -> PASS, revocation PASS, identity
+still PASS on all 70 but now "at the search's time", client-facing gaps **7 -> 5**.
+
+**Cost paid for it:** the `current.json.ots` anchor commits to the OLD bytes, so it was archived. The
+live reference currently has NO timestamp anchor until Henry runs `ots stamp`. Stamping publishes a
+hash, so it is his call and not something to do on his behalf.
+
+**Fresh record: the policy runs, the service did not become ready.** Generated the stdio-closed policy
+against the EXISTING image pinned by digest — no rebuild, no push, so the program stays the one whose
+source the supplement matched. All 3 containers stdio false, deploy gate ACCEPTS, HOST_DATA
+`011b8b1a…`. It deployed and reached Running in 187s with 0 restarts. `/offer` never answered within
+1000s and it tore down cleanly.
+
+- westeurope refuses deployments outright ("region not accepting new customers"); eastus2 works.
+- My first explanation — a cross-region 34 GB pull — was WRONG: storage and registry are both eastus2.
+- An adversarial review named a better hypothesis I had missed (a key-release policy pinned to the old
+  HOST_DATA, which would fit every fact) — checked for $0, does not apply here.
+- It also corrected my pipe-blocking theory (~70% that unconnected stdio resolves to /dev/null) and
+  caught a blind spot: `containers[].instanceView` survives `--disable-stdio`, so per-container state
+  was readable all along. Group "Running, restartCount 0" does not exclude a Terminated container.
+- Reading the startup code made the likely answer mundane: it downloads 34 GB, then HASHES the whole
+  index for the manifest commitment, then pretouches. Known-good was 428s; the 1000s ceiling is only
+  2.3x that. Rerunning at 2400s with instanceView polling.
+
+**Note for the next release, not actionable now:** the right diagnostic is a `/status` endpoint
+reporting phase and bytes. It cannot be added tonight — changing the image changes its layer hashes,
+hence the policy, hence the HOST_DATA just signed into the reference.
+
+**Audit machine moved to `ade`** (mac-papa sleeps). node + pi installed, provider config proven
+(`PI_OK` from Kimi-K2.6-TEE), pack and 2071-word prompt staged. `ir` cannot be installed there
+(published wheel needs Python >=3.10, macOS ships 3.9.6) so the runner drives `pi` directly. **I
+overstated that as an auditor-facing defect and retract it:** VERIFY.md says 3.9+ and never asks an
+auditor to install the CLI.
+
+**Near-miss worth keeping:** a prompt rebuilt from a sleeping machine came out at 155 words — only the
+appendix — because the fetch returned empty and `sed` on empty input exits 0. A round on that brief
+would have returned "found nothing", which reads as a clean audit. The new runner refuses any brief
+under 500 words.

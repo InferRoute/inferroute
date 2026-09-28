@@ -240,3 +240,54 @@ auditor to install the CLI.
 appendix — because the fetch returned empty and `sed` on empty input exits 0. A round on that brief
 would have returned "found nothing", which reads as a clean audit. The new runner refuses any brief
 under 500 words.
+
+---
+
+## Iteration 8 — the audit landed, and the enclave failure was never about privacy
+
+**The audit round ran and found real defects. Stop condition 3 is NOT met, which is the right
+outcome.** 0.9.62, on mac-papa: 91,577 events, 76 tool turns, $5.73. It named what it attacked — it
+built a synthetic pack with all five listed gaps closed and confirmed the blocker-to-text mapping is
+mechanically sound.
+
+- **Finding 1, residual overclaim:** naming stdio as THE actionable setting gives the reader "a plan
+  of action that addresses a relatively small part of the risk surface" while the dozen
+  Microsoft-controlled containers sit in a technical bullet. Already fixed before the verdict arrived
+  (7381a9d, 8e59f72); the audited pack predates it.
+- **Finding 2, fixed in 2fae525:** the five-item list reads as a census. The preamble is "honest but
+  fragile". Fixed by naming the CATEGORIES the instrument cannot see — timing and size observable from
+  outside, memory remanence, the layer beneath the protected machine, and what the program did with
+  the text.
+- **Finding 3, recorded not fixed:** "min_tcb exactly matches every record's reported TCB, and the
+  reference was published after the records. It is a descriptive capture, not an independently
+  meaningful security threshold." A fair hit on a choice I defended. It does block downgrade; it is
+  not an external standard. Closing it needs a floor justified by AMD guidance.
+- **No defect in the verifier's check logic**, and explicitly no lexical overclaim in PLAIN_ANSWER or
+  PLAIN_NARROWER.
+- It could not verify the historical-image supplement: I never staged it into r0962.
+
+**The enclave failure had nothing to do with --disable-stdio.** Three runs died identically. The
+control — same image by digest, same region, historical stdio-ENABLED policy — failed the same way,
+which killed the hypothesis in one run. Root cause: `INDEX_ROOT` defaults to
+`/mnt/movies/sealed-patent-root-us`, so `BLOB_NAME` became `sealed-patent-root-us.tar`, while the
+staged blob is `sealed-patent-root-usall-epwo.tar` — matching the records' pipeline version
+`azure-m2-patent-usall-epwo-1`. Every attempt fetched a nonexistent blob:
+`HTTP Error 404: The specified blob does not exist`. Setting IR_M2_INDEX_ROOT cleared the 404.
+
+**Two process failures of mine, both worth keeping:**
+1. I ran the treatment three times before the control once. The control refuted the hypothesis
+   immediately. Run the control first when a variable is suspected.
+2. My diagnostic produced nothing for two runs because I started it on the line AFTER `deploy_m2` —
+   and `poll_offer_m2` raises from inside it, so it never returned. A diagnostic that cannot execute
+   during the failure it targets is decoration. Moved before the deploy, it immediately showed
+   `search Terminated Error` while the GROUP still read Running, and then the 404 itself.
+
+**Two runner defects found by using it:** the report path passed to the runner did not match the path
+named inside the prompt, so a round that produced a 20KB report was recorded as producing none; and
+the failure message said "the model stopped on an error" for every non-OK status, contradicting a
+transcript line that read OK. Both fixed: the path is now derived FROM the prompt, and each status
+prints its own message.
+
+**0.9.63 published** with findings 1 and 2 addressed, verified behaviourally from inside the wheel.
+
+**Spend:** $7.43 of $15 on audits; roughly $2 of Azure across five enclave attempts.

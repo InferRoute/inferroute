@@ -1018,13 +1018,14 @@ PLAIN_ANSWER: Dict[int, str] = {
     # Codex's test_unestablished_coverage_does_not_call_an_intact_record_corrupt caught this.
     -1: "This record cannot answer that question. The details above say which evidence is missing, "
         "failed, or outside what this program checks.",
-    0: "No — this record cannot rule out that someone with access to the machine could have read your text.",
+    0: "No — this record cannot rule out that someone with access to the machine could have read your "
+       "text. It also does not show that anyone did.",
     1: "No — this record cannot rule out that someone with access to the machine could have read your "
        "text, though the containers we control passed the checks listed above.",
 }
 
 # Said once, plainly, so the reader is not left to infer it from a list that happens to be short today.
-PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search really did run on the "
+PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search ran on the "
                   "machine this record describes, and the record has not been altered since. That is a "
                   "fact about the record. It is not a fact about whether your text stayed private.")
 
@@ -1040,7 +1041,50 @@ PLAIN_ASK_TRIGGER = "policy denies host access to the enclave's stdio"   # the R
 PLAIN_WHAT_IT_BUYS = ("That removes one reason this record cannot answer your question. It does not get "
                       "you to \"yes\". The answer would still be \"cannot tell\", for the reasons below.")
 
-def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
+# A reader given only what is MISSING has nothing to say to anyone. Tested: with the stdio gap closed
+# the ask disappeared and the same reader who had four actions was left with none — "it feels like
+# being told after surgery which instruments weren't sterilised", and they called the shorter version
+# WORSE. Two things follow, and both are theirs rather than mine.
+#
+# First: when a control IS closed, say so. The block only ever reported gaps, so a fixed setting showed
+# up as silence. "If the setting was fixed, tell me that — it's the only good news the report could
+# have carried." These are scoped deliberately: a closed control is one specific way in shut, never a
+# statement that the text stayed private.
+PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("allow_stdio_access",
+     "access by whoever runs the machine to the program's input and output as off"),
+    ("allow_elevated",
+     "no raised privileges"),
+    ("allow_runtime_logging",
+     "host-visible logging as off"),
+)
+
+# Second: always leave the reader a next step, even when it is "nothing, this time". Ordered by what a
+# provider can actually act on, so the ask moves to the next open gap instead of vanishing with the
+# first one closed.
+PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
+    ("policy denies host access to the enclave's stdio",
+     "ask for a record made with one setting switched off: the setting that lets whoever runs the "
+     "machine watch what goes into the program and what comes out"),
+    ("does not name a source for the image",
+     "ask your provider to publish the program's source and tie it to the exact version that ran, so "
+     "someone you trust can read what it does with your text"),
+    ("image_source is only a reference field",
+     "ask your provider to show that the published source was built into the exact program that ran, "
+     "not merely that a source exists"),
+)
+PLAIN_NO_ASK = ("Nothing here is something you can fix yourself, and nothing about this search can be "
+                "changed now. For future searches, the gaps below are what to raise with your provider.")
+
+def _join_plain(items: List[str]) -> str:
+    """Join as prose, never as a numbered or bulleted list: a list invites a reader to count it."""
+    if len(items) == 1:
+        return items[0]
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def report_plain(reach: int, blockers: Optional[List[str]] = None,
+                 closed: Optional[Dict[str, Optional[bool]]] = None) -> None:
     print()
     print("  In plain words, for a reader who will not read the table above")
     pair = plain_statement(reach)
@@ -1061,10 +1105,22 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None) -> None:
     if reach >= 0:
         print()
         print(f"    {PLAIN_NARROWER}")
-        if any(PLAIN_ASK_TRIGGER in r for r in (blockers or [])):
+        shut = [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
+        if shut:
             print()
-            print(f"    {PLAIN_ASK}")
-            print(f"    {PLAIN_WHAT_IT_BUYS}")
+            print("    For the containers your provider controls, the policy document records "
+                  + _join_plain(shut) + ". But the same document lets the cloud platform run further "
+                  "containers inside the same protected area, permits those to use their own input and "
+                  "output, and permits most of them to run with raised powers. Your provider does not "
+                  "control those and this record does not constrain them. So the settings above are "
+                  "what the document says about one part of the machine, not about the whole of it.")
+        raw = blockers or []
+        ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
+        print()
+        # NOT "assume it was disclosed": that instructs a legal posture the evidence does not support,
+        # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
+        print("    What you can do: take that uncertainty to someone qualified before deciding what it "
+              "means for your filing. This record cannot settle it either way.")
     print()
     # The licensed technical sentence still reaches this reader. It restates the answer above in the
     # verifier's own terms, which is mild redundancy -- and the alternative was editing another
@@ -1163,10 +1219,17 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         report_plain(-1)
         return
     reach, blockers = 1, []
+    closed_controls: Dict[str, Optional[bool]] = {}
     for hd, pol in policies:
         print(f"  policy {hd[:16]}…")
         c = Checks()
         posture = check_policy_posture(c, pol)
+        # Keep the WEAKEST result per control across policies: a control closed in one policy and open
+        # in another is not closed. Silence about a closed control is its own defect -- a reader told us
+        # "if the setting was fixed, tell me that; it is the only good news the report could carry".
+        for _k, _v in posture.items():
+            closed_controls[_k] = _v if _k not in closed_controls else (
+                _v if _v is not True else closed_controls[_k])
         c.dump(indent="    ")
         r, b = confidentiality_reach(posture, floor_pinned=floor_pinned,
                                      revocation_checked=revocation_checked,
@@ -1208,7 +1271,7 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
           "binding checks, NOT a sufficient privacy checklist:")
     for cond in AI_LANE_CONDITIONS:
         print(f"    - {cond}")
-    report_plain(reach, blockers)
+    report_plain(reach, blockers, closed_controls)
 
 
 # --- Revocation ---------------------------------------------------------------------------------------

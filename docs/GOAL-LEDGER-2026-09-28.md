@@ -336,3 +336,104 @@ stdio enabled is running to make the logs readable.
 error), mac-papa has timed out repeatedly mid-transfer. mgld could run a round — it has node, pi and
 ir 0.9.63 — but the auditor would then have our repositories in reach, which weakens exactly the
 independence the round exists to provide. Using it only as a last resort, and it would be stated.
+
+---
+
+## Iteration 10 — the audit round landed, and the enclave's real blocker surfaced
+
+### The 0.9.63 audit round (round `0963-local`, 55,560 events, 42 tool turns, $2.80, rc=0)
+
+Run on mgld, with the independence caveat stated: this round was driven from the
+same machine as the work, so it is an independent *model* and an independent
+*reading*, not an independent *operator*.
+
+Its verdict on the mapping was the part worth having: "mechanically sound… I
+could not construct a configuration where the sentence shown was the wrong one."
+That is a named attack that failed, which is what stop condition 3 asks for.
+
+Three findings, all in the direction that matters — literally true wording that
+leaves a non-technical reader more confident than the evidence warrants:
+
+1. The bare **"No —"** answered *"was your text private?"*, which this evidence
+   cannot settle either way, rather than *"can this record prove it?"*. Fixed by
+   naming the question inside the line. A reader test had already shown the pull
+   ("my gut says probably no… the lean toward no is my worry, not the paper").
+2. **"None of that shows anyone used those powers"** defanged the disclosure it
+   followed: "a skimming reader may retain 'they have powers, but didn't use
+   them' → 'I'm safe'." Replaced with what is known: *does not show whether*.
+3. Naming four uncapturable categories risked an **implied census** — "the cure
+   is milder than the disease it replaced, but not perfect". The set now declares
+   itself open before the examples.
+
+Commit `d6e8831`.
+
+**The three tests that broke were pinned to literal wording**, which is why they
+go red on every wording round without ever having an opinion about the claim.
+Rewritten as properties, and `PLAIN_CANNOT_SEE` hoisted to a constant so a test
+binds to the sentence's identity rather than its text — still catching deletion
+on an empty blocker list, no longer catching rephrasing.
+
+### The naive-reader round on the result
+
+Persona: non-technical inventor about to file. They ended **less confident** —
+which is correct, not a defect, and is why that stop condition was dropped
+earlier as mis-specified: a reader who arrives believing the sales page *should*
+leave knowing "the promise was bigger than the proof". Their sentence for their
+attorney was accurate and specific, which is the half of the condition that
+measures something.
+
+Their out-of-character accuracy check found two things three audit rounds had
+not, both about *placement* rather than content (commit `67ff282`):
+
+- **The one reassuring sentence outran its limit.** "…valid signatures linked to
+  hardware evidence for a protected computer" sits exactly where a skimmer's eye
+  lands after the technical paragraph; the qualifier was in the *next* sentence,
+  and "the reader has already been reassured by the time they reach it". The
+  limit now lives before the first full stop.
+- **The closed-controls sentence was unreadable** — one run-on with three nested
+  relative clauses. "My eyes slid off it… I jumped ahead looking for a plain
+  verdict", skipping the paragraph that does the real work. Each control is now
+  a short clause. Pinned: ≤15 words, and no "X as off", which is the config's
+  grammar rather than a reader's.
+
+**0.9.64 published**, `832dc009…`, verified behaviourally from inside the wheel.
+
+### The enclave: three invisible failures, one 8-day-old cause
+
+Three m2 deployments reached Running and exited **1** after ~7 minutes with **no
+container logs at all**.
+
+The missing logs are not a fault — they are the setting working. `az container
+logs` reads stdio through the host, and the policy we now deploy denies exactly
+that. **The confidentiality control we ship is also our diagnosis channel.**
+Three runs were spent blind on a message we could not read. Runbook consequence:
+diagnose on a stdio-OPEN policy, close it only for the known-good run.
+
+Root cause: the index blob was staged **2026-09-17**; the `missing_artifacts`
+gate landed **2026-09-25** (146e896). The staged index predates the requirement
+by 8 days and can never satisfy the current image. Nothing regressed — the blob
+was simply never re-staged.
+
+**A search for the four missing artifacts across mgld, ft, nm and the NAS
+returned zero hits, and I reported that they did not exist. That was wrong.**
+The builders write differently-named top-level directories; the required names
+are what they get linked *as*. Which graphs belong to the combined root was then
+settled by measurement rather than by the `epwo-` prefix: `Npos = 29,595,902`,
+exactly the combined ann's row count (the `us-` pair matches the US-only
+17,556,761). All four are now wired in and the checker passes. The root *name*
+was deliberately left alone — `INDEX_SUBDIR` is measured into the policy, so
+renaming it would invalidate the reference Henry signed as `011b8b1a…`.
+
+**What now blocks a fresh record is size, and it is Henry's call.** The completed
+combined tree measures **57.23 GB** against the container's **50 GB**. The whole
+overage is one artifact: the claim store is **15.49 GB** where the code's own
+DISK MATH comment budgeted "2-3 GB" — a comment that implied 23 GB of headroom
+while the truth was a 7 GB overrun. Corrected in place with `du -sbL` figures
+(sealed-research `6833e3d`). US-only measures **41.33 GB** and fits, but is a
+different `INDEX_SUBDIR`, hence a different HOST_DATA, hence a re-sign on the
+offline key. Reported to Henry by voice with a recommendation: deliver
+Bétrancourt with the existing record — whose wording already names this exact
+gap and tells the client what to ask for — and build the US-only record when he
+can sign.
+
+**Spend:** $10.23 of $15 on audits; ~$3 of Azure across seven enclave attempts.

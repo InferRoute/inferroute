@@ -980,7 +980,8 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
         # NOT "listed above": reach 1 also requires image_pinned and no_exec, which are not among
         # PLAIN_CLOSED_WORDS, so "listed above" invites the reader to treat the short plain list as
         # the whole of what was checked.
-        "and for the containers we control, the policy document records the protection settings this verifier checked.",
+        "and for the containers we control, the policy document records every protection setting this "
+        "verifier requires, only some of which are named in plain words above.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
 }

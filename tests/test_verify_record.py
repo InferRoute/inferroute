@@ -1889,13 +1889,18 @@ def test_state_C_does_not_claim_the_document_NAMES_its_dependencies(V):
 
 
 def test_the_level_one_headline_does_not_borrow_completeness(V):
-    """reach 1 gates on more than the plain list shows -- image_pinned, no_exec, the firmware floor.
-    Calling the handful of named items 'the required protection settings' invites a reader to treat
-    them as sufficient."""
+    """reach 1 gates on MORE than the plain list ever shows: allow_unencrypted_scratch (absent by
+    ruling), image_pinned and no_exec. Two previous wordings each implied the named handful was the
+    whole -- "the required protection settings", then "the protection settings this verifier checked".
+    Moving the adjective does not fix it; the sentence has to SAY the list is partial."""
     one = V.PLAIN_BY_REACH[1][0]
-    assert "listed above" not in one
-    assert "required protection settings" not in one, one
-    assert "this verifier checked" in one, one
+    named = {k for k, _ in V.PLAIN_CLOSED_WORDS}
+    gates = {r[0] for r in V.CONFIDENTIALITY_POSTURE} | {"image_pinned", "no_exec"}
+    assert gates - named, "if the plain list ever becomes complete, delete this test rather than weaken it"
+    for borrowed in ("listed above", "required protection settings",
+                     "the protection settings this verifier checked"):
+        assert borrowed not in one, f"implies the named list is the whole: {one}"
+    assert "only some of which" in one, f"must say the plain list is partial: {one}"
 
 
 def test_the_platform_paragraph_never_cites_a_list_that_was_not_printed(V):

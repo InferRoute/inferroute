@@ -1595,13 +1595,21 @@ def _ref_windowed(reference: Dict[str, Any]) -> bool:
     return False
 
 
-def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str]) -> Tuple[bool, str]:
+def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str],
+               live: bool = False) -> Tuple[bool, str]:
     """(current_match, why). EVERY entry whose value matches is evaluated: the match is current if ANY of
     them is current at the statement's time (that entry is reported); it is refused only when no matching
     entry is current, with every reason listed. So a retired entry listed before a current one for the same
     hash — two releases sharing a manifest, a reinstated policy — cannot decide the verdict by list order.
     A windowed entry can only be called current against a PARSABLE statement time: a missing or unreadable
-    started_utc FAILS rather than making the window vacuous."""
+    started_utc FAILS rather than making the window vacuous.
+
+    `live` picks what the prose CALLS the moment. On the offer path there is no search yet -- this check is
+    what decides whether one may happen -- so saying "the search (T) is after its valid_to" describes an
+    event that has not occurred, to a reader whose disclosure has not left their machine. Same family as the
+    decorative "at the search\'s time" an auditor flagged on 25 Sep; the suffix below carries its fix."""
+    moment = "now" if live else "the search"
+    stamp = "checked at" if live else "search at"
     v = str(value or "").lower()
     at = _parse_time(at_iso)
     refusals: List[str] = []
@@ -1623,16 +1631,18 @@ def _ref_match(entries: List[Dict[str, Any]], value: Any, at_iso: Optional[str])
                             f"(started_utc {at_iso!r}) — cannot say it was current")
             continue
         if vf is not None and at < vf:
-            refusals.append(f"matches, but the search ({at_iso}) predates its valid_from {e['valid_from']}")
+            refusals.append(f"matches, but {moment} ({at_iso}) predates its valid_from {e['valid_from']}")
             continue
         if vt is not None and at > vt:
-            refusals.append(f"matches, but the search ({at_iso}) is after its valid_to {e['valid_to']}")
+            refusals.append(f"matches, but {moment} ({at_iso}) is after its valid_to {e['valid_to']}")
             continue
-        return True, f"current (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'}, search at {at_iso})"
+        return True, f"current (valid {e['valid_from'] or '…'} → {e['valid_to'] or '…'}, {stamp} {at_iso})"
     if refusals:
         return False, "; ".join(dict.fromkeys(refusals)) + (f" ({len(refusals)} matching entries, none current)" if len(refusals) > 1 else "")
     return False, "no entry matches"
 
+
+SEARCH_TIME_LABEL = "the search's time"
 
 REFERENCE_SCHEMA = "inferroute.enclave-reference/1"
 
@@ -1860,7 +1870,7 @@ def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_by
 
 
 def check_identity(c: "Checks", rd: Dict[str, Any], p: Optional[Dict[str, Any]],
-                   reference: Optional[Dict[str, Any]], at: Optional[str]) -> None:
+                   reference: Optional[Dict[str, Any]], at: Optional[str], live: bool = False) -> None:
     """The only check that separates InferRoute's enclave from anyone else's Azure confidential container:
     HOST_DATA and the manifest hashes against values obtained OUT OF BAND. `at` is the moment the claim is
     about — a statement's own time when checking a record, and now when checking a live enclave.
@@ -1881,17 +1891,18 @@ def check_identity(c: "Checks", rd: Dict[str, Any], p: Optional[Dict[str, Any]],
         # the manifest hashes come from the runtime data the hardware bound, never from the statement:
         # the question is what the ENCLAVE committed to, not what a record says about it
         idx, mdl = rd.get("index_manifest_sha256"), rd.get("model_manifest_sha256")
-        pol_ok, pol_why = (_ref_match(_ref_entries(reference, "policy_sha256"), p["host_data"].hex(), at) if p is not None
+        pol_ok, pol_why = (_ref_match(_ref_entries(reference, "policy_sha256"), p["host_data"].hex(), at, live) if p is not None
                            else (False, "no report"))
-        idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), idx, at) if rd else (False, "no runtime data")
-        mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), mdl, at) if rd else (False, "no runtime data")
+        idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), idx, at, live) if rd else (False, "no runtime data")
+        mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), mdl, at, live) if rd else (False, "no runtime data")
         c.add(pol_ok and idx_ok and mdl_ok, "enclave identity (InferRoute's policy, index, encoders)",
               f"policy: {pol_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — against reference "
               f"{reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}"
               # Only claim a time was tested when some entry actually carries a window. With none, every
               # match is current by default and "at the search's time X" reads as a check that did not
               # happen — flagged by an auditor on 25 Sep as decorative, which on this record it was.
-              + (f", at the search's time {at}" if at and _ref_windowed(reference) else ""))
+              + (f", at {'the time of this check' if live else SEARCH_TIME_LABEL} {at}"
+                 if at and _ref_windowed(reference) else ""))
 
 
 
@@ -2132,7 +2143,7 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     # means DO NOT SEAL, so a windowed reference stopped a client searching at all. Flat references hid
     # it -- a flat entry has no window to resolve -- and the first windowed reference went live that
     # morning. verify_search below deliberately keeps `at` as the search's own time.
-    check_identity(c, rd, p, reference, at or _utc_now_iso())
+    check_identity(c, rd, p, reference, at or _utc_now_iso(), live=True)
     check_reference_firmware_before_sealing(c, offer or {}, reference, pins=pins)
     return c
 

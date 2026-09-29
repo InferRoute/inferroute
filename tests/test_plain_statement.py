@@ -80,7 +80,7 @@ def test_higher_level_says_strictly_more_than_lower():
     zero = m.plain_statement(0)[0]
     one = m.plain_statement(1)[0]
     assert one != zero
-    controls = "the policy document records the protection settings"
+    controls = "the policy document records the required protection settings"
     assert controls in one, "level 1 must name what the controls evidence actually is"
     assert controls not in zero, "level 0 has not earned any controls clause"
     # And it must stay a claim about a DOCUMENT, never about what the containers did at runtime.
@@ -120,7 +120,7 @@ def test_all_controls_passing_does_not_restore_plain_disclosure_guarantee(capsys
     plain = out.split("In plain words, for a reader")[1]
     assert m.plain_statement(1)[0] in plain
     # Bound to the PROPERTY, not the phrase -- see test_higher_level_says_strictly_more_than_lower.
-    assert "the policy document records the protection settings" in plain
+    assert "the policy document records the required protection settings" in plain
     assert "does not show who could read your text" in plain
     assert "could not attach" not in plain
 

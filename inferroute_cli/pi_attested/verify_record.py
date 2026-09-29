@@ -830,11 +830,30 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # platform's containers out of the rows -- it was flagging that the rows are silent about them. The
     # honest fix is to say so in the sentence, which STATEMENT_ENCLOSED now does.
     disclosed = platform_dependency_disclosure(text)
-    out["dependencies_identified"] = bool(out["self_contained"] or disclosed)
+    # `dependencies` carries Rego IMPORTS and parse sentinels as well as fragment feeds, and
+    # platform_dependency_disclosure only ever examines fragments. Judging the whole list by it makes
+    # the verifier vouch for items nothing looked at -- an adversarial review reproduced exactly that
+    # on 2026-09-29, with an unparseable import described as "identified, pinned and disclosed below".
+    _disclosed_feeds = {str(d["feed"]) for d in (disclosed or {}).get("dependencies", [])}
+    fully_disclosed = bool(disclosed) and set(dependencies) <= _disclosed_feeds
+    out["dependencies_identified"] = bool(out["self_contained"] or fully_disclosed)
+    # "Unresolved" is the honest word for a dependency we could NOT identify, and a lie for one we
+    # pinned, measured and printed a census of. Saying it in both branches made a single run tell the
+    # reader the same dependency is unresolved (this row) and identified (the next) -- an audit on
+    # 2026-09-29 called that out, and it destroys trust in the instrument. The ROW still fails either
+    # way, because self_contained is a security property and identification is bookkeeping; only the
+    # detail distinguishes what we actually know.
     c.add(out["self_contained"], "policy is self-contained",
           "no external fragments or imports found" if out["self_contained"] else
-          f"unresolved external policy dependency/dependencies: {', '.join(dependencies[:5])} — "
-          "the permission rows below cover only the literal containers in this document, not the effective policy")
+          (f"external policy dependency/dependencies INSIDE the trust boundary: "
+           f"{', '.join(dependencies[:5])}"
+           f"{f' (+{len(dependencies) - 5} more)' if len(dependencies) > 5 else ''} — NOT constrained "
+           "by the permission rows, which cover only the containers in this document, so those rows "
+           "are not the effective policy; each is identified, pinned to a signing identity and a "
+           "MINIMUM version, and its measured contents are disclosed below" if fully_disclosed else
+           f"unresolved external policy dependency/dependencies: {', '.join(dependencies[:5])} — "
+           "the permission rows below cover only the literal containers in this document, not the "
+           "effective policy"))
     if not out["self_contained"]:
         c.add(out["dependencies_identified"], "every external dependency is identified",
               "each is pinned by feed, signing identity and a version floor, and its contents are "
@@ -933,10 +952,14 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
         "computer \u2014 which establishes that this record is genuine, not that your text was protected.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
+    # Level 1 requires self_contained, which means the policy declares NO external fragments -- so
+    # platform_dependency_disclosure returns None and no platform container is identified at all. The
+    # previous sentence asserted an identification its own gate makes impossible, and turned a check of
+    # a DOCUMENT into "passed the listed protection checks", which a reader hears as a runtime test.
+    # Both found by audit 2026-09-29.
     1: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
         "computer \u2014 which establishes that this record is genuine, not that your text was protected \u2014 "
-        "and the containers we control passed the listed protection checks. The cloud platform runs further "
-        "containers alongside them that we identify but do not control.",
+        "and for the containers we control, the policy document records the protection settings listed above.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
 }
@@ -1031,8 +1054,8 @@ PLAIN_ANSWER: Dict[int, str] = {
     0: "This record cannot tell you whether your text stayed private: it records what was permitted, "
        "not whether anyone read your text, so on that question it says nothing.",
     1: "This record cannot tell you whether your text stayed private: it records what was permitted, "
-       "not whether anyone read your text, so on that question it says nothing \u2014 though the "
-       "permissions on the containers we control passed the checks listed above.",
+       "not whether anyone read your text, so on that question it says nothing \u2014 though the policy "
+       "document records the controls on the containers we control at their protective values.",
 }
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
@@ -1073,12 +1096,21 @@ PLAIN_WHAT_IT_BUYS = ("That removes one reason this record cannot answer your qu
 # it... I jumped ahead looking for a plain verdict", skipping the paragraph that follows and does the
 # real work. Each phrase is now a clause with one subject and one verb.
 PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
+    # PERMISSION, not capability. "cannot watch" states a fact about the world; the evidence is a flag
+    # in a document. The carrier sentence already frames these with "the policy document records this:"
+    # and closes with "not a record of what happened", but this file's own doctrine is that the
+    # neutraliser belongs AGAINST the clause, because a reader who stops midway never reaches it.
+    # NOT "may not": English reads that as permission OR as "perhaps they do not", and the epistemic
+    # sense is vaguer than the overclaim it replaced. "is not permitted to" is unambiguous and is
+    # lexically parallel with the "lets"/"permits" verbs in the second half of the same paragraph.
+    # The stdio phrase must keep naming THE PROGRAM: the nearest noun is the machine, and the flag is
+    # about the container's own streams. (Audit + adversarial review, 2026-09-29.)
     ("allow_stdio_access",
-     "whoever runs the machine cannot watch what goes into the program or what comes out"),
+     "whoever runs the machine is not permitted to watch the program's input or output"),
     ("allow_elevated",
-     "the program does not run with raised powers"),
+     "the program is not permitted to run with raised powers"),
     ("allow_runtime_logging",
-     "whoever runs the machine cannot collect a log of what happened"),
+     "whoever runs the machine is not permitted to log what happened"),
 )
 
 # Second: always leave the reader a next step, even when it is "nothing, this time". Ordered by what a
@@ -1142,8 +1174,21 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         shut = [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
         if shut:
             print()
-            print("    For the containers your provider controls, the policy document records this: "
-                  + _join_plain(shut) + ". But the same document lets the cloud platform run further "
+            # The platform half is TRUE ONLY WHEN THERE IS A PLATFORM DEPENDENCY. It used to print
+            # whenever any control was closed, which asserted foreign containers even for a policy that
+            # declares none -- and at reach 1, which REQUIRES self_contained, that is every time. An
+            # adversarial review on 2026-09-29 caught the run contradicting itself: the same output
+            # said level 1 has no external fragments and that "the same document" runs further
+            # containers. Say it when it is true, and stop when it is not.
+            platform_present = (closed or {}).get("self_contained") is not True
+            head = ("    For the containers your provider controls, the policy document records this: "
+                    + _join_plain(shut) + ".")
+            if not platform_present:
+                print(head + " That is what the document allows, not a record of what happened: "
+                      "nothing here establishes what passed through those streams, or that your text "
+                      "reached them.")
+            else:
+                print(head + " But the same document lets the cloud platform run further "
                   "containers inside the same protected machine, permits whoever operates the machine to "
                   "attach to those containers' own input and output, and permits most of them to run with raised "
                   # The neutraliser sits AGAINST the alarming clause, not after it. An auditor: "the

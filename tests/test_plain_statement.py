@@ -68,13 +68,25 @@ def test_the_overclaim_guard_actually_refuses():
 
 
 def test_higher_level_says_strictly_more_than_lower():
+    """Level 1 earns a clause about the controls; level 0 must not carry it.
+
+    This binds to the PROPERTY, not to a phrase. It used to assert the literal words "listed
+    protection checks", which made it a lock on wording rather than on meaning: when an audit on
+    2026-09-29 showed that phrase reads as a runtime test of the containers rather than a reading of a
+    document, the test failed for the fix. A test that fails when a sentence is corrected is guarding
+    the wrong thing.
+    """
     m = _mod()
     zero = m.plain_statement(0)[0]
     one = m.plain_statement(1)[0]
     assert one != zero
-    # level 1 is the one that earned the controls clause; level 0 must not carry it
-    assert "listed protection checks" in one
-    assert "listed protection checks" not in zero
+    controls = "the policy document records the protection settings"
+    assert controls in one, "level 1 must name what the controls evidence actually is"
+    assert controls not in zero, "level 0 has not earned any controls clause"
+    # And it must stay a claim about a DOCUMENT, never about what the containers did at runtime.
+    assert "passed" not in one.lower(), (
+        "level 1 must not say the containers PASSED anything: the evidence is a policy document, and "
+        "a reader hears 'passed' as a test that was run against the running program")
 
 
 @pytest.mark.parametrize("level", (0, 1))
@@ -107,7 +119,8 @@ def test_all_controls_passing_does_not_restore_plain_disclosure_guarantee(capsys
     out = capsys.readouterr().out
     plain = out.split("In plain words, for a reader")[1]
     assert m.plain_statement(1)[0] in plain
-    assert "listed protection checks" in plain
+    # Bound to the PROPERTY, not the phrase -- see test_higher_level_says_strictly_more_than_lower.
+    assert "the policy document records the protection settings" in plain
     assert "does not show who could read your text" in plain
     assert "could not attach" not in plain
 

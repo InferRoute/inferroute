@@ -1697,3 +1697,70 @@ def test_the_opening_line_does_not_say_the_containers_PASSED(V):
     """PLAIN_ANSWER[1] is the line the reader reads FIRST. Fixing 'passed the listed protection checks'
     only in the restatement at the bottom of the block leaves the stronger claim at the top."""
     assert "passed" not in V.PLAIN_ANSWER[1].lower(), V.PLAIN_ANSWER[1]
+
+
+def _render_plain(V, reach, **closed):
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(reach, closed=closed, blockers=[])
+    return buf.getvalue()
+
+
+def test_the_platform_paragraph_is_gated_on_KNOWING_what_the_dependency_is(V):
+    """Every specific in that paragraph -- a CLOUD PLATFORM, containers permitted to attach to stdio,
+    most running elevated -- comes from the PLATFORM_DEPENDENCIES census of Microsoft's fragment. Saying
+    it because the policy merely is NOT self-contained asserts those specifics about a dependency the
+    same run may be reporting as unreadable. That is the defect fixed one row above, mirrored: a
+    confident claim about foreign code the instrument never read, in the alarming direction.
+    """
+    shut = dict(allow_stdio_access=True, allow_elevated=True, allow_runtime_logging=True)
+
+    none = _render_plain(V, 1, self_contained=True, dependencies_identified=True, **shut)
+    assert "cloud platform" not in none, "a self-contained policy has no platform containers"
+
+    known = _render_plain(V, 0, self_contained=False, dependencies_identified=True, **shut)
+    assert "lets the cloud platform run further containers" in known
+    assert "could not read" not in known
+
+    unknown = _render_plain(V, 0, self_contained=False, dependencies_identified=False, **shut)
+    assert "could not read" in unknown, (
+        "an unidentified dependency must not be described with Microsoft's census: " + unknown)
+    assert "lets the cloud platform run further containers" not in unknown
+    assert "not a record of what happened" in unknown, "the neutraliser must survive on every branch"
+
+    # Fail-safe: a posture dict missing the keys must take the cautious branch, never the silent one.
+    missing = _render_plain(V, 0, **shut)
+    assert "could not read" in missing, "an absent key must fall to the honest branch"
+
+
+def test_the_unresolved_branch_names_only_items_that_are_unresolved(V):
+    """With a recognised fragment AND a foreign import, the row correctly says 'unresolved' -- but it
+    used to list the recognised fragment under that word, while the DISCLOSED line below printed that
+    same fragment's measured census. Name only what is actually unresolved."""
+    c = V.Checks()
+    V.check_policy_posture(c, _policy_with(extra_head="import data.acme.extra_rules\n\n"))
+    detail = " ".join(d for _, step, d in c.rows if step == "policy is self-contained")
+    assert "unresolved" in detail
+    assert "import data.acme.extra_rules" in detail
+    assert _MSFT_FEED not in detail, (
+        "the recognised fragment must not be listed under the word 'unresolved': " + detail)
+
+
+def test_a_truncated_dependency_list_says_how_many_it_hid(V):
+    """Hiding dependencies matters MOST where they are unknown: a reader told about unidentified
+    foreign code and shown 5 of 12, with nothing saying there are 12."""
+    head = "".join(f"import data.acme.m{i}\n" for i in range(12)) + "\n"
+    c = V.Checks()
+    V.check_policy_posture(c, _policy_with(extra_head=head))
+    detail = " ".join(d for _, step, d in c.rows if step == "policy is self-contained")
+    assert "more)" in detail, f"silent truncation in the unresolved branch: {detail!r}"
+
+
+def test_the_dead_plain_constants_are_gone(V):
+    """PLAIN_ASK, PLAIN_ASK_TRIGGER, PLAIN_WHAT_IT_BUYS and PLAIN_NO_ASK were defined and referenced
+    nowhere. PLAIN_ASK was a near-duplicate of the LIVE PLAIN_ASKS[0] carrying older wording -- exactly
+    the string a future editor corrects instead of the one a client reads."""
+    for dead in ("PLAIN_ASK", "PLAIN_ASK_TRIGGER", "PLAIN_WHAT_IT_BUYS", "PLAIN_NO_ASK"):
+        assert not hasattr(V, dead), f"{dead} is dead client-facing text; delete it, do not keep a twin"
+    assert hasattr(V, "PLAIN_ASKS"), "the live one must survive"

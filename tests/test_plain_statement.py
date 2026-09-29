@@ -261,6 +261,14 @@ def test_familiar_substrings_and_colons_do_not_swallow_unknown_qualifiers(blocke
 STDIO_BLOCKER = "policy x: the policy does not satisfy: policy denies host access to the enclave's stdio"
 
 
+# The platform paragraph is no longer unconditional: since 2026-09-29 it is printed only when the run
+# KNOWS what the external dependency is, because every specific in it (a cloud platform, containers
+# permitted to attach to stdio, most running elevated) comes from the census of Microsoft's fragment.
+# A fixture that wants that prose must now say so; one that stays silent gets the honest
+# "rules this check could not read" branch instead. That is the point of the gate, not a nuisance.
+_KNOWN_PLATFORM = {"self_contained": False, "dependencies_identified": True}
+
+
 def _plain(reach, blockers, closed=None):
     out = io.StringIO()
     with redirect_stdout(out):
@@ -402,7 +410,7 @@ def test_the_record_is_not_described_as_never_expiring():
 def test_the_platform_prose_names_the_actor_and_stops_there():
     """allow_stdio_access permits the OPERATOR to attach to container streams. It establishes nothing
     about what passed through them."""
-    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True, **_KNOWN_PLATFORM})
     assert "whoever operates the machine to attach" in text
     assert "what passed through those streams" in text
 
@@ -437,7 +445,7 @@ def test_a_permission_is_not_an_event():
     who reads to the end gets the correction; a reader who stops midway does not." The clause that says
     a PERMISSION is not an EVENT must sit inside the same sentence run as the permissions themselves,
     not trail the paragraph."""
-    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True, **_KNOWN_PLATFORM})
     para = next(l for l in text.splitlines() if "run further" in l)
     scary = para.index("permits most of them to run with raised powers")
     cure = para.index("not a record of what happened")
@@ -449,7 +457,7 @@ def test_the_record_is_not_called_a_receipt():
     """"Receipt" primes a reassuring frame: in everyday English it is proof of a COMPLETED, satisfactory
     transaction. An auditor asked for "record" or "document" because the evidence has not earned the
     connotation of completion."""
-    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True}).lower()
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True, **_KNOWN_PLATFORM}).lower()
     assert "receipt" not in text, "'receipt' connotes a settled, satisfactory transaction"
 
 
@@ -458,7 +466,7 @@ def test_the_platform_streams_are_not_the_readers_own_text():
     themselves: "Whoever operates the machine can attach to input and output. My invention description
     was the input." The pronoun's referent is the PLATFORM's containers, not the reader's search, and
     ambiguity here converts a permission on other containers into an implied live tap on their text."""
-    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True})
+    text = _plain(0, [STDIO_BLOCKER], {"allow_elevated": True, **_KNOWN_PLATFORM})
     para = next(l for l in text.splitlines() if "run further" in l)
     assert "attach to their input and output" not in para, (
         "'their' is read as the READER's input; name the containers the permission is about")

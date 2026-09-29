@@ -792,6 +792,20 @@ def platform_dependency_disclosure(policy_text: str) -> Optional[Dict[str, Any]]
         known.append({"feed": item["feed"], **pin})
     return {"dependencies": known} if known else None
 
+def _dep_noun(items: List[str]) -> str:
+    return "dependency" if len(items) == 1 else "dependencies"
+
+
+def _dep_list(items: List[str], show: int = 5) -> str:
+    """Name up to `show` dependencies and SAY when more were hidden.
+
+    Silent truncation matters most in the unresolved branch: a reader told about unidentified foreign
+    code, shown five of twelve, with nothing saying there are twelve.
+    """
+    head = ", ".join(items[:show])
+    return head + (f" (+{len(items) - show} more)" if len(items) > show else "")
+
+
 def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Optional[bool]]:
     """Report each permission that bears on whether anything outside the enclave could observe the work.
     Returns {condition: True/False/None}; None is "the document does not say", which is NOT satisfied."""
@@ -836,6 +850,7 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # on 2026-09-29, with an unparseable import described as "identified, pinned and disclosed below".
     _disclosed_feeds = {str(d["feed"]) for d in (disclosed or {}).get("dependencies", [])}
     fully_disclosed = bool(disclosed) and set(dependencies) <= _disclosed_feeds
+    _unresolved = sorted(set(dependencies) - _disclosed_feeds) or list(dependencies)
     out["dependencies_identified"] = bool(out["self_contained"] or fully_disclosed)
     # "Unresolved" is the honest word for a dependency we could NOT identify, and a lie for one we
     # pinned, measured and printed a census of. Saying it in both branches made a single run tell the
@@ -845,13 +860,16 @@ def check_policy_posture(c: Checks, policy_b64: Optional[str]) -> Dict[str, Opti
     # detail distinguishes what we actually know.
     c.add(out["self_contained"], "policy is self-contained",
           "no external fragments or imports found" if out["self_contained"] else
-          (f"external policy dependency/dependencies INSIDE the trust boundary: "
-           f"{', '.join(dependencies[:5])}"
-           f"{f' (+{len(dependencies) - 5} more)' if len(dependencies) > 5 else ''} — NOT constrained "
-           "by the permission rows, which cover only the containers in this document, so those rows "
-           "are not the effective policy; each is identified, pinned to a signing identity and a "
-           "MINIMUM version, and its measured contents are disclosed below" if fully_disclosed else
-           f"unresolved external policy dependency/dependencies: {', '.join(dependencies[:5])} — "
+          (f"external policy {_dep_noun(dependencies)} INSIDE the trust boundary: "
+           f"{_dep_list(dependencies)} — NOT constrained by the permission rows, which cover only the "
+           "containers in this document, so those rows are not the effective policy; "
+           f"{'it is' if len(dependencies) == 1 else 'each is'} identified, pinned to a signing "
+           "identity and a MINIMUM version, and its measured contents are disclosed below"
+           if fully_disclosed else
+           # Only the items actually unresolved go under the word. Listing a recognised fragment here
+           # while the DISCLOSED line below prints its measured census re-creates, in miniature, the
+           # same-run contradiction this branch exists to end.
+           f"unresolved external policy {_dep_noun(_unresolved)}: {_dep_list(_unresolved)} — "
            "the permission rows below cover only the literal containers in this document, not the "
            "effective policy"))
     if not out["self_contained"]:
@@ -1070,17 +1088,10 @@ PLAIN_NARROWER = ("What it does show is narrower than it may sound. The search r
                   "machine this record describes, and the record has not been altered since. That "
                   "is a fact about the record. It is not a fact about whether your text stayed private.")
 
-# A reader who is told only what is wrong has nothing to do. A reader told what to ask for does.
-# Derived from the blockers rather than written in, so it disappears when the gap is closed.
-PLAIN_ASK = ("You can ask for a record made with one setting switched off: the setting that lets whoever "
-             "runs the machine watch what goes into the program and what comes out. Your provider can "
-             "make that change. It would apply to future searches, not this one.")
-PLAIN_ASK_TRIGGER = "policy denies host access to the enclave's stdio"   # the RAW blocker text
-
-# Tested: without this a reader believes flipping that one setting buys privacy. It buys one fewer
-# reason for doubt. The remaining reasons are the generated list, so this cannot go stale.
-PLAIN_WHAT_IT_BUYS = ("That removes one reason this record cannot answer your question. It does not get "
-                      "you to \"yes\". The answer would still be \"cannot tell\", for the reasons below.")
+# NOTE: PLAIN_ASK / PLAIN_ASK_TRIGGER / PLAIN_WHAT_IT_BUYS lived here and were referenced NOWHERE --
+# each appeared exactly once, at its own definition. PLAIN_ASK was a near-duplicate of the LIVE
+# PLAIN_ASKS[0] below, carrying older stdio wording: precisely the string a future editor would correct
+# instead of the one a client reads. Deleted 2026-09-29 rather than left as a twin.
 
 # A reader given only what is MISSING has nothing to say to anyone. Tested: with the stdio gap closed
 # the ask disappeared and the same reader who had four actions was left with none — "it feels like
@@ -1139,9 +1150,6 @@ PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
      "ask your provider to show that the published source was built into the exact program that ran, "
      "not merely that a source exists"),
 )
-PLAIN_NO_ASK = ("Nothing here is something you can fix yourself, and nothing about this search can be "
-                "changed now. For future searches, the gaps below are what to raise with your provider.")
-
 def _join_plain(items: List[str]) -> str:
     """Join as prose, never as a numbered or bulleted list: a list invites a reader to count it."""
     if len(items) == 1:
@@ -1180,10 +1188,27 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
             # adversarial review on 2026-09-29 caught the run contradicting itself: the same output
             # said level 1 has no external fragments and that "the same document" runs further
             # containers. Say it when it is true, and stop when it is not.
-            platform_present = (closed or {}).get("self_contained") is not True
+            # Three states, not two. Every specific below -- a CLOUD PLATFORM, containers permitted to
+            # attach to stdio, most running elevated -- is imported from the PLATFORM_DEPENDENCIES
+            # census of Microsoft's fragment. Asserting it merely because the policy is not
+            # self-contained states those specifics about a dependency this run may have been unable to
+            # read: the same defect fixed on the row above, with the sign flipped to alarmist.
+            # dependencies_identified is assigned on the same line as self_contained, so it has
+            # identical availability, and a missing key falls to the cautious branch.
+            _c = closed or {}
+            platform_known = (_c.get("self_contained") is not True
+                              and _c.get("dependencies_identified") is True)
+            platform_unknown = _c.get("self_contained") is not True and not platform_known
+            platform_present = platform_known
             head = ("    For the containers your provider controls, the policy document records this: "
                     + _join_plain(shut) + ".")
-            if not platform_present:
+            if platform_unknown:
+                print(head + " But the same document pulls in rules this check could not read, so it "
+                      "may put further containers inside the same protected machine that these "
+                      "settings do not cover. That is what the document allows, not a record of what "
+                      "happened: nothing here establishes what passed through those streams, or that "
+                      "your text reached them.")
+            elif not platform_present:
                 print(head + " That is what the document allows, not a record of what happened: "
                       "nothing here establishes what passed through those streams, or that your text "
                       "reached them.")

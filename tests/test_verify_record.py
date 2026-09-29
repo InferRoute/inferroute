@@ -2023,6 +2023,43 @@ def test_an_explicit_at_still_overrides_now_for_a_live_offer(V, kms):
     """`at` is defaulted, not hardcoded: a caller asking about a specific moment still gets that moment.
     Without this, the default could silently become the only behaviour."""
     ref = _windowed_ref(_host(V, kms), valid_from=_rel(days=-30), valid_to=_rel(days=-10))
-    assert IDENTITY in V.verify_offer(_offer(V, kms), reference=ref).failed          # closed now
+    closed = V.verify_offer(_offer(V, kms), reference=ref)
+    assert IDENTITY in closed.failed                                                # closed now
+    # ...and closed because the WINDOW closed, not because no time could be parsed. Without this the
+    # first leg is satisfied pre-fix for the wrong reason and contributes nothing (adversarial review).
+    assert not any("no parsable time" in d for _, _, d in closed.rows)
     c = V.verify_offer(_offer(V, kms), reference=ref, at=_rel(days=-20))             # open back then
     assert IDENTITY not in c.failed, [d for s, n, d in c.rows if n == IDENTITY]
+
+
+def test_a_live_offer_never_narrates_a_search_that_has_not_happened(V, kms):
+    """The pre-seal check decides whether a search may happen at all, and _narrate_checks prints these
+    details verbatim to the reader. Saying "the search (T) is after its valid_to" describes an event that
+    has not occurred, to someone whose disclosure has not left their machine. Found by an adversarial
+    review of the `at` default on 2026-09-29; same family as the decorative "at the search's time" an
+    auditor flagged on 25 Sep."""
+    host = _host(V, kms)
+    for ref in (_windowed_ref(host, valid_from=_rel(days=-30)),                       # open -> PASS row
+                _windowed_ref(host, valid_from=_rel(days=-30), valid_to=_rel(days=-1)),   # closed
+                _windowed_ref(host, valid_from=_rel(days=+1))):                        # not yet open
+        rows = " | ".join(d for _, n, d in V.verify_offer(_offer(V, kms), reference=ref).rows
+                          if n == IDENTITY and d)
+        assert "the search" not in rows, rows
+        assert "search at" not in rows, rows
+    # and it still says WHEN it decided, so the window check is not silently decorative
+    open_rows = " | ".join(d for _, n, d in V.verify_offer(
+        _offer(V, kms), reference=_windowed_ref(host, valid_from=_rel(days=-30))).rows if n == IDENTITY and d)
+    assert "checked at" in open_rows and "the time of this check" in open_rows, open_rows
+
+
+def test_a_record_still_narrates_the_search_not_a_live_check(V, kms):
+    """The inverse: `live` must not leak into the record path, where there really is a search and the
+    reader is reading about one that already ran."""
+    host = _host(V, kms)
+    ref = _windowed_ref(host, valid_from=_rel(days=-30))
+    c = V.Checks()
+    rd = {"index_manifest_sha256": "ef" * 32, "model_manifest_sha256": "12" * 32}
+    V.check_identity(c, rd, {"host_data": bytes.fromhex(host)}, ref, _rel(days=-1))   # live defaults False
+    rows = " | ".join(d for _, n, d in c.rows if n == IDENTITY and d)
+    assert "search at" in rows and "the search's time" in rows, rows
+    assert "the time of this check" not in rows, rows

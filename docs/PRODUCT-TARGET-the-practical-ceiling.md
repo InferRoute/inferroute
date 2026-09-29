@@ -8,11 +8,30 @@ able to make truthfully before it is worth shipping, and every workstream below 
 > "The program that ran is the one published at ⟨url⟩, byte for byte. Only two kinds of program
 > could run inside the protected machine — ours, and the cloud platform's own startup containers,
 > every one of them named in this record with what it was permitted to do. The operator could not
-> read that machine's memory. Nothing could leave it except the
-> sealed answer to you — not to disk, not to logs, not to the network — because the machine was
-> configured so that it could not, and that configuration is part of what the chip signed. What this
-> still cannot show: how long your search took and how large it was, which is observable from
-> outside — and anything about your own computer."
+> read that machine's memory. The program we published could not send your text anywhere except
+> back to you — not to disk, not to logs, not to the network — because the machine was configured
+> so that it could not, and that configuration is part of what the chip signed. What this still
+> cannot show: what the platform's own containers could reach, which is why they are named above;
+> how long your search took and how large it was, which is observable from outside — and anything
+> about your own computer."
+
+**REVISED AGAIN 2026-09-29 (Henry's ruling), fourth clause.** It read "Nothing could leave it
+except the sealed answer to you". An independent audit called that a behavioural negative that
+attestation cannot license, since attestation measures what was LOADED and what was PERMITTED and
+never what HAPPENED. That argument is correct but it is not the decisive one.
+
+The decisive one is that **the clause contradicted the statement's own second clause.** We tell the
+reader, in the same paragraph, that the cloud platform's startup containers run inside that same
+protected machine — and this record's own disclosure says they may attach to their containers'
+input and output and mostly run with raised powers. "Nothing could leave it" and that sentence
+cannot both be true. It was not merely unprovable on this substrate; it was false, and visibly so
+to anyone who read to the end.
+
+The replacement scopes the promise to the thing we actually control and actually enforce: **our own
+published program**, constrained by a configuration the chip signed. It is a smaller claim, it is
+enforced rather than asserted, and it survives contact with the disclosure two clauses earlier. The
+platform containers move into the remainder, where they belong, with a pointer back to the clause
+that names them.
 
 **REVISED 2026-09-29.** The third clause used to read "we audited every path your text takes inside
 it; none writes it to disk, to logs, or to the network". Two things were wrong with it. It was
@@ -33,7 +52,7 @@ text stayed private. That sentence is unreachable on any substrate — see the l
 | "the one published at ⟨url⟩, byte for byte" | ROW 2 — a reproducible build and a published recipe, so `HOST_DATA` is recomputable by a stranger | in progress; one file of 37,441 still non-deterministic |
 | "only two kinds of program could run … every one named" | the effective policy enumerates every permitted container, and `HOST_DATA` commits the chip to that enumeration | **reachable now** — the verifier already computes the disclosure; see the 2026-09-29 decision below |
 | "whose memory the operator could not read" | SEV-SNP | already true |
-| "nothing could leave except the sealed answer" | ROW 3 — **confinement**, not audit: an irreversible seccomp filter installed by measured code before the serve loop | **~1-2 weeks.** Measured 2026-09-29: the enclave touches the network in exactly two places, a startup-only index fetch and a localhost call to the attestation sidecar, so closing egress after init costs nothing operationally |
+| "the program we published could not send your text anywhere except back to you" | ROW 3 — **confinement**, not audit: an irreversible seccomp filter installed by measured code before the serve loop. Scoped to OUR program: the platform's containers are a separate surface, named in clause 2 and carried in the remainder | **~1-2 weeks.** Measured 2026-09-29: the enclave touches the network in exactly two places, a startup-only index fetch and a localhost call to the attestation sidecar, so closing egress after init costs nothing operationally |
 | "how long your search took and how large it was" | nothing — it is an honest remainder | permanent |
 
 ## The sentence today, for contrast
@@ -140,7 +159,7 @@ alone. What it costs beyond the build: the trust root moves from an AMD-signed p
 paravisor-emulated vTPM, which is a weaker anchor for the byte-for-byte clause than what we have
 today. That trade is why this is future work and not the critical path — it should only be taken if
 a client asks for the collapse to a single program AND accepts the weaker anchor.
-| "nothing could leave" | months, and **unprovable by inspection** | **~1-2 weeks**, and mechanically checkable |
+| "our program could not send it anywhere" | months, and **unprovable by inspection** | **~1-2 weeks**, and mechanically checkable |
 
 The critical path is now **row 1**, not row 3. The ceiling moves from "months, with one clause that
 could never be proven" to roughly **six to eight weeks with every clause provable** — conditional on

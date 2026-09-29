@@ -2056,6 +2056,14 @@ def check_reference_firmware_before_sealing(c: Checks, offer: Dict[str, Any],
         c.add(False, name, f"refusing to seal: firmware requirement or evidence is invalid ({type(exc).__name__})")
 
 
+def _utc_now_iso() -> str:
+    """Now, in the one format _parse_time accepts. For LIVE checks only, never for a record: a record is
+    judged at the time its search ran, and dating one to "now" would let an entry retired since vouch for
+    a search made while it was current, or the reverse."""
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None, uvm_root: Optional[str] = None,
                  uvm_min_svn: int = UVM_MIN_SVN, reference: Optional[Dict[str, Any]] = None,
                  policy_b64: Optional[str] = None, at: Optional[str] = None,
@@ -2115,7 +2123,16 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
         p = parse_report(base64.b64decode((offer or {}).get("evidence", ""), validate=True))
     except Exception:                                       # noqa: BLE001
         p = None
-    check_identity(c, rd, p, reference, at)
+    # A LIVE enclave is judged CURRENT, which is what check_identity's own contract already says: "`at`
+    # is the moment the claim is about -- a statement's own time when checking a record, and now when
+    # checking a live enclave". An offer carries no statement, so `at` stayed None here and EVERY
+    # windowed reference entry failed with "matches a windowed entry, but the statement carries no
+    # parsable time". Measured 2026-09-29 against the SHIPPED client with a reference whose anchors
+    # matched the enclave exactly: identity still failed. This function's contract is that any failure
+    # means DO NOT SEAL, so a windowed reference stopped a client searching at all. Flat references hid
+    # it -- a flat entry has no window to resolve -- and the first windowed reference went live that
+    # morning. verify_search below deliberately keeps `at` as the search's own time.
+    check_identity(c, rd, p, reference, at or _utc_now_iso())
     check_reference_firmware_before_sealing(c, offer or {}, reference, pins=pins)
     return c
 

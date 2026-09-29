@@ -1271,8 +1271,12 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
               "uncertainty bears on what you are filing, that part is a question for someone qualified; "
               "this record cannot settle it either way.")
         if ask:
-            print(f"    For future searches: {ask}. That is a change your provider can make. It cannot "
-                  "change this one, and it would not by itself make the answer yes.")
+            # "It cannot change this one" -- a naive-reader test on 2026-09-29 read "this one" as
+            # pointing at a GAP and found no antecedent, in the single actionable instruction the
+            # statement gives. The intended referent was this RECORD. Say which.
+            print(f"    For future searches: {ask}. That is a change your provider can make, and it "
+                  "would not by itself make the answer yes. It cannot change this record, which is "
+                  "already made.")
     print()
     # The licensed technical sentence still reaches this reader. It restates the answer above in the
     # verifier's own terms, which is mild redundancy -- and the alternative was editing another

@@ -217,3 +217,15 @@ def test_the_ask_does_not_imply_one_setting_is_the_whole_fix(V):
     joined = " ".join(a for _t, a in V.PLAIN_ASKS)
     assert "will not by itself" in joined or "other gaps" in joined, \
         "the ask must say that closing it does not remove the other gaps: " + joined
+
+
+def test_the_one_actionable_instruction_names_what_it_cannot_change(V):
+    """A naive reader read 'It cannot change this one' as pointing at a gap, found no antecedent, and
+    said it 'reads like a form letter where a blank wasn't filled in' -- in the ONE sentence telling
+    them what to do. Ambiguity costs most where the reader is being asked to act."""
+    for reach, blockers, closed in _reachable(V):
+        text = _render(V, reach, blockers, closed)
+        assert "change this one" not in text, f"ambiguous referent in the ask (reach={reach})"
+        if "For future searches:" in text:
+            assert "cannot change this record" in text, (
+                "the ask must name what it cannot change: " + text[text.index("For future searches:"):][:220])

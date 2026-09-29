@@ -2063,3 +2063,35 @@ def test_a_record_still_narrates_the_search_not_a_live_check(V, kms):
     rows = " | ".join(d for _, n, d in c.rows if n == IDENTITY and d)
     assert "search at" in rows and "the search's time" in rows, rows
     assert "the time of this check" not in rows, rows
+
+
+def _floor_row(c):
+    return next((d for _, n, d in c.rows if n == "configured firmware TCB floor"), "")
+
+
+def test_the_floor_row_does_not_deny_a_floor_the_reference_declares(V, kms):
+    """Two rows, printed to the same reader, said opposite things. With no --min-tcb the hardware check
+    reported "no minimum pinned for <product>" directly above "the authenticated report meets the
+    reference's declared minimum". Measured 2026-09-29 against the signed production reference. The floor
+    was always enforced -- only the wording was wrong -- so this row stays a SKIP and now names the row
+    that did the work."""
+    ref = _windowed_ref(_host(V, kms), valid_from=_rel(days=-30))
+    ref["min_tcb"] = [{"value": {"Milan": {"snpSPL": 1}}, "valid_from": _rel(days=-30)}]
+    row = _floor_row(V.verify_offer(_offer(V, kms), reference=ref))
+    assert "no minimum pinned" not in row, row
+    assert "reference firmware floor before sealing" in row, row
+
+
+def test_the_floor_row_still_says_nothing_is_pinned_when_nothing_is(V, kms):
+    """The inverse, so the message above cannot become unconditional: with no reference floor and no
+    --min-tcb, there genuinely is no minimum and the row must still say so."""
+    row = _floor_row(V.verify_offer(_offer(V, kms), reference=_windowed_ref(_host(V, kms), valid_from=_rel(days=-30))))
+    assert "no minimum pinned" in row, row
+
+
+def test_an_explicit_min_tcb_still_wins_over_the_reference_wording(V, kms):
+    """A caller that passes --min-tcb must still get the real comparison, not the pointer."""
+    ref = _windowed_ref(_host(V, kms), valid_from=_rel(days=-30))
+    ref["min_tcb"] = [{"value": {"Milan": {"snpSPL": 1}}, "valid_from": _rel(days=-30)}]
+    row = _floor_row(V.verify_offer(_offer(V, kms), reference=ref, min_tcb={"Milan": {"snpSPL": 1}}))
+    assert "threshold" in row and "reference firmware floor before sealing" not in row, row

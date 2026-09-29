@@ -2078,7 +2078,8 @@ def _utc_now_iso() -> str:
 def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None, uvm_root: Optional[str] = None,
                  uvm_min_svn: int = UVM_MIN_SVN, reference: Optional[Dict[str, Any]] = None,
                  policy_b64: Optional[str] = None, at: Optional[str] = None,
-                 min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
+                 min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+                 reference_key: Optional[str] = None) -> Checks:
     """Everything checkable about an enclave BEFORE anything is sealed to it — the check a live client must
     pass before it sends a word of the invention.
 
@@ -2156,6 +2157,30 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     # morning. verify_search below deliberately keeps `at` as the search's own time.
     check_identity(c, rd, p, reference, at or _utc_now_iso(), live=True)
     check_reference_firmware_before_sealing(c, offer or {}, reference, pins=pins)
+    # WHO SAYS THAT REFERENCE IS OURS. Identity above compares the enclave to a FILE. If nobody checked
+    # that the file was signed by the publication key, the comparison establishes only that the enclave
+    # matches whatever the file says -- and if the file ever travels in the same bundle as the offer, the
+    # host is vouching for itself, which is the one thing this check exists to prevent. The RECORD path
+    # already says so (exit 4, "checked against a signed file nobody verified"); the offer path, which is
+    # the one that decides whether the invention may be sent, said nothing. Found by an adversarial review
+    # on 2026-09-29.
+    #
+    # This is deliberately NOT a failure. `verify_offer`'s contract is that any failure means DO NOT SEAL,
+    # so failing here would stop every client that has not been given a key -- an outage, not a control.
+    # It is a distinct row instead, mirroring the record path's distinct exit code, and `reference_key`
+    # lets a caller close it outright.
+    if isinstance(reference, dict):
+        if reference_key:
+            check_reference_signature(c, reference, reference_key)
+        elif reference.get("sig"):
+            c.add(None, "reference authenticated",
+                  "this reference carries a signature but NO key was supplied to check it against, so the "
+                  "identity above rests on a file nobody verified. Obtain InferRoute's publication key from "
+                  "your engagement letter and supply it to close this.")
+        else:
+            c.add(None, "reference authenticated",
+                  "this reference carries NO signature at all — identity above rests on an unsigned file, "
+                  "which establishes only that the enclave matches what that file happens to say.")
     return c
 
 

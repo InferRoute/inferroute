@@ -2095,3 +2095,55 @@ def test_an_explicit_min_tcb_still_wins_over_the_reference_wording(V, kms):
     ref["min_tcb"] = [{"value": {"Milan": {"snpSPL": 1}}, "valid_from": _rel(days=-30)}]
     row = _floor_row(V.verify_offer(_offer(V, kms), reference=ref, min_tcb={"Milan": {"snpSPL": 1}}))
     assert "threshold" in row and "reference firmware floor before sealing" not in row, row
+
+
+# ── who says the reference is ours ───────────────────────────────────────────────────────────────
+# Identity compares the enclave to a FILE. If nobody checks that the file was signed by the publication
+# key, it establishes only that the enclave matches whatever that file says — and if the file ever
+# travels in the same bundle as the offer, the host vouches for itself. The record path already says so
+# (exit 4); the offer path — the one that decides whether the invention may be sent — said nothing.
+# Found by an adversarial review on 2026-09-29.
+
+def _sign_ref(V, ref):
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives import serialization as _ser
+    k = Ed25519PrivateKey.generate()
+    body = {kk: vv for kk, vv in ref.items() if kk != "sig"}
+    pub = k.public_key().public_bytes(_ser.Encoding.Raw, _ser.PublicFormat.Raw).hex()
+    return {**body, "sig": k.sign(V.canonical(body)).hex()}, pub
+
+
+def _auth_row(c):
+    return next((d for _, n, d in c.rows if n == "reference authenticated"), None)
+
+
+def test_an_unauthenticated_reference_is_reported_not_silently_trusted(V, kms):
+    signed, _pub = _sign_ref(V, _windowed_ref(_host(V, kms), valid_from=_rel(days=-30)))
+    c = V.verify_offer(_offer(V, kms), reference=signed)              # no key supplied
+    row = _auth_row(c)
+    assert row and "nobody verified" in row, row
+    # and it must NOT become a refusal: failing here would stop every client without a key
+    assert IDENTITY not in c.failed
+    assert "reference authenticated" not in c.failed
+
+
+def test_supplying_the_key_closes_the_row_with_a_real_signature_check(V, kms):
+    signed, pub = _sign_ref(V, _windowed_ref(_host(V, kms), valid_from=_rel(days=-30)))
+    c = V.verify_offer(_offer(V, kms), reference=signed, reference_key=pub)
+    assert _auth_row(c) is None, _auth_row(c)
+    assert any(n == "reference signature" and s == "PASS" for s, n, _ in c.rows), c.rows
+    assert "reference signature" not in c.failed
+
+
+def test_a_wrong_key_makes_the_signature_row_fail(V, kms):
+    """The inversion: the check must be capable of refusing, or supplying a key proves nothing."""
+    signed, _pub = _sign_ref(V, _windowed_ref(_host(V, kms), valid_from=_rel(days=-30)))
+    _other, other_pub = _sign_ref(V, {"schema": "inferroute.enclave-reference/1"})
+    c = V.verify_offer(_offer(V, kms), reference=signed, reference_key=other_pub)
+    assert "reference signature" in c.failed, c.failed
+
+
+def test_an_unsigned_reference_says_it_carries_no_signature_at_all(V, kms):
+    c = V.verify_offer(_offer(V, kms), reference=_windowed_ref(_host(V, kms), valid_from=_rel(days=-30)))
+    row = _auth_row(c)
+    assert row and "NO signature at all" in row, row

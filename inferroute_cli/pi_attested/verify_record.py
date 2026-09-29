@@ -977,7 +977,10 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
     # Both found by audit 2026-09-29.
     1: ("The saved search statements have valid signatures linked to hardware evidence for a protected "
         "computer \u2014 which establishes that this record is genuine, not that your text was protected \u2014 "
-        "and for the containers we control, the policy document records the protection settings listed above.",
+        # NOT "listed above": reach 1 also requires image_pinned and no_exec, which are not among
+        # PLAIN_CLOSED_WORDS, so "listed above" invites the reader to treat the short plain list as
+        # the whole of what was checked.
+        "and for the containers we control, the policy document records the required protection settings.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
 }
@@ -1203,9 +1206,14 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
             head = ("    For the containers your provider controls, the policy document records this: "
                     + _join_plain(shut) + ".")
             if platform_unknown:
-                print(head + " But the same document pulls in rules this check could not read, so it "
-                      "may put further containers inside the same protected machine that these "
-                      "settings do not cover. That is what the document allows, not a record of what "
+                # NOT "could not read". platform_dependency_disclosure also returns None for a
+                # RECOGNISED feed whose issuer mismatches or whose minimum_svn is under the floor --
+                # that declaration WAS read and parsed; it just could not be validated against the
+                # measured census. An independent Codex review caught this after two same-family
+                # reviews missed it. Name the defect that actually occurred.
+                print(head + " But the same document names dependencies this check could not fully "
+                      "verify, so it may put further containers inside the same protected machine "
+                      "that these settings do not cover. That is what the document allows, not a record of what "
                       "happened: nothing here establishes what passed through those streams, or that "
                       "your text reached them.")
             elif not platform_present:

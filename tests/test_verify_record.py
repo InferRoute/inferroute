@@ -1721,17 +1721,17 @@ def test_the_platform_paragraph_is_gated_on_KNOWING_what_the_dependency_is(V):
 
     known = _render_plain(V, 0, self_contained=False, dependencies_identified=True, **shut)
     assert "lets the cloud platform run further containers" in known
-    assert "could not read" not in known
+    assert "could not fully verify" not in known
 
     unknown = _render_plain(V, 0, self_contained=False, dependencies_identified=False, **shut)
-    assert "could not read" in unknown, (
+    assert "could not fully verify" in unknown, (
         "an unidentified dependency must not be described with Microsoft's census: " + unknown)
     assert "lets the cloud platform run further containers" not in unknown
     assert "not a record of what happened" in unknown, "the neutraliser must survive on every branch"
 
     # Fail-safe: a posture dict missing the keys must take the cautious branch, never the silent one.
     missing = _render_plain(V, 0, **shut)
-    assert "could not read" in missing, "an absent key must fall to the honest branch"
+    assert "could not fully verify" in missing, "an absent key must fall to the honest branch"
 
 
 def test_the_unresolved_branch_names_only_items_that_are_unresolved(V):
@@ -1764,3 +1764,29 @@ def test_the_dead_plain_constants_are_gone(V):
     for dead in ("PLAIN_ASK", "PLAIN_ASK_TRIGGER", "PLAIN_WHAT_IT_BUYS", "PLAIN_NO_ASK"):
         assert not hasattr(V, dead), f"{dead} is dead client-facing text; delete it, do not keep a twin"
     assert hasattr(V, "PLAIN_ASKS"), "the live one must survive"
+
+
+def test_a_READ_but_UNVALIDATED_fragment_is_not_called_unreadable(V):
+    """Found by an independent Codex review on 2026-09-29, after two same-family reviews missed it.
+    platform_dependency_disclosure returns None for a RECOGNISED feed whose issuer mismatches or whose
+    minimum_svn is under the floor. That declaration was read and parsed -- we know exactly what it is
+    -- so saying the document 'pulls in rules this check could not read' states the wrong defect."""
+    import io, contextlib
+    shut = dict(allow_stdio_access=True, allow_elevated=True, allow_runtime_logging=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(0, closed={**shut, "self_contained": False, "dependencies_identified": False},
+                       blockers=[])
+    out = buf.getvalue()
+    assert "could not read" not in out, (
+        "an unvalidated-but-parsed dependency must not be described as unreadable: " + out)
+    assert "could not fully verify" in out, "say what is actually true: it was named but not verified"
+
+
+def test_the_level_one_sentence_does_not_imply_an_exhaustive_list(V):
+    """reach 1 also requires image_pinned and no_exec, which are NOT in PLAIN_CLOSED_WORDS. Saying
+    'the protection settings listed above' invites the reader to treat the short plain list as the
+    whole of what was checked."""
+    one = V.PLAIN_BY_REACH[1][0]
+    assert "listed above" not in one, one
+    assert "required protection settings" in one, one

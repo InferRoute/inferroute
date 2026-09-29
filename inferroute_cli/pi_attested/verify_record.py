@@ -2126,9 +2126,20 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
         c.add(_names_bytes(v), label,
               f"{str(v)[:16]}… identifies the files this enclave serves" if _names_bytes(v)
               else f"{field} is {why}")
+    # WHY A CUSTOM SKIP REASON. The hardware check only ever sees the CLI's --min-tcb, so with none
+    # supplied it said "no minimum pinned for Genoa" -- directly above a row reporting that the
+    # reference's declared Genoa minimum WAS met. Both lines are printed to the reader verbatim, so the
+    # output contradicted itself about whether a floor existed. Measured 2026-09-29 against the signed
+    # production reference. The floor IS enforced, by check_reference_firmware_before_sealing below;
+    # only the wording was wrong, so this changes no verdict -- it stays a SKIP and points at the row
+    # that did the work. (verify_search does not need this: it feeds the reference's floor straight in.)
+    _ref_has_floor = isinstance(reference, dict) and "min_tcb" in reference
     check_hardware(c, offer or {}, rd, rd_bytes, pins=pins or AMD_ARK_SPKI_SHA256,
                    uvm_root=uvm_root or MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=uvm_min_svn,
-                   policy_b64=policy_b64, min_tcb=min_tcb)
+                   policy_b64=policy_b64, min_tcb=min_tcb,
+                   floor_skip=(None if min_tcb or not _ref_has_floor else
+                               "no --min-tcb was supplied; the reference declares its own firmware floor, "
+                               "which is checked in 'reference firmware floor before sealing'"))
     p = None
     try:
         p = parse_report(base64.b64decode((offer or {}).get("evidence", ""), validate=True))

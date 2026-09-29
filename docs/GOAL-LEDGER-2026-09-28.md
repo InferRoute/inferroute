@@ -844,3 +844,46 @@ stricter — a product call, asked 2026-09-29.
 
 **Stop condition 4** still needs a real client RECORD (searches + plain output),
 which needs a live enclave; the offer path is now clean.
+
+---
+
+## Iteration 8 — 2026-09-30 — three offer-path defects, and a release premise that failed
+
+All three were the same shape: **`verify_offer` diverging from `verify_search`**, which already did the
+right thing. The offer path is the one that decides whether a client's invention may be sent at all, so
+each was more consequential than its record-path twin would have been.
+
+| # | defect | commit |
+|---|---|---|
+| 1 | a windowed reference stopped the shipped client sealing ANYTHING (`at` never defaulted to now) | 6c17643 / 1c010da |
+| 2 | the pre-seal row narrated "search at T" for a search that had not happened | 0dc58a9 / 244c3c3 |
+| 3 | the firmware row said "no minimum pinned" directly above "the declared minimum was met" | 3f1692d / b82e332 |
+| 4 | identity PASSed against a reference nobody authenticated | 32a71e2 / 34c3f54 |
+
+(2) was introduced by (1) and caught by the adversarial review OF (1) — which otherwise failed to break
+it across 19 malformed reference shapes, retired entries, closed and unopened windows, mixed lists,
+per-field mismatches and clock skew. (4) was flagged by that same review as out of its scope.
+
+(4) is deliberately **not** a refusal: `verify_offer`'s contract is that any failure means DO NOT SEAL,
+so refusing would stop every client not yet handed a key — an outage, not a control, days before a
+delivery. It is a distinct row mirroring the record path's distinct exit code, and `reference_key` (read
+from an optional `reference-key.txt` beside the offer) closes it outright. Verified both ways against the
+real signed reference: SKIP "rests on a file nobody verified" without it, real `reference signature` PASS
+with it.
+
+### The release premise did not survive checking
+
+The standing note said "0.9.61 and 0.9.62 published and live". Measured 2026-09-30:
+
+* PyPI `inferroute` latest is **0.9.2**, released 2026-09-22
+* git tags and GitHub releases both stop at **v0.9.2**
+* `pyproject.toml` says **0.9.66**
+* `inferroute.ai/simple/inferroute` returns 404 — there is no private index; `release.yml` publishes to
+  PyPI and the README's install route is `pip install 'inferroute[confidential]'`
+
+So 0.9.61–0.9.66 were never released anywhere. The most likely reading is that those numbers are BUILD
+identifiers used for audit packs (`auditpack62`, `AUDIT-REPORT-0.9.62-r1.md`), not published wheels.
+
+**Consequence:** none of the four fixes above reaches a real client until an actual release happens, and
+that release would move PyPI 0.9.2 → 0.9.6x in one step, carrying everything since 22 September. That is
+a release decision, not a routine republish, so it was NOT done. Asked of Henry 2026-09-30.

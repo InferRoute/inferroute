@@ -1790,3 +1790,73 @@ def test_the_level_one_sentence_does_not_imply_an_exhaustive_list(V):
     one = V.PLAIN_BY_REACH[1][0]
     assert "listed above" not in one, one
     assert "required protection settings" in one, one
+
+
+def test_the_BLOCKER_does_not_call_an_identified_dependency_unresolved(V):
+    """The twin I missed. The row detail in check_policy_posture was fixed on 2026-09-29 so a
+    recognised fragment is no longer called 'unresolved' -- but confidentiality_reach appends its
+    blocker on self_contained alone, so the SAME run still told the reader the SAME dependency was
+    unresolved. Found by the independent mac-papa round."""
+    posture = {k: True for k, *_ in V.CONFIDENTIALITY_POSTURE}
+    posture.update({"image_pinned": True, "no_exec": True,
+                    "self_contained": False, "dependencies_identified": True})
+    _reach, blockers = V.confidentiality_reach(
+        posture, floor_pinned=True, revocation_checked=True, image_published=True,
+        authenticated=True, record_ok=True, policy_committed=True)
+    joined = " ".join(blockers)
+    assert "unresolved external fragments" not in joined, (
+        "an identified, disclosed dependency must not be called unresolved: " + joined)
+    assert "not constrained by the permission rows" in joined.lower(), \
+        "say what is actually true: identified, but outside what the rows cover"
+    # inversion: when it genuinely is NOT identified, the honest word must come back
+    posture["dependencies_identified"] = False
+    _r2, b2 = V.confidentiality_reach(posture, floor_pinned=True, revocation_checked=True,
+                                      image_published=True, authenticated=True, record_ok=True,
+                                      policy_committed=True)
+    assert "unresolved external fragments" in " ".join(b2), "the unidentified case must still say so"
+
+
+def test_every_verified_control_reaches_the_plain_reader(V):
+    """At reach 1 all five CONFIDENTIALITY_POSTURE controls are required True, but only three had
+    plain-language phrases, so a reader was never told about stack dumps or unencrypted scratch --
+    left less confident than the evidence warrants, and unable to repeat two verified facts."""
+    post = [r[0] for r in V.CONFIDENTIALITY_POSTURE]
+    plain = [k for k, _ in V.PLAIN_CLOSED_WORDS]
+    # allow_unencrypted_scratch is excluded BY RULING, not by oversight: saying scratch is encrypted
+    # reassures about the one vector that is open, since the platform's containers share the SEV-SNP
+    # key domain. See test_no_reassurance_about_encryption_of_working_storage.
+    missing = [k for k in post if k not in plain and k != "allow_unencrypted_scratch"]
+    assert not missing, f"controls verified but never said in plain words: {missing}"
+    assert "allow_unencrypted_scratch" not in plain, "that omission is deliberate; do not 'fix' it"
+    for key, phrase in V.PLAIN_CLOSED_WORDS:
+        assert len(phrase.split()) <= 15, f"{key}: {len(phrase.split())} words"
+        assert "not permitted" in phrase, f"{key} must stay deontic: {phrase!r}"
+
+
+def test_the_platform_paragraph_carries_the_census_floor_caveat(V):
+    """The specifics in that paragraph come from the hardcoded PLATFORM_DEPENDENCIES census, not from
+    anything read out of this record, and that census says the version actually in force may be newer
+    than anything measured. The caveat printed in the technical row was absent from the plain one."""
+    import io, contextlib
+    shut = dict(allow_stdio_access=True, allow_elevated=True, allow_runtime_logging=True)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(0, closed={**shut, "self_contained": False, "dependencies_identified": True},
+                       blockers=[])
+    out = buf.getvalue()
+    assert "lets the cloud platform run further containers" in out
+    assert "may be newer" in out, "the plain paragraph must carry the census's own floor caveat: " + out
+
+
+def test_a_SKIPPED_floor_is_not_described_as_a_failure(V):
+    """floor_pinned is False for a SKIP as well as a FAIL. 'did not PASS' is literally true and reads
+    to a non-technical reader as 'the firmware was below the required level'."""
+    posture = {k: True for k, *_ in V.CONFIDENTIALITY_POSTURE}
+    posture.update({"image_pinned": True, "no_exec": True, "self_contained": True,
+                    "dependencies_identified": True})
+    _reach, blockers = V.confidentiality_reach(
+        posture, floor_pinned=False, revocation_checked=True, image_published=True,
+        authenticated=True, record_ok=True, policy_committed=True)
+    joined = " ".join(blockers)
+    assert "did not PASS" not in joined, "a SKIP must not be worded as a failure: " + joined
+    assert "not established as passing" in joined.lower()

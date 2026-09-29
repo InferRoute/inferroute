@@ -1005,8 +1005,11 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     ("the policy has unresolved external fragments/imports, so the permission rows may "
      "omit effective rules — resolve and verify every dependency",
      "this verifier could not establish the complete rules because policy dependencies remain unresolved"),
-    ("a contemporaneous configured firmware floor did not PASS for every archived operation",
+    ("a contemporaneous configured firmware floor was not established as passing for every archived operation",
      "no firmware floor shown to be active at the time of every saved search was checked and passed"),
+    ("the policy references external dependencies that are identified and disclosed",
+     "the platform's own dependencies are named and disclosed here, but the permission rows cover "
+     "only the containers in this document, so those rows are not the whole of what was in force"),
     ("certificate revocation was not checked successfully (pass --check-revocation)",
      "a successful certificate-withdrawal check was not established for every relevant signing chain; "
      "this does not mean a certificate was withdrawn"),
@@ -1125,6 +1128,16 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
      "the program is not permitted to run with raised powers"),
     ("allow_runtime_logging",
      "whoever runs the machine is not permitted to log what happened"),
+    # At reach 1 all five CONFIDENTIALITY_POSTURE controls are required true. These two were verified
+    # and printed in the technical rows but never said in plain words, leaving the reader less
+    # confident than the evidence warrants and unable to repeat two facts this record establishes.
+    ("allow_dump_stacks",
+     "whoever runs the machine is not permitted to take a dump of the program's memory"),
+    # allow_unencrypted_scratch is DELIBERATELY absent, and must stay absent. SEV-SNP encrypts
+    # against the HOST, but the platform's own containers share the key domain -- so telling a reader
+    # that scratch is encrypted reassures them about precisely the vector that is open. Pinned by
+    # test_no_reassurance_about_encryption_of_working_storage. An independent audit on 2026-09-29
+    # proposed adding it; it could not see that test, and the omission is a ruling, not an oversight.
 )
 
 # Second: always leave the reader a next step, even when it is "nothing, this time". Ordered by what a
@@ -1232,7 +1245,10 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "here establishes what passed through those streams, or that your text reached them, "
                   "and this record does not show whether anyone used those powers. Your provider does "
                   "not control those containers and this record does not constrain them. It means the "
-                  "settings above describe one part of the machine, not the whole of it.")
+                  "settings above describe one part of the machine, not the whole of it. What we say "
+                  "those platform containers allow comes from a dated census of published versions, "
+                  "not from this record: the policy pins a MINIMUM version, so the version actually "
+                  "in force may be newer than any version measured.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         print()
@@ -1303,10 +1319,22 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
     # always pinnable and always disclosable, so the branch was satisfied by construction -- a pin that
     # cannot fail the gate grades nothing.
     if posture.get("self_contained") is not True:
-        blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
-                        "omit effective rules — resolve and verify every dependency")
+        # The ROW detail was fixed on 2026-09-29 so a recognised fragment is not called "unresolved".
+        # This blocker was its twin and kept saying it, so one run told the reader the same dependency
+        # was both identified-and-disclosed and unresolved. Found by the independent mac-papa round
+        # after two reviews missed it. Fixing one site and leaving the other is the night's pattern.
+        if posture.get("dependencies_identified") is not True:
+            blockers.append("the policy has unresolved external fragments/imports, so the permission rows may "
+                            "omit effective rules — resolve and verify every dependency")
+        else:
+            blockers.append("the policy references external dependencies that are identified and disclosed "
+                            "but are NOT constrained by the permission rows, which cover only the "
+                            "containers in this document")
     if not floor_pinned:
-        blockers.append("a contemporaneous configured firmware floor did not PASS for every archived operation")
+        # floor_pinned is False for a SKIP as well as a FAIL. "did not PASS" is literally true and
+        # reads to a non-technical reader as "the firmware was below the required level".
+        blockers.append("a contemporaneous configured firmware floor was not established as passing "
+                        "for every archived operation")
     if not revocation_checked:
         blockers.append("certificate revocation was not checked successfully (pass --check-revocation)")
     if not authenticated:

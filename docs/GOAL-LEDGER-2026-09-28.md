@@ -887,3 +887,47 @@ identifiers used for audit packs (`auditpack62`, `AUDIT-REPORT-0.9.62-r1.md`), n
 **Consequence:** none of the four fixes above reaches a real client until an actual release happens, and
 that release would move PyPI 0.9.2 → 0.9.6x in one step, carrying everything since 22 September. That is
 a release decision, not a routine republish, so it was NOT done. Asked of Henry 2026-09-30.
+
+### Iteration 8 addendum — the mission sentence, reached
+
+A real client record, made by `sealed_search` against the live enclave serving the signed anchor
+`0d6cc360`, now **verifies exit 0 AND renders the substantive confidentiality statement.**
+
+The blocker was not in the wording, the verifier or the policy. It was that **the CCE policy document
+never reached the client.** `/offer` carries `endorsements`, `evidence`, `runtime_data`,
+`uvm_endorsements` — no policy. Our own captures have `policy_b64` only because `deploy-and-capture`
+reads it from Azure, which a firm cannot do. So the first real client record verified perfectly and then
+said, in the only paragraph a client reads: *"This record cannot answer that question."* The record could
+establish WHO the enclave was; nothing about what it was PERMITTED to do.
+
+It cannot be patched in afterwards — the evidence file is content-addressed (its name is its own sha256,
+and `searches.json` names that hash), so injecting the policy fails MANIFEST integrity and the
+evidence/searches binding. Verified by doing it.
+
+Fix (c4caab5): `--policy FILE`, embedded **only** if `sha256(file) == HOST_DATA`. Self-authenticating, so
+it may come from any source; a mismatch refuses before the bundle is written, because a record describing
+permissions that were never in force is worse than one describing none.
+
+| same enclave, same query | plain statement |
+|---|---|
+| without `--policy` | "This record cannot answer that question." |
+| with `--policy` | "…whoever runs the machine is **not permitted to watch the program's input or output**, the program is **not permitted to run with raised powers**, …**not permitted to log what happened**…**not permitted to take a dump of the program's memory**" + the honest account of the platform containers it cannot constrain |
+
+Both exit 0 standalone. **Open item for the product: the policy must be published or delivered alongside
+the reference**, or clients cannot reach this sentence.
+
+### EP: my warning was overstated — correction
+
+Told Henry EP was probably "systematically pushed down". Measured: EP/WO are **38.0% of top-20** across
+10 queries against a **40.7% corpus share** — not crowded out.
+
+Two attempts to isolate the MECHANISM were both invalid and neither is reported as a finding:
+* disabling the claim store for everyone (EP/WO 20.5%) takes the model out of the distribution it was
+  trained in, where US documents always have claims. It measures breaking the model.
+* ordering `search(k=200)` results by stage-1 vs stage-2 score (+12.5 pts) draws from a pool **already
+  selected by stage 2**, so EP documents stage 2 demoted below 200 are invisible. It is biased toward
+  the answer it gave.
+
+The residual limitation is real but narrower than claimed: no claims text exists for EP/WO, so their
+claim-level relevance is invisible to the ranker. A DEPTH limitation, not a ranking bias. Isolating the
+mechanism properly needs the ranker instrumented to expose the pre-stage-2 pool.

@@ -1921,3 +1921,47 @@ def test_the_platform_paragraph_never_cites_a_list_that_was_not_printed(V):
                               allow_stdio_access=True)
     assert "records this:" in with_list
     assert "settings above" in with_list, "the back-reference is correct when the list exists"
+
+
+def test_reach_minus_one_does_not_cite_gaps_it_did_not_print(V):
+    """The rendering a FAILED record produces, and the live rehearsal record fails. report_plain(-1) is
+    called from four sites with blockers defaulting to None, so no bullet list follows -- while the
+    preamble said "These are gaps identified by this verifier". Same class as citing "the settings
+    above" with no settings printed. Found by the independent round on 2026-09-29."""
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(-1, blockers=None, closed=None)
+    out = buf.getvalue()
+    assert "      - " not in out, "fixture must render with NO bullet list"
+    assert "These are gaps" not in out, "cites gaps it did not print: " + out
+    # the universal caution must survive the guard, since an empty list is the strongest invitation
+    assert "does not establish privacy" in out, "the empty-list caution must still print: " + out
+
+
+def test_reach_minus_one_does_not_presuppose_authenticated_operations(V):
+    """At reach -1 the verifier has just refused: 'this record did not verify; no sentence is licensed.'
+    Saying 'what was enforced for these saved operations' presupposes the record holds authenticated
+    operations and that something was enforced for them. Nothing has been established."""
+    import io, contextlib
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(-1, blockers=None, closed=None)
+    out = buf.getvalue()
+    assert "what was enforced for these saved operations" not in out, out
+    assert "does not establish that any operation was enforced" in out, out
+
+
+def test_the_statement_speaks_with_one_voice_about_whose_containers(V):
+    """'the containers we control' and 'the containers your provider controls' name the SAME
+    containers. The reader runs this verifier, so 'we' can read as the reader, which misattributes
+    control of the enclave to them. One voice throughout: your provider."""
+    import io, contextlib
+    blobs = [V.PLAIN_BY_REACH[1][0], V.PLAIN_ANSWER[1]]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        V.report_plain(0, closed={"allow_stdio_access": True, "self_contained": False,
+                                  "dependencies_identified": True}, blockers=[])
+    blobs.append(buf.getvalue())
+    for b in blobs:
+        assert "we control" not in b, f"mixed voice; say whose containers plainly: {b[:160]}"

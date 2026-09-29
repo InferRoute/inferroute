@@ -980,7 +980,7 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
         # NOT "listed above": reach 1 also requires image_pinned and no_exec, which are not among
         # PLAIN_CLOSED_WORDS, so "listed above" invites the reader to treat the short plain list as
         # the whole of what was checked.
-        "and for the containers we control, the policy document records every protection setting this "
+        "and for the containers your provider controls, the policy document records every protection setting this "
         "verifier requires, only some of which are named in plain words above.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
@@ -1080,7 +1080,7 @@ PLAIN_ANSWER: Dict[int, str] = {
        "not whether anyone read your text, so on that question it says nothing.",
     1: "This record cannot tell you whether your text stayed private: it records what was permitted, "
        "not whether anyone read your text, so on that question it says nothing \u2014 though the policy "
-       "document records the controls on the containers we control at their protective values.",
+       "document records the controls on the containers your provider controls at their protective values.",
 }
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
@@ -1270,9 +1270,24 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     # session's failing tests to fit my change, which is how a gate gets weakened.
     print(f"    {headline}")
     print(f"    {caveat}")
-    print("    These are gaps identified by this verifier, not a complete list of risks or ways text could "
-          "be disclosed. A shorter or empty list does not establish privacy. Fixes to a future deployment "
-          "do not change what was enforced for these saved operations.")
+    # "These are gaps" cited a list that reach -1 never prints: report_plain(-1) is called from four
+    # sites with blockers defaulting to None, so `reasons` is empty and no bullets follow. And "what
+    # was enforced for these saved operations" presupposes the record HOLDS authenticated operations
+    # and that something was enforced for them -- at reach -1 the verifier has just refused and
+    # established nothing. Both found by the independent round 2026-09-29; both are the same shape as
+    # the "settings above" defect, in the one rendering a FAILED record actually produces.
+    # The non-exhaustiveness caution must survive an EMPTY list -- an empty list is the strongest
+    # invitation to over-read, and a test pins that. Only the ungrounded demonstrative changes:
+    # "These are gaps" pointed at bullets that reach -1 never prints.
+    print("    " + ("These are gaps identified by this verifier, not" if reasons else
+                    "Any gaps this verifier identifies are not")
+          + " a complete list of risks or ways text could be disclosed.")
+    print("    A shorter or empty list does not establish privacy.")
+    if reach >= 0:
+        print("    Fixes to a future deployment do not change what was enforced for these saved operations.")
+    else:
+        print("    Fixes to a future deployment do not change what this record established, and this "
+              "record does not establish that any operation was enforced.")
     if reasons:
         print("    Gaps identified in this record:")
         for reason in reasons:

@@ -174,3 +174,46 @@ def test_the_state_space_is_real_and_the_needles_are_mostly_live(V):
     # whoever added it that its antecedent is checked.
     assert "these settings" not in live, (
         "'these settings' is now live; that is fine, but move it out of the regression-only note")
+
+
+def test_no_rendering_evaluates_what_it_only_recorded(V):
+    """'at their protective values' judges the values rather than reporting them. The verifier checked
+    that the document RECORDS certain control values; it did not check, and cannot check, that those
+    values protect this reader's text. Found by the independent round on 2026-09-29 -- in wording an
+    earlier fix of mine introduced."""
+    bad = []
+    for reach, blockers, closed in _reachable(V):
+        text = _render(V, reach, blockers, closed)
+        for evaluative in ("protective values", "protective value"):
+            if evaluative in text:
+                bad.append(f"reach={reach}: {evaluative!r} evaluates rather than reports")
+    assert not bad, "\n  ".join(sorted(set(bad))[:6])
+
+
+def test_a_self_contained_policy_says_so_rather_than_falling_silent(V):
+    """Where the policy declares no external dependencies the platform paragraph is correctly absent --
+    but ABSENCE is not a statement. This file's own doctrine: a reader told us 'if the setting was
+    fixed, tell me that; it is the only good news the report could carry.' An absence also leaves a
+    reader comparing two records with no way to tell why the paragraph vanished."""
+    seen = 0
+    for reach, blockers, closed in _reachable(V):
+        if not closed or closed.get("self_contained") is not True:
+            continue
+        text = _render(V, reach, blockers, closed)
+        if "records this:" not in text:      # only where a controls list was printed
+            continue
+        seen += 1
+        assert "declares no dependencies outside itself" in text, (
+            "a self-contained policy must SAY so, not merely omit the platform paragraph: " + text[:400])
+    assert seen > 0, "fixture found no self-contained rendering with a controls list"
+
+
+def test_the_ask_does_not_imply_one_setting_is_the_whole_fix(V):
+    """The singular 'one setting switched off' frames stdio as the sole privacy-relevant lever, in a
+    rendering that carries several other blockers. A reader who acts on it may believe the resulting
+    record will be authoritative on privacy."""
+    for _trigger, ask in V.PLAIN_ASKS:
+        assert "one setting switched off" not in ask, ask
+    joined = " ".join(a for _t, a in V.PLAIN_ASKS)
+    assert "will not by itself" in joined or "other gaps" in joined, \
+        "the ask must say that closing it does not remove the other gaps: " + joined

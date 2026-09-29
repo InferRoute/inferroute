@@ -980,7 +980,7 @@ PLAIN_BY_REACH: Dict[int, Tuple[str, str]] = {
         # NOT "listed above": reach 1 also requires image_pinned and no_exec, which are not among
         # PLAIN_CLOSED_WORDS, so "listed above" invites the reader to treat the short plain list as
         # the whole of what was checked.
-        "and for the containers we control, the policy document records the required protection settings.",
+        "and for the containers we control, the policy document records the protection settings this verifier checked.",
         "This does not show who could read your text or verify protection of your own computer or the AI "
         "conversation. The program's publication and behavior were not verified."),
 }
@@ -1196,51 +1196,36 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         print()
         print(f"    {PLAIN_NARROWER}")
         shut = [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
+        # Three states, not two. Every specific in the census prose -- a CLOUD PLATFORM, containers
+        # permitted to attach to stdio, most running elevated -- is imported from PLATFORM_DEPENDENCIES.
+        # Asserting it merely because the policy is not self-contained states those specifics about a
+        # dependency this run may have been unable to read. A missing key falls to the cautious branch.
+        _c = closed or {}
+        platform_known = (_c.get("self_contained") is not True
+                          and _c.get("dependencies_identified") is True)
+        platform_unknown = _c.get("self_contained") is not True and not platform_known
+        # THE PLATFORM WARNING IS NOT CONDITIONAL ON A CONTROL BEING CLOSED. It used to live inside
+        # `if shut:`, so a policy with external dependencies and NOT ONE control closed printed no
+        # plain mention of the platform's containers at all -- the warning vanished exactly when the
+        # posture was worst, and reappeared as soon as any single control was closed. Found by the
+        # independent mac-papa round on 2026-09-29 and reproduced before fixing.
         if shut:
             print()
-            # The platform half is TRUE ONLY WHEN THERE IS A PLATFORM DEPENDENCY. It used to print
-            # whenever any control was closed, which asserted foreign containers even for a policy that
-            # declares none -- and at reach 1, which REQUIRES self_contained, that is every time. An
-            # adversarial review on 2026-09-29 caught the run contradicting itself: the same output
-            # said level 1 has no external fragments and that "the same document" runs further
-            # containers. Say it when it is true, and stop when it is not.
-            # Three states, not two. Every specific below -- a CLOUD PLATFORM, containers permitted to
-            # attach to stdio, most running elevated -- is imported from the PLATFORM_DEPENDENCIES
-            # census of Microsoft's fragment. Asserting it merely because the policy is not
-            # self-contained states those specifics about a dependency this run may have been unable to
-            # read: the same defect fixed on the row above, with the sign flipped to alarmist.
-            # dependencies_identified is assigned on the same line as self_contained, so it has
-            # identical availability, and a missing key falls to the cautious branch.
-            _c = closed or {}
-            platform_known = (_c.get("self_contained") is not True
-                              and _c.get("dependencies_identified") is True)
-            platform_unknown = _c.get("self_contained") is not True and not platform_known
-            platform_present = platform_known
-            head = ("    For the containers your provider controls, the policy document records this: "
-                    + _join_plain(shut) + ".")
-            if platform_unknown:
-                # NOT "could not read". platform_dependency_disclosure also returns None for a
-                # RECOGNISED feed whose issuer mismatches or whose minimum_svn is under the floor --
-                # that declaration WAS read and parsed; it just could not be validated against the
-                # measured census. An independent Codex review caught this after two same-family
-                # reviews missed it. Name the defect that actually occurred.
-                print(head + " But the same document names dependencies this check could not fully "
-                      "verify, so it may put further containers inside the same protected machine "
-                      "that these settings do not cover. That is what the document allows, not a record of what "
-                      "happened: nothing here establishes what passed through those streams, or that "
-                      "your text reached them.")
-            elif not platform_present:
-                print(head + " That is what the document allows, not a record of what happened: "
-                      "nothing here establishes what passed through those streams, or that your text "
-                      "reached them.")
-            else:
-                print(head + " But the same document lets the cloud platform run further "
-                  "containers inside the same protected machine, permits whoever operates the machine to "
-                  "attach to those containers' own input and output, and permits most of them to run with raised "
-                  # The neutraliser sits AGAINST the alarming clause, not after it. An auditor: "the
-                  # saving clause is present, but it arrives after the scary description. A reader who
-                  # reads to the end gets the correction; a reader who stops midway does not." What the
-                  # document PERMITS is not a record of what HAPPENED, and that has to be said here.
+            print("    For the containers your provider controls, the policy document records this: "
+                  + _join_plain(shut) + ".")
+        if platform_unknown:
+            print()
+            print("    The same document carries dependencies this check could not fully verify, so it "
+                  "may put further containers inside the same protected machine that these settings do "
+                  "not cover. That is what the document allows, not a record of what happened: nothing "
+                  "here establishes what passed through those streams, or that your text reached them.")
+        elif platform_known:
+            print()
+            print("    The same document lets the cloud platform run further containers inside the same "
+                  "protected machine, permits whoever operates the machine to attach to those "
+                  "containers' own input and output, and permits most of them to run with raised "
+                  # The neutraliser sits AGAINST the alarming clause, not after it: a reader who stops
+                  # midway must still get the correction.
                   "powers. That is what the document allows, not a record of what happened: nothing "
                   "here establishes what passed through those streams, or that your text reached them, "
                   "and this record does not show whether anyone used those powers. Your provider does "
@@ -1249,6 +1234,9 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "those platform containers allow comes from a dated census of published versions, "
                   "not from this record: the policy pins a MINIMUM version, so the version actually "
                   "in force may be newer than any version measured.")
+        elif shut:
+            print("    That is what the document allows, not a record of what happened: nothing here "
+                  "establishes what passed through those streams, or that your text reached them.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         print()

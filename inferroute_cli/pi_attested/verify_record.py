@@ -1215,10 +1215,16 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   + _join_plain(shut) + ".")
         if platform_unknown:
             print()
-            print("    The same document carries dependencies this check could not fully verify, so it "
-                  "may put further containers inside the same protected machine that these settings do "
-                  "not cover. That is what the document allows, not a record of what happened: nothing "
-                  "here establishes what passed through those streams, or that your text reached them.")
+            # "these settings" / "the settings above" only mean something when a list was PRINTED,
+            # and `shut` is empty whenever no control is closed. Moving this paragraph out of
+            # `if shut:` (so the warning stops vanishing in the worst posture) left both phrases
+            # dangling in exactly that case. Found by the independent round 2026-09-29.
+            covers = ("that the settings above do not cover" if shut else
+                      "and this record does not show what limits, if any, apply to them")
+            print(f"    The same document carries dependencies this check could not fully verify, so it "
+                  f"may put further containers inside the same protected machine {covers}. That is what "
+                  "the document allows, not a record of what happened: nothing here establishes what "
+                  "passed through those streams, or that your text reached them.")
         elif platform_known:
             print()
             print("    The same document lets the cloud platform run further containers inside the same "
@@ -1229,8 +1235,12 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "powers. That is what the document allows, not a record of what happened: nothing "
                   "here establishes what passed through those streams, or that your text reached them, "
                   "and this record does not show whether anyone used those powers. Your provider does "
-                  "not control those containers and this record does not constrain them. It means the "
-                  "settings above describe one part of the machine, not the whole of it. What we say "
+                  "not control those containers and this record does not constrain them. "
+                  + ("It means the settings above describe one part of the machine, not the whole of "
+                     "it. " if shut else
+                     "No settings for our own containers are listed above, so this record does not "
+                     "show what limits, if any, apply to either part of the machine. ")
+                  + "What we say "
                   "those platform containers allow comes from a dated census of published versions, "
                   "not from this record: the policy pins a MINIMUM version, so the version actually "
                   "in force may be newer than any version measured.")

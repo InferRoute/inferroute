@@ -1896,3 +1896,23 @@ def test_the_level_one_headline_does_not_borrow_completeness(V):
     assert "listed above" not in one
     assert "required protection settings" not in one, one
     assert "this verifier checked" in one, one
+
+
+def test_the_platform_paragraph_never_cites_a_list_that_was_not_printed(V):
+    """The defect my own fix created. Moving the platform paragraph out of `if shut:` stopped the
+    warning vanishing when nothing was closed -- and left it saying "the settings above" and "these
+    settings" when no settings had been printed. A reader looks back, finds nothing, and either thinks
+    text is missing or invents the absent list from the phrase. Found by the independent round on
+    2026-09-29 and reproduced before fixing."""
+    for label, kw in (("platform known", dict(self_contained=False, dependencies_identified=True)),
+                      ("dependency unknown", dict(self_contained=False, dependencies_identified=False))):
+        out = _render_plain(V, 0, **kw)                      # NOTHING closed -> shut is empty
+        assert "records this:" not in out, f"{label}: fixture must have no settings list"
+        assert "further containers" in out, f"{label}: the warning must still appear"
+        assert "settings above" not in out, f"{label}: cites a list that was not printed: {out}"
+        assert "these settings" not in out, f"{label}: cites a list that was not printed: {out}"
+    # and when a list IS printed, the back-reference is legitimate and must survive
+    with_list = _render_plain(V, 0, self_contained=False, dependencies_identified=True,
+                              allow_stdio_access=True)
+    assert "records this:" in with_list
+    assert "settings above" in with_list, "the back-reference is correct when the list exists"

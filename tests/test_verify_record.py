@@ -1783,13 +1783,12 @@ def test_a_READ_but_UNVALIDATED_fragment_is_not_called_unreadable(V):
     assert "could not fully verify" in out, "say what is actually true: it was named but not verified"
 
 
-def test_the_level_one_sentence_does_not_imply_an_exhaustive_list(V):
-    """reach 1 also requires image_pinned and no_exec, which are NOT in PLAIN_CLOSED_WORDS. Saying
-    'the protection settings listed above' invites the reader to treat the short plain list as the
-    whole of what was checked."""
-    one = V.PLAIN_BY_REACH[1][0]
-    assert "listed above" not in one, one
-    assert "required protection settings" in one, one
+# NOTE: test_the_level_one_sentence_does_not_imply_an_exhaustive_list lived here. It pinned
+# "required protection settings", which a later independent round showed ALSO borrows completeness
+# (reach 1 gates on image_pinned, no_exec and the floor too, none of which the plain list names).
+# Superseded by test_the_level_one_headline_does_not_borrow_completeness, which asserts the same
+# "listed above" property plus the stronger one, so this is merged rather than kept as a second
+# test of one property that would drift against it.
 
 
 def test_the_BLOCKER_does_not_call_an_identified_dependency_unresolved(V):
@@ -1860,3 +1859,40 @@ def test_a_SKIPPED_floor_is_not_described_as_a_failure(V):
     joined = " ".join(blockers)
     assert "did not PASS" not in joined, "a SKIP must not be worded as a failure: " + joined
     assert "not established as passing" in joined.lower()
+
+
+def test_the_platform_warning_survives_the_WORST_posture(V):
+    """Found by the independent round on 2026-09-29 and reproduced. The platform paragraph lived
+    inside `if shut:`, so a policy with external dependencies and NOT ONE control closed printed no
+    plain-language mention of the platform's containers at all. The warning was suppressed exactly
+    when the posture was worst, and appeared as soon as any single control was closed."""
+    worst = _render_plain(V, 0, self_contained=False, dependencies_identified=True)
+    assert "further containers" in worst, (
+        "the worst posture must still warn about platform containers: " + worst)
+    some = _render_plain(V, 0, self_contained=False, dependencies_identified=True,
+                         allow_stdio_access=True)
+    assert "further containers" in some, "and it must still warn when a control IS closed"
+    # inversion: a self-contained policy has no platform containers, so it must stay silent
+    none_ = _render_plain(V, 1, self_contained=True, dependencies_identified=True,
+                          allow_stdio_access=True)
+    assert "further containers" not in none_
+
+
+def test_state_C_does_not_claim_the_document_NAMES_its_dependencies(V):
+    """State C also covers a declaration that could not be parsed at all, labelled
+    '<unparseable fragments assignment>' -- there is no feed, source_uri or uri, so nothing is named.
+    'names dependencies' asserts a property the verifier has not established."""
+    c = _render_plain(V, 0, self_contained=False, dependencies_identified=False,
+                      allow_stdio_access=True)
+    assert "could not fully verify" in c
+    assert "names dependencies" not in c, "nothing is named when the declaration is unparseable: " + c
+
+
+def test_the_level_one_headline_does_not_borrow_completeness(V):
+    """reach 1 gates on more than the plain list shows -- image_pinned, no_exec, the firmware floor.
+    Calling the handful of named items 'the required protection settings' invites a reader to treat
+    them as sufficient."""
+    one = V.PLAIN_BY_REACH[1][0]
+    assert "listed above" not in one
+    assert "required protection settings" not in one, one
+    assert "this verifier checked" in one, one

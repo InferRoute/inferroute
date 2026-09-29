@@ -1965,3 +1965,64 @@ def test_the_statement_speaks_with_one_voice_about_whose_containers(V):
     blobs.append(buf.getvalue())
     for b in blobs:
         assert "we control" not in b, f"mixed voice; say whose containers plainly: {b[:160]}"
+
+
+# ── a LIVE offer against a WINDOWED reference ────────────────────────────────────────────────────
+# check_identity's contract: "`at` is the moment the claim is about — a statement's own time when
+# checking a record, and now when checking a live enclave". verify_offer did not supply the second
+# half, so `at` was None and every windowed entry failed with "the statement carries no parsable time
+# (started_utc None)" — an offer has no statement. The retired test above passed only because
+# `retired` short-circuits before any window is resolved, so nothing caught it. Measured 2026-09-29
+# against the SHIPPED client with a reference whose anchors matched the enclave exactly: identity
+# still failed, and that function's contract is that a failure means DO NOT SEAL. Flat references hid
+# it; the first windowed reference was published that morning.
+# Windows here are relative to now on purpose: a fixed date would age into meaning something else.
+
+def _rel(**kw):
+    import datetime as _dt
+    return (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(**kw)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _windowed_ref(host, **window):
+    return {"schema": "inferroute.enclave-reference/1",
+            "policy_sha256": [{"value": host, **window}],
+            "index_manifest_sha256": ["ef" * 32], "model_manifest_sha256": ["12" * 32]}
+
+
+def _host(V, kms):
+    return V.parse_report(base64.b64decode(kms["evidence"]))["host_data"].hex()
+
+
+IDENTITY = "enclave identity (InferRoute's policy, index, encoders)"
+
+
+def test_a_live_offer_accepts_a_reference_whose_window_is_open_now(V, kms):
+    """The regression. Before the fix this failed with "carries no parsable time"."""
+    c = V.verify_offer(_offer(V, kms), reference=_windowed_ref(_host(V, kms), valid_from=_rel(days=-30)))
+    assert IDENTITY not in c.failed, [d for s, n, d in c.rows if n == IDENTITY]
+    assert not any("no parsable time" in d for _, _, d in c.rows)
+
+
+def test_a_live_offer_still_refuses_a_window_that_has_closed(V, kms):
+    """The fix must not turn every windowed entry into a pass. A closed window is still closed, and the
+    refusal must name the WINDOW rather than the old "no parsable time"."""
+    c = V.verify_offer(_offer(V, kms),
+                       reference=_windowed_ref(_host(V, kms), valid_from=_rel(days=-30), valid_to=_rel(days=-1)))
+    assert IDENTITY in c.failed
+    assert any("valid_to" in d for _, _, d in c.rows if d)
+    assert not any("no parsable time" in d for _, _, d in c.rows)
+
+
+def test_a_live_offer_still_refuses_a_window_that_has_not_opened(V, kms):
+    c = V.verify_offer(_offer(V, kms), reference=_windowed_ref(_host(V, kms), valid_from=_rel(days=+1)))
+    assert IDENTITY in c.failed
+    assert any("valid_from" in d for _, _, d in c.rows if d)
+
+
+def test_an_explicit_at_still_overrides_now_for_a_live_offer(V, kms):
+    """`at` is defaulted, not hardcoded: a caller asking about a specific moment still gets that moment.
+    Without this, the default could silently become the only behaviour."""
+    ref = _windowed_ref(_host(V, kms), valid_from=_rel(days=-30), valid_to=_rel(days=-10))
+    assert IDENTITY in V.verify_offer(_offer(V, kms), reference=ref).failed          # closed now
+    c = V.verify_offer(_offer(V, kms), reference=ref, at=_rel(days=-20))             # open back then
+    assert IDENTITY not in c.failed, [d for s, n, d in c.rows if n == IDENTITY]

@@ -1626,3 +1626,74 @@ def test_archive_refuses_malformed_reference_floor_instead_of_dropping_it(tmp_pa
     p.write_text(json.dumps(ref))
     code, out = _run(d, '--reference', str(p))
     assert code == 2 and 'invalid reference firmware requirement' in out
+
+
+_MSFT_FEED = "mcr.microsoft.com/aci/aci-cc-infra-fragment"
+_MSFT_ISSUER = ("did:x509:0:sha256:I__iuL25oXEVFdTP_aBLx_eT1RPHbCQ_ECBQfYZpt9s"
+                "::eku:1.3.6.1.4.1.311.76.59.1.3")
+
+
+def _policy_with(extra_head: str = "", feed: str = _MSFT_FEED, issuer: str = _MSFT_ISSUER, svn: str = "9"):
+    import base64 as _b64
+    return _b64.b64encode((
+        'package policy\n\n' + extra_head +
+        f'fragments := [{{"feed":"{feed}","issuer":"{issuer}",'
+        f'"includes":["containers","fragments"],"minimum_svn":"{svn}"}}]\n\n'
+        'allow_runtime_logging := false\nallow_dump_stacks := false\n'
+        'allow_unencrypted_scratch := false\n\n'
+        'containers := [{"allow_elevated":false,"allow_stdio_access":false,'
+        '"exec_processes":[],"layers":["aa"]}]\n').encode()).decode()
+
+
+def test_a_RECOGNISED_platform_fragment_is_not_called_unresolved(V):
+    """It is identified, pinned and its contents are disclosed. Calling it 'unresolved' in the same
+    run that prints 'every external dependency is identified' tells the reader both at once."""
+    c = V.Checks()
+    out = V.check_policy_posture(c, _policy_with())
+    assert out["self_contained"] is False, "a fragment is still not self-contained"
+    detail = " ".join(d for _, step, d in c.rows if step == "policy is self-contained")
+    assert "unresolved" not in detail, f"recognised fragment still called unresolved: {detail!r}"
+    assert "not constrained by the permission rows" in detail.lower()
+    assert "not the effective policy" in detail, "the CONSEQUENCE clause must survive"
+
+
+def test_a_recognised_fragment_PLUS_a_foreign_import_is_still_unresolved(V):
+    """The defect an adversarial review reproduced on 2026-09-29. `dependencies` carries Rego imports
+    and parse sentinels; platform_dependency_disclosure only ever examines FRAGMENTS. Softening on it
+    alone made the verifier vouch for an import nothing had looked at."""
+    c = V.Checks()
+    out = V.check_policy_posture(c, _policy_with(extra_head="import data.acme.extra_rules\n\n"))
+    detail = " ".join(d for _, step, d in c.rows if step == "policy is self-contained")
+    assert "unresolved" in detail, (
+        "a dependency nothing examined must NOT be described as identified and disclosed: " + repr(detail))
+    assert out["dependencies_identified"] is not True, (
+        "the identified row must FAIL when an unexamined dependency is in the same list")
+
+
+def test_an_unparseable_import_is_never_described_as_disclosed(V):
+    c = V.Checks()
+    V.check_policy_posture(c, _policy_with(extra_head="import\n\n"))
+    detail = " ".join(d for _, step, d in c.rows if step == "policy is self-contained")
+    assert "disclosed below" not in detail, f"vouched for an unparseable import: {detail!r}"
+
+
+def test_the_closed_control_phrases_are_deontic_and_name_the_program(V):
+    """'cannot watch' states a fact about the world from a flag in a document. 'may not' fixes that but
+    is ambiguous in English between permission and epistemic possibility ('perhaps they do not'), which
+    is weaker and vaguer than intended. And the stdio phrase must keep naming THE PROGRAM: the nearest
+    noun is the machine, so dropping it widens a claim that is about the container's streams."""
+    phrases = dict(V.PLAIN_CLOSED_WORDS)
+    for key, phrase in phrases.items():
+        assert len(phrase.split()) <= 15, f"{key}: {len(phrase.split())} words"
+        assert "cannot" not in phrase, f"{key} states capability, not permission: {phrase!r}"
+        assert " may not " not in f" {phrase} ", f"{key} is ambiguously deontic/epistemic: {phrase!r}"
+        assert "not permitted" in phrase, f"{key} must be unambiguously deontic: {phrase!r}"
+    assert "program" in phrases["allow_stdio_access"], (
+        "the stdio phrase must name the program; the flag is about the container's streams, not the "
+        "whole machine: " + repr(phrases["allow_stdio_access"]))
+
+
+def test_the_opening_line_does_not_say_the_containers_PASSED(V):
+    """PLAIN_ANSWER[1] is the line the reader reads FIRST. Fixing 'passed the listed protection checks'
+    only in the restatement at the bottom of the block leaves the stronger claim at the top."""
+    assert "passed" not in V.PLAIN_ANSWER[1].lower(), V.PLAIN_ANSWER[1]

@@ -803,3 +803,44 @@ Inversion-verified: fed a flat floor, it fails on exactly that assertion.
    mismatches, and those are Henry's key to close, not ours.
 
 **Spend:** $23.57 + ~$0.30 Azure this iteration.
+
+### Iteration 7 addendum — Henry signed; the record verifies clean
+
+Reference superseded and signed 2026-09-29T18:24:32Z (`7-supersede-reference.sh`
+over `offers/20260929T173500Z/evidence.json`). Signature verifies under the
+published key `748e4c8e…` (rc=0). Exactly one open policy entry, `0d6cc360…`; the
+index manifest rolled to `4d9c239b…`; the encoder value unchanged; the Genoa floor
+preserved. The previous reference is archived, so records made under it still check.
+
+**Shipped client against today's record with the real signed reference: 34 rows,
+33 PASS, 1 SKIP, 0 FAIL.** That is the whole pre-seal path clean end to end.
+
+Verifying it surfaced two more OFFER-path defects, both of the same family as the
+`at` bug — `verify_offer` diverging from `verify_search`, which already did the
+right thing:
+
+1. **6c17643 made the pre-seal row narrate a search that had not happened**
+   ("search at T", "the search (T) is after its valid_to"), to a reader whose
+   disclosure had not left their machine. Caught by the adversarial review of that
+   very commit. Fixed with a `live` flag (0dc58a9 / 244c3c3): "checked at", "the
+   time of this check". Record path untouched and tested for the leak.
+2. **The firmware row denied a floor the reference declares** — "no minimum pinned
+   for Genoa" printed directly above "the authenticated report meets the
+   reference's declared minimum". The floor was always enforced; only the wording
+   was wrong. Fixed as wording, still a SKIP, now naming the row that checked it
+   (3f1692d / b82e332).
+
+The adversarial review of 6c17643 otherwise **failed to break it**: 19 malformed
+reference shapes, retired entries, closed and unopened windows, mixed flat/windowed
+lists, per-field mismatches, clock skew — every refusal still refuses, and no
+previously-correct PASS changed meaning.
+
+**Left open, for Henry:** in the `--offer-dir` lane `verify_offer` never
+authenticates the reference (no `check_reference_signature`); the `--endpoint` lane
+does. Today provenance rests on the attorney placing the file by hand. If
+`reference.json` ever arrives in the same bundle as `offer.json`, identity becomes
+self-certifying. Recommended fix is to verify and refuse, which makes the client
+stricter — a product call, asked 2026-09-29.
+
+**Stop condition 4** still needs a real client RECORD (searches + plain output),
+which needs a live enclave; the offer path is now clean.

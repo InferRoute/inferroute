@@ -1080,7 +1080,7 @@ PLAIN_ANSWER: Dict[int, str] = {
        "not whether anyone read your text, so on that question it says nothing.",
     1: "This record cannot tell you whether your text stayed private: it records what was permitted, "
        "not whether anyone read your text, so on that question it says nothing \u2014 though the policy "
-       "document records the controls on the containers your provider controls at their protective values.",
+       "document records what each of the controls on the containers your provider controls was set to.",
 }
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
@@ -1146,8 +1146,10 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
     ("policy denies host access to the enclave's stdio",
-     "ask for a record made with one setting switched off: the setting that lets whoever runs the "
-     "machine watch what goes into the program and what comes out"),
+     "of the gaps listed above, the one your provider can most readily change is the setting "
+     "that lets whoever runs the machine watch what goes into the program and what comes out; "
+     "ask for a record made with that setting switched off, which will not by itself remove "
+     "the other gaps"),
     ("does not name a source for the image",
      "ask your provider to publish the program's source and tie it to the exact version that ran, so "
      "someone you trust can read what it does with your text"),
@@ -1246,8 +1248,15 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "not from this record: the policy pins a MINIMUM version, so the version actually "
                   "in force may be newer than any version measured.")
         elif shut:
-            print("    That is what the document allows, not a record of what happened: nothing here "
-                  "establishes what passed through those streams, or that your text reached them.")
+            # Say self-containment POSITIVELY. The round-12 auditor's stated reason was wrong -- a
+            # self-contained policy does not HIDE platform containers, it has none, and on ACI that
+            # state cannot run at all (see "A policy on ACI can never be self-contained"). The remedy
+            # is right for this file's OWN reason: silence about a closed control is its own defect,
+            # and a reader comparing two records cannot otherwise tell why the paragraph vanished.
+            print("    The policy declares no dependencies outside itself: the containers it lists are "
+                  "all the containers it permits. That is what the document allows, not a record of "
+                  "what happened: nothing here establishes what passed through those streams, or that "
+                  "your text reached them.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         print()

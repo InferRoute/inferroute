@@ -692,3 +692,114 @@ checking.
    which is blocked on the index route and one signature.
 
 **Spend:** $23.57 of $50.
+
+---
+
+## Iteration 7 — 2026-09-29 — the enclave crash, found for free
+
+### The crash was an image defect, and the guard against it could never fail
+
+Four Azure deploys had died with `exitCode 1` roughly two minutes after the index
+finished extracting. Container logs are denied by the policy on purpose
+(`allow_runtime_logging: false`), so nothing was visible from the cloud side, and
+each redeploy cost ~11 minutes of index transfer to learn nothing.
+
+Running the SAME registry image locally against the mounted index root produced
+the traceback in 88 seconds, for nothing:
+
+```
+M2Ranker.__init__ -> import lightgbm -> ctypes LoadLibrary("libgomp.so.1")
+OSError: libgomp.so.1: cannot open shared object file
+```
+
+Two false leads were discarded rather than reported, both artifacts of the local
+harness and not of ACI: a `FileNotFoundError` on `models/patents` (a four-hop
+symlink chain escaping the mount set — the tar is built with `-h`, so ACI has real
+bytes there) and a `PermissionError` on `model.safetensors` (mode 0600 on the
+host). Neither was the defect. A first check reported "zero broken symlinks" and
+was itself wrong: `models` is a symlink, so `find -type l` never descended into it.
+
+**The guard.** `Dockerfile.m2` had dropped `apt-get install libgomp1` in 06c3cd6
+(the reproducible-build work) and justified it in a comment: "faiss-cpu's wheel
+bundles its own OpenMP runtime, so libgomp1 was not needed — the baked-import
+check below is what proves that". Both halves were false, measured:
+
+* faiss-cpu and scikit-learn DO bundle OpenMP, but name-mangled
+  (`libgomp-e985bcbb.so.1.0.0`, empty SONAME). They can never satisfy a request
+  for the soname `libgomp.so.1`. `import faiss, lightgbm` fails exactly like
+  `import lightgbm` alone — so the credited mechanism was not the one operating.
+* the only plain soname in the image is `torch/lib/libgomp.so.1`, and the check
+  imports `sentence_transformers` (hence torch) BEFORE lightgbm, which loads it
+  into the process. The later ctypes call never touched disk.
+
+So the check passed for a reason unrelated to its claim and could not fail in this
+direction, while at runtime `M2Ranker` imports lightgbm lazily, before torch. The
+defect and the guard were one blind spot. Same shape as
+`a-control-you-always-satisfy-inside-the-guard`.
+
+Fixed by symlinking the soname from the same hash-pinned torch wheel into
+`/opt/omp` on `LD_LIBRARY_PATH` — no apt, so the reproducible build is intact —
+and rebuilding the check to run the ranker's lazy imports FIRST, each in a FRESH
+interpreter, ALONE. Verified in both directions: the new check fails on the
+pre-fix image and passes after. Commit 3cf3b30.
+
+### The run then succeeded end to end
+
+`deploy-and-capture.py`, offers/20260929T173500Z. Anchor proven reproducible
+before deploy (two generations, different SAS, same HOST_DATA). `verify(prod
+roots): ok=True`. Six real sealed searches, all `ok=True, hits=20`; first 3.924s,
+steady median 2.918s; genuine glucose-monitoring prior art returned. Everything
+reaped — only `ir-attested-durable` and `NetworkWatcherRG` remain.
+
+**First run with the policy fully closed**: `allow_stdio_access` false on all
+three containers, `allow_elevated` false on all three, `allow_runtime_logging`,
+`allow_dump_stacks` and `allow_unencrypted_scratch` all false. The closure is not
+merely asserted — `logs-search.txt` and `logs-skr.txt` came back 1 byte each.
+
+### The signed reference now misses on TWO anchors, not one
+
+| anchor | reference (signed 2026-09-29T10:09Z) | this record | |
+|---|---|---|---|
+| `policy_sha256` (HOST_DATA) | `011b8b1a…` | `0d6cc360…` | MISMATCH |
+| `index_manifest_sha256` | `5404ee03…` | `4d9c239b…` | MISMATCH |
+| `model_manifest_sha256` | `7f31cb3f…` | `7f31cb3f…` | match |
+
+The policy move is expected — we changed the image. The index move is NOT, and
+matters: the durable blob was re-staged **2026-09-28T19:25Z**, after the last of
+the 15 prior records (all `5404ee03…`, 09-16 → 09-24) and the evening BEFORE the
+reference was signed. So the signature already named a stale index at the moment
+it was made; a record produced today would have failed identity even without the
+image fix. `build_manifest_hash` itself is unchanged since 09-24, and today's two
+independent paths — a local pre-mounted run with no extraction and the ACI run
+with memfd extraction — agree on `4d9c239b…`, which is why that value is trusted.
+
+**Consequence for the signing trip:** still ONE trip, but it must carry BOTH new
+values. The `f7a4bb2e` policy discussed earlier is superseded and should not be
+signed for.
+
+### Also closed this iteration
+
+Two suite failures, both from b144c32 not reaching sealed-research's copies
+(commit 510dc94). The vendored verifier had drifted from canonical by the single
+"this one" -> "this record" naive-reader fix; re-copied, pin moved in the same
+commit. And `test_matching_reference_firmware_requirement_allows_a_verified_search`
+built a FLAT `min_tcb`, which is now refused for having no validity window before
+the floor is ever compared — so it failed for a reason unrelated to its subject.
+
+That hid something worse: the parametrised refusal test above it is also all-flat,
+so its two floor cases refuse on windowing and never reach the comparison. It was
+green while covering nothing. Added
+`test_windowed_reference_firmware_requirement_refuses_an_unmet_floor`, asserting
+the REASON and explicitly that the refusal was not about the window.
+Inversion-verified: fed a flat floor, it fails on exactly that assertion.
+
+### Stop conditions
+
+1. mis-specified, dropped (unchanged).
+2. measurable half met (unchanged).
+3. **MET** (unchanged).
+4. **now pends only the signature.** The fresh record exists, searches, and is
+   fully closed; the blockers that remain in its plain output are the two anchor
+   mismatches, and those are Henry's key to close, not ours.
+
+**Spend:** $23.57 + ~$0.30 Azure this iteration.

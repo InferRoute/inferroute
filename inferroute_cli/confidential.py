@@ -608,8 +608,25 @@ async def _open_continuity(order, alias, catalog, session_id, transport, http, e
             raise RuntimeError(s.receipt.refusal or "not confidential")
         return s
 
+    def _announce(kind: str, detail: str) -> None:
+        """A switch is NEVER SILENT. This module's own rule, forty lines up: "the model that actually
+        answered is announced, because a record whose reader assumes the preferred model ran is a
+        record that misleads." The lane was built with no display hook at all, so every switch happened
+        behind the user — and its own note text said the quiet part: "the user saw nothing".
+
+        The user seeing nothing is the goal for the ERROR. It is the opposite of the goal for the fact
+        that a different model answered."""
+        if kind == "switched":
+            console.print(f"[yellow]the machine serving this session stopped responding, so it moved: "
+                          f"{detail}[/]\n[grey58]still the confidential lane — every machine verified "
+                          f"from this device before anything was sent to it, and the receipt names "
+                          f"each one.[/]")
+        elif kind == "no-standby":
+            console.print(f"[grey58]{detail}[/]")
+
     lane = cont.Continuity(cands, opener, beliefs=beliefs,
-                           policy=av.Policy(rank=av.RANK_CAPABILITY), transport=transport)
+                           policy=av.Policy(rank=av.RANK_CAPABILITY), transport=transport,
+                           note=_announce)
     status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
     status.start()
     try:
@@ -735,8 +752,15 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             # Changing a client-facing confidentiality claim is Henry's call and an audit's, not a
             # commit's. So the lane ships complete, tested and REACHABLE ONLY ON PURPOSE, and Probant
             # keeps exactly the single-session behaviour it has today until that sentence is settled.
+            # ON, per Henry's ruling of 2026-09-30, once the claim it needed was conditioned rather
+            # than quietly broken: probant_trust no longer says "only that machine can open it" for the
+            # AI lane, the `machines-per-session` limitation carries the condition, and the Bétrancourt
+            # draft says the same in the same register. The search lane's singular claim is untouched
+            # because it pins expect_lifetime_id and is still earned.
+            #
+            # IR_PROBANT_CONTINUITY=0 turns it off again without a code change.
             use_continuity = (probant is not None
-                              and os.environ.get("IR_PROBANT_CONTINUITY") == "1")
+                              and os.environ.get("IR_PROBANT_CONTINUITY") != "0")
             session, receipt = await _open_session(alias, session_id, http, console,
                                                    continuity=use_continuity)
             search_endpoint = None

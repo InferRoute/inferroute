@@ -106,13 +106,38 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         # never an UNVERIFIED machine. The count is stated rather than hedged, so the ordinary
         # single-machine session still says something definite.
         n = machines_served(receipt)
-        points.append("Your text is encrypted here; only a machine this computer has verified can open "
-                      "it — never an unverified one.")
+        # REWRITTEN AFTER A NAIVE-READER TEST, which the first attempt failed in three distinct ways.
+        #
+        # 1. The two lines argued with each other in front of the reader: the tick said "only A MACHINE
+        #    ... can open it", singular, and the limitation said several will have decrypted it. Their
+        #    words: "those two sentences are having an argument in front of me ... I felt slightly
+        #    handled, and once you feel handled you start rereading everything." Plural throughout now,
+        #    so the tick and the condition cannot disagree.
+        # 2. "never an unverified one" was a defensive negation and it backfired: "nobody says that
+        #    unless somebody somewhere was worried about unverified ones. It's a denial of a thing I
+        #    hadn't thought to worry about, so now I'm worried about it." The exclusion is now about
+        #    the parties a reader already has in mind — the company, the network, the host — which is
+        #    what they were actually asking.
+        # 3. The condition used "enclave", a word the reassuring lines never introduced: "if you're
+        #    going to use a word I don't know, use it where you're reassuring me, not where you're
+        #    warning me." One vocabulary — machine — everywhere.
+        points.append("Your text leaves this computer encrypted, and is opened only inside machines "
+                      "this computer checked first.")
+        # "SO FAR", because a count is not a promise. Two independent naive readers found the same
+        # argument on the screen: the tick said "one machine has served this session" and the condition
+        # said "more than one will have opened it", and both read the second as the small print taking
+        # back what the big print promised. The second reader named the fix — "I'd take it better if the
+        # top line said one or more from the start, so the honest bit isn't the bit that ambushes me at
+        # the bottom." A running count reads as a running count and cannot be contradicted later.
+        #
+        # The enumerated exclusions that used to end this line are gone. They were accurate, and the
+        # first reader still reacted: "it lists three people who can't, and that's a suspiciously
+        # specific list — when someone tells me three things they're not doing, I start wondering about
+        # the fourth." They remain one level down, where a reader who wants them goes looking.
         points.append(
-            f"{n} machines have served this session, each verified before it was used, and the record "
-            f"names them." if n > 1 else
-            "If a machine stops responding, the session moves to another verified machine and the "
-            "record names every machine that served.")
+            f"{n} machines have opened it so far. The receipt names every machine that does."
+            if n > 1 else
+            "One machine has opened it so far. The receipt names every machine that does.")
     warn_ids = {"new-build", "pending-build"}
     caveats = [str(lim.get("text", "")) for lim in (getattr(receipt, "limitations", None) or [])
                if isinstance(lim, dict) and lim.get("id") in warn_ids]

@@ -324,3 +324,70 @@ def test_a_fallback_is_announced_and_a_candidate_is_skipped_not_fatal():
     # the chain is only reached for per-fleet failures: a refused key or an unreachable carrier exits above
     assert src.index("RelayUnavailable") < src.index("for short in order")
     assert C._resolve_model_quietly("definitely-not-a-model") is None
+
+
+# ── a competing provider route must not survive into a sealed session ─────────────────────────────
+# Supply audit 2026-09-12 (A2), confirmed independently, shipped unfixed pending a design call. With
+# CLAUDE_CODE_USE_BEDROCK=1 the child ignored our ANTHROPIC_BASE_URL, resolved real AWS credentials and
+# enumerated the Bedrock deployment — while the panel rendered every check green and "plaintext that left
+# this device: 0 bytes". Every check was TRUE and the session was not using what they verified. Worse than
+# a failed check, because a failure refuses and this displayed success.
+
+def test_every_competing_provider_route_is_stripped_and_named():
+    from inferroute_cli import confidential as C
+    env = {k: "1" for k in C.PROVIDER_ROUTE_VARS}
+    env["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:1"      # ours, must survive
+    found = C.strip_provider_route(env)
+    assert set(found) == set(C.PROVIDER_ROUTE_VARS), found
+    assert not [k for k in C.PROVIDER_ROUTE_VARS if k in env], "a route survived the strip"
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:1", "the sealed proxy route was stripped too"
+    # the names are returned so the user can be TOLD: silent denial is as bad as silent bypass
+    assert found, "an override with nothing to report cannot be announced"
+    # Mantle is in the list — it was the third route neither reviewer listed first
+    assert "CLAUDE_CODE_USE_MANTLE" in C.PROVIDER_ROUTE_VARS
+    # empty/whitespace values are not "set": they route nowhere and must not raise a false announcement
+    assert C.strip_provider_route({"CLAUDE_CODE_USE_BEDROCK": "  "}) == []
+
+
+def test_the_falsy_settings_override_is_applied_even_when_the_status_line_backs_off():
+    """THE property. `_product_strip_settings_args` returns [] when IR_NO_STATUSLINE is set or the user has
+    their own statusLine. A security override that is skipped because someone customised their status bar
+    is not an override — so this must create its own --settings layer when there is none."""
+    import json
+    from inferroute_cli import confidential as C
+    status_args: list[str] = []                            # the back-off case
+    C.force_provider_route_falsy(status_args, [])
+    assert status_args[0] == "--settings"
+    envb = json.loads(status_args[1])["env"]
+    assert all(envb[k] == "0" for k in C.PROVIDER_ROUTE_VARS), envb
+    # "0" is falsy to Claude Code for these flags — measured 2026-09-12, along with "" and "false"
+    assert envb["CLAUDE_CODE_USE_BEDROCK"] == "0"
+
+
+def test_the_override_merges_without_discarding_the_caller_s_settings():
+    """It rides in whichever --settings layer exists, and must not throw away what is already there --
+    the status line lives in that same blob."""
+    import json
+    from inferroute_cli import confidential as C
+    status_args = ["--settings", json.dumps({"statusLine": {"command": "echo hi"}, "env": {"FOO": "bar"}})]
+    C.force_provider_route_falsy(status_args, [])
+    doc = json.loads(status_args[1])
+    assert doc["statusLine"]["command"] == "echo hi", "the status line was discarded"
+    assert doc["env"]["FOO"] == "bar", "an unrelated env entry was discarded"
+    assert doc["env"]["CLAUDE_CODE_USE_BEDROCK"] == "0"
+    # a caller's own --settings in passthrough is honoured the same way
+    passthrough = ["--settings", json.dumps({"tui": {"x": 1}})]
+    C.force_provider_route_falsy([], passthrough)
+    assert json.loads(passthrough[1])["tui"] == {"x": 1}
+    assert json.loads(passthrough[1])["env"]["CLAUDE_CODE_USE_VERTEX"] == "0"
+
+
+def test_malformed_settings_still_get_an_override_rather_than_a_crash():
+    """Someone else's malformed --settings must not be rewritten, and must not stop the override either."""
+    from inferroute_cli import confidential as C
+    import json
+    status_args = ["--settings", "{not json"]
+    C.force_provider_route_falsy(status_args, [])
+    assert status_args[1] == "{not json", "a malformed value was rewritten"
+    assert status_args.count("--settings") == 2, "no override layer was added"
+    assert json.loads(status_args[-1])["env"]["CLAUDE_CODE_USE_BEDROCK"] == "0"

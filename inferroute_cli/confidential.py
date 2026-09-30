@@ -41,6 +41,82 @@ PROBANT_MODEL = "kimi-k3"
 FALLBACK_MODELS = ("kimi-k3", "kimi-k2.6", "glm-5.2", "glm-5.1", "deepseek-v4-flash")
 
 
+# ── competing provider routes ─────────────────────────────────────────────────────────────────────
+# Found by the supply audit 2026-09-12 (A2), confirmed independently, and left SHIPPED and unfixed
+# pending a design call. `env = os.environ.copy()` passed the parent environment through untouched, and
+# Claude Code's own precedence makes CLAUDE_CODE_USE_BEDROCK=1 (or Vertex, or Mantle) beat the
+# ANTHROPIC_BASE_URL we point at the local sealed proxy. Measured on this machine: with the var set,
+# Claude Code IGNORED the base URL, resolved real AWS credentials and enumerated the Bedrock deployment.
+#
+# WHY IT IS WORSE THAN A FAILED CHECK: the session never touches the enclave while the panel renders
+# every check green and "plaintext that left this device: 0 bytes". Every one of those checks is TRUE.
+# A failure refuses; this displays success. And the lane is confidential BY DEFAULT since 0.9.0, so the
+# user never opted in to the risk.
+#
+# STRIPPING THE CHILD ENV IS NOT ENOUGH: `/setup-bedrock` and `/setup-vertex` write these into
+# ~/.claude/settings.json's env block, and Claude Code applies its own settings to itself, so a child-env
+# strip cannot reach the wizard population — the most exposed. `--settings` is precedence 2 and beats a
+# level-5 user settings file. Measured 2026-09-12: "0", "" and "false" are all falsy to Claude Code for
+# these flags, so a falsy override there genuinely takes the Anthropic path.
+PROVIDER_ROUTE_VARS = (
+    "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_MANTLE",
+    "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_MANTLE_BASE_URL",
+    "CLAUDE_CODE_SKIP_BEDROCK_AUTH", "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+)
+
+
+def strip_provider_route(env: dict) -> list[str]:
+    """Remove competing provider routes from the child env; return the names that were set.
+
+    Returning the names is the point: a user who deliberately configured Bedrock is TOLD the sealed lane
+    overrode it, rather than silently getting something other than what they asked for. Silent denial and
+    silent bypass are both failures to say what happened.
+    """
+    found = [k for k in PROVIDER_ROUTE_VARS if env.get(k, "").strip()]
+    for k in PROVIDER_ROUTE_VARS:
+        env.pop(k, None)
+    return found
+
+
+def force_provider_route_falsy(status_args: list[str], passthrough: list[str]) -> None:
+    """Pin every provider route falsy in a `--settings` layer, so a settings FILE cannot re-enable one.
+
+    This must not ride on the status-line settings, which back off when IR_NO_STATUSLINE is set or the
+    user already has a statusLine of their own. A security override that is skipped because someone
+    customised their status bar is not an override. So: merge into whichever --settings layer exists, and
+    create one when none does.
+    """
+    import json
+    falsy = {k: "0" for k in PROVIDER_ROUTE_VARS}
+
+    def _merge(blob: str):
+        """The merged JSON, or None when the caller's value cannot be parsed — never a rewrite of it."""
+        try:
+            doc = json.loads(blob) if blob.strip() else {}
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(doc, dict):
+            return None
+        envb = doc.get("env")
+        doc["env"] = {**(envb if isinstance(envb, dict) else {}), **falsy}
+        return json.dumps(doc)
+
+    # FAILING TO PARSE MUST NOT MEAN FAILING TO OVERRIDE. The first version returned early on malformed
+    # input, so a caller's broken --settings silently disabled the neutralisation entirely — a fail-OPEN,
+    # caught by the test below. Unparseable input is left untouched and we add our own layer instead; a
+    # later --settings wins for the keys it sets, and ours is the last one appended.
+    for args in (status_args, passthrough):
+        if "--settings" in args:
+            i = args.index("--settings")
+            if i + 1 < len(args):
+                merged = _merge(args[i + 1])
+                if merged is not None:
+                    args[i + 1] = merged
+                    return
+                break                         # malformed: leave it alone, fall through to our own layer
+    status_args.extend(["--settings", json.dumps({"env": falsy})])
+
+
 def _console():
     from rich.console import Console
     return Console()
@@ -330,6 +406,10 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                     server_task.result()
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
+            # Before anything else about this child: a competing provider route would send the session
+            # somewhere the panel has not verified, while the panel renders all-green. See
+            # strip_provider_route.
+            overridden_routes = strip_provider_route(env)
             env["IR_CONFIDENTIAL"] = "1"
             agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
             if probant is not None:
@@ -350,6 +430,14 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 status_args = launch_mod._product_strip_settings_args(
                     _strip_prefix(receipt), passthrough, disable_connectors=True)
                 _attach_counter(status_args, receipt.path)
+                # A settings FILE could re-enable a route the env strip removed; this cannot be skipped.
+                force_provider_route_falsy(status_args, passthrough)
+                if overridden_routes:
+                    console.print(
+                        f"[yellow]the sealed lane overrode {', '.join(overridden_routes)}[/]\n"
+                        "[grey58]those settings route to another provider, which would bypass the enclave "
+                        "this panel just verified. This session goes to the enclave. To use that provider "
+                        "instead, run without --confidential.[/]")
                 if resuming:
                     argv = [binary, "--model", shown_model, "--resume", session_id, *passthrough, *status_args]
                 else:

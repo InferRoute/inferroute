@@ -21,6 +21,25 @@ from pathlib import Path
 
 DEFAULT_MODEL = "kimi-k2.6"
 
+# PROBANT runs its own default. Measured 2026-09-30, per-model eligibility on this device:
+#   kimi-k2.6  12 instances → 1 eligible      kimi-k3            4 → 3
+#   glm-5.2     4 → 3                          glm-5.1           18 → 2
+#   deepseek-v4-flash 4 → 4
+# The k2.6 fleet had grown to 12 while 11 were refused HERE (7 for an enclave build InferRoute has not
+# recorded, 7 for an e2e key the hardware quote does not commit to). A pool of one is why sessions kept
+# reporting "the AI machine couldn't be reached": the pinned instance cycles out and there is no
+# alternative. The other fleets were healthy throughout, so this was never a carrier outage.
+PROBANT_MODEL = "kimi-k3"
+
+# Tried in order when a session cannot get an eligible instance on the model asked for. Ordering is
+# capability first, cheapest last — Probant is low-volume, so availability is worth more than price here.
+#
+# TWO LINES THIS MUST NOT CROSS. It never leaves the CONFIDENTIAL lane: falling back to the plain lane
+# would send a client's disclosure to a machine nobody attested, which is the one thing the product
+# exists to prevent. And it is never silent — the model that actually answered is announced, because a
+# record whose reader assumes the preferred model ran is a record that misleads.
+FALLBACK_MODELS = ("kimi-k3", "kimi-k2.6", "glm-5.2", "glm-5.1", "deepseek-v4-flash")
+
 
 def _console():
     from rich.console import Console
@@ -50,6 +69,15 @@ def _resolve_model(short: str | None):
         sys.stderr.write(f"\n  `{short}` cannot run confidentially. Models that can: {', '.join(tee) or '(none in catalog)'}\n\n")
         sys.exit(2)
     return alias
+
+
+def _resolve_model_quietly(short: str):
+    """A fallback candidate that is not in the catalog, or not enclave-backed, is SKIPPED rather than fatal:
+    _resolve_model exits the process, which is right for what the user asked for and wrong for a guess."""
+    from . import models as models_mod
+    from . import lane as lane_mod
+    alias = models_mod.get(short)
+    return alias if alias is not None and lane_mod.enclave_backed(short) else None
 
 
 def _interactive(passthrough: list[str]) -> bool:
@@ -118,26 +146,44 @@ async def _open_session(alias, session_id: str, http, console):
         except httpx.HTTPError as e:
             console.print(f"[red]cannot reach the carrier ({type(e).__name__})[/]\n[grey58]Nothing was sent.[/]")
             sys.exit(3)
-    fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == alias.ref_key), None)
-    if not fleet_id:
-        console.print(f"[red]{alias.ref_key} is not offered on the confidential lane right now[/]")
-        sys.exit(3)
     economy = os.environ.get("IR_LANE", "").strip().lower() in ("economy", "economy-loop")
-    session = ConfidentialSession(session_id=session_id, model_short=alias.short, upstream_model=alias.ref_key,
-                                  fleet_id=fleet_id, transport=transport, http=http,
-                                  price=_lane_price(alias, economy), economy=economy)
-    status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
-    status.start()
-    try:
-        receipt = await session.open(progress=lambda s: status.update(f"[bold]{s}"))
-    except Exception as e:  # session.open() refuses on expected failures; anything else is a bug, shown cleanly
-        status.stop()
-        from inferroute_local.confidential.session import public_reason
-        console.print(f"[red]could not open the confidential session ({public_reason(e)})[/]\n[grey58]Nothing was sent.[/]")
-        sys.exit(3)
-    finally:
-        status.stop()
-    return session, receipt
+    # The model asked for, then the fallbacks, without repeating it. Only reached when a fleet cannot give
+    # this device an eligible instance — a carrier or credential failure has already exited above, because
+    # trying four models against a refused key would just print the same error four times.
+    order = [alias.short] + [m for m in FALLBACK_MODELS if m != alias.short]
+    if os.environ.get("IR_NO_MODEL_FALLBACK") == "1":
+        order = [alias.short]
+    tried: list[str] = []
+    for short in order:
+        cand = alias if short == alias.short else _resolve_model_quietly(short)
+        if cand is None:
+            continue
+        fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == cand.ref_key), None)
+        if not fleet_id:
+            tried.append(f"{short} (not offered)")
+            continue
+        session = ConfidentialSession(session_id=session_id, model_short=cand.short, upstream_model=cand.ref_key,
+                                      fleet_id=fleet_id, transport=transport, http=http,
+                                      price=_lane_price(cand, economy), economy=economy)
+        status = console.status(f"[bold]verifying the enclave from this device… ({cand.short})", spinner="dots")
+        status.start()
+        try:
+            receipt = await session.open(progress=lambda s: status.update(f"[bold]{s}"))
+        except Exception as e:      # session.open() refuses on expected failures; a bug shows the same way
+            from inferroute_local.confidential.session import public_reason
+            tried.append(f"{short} ({public_reason(e)})")
+            continue
+        finally:
+            status.stop()
+        if short != alias.short:
+            # NEVER silent: the reader must know which model answered, and why it was not the first choice.
+            console.print(f"[yellow]{alias.short} had no machine this device accepts, so this session runs "
+                          f"{cand.short}[/]\n[grey58]still the confidential lane — a verified enclave, "
+                          f"never the plain one. Tried: {', '.join(tried)}.[/]")
+        return session, receipt
+    console.print("[red]no confidential model could give this device a verified machine[/]"
+                  f"\n[grey58]tried {', '.join(tried) or '(none)'}[/]\n[grey58]Nothing was sent.[/]")
+    sys.exit(3)
 
 
 def _strip_prefix(receipt) -> str:
@@ -201,7 +247,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             return 130
         hint = f"ir {agent} --model {user_model}" if agent != "claude" else f"ir --model {user_model}"
         sys.stderr.write(f"\n  Run this next time directly:  {hint}\n\n")
-    alias = _resolve_model(user_model)
+    # Probant's own default, not the lane's: see PROBANT_MODEL. An explicit --model still wins.
+    alias = _resolve_model(user_model or (PROBANT_MODEL if probant is not None else None))
     if agent == "pi":
         from . import pi_attested
         try:

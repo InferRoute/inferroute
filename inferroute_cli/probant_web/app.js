@@ -361,6 +361,13 @@
     // from a fresh pool, was falling into the bare "nonce" token below and being quietly retried against
     // the advice it was about to print. That was an instance of this class, not a special case.
     if (isTerminal(d)) return false;
+    // A REPLY THAT WILL NOT OPEN IS NEVER QUIET. It is an authentication failure against the key the
+    // hardware quote committed to — indistinguishable from a substituted key or machine, and the only
+    // runtime sign that the claim "no relay could substitute the key or the hardware without failing a
+    // check on this device" is being tested. I made this one quiet earlier tonight while fixing the
+    // mid-stream classes; retrying it silently and averaging it into a health score turns the one
+    // tripwire this product has into a metric.
+    if (d.includes("could not open the enclave")) return false;
     if (d.includes("unreachable") || d.includes("502") || d.includes("503")
         || d.includes("504") || d.includes("timeout") || d.includes("timed out")
         || d.includes("429") || d.includes("rate") || d.includes("nonce")
@@ -368,7 +375,7 @@
     // Mid-stream: the reply started and did not finish. Retrying is the right move and nothing left the
     // machine in the clear either way.
     if (d.includes("ended part-way") || d.includes("without finishing the answer")
-        || d.includes("mid-reply") || d.includes("could not open the enclave")) return true;
+        || d.includes("mid-reply")) return true;
     // UNRECOGNISED IS NOT EVIDENCE OF SUBSTANTIVE. Henry, 30 Sep, on seeing the unnamed sentence in a
     // session that then continued normally: "really i guess that message should not have been displayed".
     //

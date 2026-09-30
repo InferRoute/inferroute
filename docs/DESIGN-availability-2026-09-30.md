@@ -128,3 +128,110 @@ that says something untrue is worse than a session that failed.
 8. Relay endpoint; then retire the client-side epidemiology it stands in for
 
 1-4 are self-contained and safe. 5-6 change what the record claims and must not be rushed.
+
+---
+
+# Adversarial review 1 — privacy and failure modes (2026-09-30)
+
+Findings that **falsify parts of the design above**. Kept verbatim in substance; the design's order of
+work is wrong until these are folded in.
+
+## Fatal
+
+**F1. A sealed request is not portable across fleets.** `translate.to_openai`/`native_openai` bake
+`{"model": upstream_model}` into the body (translate.py:163, 481) at session.py:414/437 — *before*
+`_send_sealed`, which seals that same dict on both attempts (331). §6's "switch fleet and retry inside
+the lane" would send fleet A's model name to fleet B's enclave. The request shape is model-specific too
+(`thinking_key_for`, translate.py:192). Cross-fleet failover must re-enter at `messages()` /
+`chat_completions()`, not inside `_send_sealed`. The "one call site away" framing does not apply.
+
+**F2. `fleet_id` is read outside the lock that pins the instance.** session.py:330 takes `(pinned, nonce)`
+under `_lock`; 342-343 reads `self.fleet_id` outside it. Inert while the field is frozen; a live,
+intermittent mismatch the moment fact 3 makes it mutable. Carry `fleet_id` inside `Pinned`.
+
+**F3. `_verified_at` is one session-wide clock** (78, set at 109/306, gating 210/273). Per-fleet
+selection would verify fleet B, mark the clock fresh, then seal to a fleet-A instance whose evidence is
+older than `REVERIFY_EVERY_S` — breaking the one invariant the lane sells. Verification state must be
+per-fleet BEFORE §6. Also: `_absorb_pool` replaces the pool wholesale (171), so each switch discards the
+other fleet's nonces and every switch-back costs a full re-verify — the code calls it "the slow part"
+and measures 68 s.
+
+**F4. §7 fixes the wrong fields.** `lane_preamble` (receipt.py:164-186) is prepended to EVERY request and
+asserts `The assistant in this session is {upstream_model}`, `instance {id[:8]}`, the passed-check list,
+and `never say otherwise`. `_pin` rewrites `receipt.instance` (177), `checks` (179), `attestation` (191),
+`limitations` (202) — but `upstream_model` and `model_short` are **never rewritten** (60-61). A silent
+cross-model failover therefore instructs the NEW model to tell a patent attorney it is the OLD model, on
+the OLD instance, and never to say otherwise. Worse than a session that failed, by this document's own
+standard. The verdict vocabulary has no state for it either (`unopened|confidential|refused|degraded`).
+
+## Serious
+
+**S5. Silent re-pricing.** `self.price` is fixed at `__init__` (71); `_account` computes
+`estimated_cost_usd` from it (607-611). A cross-fleet switch leaves the receipt's running cost at the
+wrong rate with nothing saying so. `model_short` is also echoed into the response itself (534, 599), so
+the API answer names the model the user asked for regardless of which produced the tokens.
+
+**S6. `context_length` is ignored.** `models()` already returns it (transport.py:182, 233). Failing a
+380k-token disclosure over to a smaller-context fleet truncates or fails hard mid-document. For this
+client that is the most consequential silent degradation, and the design did not mention it.
+
+**S7. The prefix cache dies on INSTANCE switches too.** The preamble embeds `instance {id[:8]}` and is
+recomputed per request from the live receipt (414, 437), so the system prefix changes on every instance
+rotation — already happening today, uncounted, via `_RETRY_ON_OTHER_INSTANCE`.
+
+**S8. §2 would hand the untrusted relay signals derived from DECRYPTED bytes.** Most classes are not new:
+for 400/402/429/5xx the relay produced the status itself. Three are new, and they are the ones behind the
+AEAD:
+  - `reply_unopenable` — a ChaCha20-Poly1305 auth failure. Not a padding oracle, but a per-attempt
+    confirmation channel for an active relay calibrating a key-substitution or downgrade attempt.
+  - `stream_truncated` — whether the *plaintext* ended with `[DONE]`. A one-bit fact about content.
+  - `Refused` from `_take_nonce` — **this device's own attestation verdict**. A relay that also serves the
+    build list (transport.py:220-226) could A/B test which forged builds a given client accepts and read
+    the answer back.
+  Sharpening it: `report_usage` is a **no-op on DirectOperator** (143-145); it exists only where
+  InferRoute is the untrusted party. **Rule: the outcome vocabulary is closed and enumerated in code, and
+  no class derivable from decrypted bytes goes on the wire.**
+
+**S9. §2 reports turns that never left the device** (seal_failed 416/439, `Refused` 332), telling the
+relay the user composed a turn and hit send while nothing went out.
+
+**S10. §5's "costs the user nothing" is false against our own disclosure sentence.** Each probe is an
+authenticated, session-tagged `instances()` call. It subdivides the think-time interval the product
+discloses as "timing". Constraint to write down now: **probes fire on a fixed wall-clock schedule, never
+on a user-activity trigger**, or it becomes keystroke-adjacent. Unanalysed: `instances()` is also the
+nonce source (157-170); a probe may invalidate the pool the session holds.
+
+**S11. The 2am one.** `_account` fires `asyncio.ensure_future(report_usage(...))` (613) — no strong
+reference (GC can drop it mid-flight, biasing the very sample §3 learns from) — on the SAME
+`httpx.AsyncClient` as `invoke`, `instances` and attestation. At the measured 95%-failure rate each
+failure spawns a 10 s POST; if the relay is the sick component those hang while more are created, and the
+availability telemetry competes for connections with the requests it measures. Bounded queue, single
+drain task, hard in-flight cap, separate client.
+
+**S12. §6 makes the availability mechanism a new cause of unavailability.**
+`REVERIFY_FAILURES_ALLOWED = 3` (291-304) counts consecutive failures; each switch needs a fresh
+`fetch_and_verify` + online pass against Intel and NVIDIA (attest.py:551, 568). A 2am flap — or those
+services rate-limiting us *because* we now attest far more often — trips it, the daemon's `_watch` sees
+`heartbeat() == False` and shuts the endpoint down after `GRACE_S = 20`. No per-fleet failure accounting,
+no backoff on switching.
+
+## Cosmetic
+
+**C13.** Retry double-counts `plaintext_bytes_sealed_here`/`ciphertext_bytes_sent` against a flat
+`requests` (336-339), so the ratio an auditor reads as compression is compression plus an unstated retry
+multiplier.
+
+**C14.** No AAD on the sealed request (e2ee.py:136, 141): `fleet_id`, `instance_id`, nonce, stream flag
+and path travel as rewritable headers. Misrouting fails harmlessly (no decapsulation), but a relay can
+replay a captured sealed request under a fresh nonce and have the enclave process the disclosure again —
+no read access, but not what the receipt will say. Binding `{fleet_id, instance_id, nonce, model}` into
+the AAD would also turn F1 into a loud failure instead of a quiet one.
+
+## Checked and NOT issues
+
+- A 400 does not correlate with what the attorney typed: `translate.py` contains zero `raise`s;
+  `to_openai`/`native_openai` are total and silently drop what they do not understand.
+- Context-overflow leaking length: strictly weaker than the `len(sealed.blob)` the relay already has.
+- Latency reporting: already sent today, and the relay times its own forwarded request anyway.
+- `session_id` correlation: `x-inferroute-session` is on every relay call already.
+- The §3 attribution fix (400/402 stop counting against fleets): correct and overdue. **Shipped, 58de466.**

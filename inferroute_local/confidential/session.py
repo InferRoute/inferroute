@@ -493,7 +493,7 @@ class ConfidentialSession:
                 done = done or _is_done(linebuf)
                 yield linebuf
         except e2ee.E2EEError as e:
-            _err(c, "reply_unopenable", INSTANCE_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT)
             yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
             yield DONE
             return
@@ -522,7 +522,7 @@ class ConfidentialSession:
             yield json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         except Exception as e:
-            _err(c, "reply_unopenable", INSTANCE_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT)
             yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
@@ -561,7 +561,7 @@ class ConfidentialSession:
                 for ev in tr.feed_line(linebuf.decode("utf-8", "replace")):
                     yield ev.encode()
         except e2ee.E2EEError as e:
-            _err(c, "reply_unopenable", INSTANCE_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT)
             yield translate.sse("error", translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         except (httpx.HTTPError, OSError) as e:          # connection dropped mid-stream: a clean error, never a traceback
@@ -592,7 +592,7 @@ class ConfidentialSession:
                 blob = data
             resp = e2ee.open_response(blob, sealed.response_sk)
         except Exception as e:
-            _err(c, "reply_unopenable", INSTANCE_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT)
             yield json.dumps(translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
@@ -678,6 +678,22 @@ ACCOUNT_FAULT = "account"        # 402/401/403 — true of every fleet at once, 
 CLIENT_FAULT = "client"          # 400, a seal failure — ours
 TRANSPORT_FAULT = "transport"    # the relay is unreachable; every fleet is equally unreachable
 ROUTE_FAULT = "route"            # 404 — configuration, not health
+# A REPLY THAT WILL NOT OPEN IS NOT A FLEET'S BAD DAY. It is a ChaCha20-Poly1305 authentication failure
+# against the key an Intel TDX quote committed to, and it is indistinguishable from a substituted key or
+# a substituted machine. It is the ONLY runtime signal that this sentence, which the receipt offers to be
+# quoted on its own, is being tested in anger:
+#
+#   "No relay, and no provider, could substitute the key or the hardware without failing a check on this
+#    device."                                                        (receipt.py, CLAIM_CONFIDENTIAL)
+#
+# So it gets its own class and is kept OUT of COUNTS_AGAINST_FLEET — not because it is unimportant, but
+# because averaging it into an availability score is how a relay attempting key substitution across a
+# fleet would present as a slightly slow afternoon. A tripwire that is retried and scored is not a
+# tripwire, it is a metric.
+#
+# Classified INSTANCE_FAULT earlier tonight, by me, in 58de466. The check still failed closed throughout —
+# nothing was ever shown unverified — but the NOTIFICATION was what that commit put at risk.
+INTEGRITY_FAULT = "integrity"
 
 # Only these are evidence about a fleet.
 COUNTS_AGAINST_FLEET = frozenset({FLEET_FAULT, INSTANCE_FAULT, UPSTREAM_UNKNOWN})

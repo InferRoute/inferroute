@@ -25,9 +25,22 @@ const check = (what, cond) => { if (cond) console.log(`  ok   ${what}`); else { 
 for (const d of [
   "the enclave's reply ended part-way through, without finishing the answer; please retry",
   "the connection to the enclave dropped mid-reply (ReadError); please retry",
-  "could not open the enclave's reply: bad tag",
   "upstream: a provider sentence nobody wrote a case for",
 ]) check(`quiet: ${d.slice(0, 46)}`, isTransient(d) === true);
+
+// REVERSED, same night, after adversarial review. "could not open the enclave's reply" was in the list
+// above. It is a ChaCha20-Poly1305 authentication failure against the key an Intel TDX quote committed
+// to — indistinguishable from a substituted key or a substituted machine, and the only runtime sign that
+// the receipt's central sentence ("No relay, and no provider, could substitute the key or the hardware
+// without failing a check on this device") is being tested in anger.
+//
+// The check fails closed either way, so nothing is ever shown unverified. What making it quiet destroyed
+// was the NOTIFICATION: a relay attempting key substitution across a fleet would have presented to a
+// patent attorney as a slightly slow afternoon. A tripwire that is retried and scored is not a tripwire.
+check("an unopenable reply is NEVER quiet",
+      isTransient("could not open the enclave's reply: bad tag") === false);
+check("...and it keeps its own plain words",
+      /discarded rather than shown unverified/.test(plainModelError("could not open the enclave's reply: x")));
 
 // three of them now have their own words for when the retries run out
 check("truncated has its own sentence", plainModelError("the enclave's reply ended part-way through") !== UNNAMED_FAILURE);

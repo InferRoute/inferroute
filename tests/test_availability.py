@@ -262,3 +262,30 @@ def test_no_path_means_in_memory_not_the_users_real_store(tmp_path, monkeypatch)
     d.observed_serve("f", 1, 0, time.time())
     d.save()
     assert d.path.exists()
+
+
+def test_a_fleet_that_serves_perfectly_but_never_verifies_is_set_aside(tmp_path, monkeypatch):
+    """The floor used to be gated on `serve` alone while promotion used the interval of serve x verify.
+    A fleet whose requests always succeed but whose machines never attest cannot be OPENED at all — and
+    was never demoted, so it was probed, ranked first by capability, and burned a full attestation on
+    every launch."""
+    import asyncio
+    import time
+    from inferroute_local.confidential import availability as A
+    now = time.time()
+    b = A.Beliefs(path=None)
+    for _ in range(40):
+        b.observed_serve("f-cap", 1, 0, now)          # every request succeeds...
+        b.observed_verify("f-cap", 0, 4, now)         # ...on machines that never verify
+    for _ in range(10):
+        b.observed_serve("f-mid", 9, 1, now)
+        b.observed_verify("f-mid", 4, 4, now)
+    v = b.view("f-cap", now)
+    assert v.serve.p > 0.9, "fixture: requests should look perfect"
+    assert v.p_usable() < 0.3, "the combined score did not see the attestation failure"
+
+    async def probe(_f):
+        return 4, 40
+    pairs = [("f-cap", "kimi-k3"), ("f-mid", "glm-5.2")]
+    c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
+    assert c.order[0] != "kimi-k3", "a fleet that cannot be opened was still ranked first"

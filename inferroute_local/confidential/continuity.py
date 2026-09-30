@@ -36,8 +36,10 @@ half-delivered answer would produce a worse artefact than the error it hid.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from . import availability as av
@@ -58,6 +60,10 @@ STANDBY_MAX_AGE_S = 20 * 60.0
 # After a sweep that opened nothing, wait before sweeping again. Without it the retry rate is the
 # request rate: a full attestation sweep across every candidate on every turn.
 WARM_COOLDOWN_S = 120.0
+
+# How often the belief store is written during a session. Only close() wrote it, so a Ctrl-C lost
+# everything the session had learned — including about the fleet that had just been failing.
+BELIEF_SAVE_EVERY_S = 60.0
 
 
 @dataclass
@@ -95,7 +101,30 @@ class Continuity:
         self.switches = 0
         self.order: list = []
         self.failed: set = set()                       # fleets this lane has seen fail; never re-warmed
+        self.retired: list = []                        # superseded sessions, closed once at the end
+        self._beliefs_saved_at = 0.0
         self._warm_blocked_until = 0.0                 # cooldown after a sweep that opened nothing
+
+    def _point_at_active(self) -> None:
+        """Keep a stable path pointing at the receipt of the session serving NOW.
+
+        The status line — "the thing people screenshot" — is a shell snippet that greps ONE receipt
+        path, baked in at launch. After a switch that path is the ABANDONED session's: its byte and cost
+        counters stop moving while still presenting as live, and the model named beside them is the one
+        that is no longer answering. A pointer the lane updates keeps the line honest without the shell
+        needing to know a lane exists."""
+        try:
+            target = getattr(self.active.receipt, "path", "") if self.active else ""
+            if not target:
+                return
+            link = Path(target).parent / "current.json"
+            tmp = link.with_suffix(".tmp")
+            if tmp.is_symlink() or tmp.exists():
+                tmp.unlink()
+            tmp.symlink_to(target)
+            os.replace(tmp, link)                     # atomic: a reader never sees a missing pointer
+        except OSError:
+            pass                                      # a status line must never break a session
 
     def note(self, kind: str, detail: str) -> None:
         """Every continuity decision goes into the RECORD, not only onto a screen.
@@ -179,6 +208,7 @@ class Continuity:
                 self.beliefs.observed_verify(cand.fleet_id, 0, 1, time.time())
                 continue
             self.beliefs.observed_verify(cand.fleet_id, 1, 1, time.time())
+            self._point_at_active()
             self.note("continuity-open", f"serving from {short}; "
                                          f"{len(self.order) - 1} other fleet(s) behind it")
             self._warm_later()
@@ -280,6 +310,7 @@ class Continuity:
                 return await self._carry(sess, name, body, empty_fault)
             self.beliefs.observed_serve(fleet, 1, 0, time.time())
             self._freshen_standby()
+            self._save_beliefs_occasionally()
             return resp
         fault = getattr(sess, "last_fault", "")
         if fault in COUNTS_AGAINST_FLEET:
@@ -380,9 +411,14 @@ class Continuity:
         old, self.active = self.active, self.standby
         self.standby, self.standby_at = None, 0.0
         self.switches += 1
+        self._point_at_active()
         self.note("switched", f"{old.model_short} -> {self.active.model_short} ({why})")
         self._record_switch(old)
-        _quietly_close(old)
+        # NOT CLOSED HERE. close() stamps ended_at and saves; a request still in flight on the session
+        # we just left — the caller captured it before the switch and may still be draining its stream —
+        # would then write into a receipt that says it had already ended. Retired sessions are closed
+        # once, at the end, so every ended_at is true. They hold nothing but their own bookkeeping.
+        self.retired.append(old)
         self._warm_later()
         return True
 
@@ -413,6 +449,21 @@ class Continuity:
         except Exception:                             # noqa: BLE001 — bookkeeping must never fail a turn
             pass
 
+    def _save_beliefs_occasionally(self) -> None:
+        """Persist what we have learned without waiting for a clean close.
+
+        The store was written only in close(), so a Ctrl-C — which is how a great many sessions
+        actually end — lost the whole session's evidence, and the next launch reopened knowing nothing
+        about the fleet that had just been failing."""
+        now = time.time()
+        if now - self._beliefs_saved_at < BELIEF_SAVE_EVERY_S:
+            return
+        self._beliefs_saved_at = now
+        try:
+            self.beliefs.save()
+        except Exception:                             # noqa: BLE001
+            pass
+
     def _freshen_standby(self) -> None:
         if self.standby is not None and time.time() - self.standby_at > STANDBY_MAX_AGE_S:
             stale, self.standby = self.standby, None
@@ -426,7 +477,7 @@ class Continuity:
         self._closed = True
         if self._warming is not None and not self._warming.done():
             self._warming.cancel()
-        for s in (self.standby, self.active):
+        for s in [*self.retired, self.standby, self.active]:
             if s is not None:
                 _quietly_close(s)
         try:

@@ -105,8 +105,7 @@ confidential lane; a sealed transcript is never replayed through the plaintext l
    here, tokens), every pin/switch/re-verification event, and the stated limitations.
 
 If any step fails, the session **refuses to open** and says why. It never falls back to the
-normal lane silently. If the pinned instance disappears mid-session, the client switches only to
-another *verified* instance and records the switch; if none exists it refuses further requests.
+normal lane silently. If the machine serving a session disappears mid-session, the client switches only to another machine it has verified, and records the switch. On the Probant lane that may also mean another MODEL: the receipt's `served_by` names every machine that served, with the evidence each was verified against, and the count is shown on the trust card.
 
 ## What this does not prove
 

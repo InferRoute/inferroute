@@ -130,8 +130,11 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         n = machines_served(receipt)
         points.append("Your text leaves this computer encrypted, and can be opened only inside hardware "
                       "this computer checked first.")
-        points.append(f"{n} machines have opened it. The receipt names each one." if n > 1 else
-                      "One machine has opened it. The receipt names each one.")
+        # A COUNT UNDER A TICK READS AS A PROMISE. The fifth reader: "'One machine has opened it' up
+        # top versus 'a session is not tied to one machine' — one, or several? Which is it?" Both were
+        # true and they still fought, because a ✓ announces a guarantee and this is data. Written as a
+        # field, which nobody reads as a promise.
+        points.append(f"Machines that have opened it: {n} — the receipt names each.")
     warn_ids = {"new-build", "pending-build"}
     caveats = [str(lim.get("text", "")) for lim in (getattr(receipt, "limitations", None) or [])
                if isinstance(lim, dict) and lim.get("id") in warn_ids]

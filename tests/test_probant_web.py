@@ -1940,6 +1940,8 @@ def test_read_matter_file_defaults_to_the_disclosure():
     guard (tests/read_matter_file_sim.js) over the calls a model actually makes, and over the escapes the
     tool exists to refuse — a default that widened the allowlist would trade this defect for the one the
     tool was built to prevent."""
+    import shutil, subprocess
+
     node = shutil.which("node")
     if not node:
         pytest.skip("node is not on PATH here")

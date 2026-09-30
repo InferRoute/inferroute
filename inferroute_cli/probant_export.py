@@ -788,7 +788,20 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                                   "why": f"the record names a receipt this device could not read "
                                          f"({type(e).__name__}); it is not in this bundle"})
             continue
-        receipt_notes.append({"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"})
+        # THE EVIDENCE served_by REFERENCES MUST TRAVEL WITH IT. A receipt now keeps a row per machine
+        # that served, with the 243 KB attestation blob content-addressed into evidence/<sha>.json
+        # beside the receipt rather than inlined. The pack shipped the receipt and not those files, so
+        # an auditor received a record citing evidence that is not in the bundle — worse than one that
+        # admits the evidence is gone, because it reads as an omission.
+        raw, carried, missing = _carry_served_evidence(raw, Path(rp).parent, files)
+        note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"}
+        if carried:
+            note["machines"] = carried
+        if missing:
+            # Named, never silent: an auditor must be able to tell evidence that was never kept from
+            # evidence that was removed.
+            note["evidence_missing"] = missing
+        receipt_notes.append(note)
         files[f"session-{sid}.receipt.json"] = raw
     if b.get("unanswered"):
         files["unanswered.json"] = json.dumps(b["unanswered"], indent=1, ensure_ascii=False).encode("utf-8")
@@ -1571,6 +1584,40 @@ def _is_session_receipt(name: str) -> bool:
     `session-*.receipt.json`, write_bundle writes that name, and the pack must carry that same set — three
     readings of one fact, so it is spelled once."""
     return name.startswith("session-") and name.endswith(".receipt.json")
+
+
+def _carry_served_evidence(raw: bytes, rdir: Path, files: dict):
+    """Ship the attestation rows `served_by` points at, and rewrite the pointers to the packed names.
+
+    Returns (receipt bytes, machines carried, shas whose evidence was not found)."""
+    try:
+        r = json.loads(raw)
+    except ValueError:
+        return raw, 0, []
+    served = r.get("served_by") if isinstance(r, dict) else None
+    if not isinstance(served, list) or not served:
+        return raw, 0, []
+    carried, missing = 0, []
+    for entry in served:
+        if not isinstance(entry, dict):
+            continue
+        sha = str(entry.get("attestation_sha256") or "")
+        if not sha:
+            continue
+        name = f"{sha[:16]}.attestation.json"
+        if name not in files:
+            try:
+                files[name] = (rdir / "evidence" / f"{sha}.json").read_bytes()
+            except OSError:
+                entry["attestation_file"] = ""
+                entry["attestation_absent"] = ("the evidence for this machine was not on this device when "
+                                               "the record was written; it is named here so its absence is "
+                                               "visible rather than silent")
+                missing.append(sha[:16])
+                continue
+        entry["attestation_file"] = name
+        carried += 1
+    return json.dumps(r, indent=1, ensure_ascii=False).encode("utf-8"), carried, missing
 
 
 def _receipt_for_pack(raw: bytes) -> bytes:

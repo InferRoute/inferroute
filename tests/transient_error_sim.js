@@ -12,7 +12,7 @@ const cut = (from, to) => {
   return src.slice(a, b);
 };
 const body = cut("  const MODEL_ERROR_CASES", "\n  const RETRY_TEXT")
-           + cut("  function isTransient(detail) {", "\n  const AUTO_RETRIES");
+           + cut("  // Failures no retry can clear.", "\n  const AUTO_RETRIES");
 const isTransient = new Function("detail", `${body}\n return isTransient(detail);`);
 
 const out = {};

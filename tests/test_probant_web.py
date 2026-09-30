@@ -955,7 +955,14 @@ def test_when_continuing_fails_too_the_page_offers_a_fresh_session():
     the session is stuck: the page says so and offers the way out, a fresh session, which re-checks from scratch."""
     js = (STATIC / "app.js").read_text()
     body = _fn_body(js, "showError")
-    assert "failedTries += 1;" in body and "if (failedTries >= 2) {" in body
+    # Bound to the condition, not its punctuation: it was widened on 30 Sep to offer the way out on the
+    # FIRST failure when the condition is terminal, and an assertion on "if (failedTries >= 2) {" failed
+    # for the spelling rather than for the behaviour.
+    assert "failedTries += 1;" in body and "failedTries >= 2" in body
+    # A terminal failure offers the fresh session immediately and withholds the retry button, because a
+    # button certain to fail is not a way on. Pinned here so the widening cannot be quietly reverted.
+    assert "failedTries >= 2 || terminal" in body, "a terminal failure still waits for a second failure"
+    assert "isTerminal(detail) ? null : again" in body, "a terminal failure still offers a doomed retry"
     assert "Start a fresh session on this matter" in body and "goHome(`/matter/${matterId}`)" in body
     # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets
     # through. Bound to the PROPERTY, not to one line: the reset grew a block on 30 Sep when a transient

@@ -278,6 +278,16 @@
     // answering, the lane's retry-on-another-instance is behind us — _send_sealed has returned — so these
     // cannot be recovered by it, which is why `upstream_retries` read 0 across 26 sessions including one
     // with 28 errors. They are still safe to retry from the page: nothing went out in the clear either way.
+    // ── PI'S OWN conditions. The detail is Pi's `message.errorMessage`, NOT a sentence this lane wrote
+    // — a premise the comment above got wrong. Pi carries 338 distinct error strings, so most of what
+    // arrives here is unmatchable by construction, and that is the real reason the unnamed sentence was
+    // common. These two are the ones worth naming because retrying them is WORSE than showing them.
+    [(d) => d.includes("context overflow") || d.includes("reducing context") || d.includes("larger-context"),
+     "This conversation has grown too long for the AI machine to hold. Nothing was sent in the clear. "
+     + "Start a fresh session on this matter — your searches, marks and this conversation stay with it."],
+    [(d) => d.includes("compaction failed"),
+     "The AI machine could not shorten this conversation to make room, so nothing was sent. "
+     + "Start a fresh session on this matter; nothing is lost."],
     [(d) => d.includes("ended part-way") || d.includes("without finishing the answer"),
      "The AI machine's answer stopped part-way through, so nothing was sent in the clear. Continuing picks up where it left off."],
     [(d) => d.includes("mid-reply"),
@@ -322,6 +332,18 @@
   // What is NEVER transient: a machine that could not be VERIFIED. That refusal is the product working, and
   // quietly retrying it would train someone to ignore the one message that must always be read. It is
   // excluded here explicitly rather than by omission, so a later edit to the list cannot swallow it.
+  // Failures no retry can clear. Kept separate from MODEL_ERROR_CASES because the question "can this
+  // clear?" is not the question "what do we call it?" — a failure can be unnameable and still terminal.
+  const TERMINAL = [
+    /nonce twice|rejected our request nonce twice/,      // already tried a fresh pool; it said so
+    /context overflow|reducing context|larger-context/,  // retrying adds to the context that overflowed
+    /compaction failed/,                                  // the room-making step is what failed
+  ];
+  function isTerminal(detail) {
+    const d = String(detail || "").toLowerCase();
+    return TERMINAL.some((re) => re.test(d));
+  }
+
   function isTransient(detail) {
     const d = String(detail || "").toLowerCase();
     // Verification named explicitly, not by the bare token "refus". A behavioural sim caught that
@@ -331,11 +353,14 @@
     if (/not verified|unverified|could not be verified|verification failed|refused to seal/.test(d)) return false;
     // Any OTHER refusal is a decision, not a hiccup: it stays loud. A socket refusal is exempted by name.
     if (d.includes("refus") && !/connection refused|econnrefused/.test(d)) return false;
-    // A nonce rejected TWICE, one from a fresh pool, is the one nonce case that retrying cannot clear —
-    // its own sentence says so and tells the reader to start a fresh session. Before this it fell into the
-    // bare "nonce" token below and was quietly retried twice, against the advice it was about to give.
-    // Pre-existing; found while testing the transient default on 2026-09-30.
-    if (d.includes("nonce twice") || d.includes("rejected our request nonce twice")) return false;
+    // TERMINAL: the condition cannot clear by trying again, and its own words usually say so. Retrying
+    // these is not merely wasted — for a context overflow each retry ADDS a message to the context that
+    // just overflowed, and hides the one sentence telling the reader what to do.
+    //
+    // This generalises a case found on 2026-09-30 rather than repeating it: a nonce rejected TWICE, one
+    // from a fresh pool, was falling into the bare "nonce" token below and being quietly retried against
+    // the advice it was about to print. That was an instance of this class, not a special case.
+    if (isTerminal(d)) return false;
     if (d.includes("unreachable") || d.includes("502") || d.includes("503")
         || d.includes("504") || d.includes("timeout") || d.includes("timed out")
         || d.includes("429") || d.includes("rate") || d.includes("nonce")
@@ -396,14 +421,25 @@
     const again = el("button", "ghost small", RETRY_TEXT);
     again.type = "button";
     again.addEventListener("click", () => { again.disabled = true; send(RETRY_TEXT); });
-    const actions = el("div", "row err-actions", again);
+    // Offered for anything that might clear; withheld when it cannot. A button that is certain to fail
+    // is not a way on, it is a second way to be told no.
+    const actions = el("div", "row err-actions", isTerminal(detail) ? null : again);
     // The same failure on the NEXT try too means this session is stuck, and continuing only repeats it.
     // A fresh session re-checks the AI machine from scratch — the way out of stale state, and the only way
     // out of a session started on older code (19 Sep: two sessions from before a fix kept failing while every
     // new one would have worked). Nothing is lost: searches, marks and the conversation stay with the matter.
     let hint = null;
-    if (failedTries >= 2) {
-      hint = el("p", "sub", "This session keeps failing to reach the AI machine. A fresh session checks it again "
+    // A TERMINAL condition offers the way out on the FIRST failure, not the second. Waiting for a second
+    // is right when we are hoping a hiccup clears; it is wrong when the condition cannot clear, because
+    // it asks the reader to watch the same failure twice before showing them the door. And the hint has
+    // to say the right thing: "keeps failing to reach the AI machine" is false for a conversation that
+    // simply grew too long, and sends someone to check their network over a full context.
+    const terminal = isTerminal(detail);
+    if (failedTries >= 2 || terminal) {
+      hint = el("p", "sub", terminal
+        ? "Trying again will not clear this one. A fresh session starts with an empty conversation; "
+          + "your searches, marks and this conversation stay with the matter."
+        : "This session keeps failing to reach the AI machine. A fresh session checks it again "
         + "from scratch; your searches, marks and this conversation stay with the matter.");
       if (HOME_LINK.test(homeUrl)) {
         const fresh = el("button", "primary small", "Start a fresh session on this matter");

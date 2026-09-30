@@ -246,7 +246,13 @@ def fleet_success(model_short: str) -> tuple[float, int]:
         if r.get("model_short") != model_short:
             continue
         c = r.get("counters") or {}
-        q, e = c.get("requests"), c.get("errors")
+        # errors_fleet counts ONLY failures attributable to this fleet. `errors` also holds our own bugs
+        # (a malformed request, a seal failure), the account's billing state (402), and relay outages —
+        # each of which would demote whichever fleet happened to be selected. Older receipts predate the
+        # split and carry only the total; using it for them is wrong in the safe direction (it can only
+        # understate a fleet), and they age out of the window.
+        q = c.get("requests")
+        e = c.get("errors_fleet", c.get("errors"))
         if isinstance(q, int) and q > 0 and isinstance(e, int):
             reqs += q
             errs += min(e, q)            # an error per request at most; a retry can count twice

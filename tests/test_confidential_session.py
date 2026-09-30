@@ -920,3 +920,44 @@ def test_the_tripwire_note_never_carries_the_upstream_body():
     assert "detail" not in block.replace("len(detail)", ""), \
         "the tripwire note interpolates the upstream body"
     assert "len(detail)" in block, "the note should still say how long the body was"
+
+
+# ── whose fault, decided where the fact is known ─────────────────────────────────────────────────
+
+def test_only_a_fleets_own_failures_count_against_it():
+    """The bug this closes shipped earlier the same night. fleet_success counted EVERY error against the
+    fleet, so a malformed request (our bug), a 402 (the account's billing state) and a relay outage
+    (every fleet equally unreachable) would each demote whichever fleet happened to be selected. That is
+    noise dressed as evidence, and a client-side bug would have demoted all five fleets at once."""
+    from inferroute_local.confidential import session as S
+    # ours, or the account's, or the relay's — true of every fleet at once, so evidence about none
+    for status in (400, 401, 402, 403, 404):
+        assert S.status_fault(status) not in S.COUNTS_AGAINST_FLEET, status
+    # the fleet's own answer, including one we do not recognise
+    for status in (429, 500, 502, 503, 504, 599):
+        assert S.status_fault(status) in S.COUNTS_AGAINST_FLEET, status
+    assert S.status_fault(599) == S.UPSTREAM_UNKNOWN, "an unusual status is still the fleet's answer"
+
+
+def test_the_receipt_separates_fleet_attributable_errors_from_the_rest():
+    """`errors` stays the honest total of everything that went wrong. `errors_fleet` is the only one the
+    availability model may read."""
+    from inferroute_local.confidential import session as S
+    c = {}
+    S._err(c, "send_failed", S.ACCOUNT_FAULT)      # 402: not the fleet's doing
+    S._err(c, "seal_failed", S.CLIENT_FAULT)       # ours
+    S._err(c, "stream_dropped", S.INSTANCE_FAULT)  # the fleet's
+    assert c["errors"] == 3, "the total must still count everything that failed"
+    assert c["errors_fleet"] == 1, "a billing state or our own bug counted against the fleet"
+    assert c["fault_account"] == 1 and c["fault_client"] == 1 and c["fault_instance"] == 1
+
+
+def test_a_relay_outage_does_not_demote_the_fleet_it_happened_to_pick():
+    """If the relay is unreachable every fleet is equally unreachable. Blaming the selected one would
+    make the chooser wander away from a healthy fleet for a reason that has nothing to do with it."""
+    from inferroute_local.confidential import session as S
+    assert S.TRANSPORT_FAULT not in S.COUNTS_AGAINST_FLEET
+    c = {}
+    for _ in range(20):
+        S._err(c, "send_failed", S.TRANSPORT_FAULT)
+    assert c.get("errors_fleet", 0) == 0 and c["errors"] == 20

@@ -364,6 +364,25 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                     console.print(f"[red]{e}[/]")
                     session.close()
                     return 2
+                # WHAT IS IN THE FOLDER BESIDES THE DISCLOSURE, said to the PROFESSIONAL before the session
+                # rather than discovered by the assistant mid-survey. On 2026-09-30 a matter held a
+                # disclosure.md.bak from the previous day; the assistant read it and called it "useful
+                # matter context", so a survey ran partly on a draft that had been revised away.
+                # DELIBERATELY NOT IN THE SYSTEM PROMPT: that prompt is fixed and sha-pinned into every
+                # session record, so per-session text there would break the pin it exists to provide. The
+                # contract carries the RULE (disclosure.md is the disclosure); this notice carries the FACT
+                # about this folder, and it is the professional's to act on.
+                _stale, _other = pi_attested.workspace_extras(os.getcwd())
+                if _stale or _other:
+                    bits = []
+                    if _stale:
+                        bits.append(f"[yellow]{', '.join(_stale)}[/] — looks like a backup or editor file")
+                    if _other:
+                        bits.append(f"[yellow]{', '.join(_other)}[/]")
+                    console.print("\n  besides disclosure.md this matter folder holds: " + "; ".join(bits)
+                                  + "\n  [grey58]the assistant searches from disclosure.md and will ask before "
+                                    "reading anything else. A superseded draft left here is worth removing — "
+                                    "it is text you already decided against.[/]")
                 # Decided before the verifier starts: the verifier stamps the confinement line into every
                 # record from this flag. If the sandbox cannot then be built, the launch is REFUSED below.
                 os.environ["IR_ATTESTED_NETNS_BIND"] = "1" if pi_attested.plan_netns_bind() else "0"

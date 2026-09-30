@@ -74,6 +74,41 @@ BUNDLED: list[dict] = [
         },
         "note": "the single VM image serving every enclave-backed catalog model on 2026-09-12 (8 RTMR0 host variants)",
     },
+    {
+        # Operator guest image 1.4.1, published 2026-09-20 — the build 7 of the 14 kimi-k2.6
+        # instances were running on 2026-09-30 and this device was refusing as "not recorded".
+        #
+        # `observed`, NOT `reviewed`, and the difference is stated rather than smoothed over:
+        #   reproduced  RTMR1 and RTMR2, by us, on 2026-09-30, from the operator's published
+        #               kernel / initramfs / command line (`scripts/reproduce_enclave_build.py
+        #               --direct`). Both matched the LIVE quotes exactly, so the model was
+        #               validated against hardware, not only against the tool that computes it.
+        #   NOT         MRTD (not recomputed today: the firmware blob is byte-identical to the one
+        #               MRTD was reproduced from on 2026-09-12 and the register is unchanged, but
+        #               that is an identity, not a recomputation), and RTMR3 (the root filesystem
+        #               is encrypted in the published image, as for the previous build).
+        #   NOT         audited: the 1.3.1 -> 1.4.1 diff was not read, only its changelog.
+        # The measurements are also on the operator's own published list, which is what
+        # `measurement_ok` checks; that is the operator agreeing with itself and counts for nothing here.
+        "id": "tee-vm-2026-09-20",
+        "status": "observed",
+        "first_seen": "2026-09-30",
+        "mrtd": "261ce538b435e2d0e85fc97e254bc99154c507b7a8e13d59b69f8532384f1d0bfaadfddf3fccc6e0a411203840bbee8d",
+        "rtmr1": "d3a862ff47357f374fc72c7f02a480a13790d1805e24aaa8de1f03994256625ce0f593ae35ea8f0c24d09f7df36cb0ed",
+        "rtmr2": "da23f73e0fddeb8128f706ecfbecbcf8cee34af7e4907d8fbc85e9b216acee27bf6cc3655eaf4d33cab76adea79fa153",
+        "rtmr3": "d9dc4c6079fb12a21ad2aa8e329d8bfa61aaa13d3ffd10a93a2c4e82f0e35efbf28f5cf3bed0c0c1b517a7c327a25226",
+        "reproduced": ["rtmr1", "rtmr2"],
+        "reproduced_on": "2026-09-30",
+        # Direct boot: the host hands the firmware kernel + initramfs + command line, so shim and GRUB
+        # are not in this chain (see the reproduction script). SHA-256 of the three files, which also
+        # equal the sha256 the operator's manifest.json lists for them.
+        "reproduced_from": {
+            "vmlinuz": "d5d71ed32239eaa9bcb0528227a7adb62688250ce9f163b3e04e9675ddf86cff",
+            "initrd": "69ff9c75a88cbea772664ad5ec6c8174c657074845170f82ea0dc67493a2b0a0",
+            "cmdline": "27cf61470fee944b05843b78e18fdb596ed8c4db299c0d5153410604b4dd550a",
+        },
+        "note": "operator guest image 1.4.1 (direct boot); RTMR1+RTMR2 recomputed from the published kernel/initramfs/cmdline; MRTD and RTMR3 not recomputed; 1.4.0 is NOT recorded (its artifacts are no longer published)",
+    },
 ]
 
 # ── the signing key that makes a run-time build OUR record rather than our server's ──

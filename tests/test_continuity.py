@@ -333,32 +333,38 @@ def test_the_claim_the_lane_depends_on_is_conditioned():
 
     assert "only that machine can open it" not in one, \
         "the AI lane still claims one machine while a session can move between several"
-    assert "3 machines have opened it so far" in three, \
-        "the count is asserted rather than read from the record"
+
     # TWO naive-reader tests failed earlier wordings for the same reason: the tick and the condition
     # ARGUED on the same screen — one machine above, more than one below — and both readers described
     # the small print as taking back what the big print promised. "So far" makes it a running count,
     # which cannot be contradicted by a later one.
-    # THREE naive readers, three revisions. The last one wrote the line himself: "if it just said
-    # 'your words leave this computer and go to a machine we check first; here's the record of which
-    # ones' — I'd have trusted it more. The effort is what worries me." Length was costing more trust
-    # than the condition it was explaining.
-    assert "One machine has opened it so far" in one
-    assert "3 machines have opened it so far" in three
+    # FOUR readers, four revisions, and then Henry asked the question that ended it: "i dont understand
+    # why allowing machines to switch has to weaken the claim." It does not. Every request is sealed to
+    # ONE machine's key and e2e_key_bound verifies that machine's quote commits to it before anything is
+    # sent — identical whether a session uses one machine or five. The count was never the guarantee,
+    # and conditioning the claim meant apologising for a number that was never the promise.
+    #
+    # So: the guarantee is stated unconditionally, and the count is a FACT, reported like a meter
+    # reading. No "if", no "so far", no apology.
+    assert "One machine has opened it. The receipt names each one." in one
+    assert "3 machines have opened it. The receipt names each one." in three
+    # and it is not filed as a LIMITATION — a limitation is something we cannot prove, and the word
+    # itself told four readers this was bad news
+    assert not any(k == "machines-per-session" for k, _ in _att.LIMITATIONS), \
+        "a behaviour we can prove is filed as something we cannot"
     # Lead with the thing no reader knew: that the text leaves at all. All three learned it from the
     # small print or not at all.
     assert "leaves this computer encrypted" in one, "the card no longer says the text leaves"
-    assert "opened only inside machines this computer checked first" in one, "the claim went singular"
+    assert "opened only inside hardware this computer checked first" in one, "the claim went singular"
     # ...and it must not deny a worry the reader did not have: "nobody says that unless somebody
     # somewhere was worried about unverified ones."
     assert "never an unverified one" not in one
     # ...nor argue its own case: "somebody has had this fight before and pre-loaded the answer."
-    lim = dict(_att.LIMITATIONS)["machines-per-session"]
-    assert "what it buys" not in lim and "What this costs" not in lim
-    # ...and the condition must be on the page, not in a footnote
-    from inferroute_local.confidential import attest
-    assert any(k == "machines-per-session" for k, _ in attest.LIMITATIONS), \
-        "nothing states the condition the lane introduces"
+
+    # ...and the behaviour is described on the page, beside the other descriptions
+    from inferroute_cli.probant_trust import ai_item as _ai
+    assert any("not tied to one machine" in m for m in probant_trust.ai_item(_R())["more"]), \
+        "nothing on the page says a session may move between machines"
     # ...while the SEARCH lane keeps its singular claim, which it earns by refusing any other enclave
     assert "only that machine can open it" in src, \
         "the search lane's claim was weakened; it pins expect_lifetime_id and is still true"

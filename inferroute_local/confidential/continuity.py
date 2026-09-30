@@ -83,6 +83,7 @@ class Continuity:
         self.standby_at = 0.0
         self._warming: Optional[asyncio.Task] = None   # STRONG reference: a fire-and-forget task can be
         self._closed = False                           # collected mid-flight, which loses the standby
+        self._pending_notes: list = []                 # notes made before a receipt exists to hold them
         self.switches = 0
         self.order: list = []
 
@@ -91,10 +92,21 @@ class Continuity:
 
         These events are the only place a reader can learn that the conversation moved, why, and what
         was held in reserve — so they default to the receipt rather than to a callback nobody passed.
-        A display hook is layered on top, never in place of it."""
+        A display hook is layered on top, never in place of it.
+
+        BUFFERED UNTIL THERE IS A RECEIPT. The most important note of all — which fleets were
+        considered, in what order, and why — is made while CHOOSING, before any session exists to write
+        it to. A live run showed it being dropped: the lane recorded that a standby was ready and said
+        nothing about how the active fleet had been picked, which is the one decision a reader would
+        want to audit."""
         try:
             if self.active is not None:
+                for k, d in self._pending_notes:
+                    self.active.receipt.note(k, d)
+                self._pending_notes.clear()
                 self.active.receipt.note(kind, detail)
+            else:
+                self._pending_notes.append((kind, detail))
         except Exception:                             # noqa: BLE001 — bookkeeping never fails a turn
             pass
         if self._on_note is not None:
@@ -150,6 +162,8 @@ class Continuity:
                 self.beliefs.observed_verify(cand.fleet_id, 0, 1, time.time())
                 continue
             self.beliefs.observed_verify(cand.fleet_id, 1, 1, time.time())
+            self.note("continuity-open", f"serving from {short}; "
+                                         f"{len(self.order) - 1} other fleet(s) behind it")
             self._warm_later()
             return self.active.receipt
         raise last or RuntimeError("no candidate fleet could be opened")

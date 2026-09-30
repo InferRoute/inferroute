@@ -277,3 +277,21 @@ def test_the_single_model_path_cannot_reach_this_lane():
 
     # a lane that will not open must degrade to the ordinary path, never to a worse one
     assert "Falls through to the single-session path below" in src
+
+
+def test_the_reason_a_fleet_was_chosen_reaches_the_record():
+    """Found on a LIVE run, not in a test: the lane recorded that a standby was ready and said nothing
+    about how the active fleet had been picked. The ordering note is made while CHOOSING, before any
+    session exists to write it to, so it was being dropped — and it is the one decision a reader would
+    most want to audit."""
+    async def go():
+        sessions = {c.model_short: FakeSession(c) for c in _cands()}
+        lane = _lane(sessions)
+        await lane.open()
+        return lane
+    lane = _run(go())
+    kinds = [e["kind"] for e in lane.active.receipt.events]
+    assert "continuity-order" in kinds, f"the ordering decision was lost; recorded {kinds}"
+    assert "continuity-open" in kinds
+    order_note = next(e for e in lane.active.receipt.events if e["kind"] == "continuity-order")
+    assert "kimi-k3" in order_note["detail"] and ">" in order_note["detail"]

@@ -1456,3 +1456,71 @@ def test_the_contract_does_not_ask_for_next_steps_in_a_way_that_re_triggers():
     assert "once per answer" in flat.lower() or "only once" in flat.lower(), (
         "the contract must bound how often next steps are offered, not only when")
     assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"
+
+
+def test_the_model_is_given_the_abstract_that_arrived_with_every_hit():
+    """Live, 2026-10-01: after a deep search the agent told Henry "I haven't opened any document yet, so
+    everything above is from titles, years, and numbers — nothing from the texts." That was TRUE, and it was
+    our doing. The enclave sends a ≤1500-char title+abstract with EVERY hit — labelled in its own searcher
+    "for reading", and measured at 1,227 characters on the first hit of a real archived result — and
+    hitsText() dropped it. So the agent reported on titles, and then had to spend a SECOND sealed request to
+    fetch bytes this machine had already sealed, sent and decrypted.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    fn = ts[ts.index("function hitsText("):ts.index("\n}\n", ts.index("function abstractOf(")) + 3]
+    fn = (fn.replace("out: SearchVerdict, label: string, earlier: Map<string, number>): string {", "out, label, earlier) {")
+            .replace("h: { title?: string; text?: unknown }): string {", "h) {"))
+    long_abs = "Title X. " + ("alpha beta gamma delta " * 80)
+    hits = [{"key": "US-1-A", "year": 1999, "title": "Title X", "text": long_abs},
+            {"key": "US-2-B", "year": 2001, "title": "Title Y", "text": "Title Y. A short abstract."},
+            {"key": "US-3-C", "year": 2003, "title": "Title Z"}]
+    js = (fn + "\nconst corpusPhrase = () => 'the index';\n"
+          + f"console.log(JSON.stringify(hitsText({json.dumps({'result': {'hits': hits}, 'enclave': {}, 'statement': {}})},"
+            " 'Search 1', new Map())));")
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-600:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert "alpha beta gamma" in out, "the abstract that arrived with the hit must reach the model"
+    assert "A short abstract." in out
+    # Bounded, and the trim DECLARED — an unmarked trim invites a confident sentence about a cut part.
+    assert "abstract trimmed here" in out and "read_patent gives the rest" in out
+    assert len(out) < 4000, "one search must not be able to flood the context"
+    # The corpus is "Title. Abstract": the title must not be printed twice.
+    assert out.count("Title Y") == 1, out
+    # A hit with no text degrades to the old behaviour rather than printing an empty line.
+    assert "US-3-C" in out
+    # And the scope statement, so the model does not treat an abstract as the document.
+    assert "NOT read their claims or descriptions" in out
+
+
+def test_a_like_query_is_seeded_with_the_held_abstract_not_the_title():
+    """There is no server-side `like` — the enclave's `_validate_search` accepts query/k/legs/marks only — so
+    a like-query is composed on this machine and nowhere else. It was composed from `docText`, which held the
+    TITLE: ~60 characters standing in for the 1,227-character abstract in the same reply, in a representation
+    the index does not embed. sealed-research confirmed (1 Oct) their bench never composed a query from a
+    title, so every title-seeded leg was a product-only path no registered number grades.
+    """
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "docText.set(d.key, d.text || String(d.title))" in ts, "a like-query must be seeded from the held text"
+    # `text` has to survive the map into docs, or there is nothing to seed from.
+    assert "text?: string" in ts and 'text: typeof (h as { text?: unknown }).text === "string"' in ts
+
+
+def test_the_reach_figure_does_not_vouch_for_a_leg_it_never_measured():
+    """The 52.8% fan-out reach was measured on legs composed from the DISCLOSURE. A leg that walks outward
+    from a marked document is a different mechanism — sealed-research's own marked-document arm was a
+    server-side graph teleport with no text at all. The sentence said "the others ... 52.8%", which vouched
+    for a marked-document leg whenever one was in the press."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "legs.some((l) => l.like)" in ts, "the figure must be scoped on whether a like-leg is present"
+    assert "composed from your description (52.8% against 38.4%)" in ts
+    assert "that measurement does " in ts and "not cover them" in ts

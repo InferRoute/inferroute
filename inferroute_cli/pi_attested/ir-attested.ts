@@ -234,7 +234,13 @@ interface SearchProof {
 	// Henry, 2026-09-30: "as if they all [have] the same-level relevance". Comparable WITHIN one
 	// search only: it is a LambdaRank output, not a calibrated probability, so it does not mean the
 	// same thing across two queries and must never be shown as an absolute score.
-	docs: { key: string; year?: number; title?: string; alsoIn?: number; score?: number }[];
+	//
+	// `text` is the ≤1500-char title+abstract the enclave sends with EVERY hit, labelled in its own searcher
+	// "for reading". It used to be dropped here, and everything downstream then had only a title: the model
+	// was told numbers, years and titles and said so ("nothing from the texts"), and a like-query was
+	// composed from ~60 characters of title when 1,227 characters of abstract had already been sealed,
+	// transmitted and decrypted on this machine.
+	docs: { key: string; year?: number; title?: string; text?: string; alsoIn?: number; score?: number }[];
 	// What this search was, as the professional sees it on the card: its number in the session, the feature it
 	// covered, the document it looked for neighbours of, and how many references were asked for.
 	searchNo?: number;
@@ -268,7 +274,9 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?
 		index: String(out.enclave?.index_snapshot ?? ""),
 		enclaveKey: String(out.enclave?.enclave_key ?? ""),
 		hits: Number(out.statement?.hits_n ?? 0),
-		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title, score: h.score })),
+		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title,
+			text: typeof (h as { text?: unknown }).text === "string" ? String((h as { text?: string }).text) : undefined,
+			score: h.score })),
 		at: new Date().toISOString(),
 	};
 }
@@ -466,12 +474,40 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 		"controls to mark them. Do NOT retype the list. Say what is worth saying about it — which part of the " +
 		"disclosure this search covered, what recurs across searches, what is worth looking at next — and cite a " +
 		"document by its number when you discuss it.",
+		`Each entry below carries the abstract as this index holds it — that is what the search matched on, and ` +
+		`it is what you have read of each document. You have NOT read their claims or descriptions: those are not ` +
+		`in this index, so do not describe them, and do not fill them in from memory or from the title.`,
 	];
 	hits.forEach((h, i) => {
 		const seen = earlier.get(String(h.key));
 		lines.push(`${i + 1}. ${h.key}${h.year ? ` (${h.year})` : ""}${h.title ? ` ${h.title}` : ""}${seen ? ` [also returned by search ${seen}]` : ""}`);
+		// THE ABSTRACT WE ALREADY HAVE. It arrives with every hit inside the sealed reply this machine
+		// opened, and was being discarded — so the model reported on titles and then had to spend a SECOND
+		// sealed request (read_patent) to fetch the same bytes back. Nothing extra goes on the wire for this.
+		//
+		// Bounded and MARKED when bounded: a deep press is several legs of ten, and an unmarked trim invites
+		// the one error a reader cannot catch — a confident sentence about a part that was cut.
+		const body = abstractOf(h);
+		if (body) lines.push(`    ${body}`);
 	});
 	return lines.join("\n");
+}
+
+// The held title+abstract for one hit, trimmed at a word with the trim declared. `ABSTRACT_MAX` bounds what
+// one search can add to the model's context; the full text is always available through read_patent.
+const ABSTRACT_MAX = 900;
+function abstractOf(h: { title?: string; text?: unknown }): string {
+	let t = typeof h.text === "string" ? h.text.replace(/\s+/g, " ").trim() : "";
+	if (!t) return "";
+	// The corpus is "Title. Abstract", so the title is already the head of it — do not print it twice.
+	const title = String(h.title ?? "").trim();
+	if (title && t.startsWith(title)) t = t.slice(title.length).replace(/^[.\s]+/, "");
+	if (!t) return "";
+	if (t.length > ABSTRACT_MAX) {
+		const cut = t.lastIndexOf(" ", ABSTRACT_MAX);
+		t = t.slice(0, cut > ABSTRACT_MAX * 0.6 ? cut : ABSTRACT_MAX) + " … (abstract trimmed here; read_patent gives the rest)";
+	}
+	return t;
 }
 
 // A suggested next step is sent as the professional's own message when they choose it. It must never be a
@@ -1194,7 +1230,14 @@ export default function (pi: ExtensionAPI) {
 			} else {
 				firstSeen.set(d.key, searchNo);
 			}
-			if (d.title) docText.set(d.key, d.title);
+			// The HELD TEXT when we have it, the title only as a fallback. This is what seeds a `like`
+			// query and the deep press's walk outward from marked documents — and there is no server-side
+			// `like` (search() takes text only; _validate_search accepts query/k/legs/marks), so that
+			// query is composed here and nowhere else. Seeding it from the title ran a query in a
+			// representation the index does not embed; sealed-research confirmed their bench never
+			// composed a query from a title, so a title-seeded leg was a product-only path no registered
+			// number grades. hit.text is the representation the index DOES embed.
+			if (d.text || d.title) docText.set(d.key, d.text || String(d.title));
 		}
 		return { sp, out, earlier };
 	}
@@ -1972,8 +2015,21 @@ export default function (pi: ExtensionAPI) {
 						+ "engine's own relevance scores — and the merged list landed below it. "
 						+ "So it is the ranked list. The others are "
 						+ "REACH, not ranking: together they surface documents the first query never reaches, "
-						+ "about 14 points more of the known-relevant families at depth 200 (52.8% against "
-						+ "38.4%). They are listed separately because merging them did not improve on the "
+						// WHICH LEGS THE FIGURE COVERS. The measured fan-out was composed from the disclosure —
+						// the whole of it, its features, its parts. A leg that walks outward from a document the
+						// professional marked is a DIFFERENT mechanism: sealed-research confirmed (1 Oct) that
+						// nothing registered ever composed a query from a returned document's text, and their
+						// marked-document arm was a server-side graph teleport with no text at all. So the
+						// figure does not grade those legs, and a sentence that said "the others" while a
+						// marked-document leg was in the press was vouching for a leg the measurement never saw.
+						+ (legs.some((l) => l.like)
+							? "about 14 points more of the known-relevant families at depth 200 for the legs "
+								+ "composed from your description (52.8% against 38.4%). The leg(s) walking outward "
+								+ "from documents you marked are a different mechanism and that measurement does "
+								+ "not cover them; their reach here is untested. "
+							: "about 14 points more of the known-relevant families at depth 200 (52.8% against "
+								+ "38.4%). ")
+						+ "They are listed separately because merging them did not improve on the "
 						+ "first query and hides which query reached what — reading the legs one by one is "
 						+ "today the only way that extra reach becomes anything. "
 						+ "That date is part of the claim: it is a measurement, it can be superseded, "

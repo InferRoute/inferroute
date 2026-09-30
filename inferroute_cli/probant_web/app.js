@@ -273,6 +273,17 @@
      "The AI machine rejected this session's one-time keys twice, including a fresh one, so nothing was sent. Retrying will not clear it — start a fresh session on this matter."],
     [(d) => d.includes("nonce"),
      "The AI machine turned this request away because its one-time key had expired. Try again; a fresh key is fetched automatically."],
+    // ── MID-STREAM: after the reply has started. These four were invisible to this list until
+    // 2026-09-30, because every earlier case describes a failure to SEND. Once the enclave is already
+    // answering, the lane's retry-on-another-instance is behind us — _send_sealed has returned — so these
+    // cannot be recovered by it, which is why `upstream_retries` read 0 across 26 sessions including one
+    // with 28 errors. They are still safe to retry from the page: nothing went out in the clear either way.
+    [(d) => d.includes("ended part-way") || d.includes("without finishing the answer"),
+     "The AI machine's answer stopped part-way through, so nothing was sent in the clear. Continuing picks up where it left off."],
+    [(d) => d.includes("mid-reply"),
+     "The connection to the AI machine dropped while it was answering. Nothing was sent in the clear; continuing resumes it."],
+    [(d) => d.includes("could not open the enclave"),
+     "This machine could not open the AI machine's reply, so the answer was discarded rather than shown unverified. Nothing was sent in the clear."],
     [(d) => d.includes("relay is unreachable") || d.includes("could not seal") || d.includes("could not be sent"),
      "The AI machine couldn't be reached. Nothing was sent in the clear; try again in a minute."],
     // ── the provider's own outcome, via UPSTREAM_PUBLIC in the lane ───────────────────────────
@@ -290,11 +301,15 @@
      "The AI provider rejected the request as malformed, so nothing was sent. This is a fault at our end; starting a fresh session usually clears it."],
   ];
 
+  // The sentence for a failure this page could not name. Named so isTransient can ASK whether we
+  // recognised the failure, instead of keeping a second token list that can disagree with this one.
+  const UNNAMED_FAILURE = "The AI machine did not complete this request, and nothing was sent in the clear.";
+
   function plainModelError(detail) {
     const d = String(detail || "").toLowerCase();
     for (const [test, sentence] of MODEL_ERROR_CASES) if (test(d)) return sentence;
     // Anything unanticipated stays honest rather than being guessed at, and says nothing left the machine.
-    return "The AI machine did not complete this request, and nothing was sent in the clear.";
+    return UNNAMED_FAILURE;
   }
 
   const RETRY_TEXT = "Continue where you left off";
@@ -316,10 +331,32 @@
     if (/not verified|unverified|could not be verified|verification failed|refused to seal/.test(d)) return false;
     // Any OTHER refusal is a decision, not a hiccup: it stays loud. A socket refusal is exempted by name.
     if (d.includes("refus") && !/connection refused|econnrefused/.test(d)) return false;
-    return d.includes("unreachable") || d.includes("502") || d.includes("503")
+    // A nonce rejected TWICE, one from a fresh pool, is the one nonce case that retrying cannot clear —
+    // its own sentence says so and tells the reader to start a fresh session. Before this it fell into the
+    // bare "nonce" token below and was quietly retried twice, against the advice it was about to give.
+    // Pre-existing; found while testing the transient default on 2026-09-30.
+    if (d.includes("nonce twice") || d.includes("rejected our request nonce twice")) return false;
+    if (d.includes("unreachable") || d.includes("502") || d.includes("503")
         || d.includes("504") || d.includes("timeout") || d.includes("timed out")
         || d.includes("429") || d.includes("rate") || d.includes("nonce")
-        || d.includes("connection") || d.includes("econn");
+        || d.includes("connection") || d.includes("econn")) return true;
+    // Mid-stream: the reply started and did not finish. Retrying is the right move and nothing left the
+    // machine in the clear either way.
+    if (d.includes("ended part-way") || d.includes("without finishing the answer")
+        || d.includes("mid-reply") || d.includes("could not open the enclave")) return true;
+    // UNRECOGNISED IS NOT EVIDENCE OF SUBSTANTIVE. Henry, 30 Sep, on seeing the unnamed sentence in a
+    // session that then continued normally: "really i guess that message should not have been displayed".
+    //
+    // The default was backwards. A failure this page could NOT name was shown loudly and permanently,
+    // while every failure it could name got a considered verdict — so the case where we know least
+    // produced the most alarming output. Not recognising a sentence says something about this list, not
+    // about the severity of what happened.
+    //
+    // The verification and refusal exclusions above run FIRST and are unaffected: a machine that could not
+    // be verified is never quiet, whether or not we have wording for it. And this is a retry BUDGET, not
+    // silence — AUTO_RETRIES exhausted still escalates to the block, so a failure that does not clear is
+    // still reported.
+    return plainModelError(detail) === UNNAMED_FAILURE;
   }
   const AUTO_RETRIES = 2;               // then stop and say so: silence that never resolves is worse
   let autoTries = 0;

@@ -113,6 +113,10 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
                      # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
                      # it takes a choice from two agents — never a command. See the launcher's own test.
                      "/api/audit-launch",
+                     # Read-only: the failures of the running session. Reports no words of the matter, only
+                     # error strings and how long it had been quiet. Added 2026-09-30 because a session
+                     # failing on every turn could not be diagnosed from outside it.
+                     "/api/faults",
                      "/api/close", "/api/end"}
 
 
@@ -2045,3 +2049,61 @@ def test_the_result_row_has_as_many_columns_as_children():
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "all passed" in r.stdout
+
+
+def test_the_agents_own_transport_failure_is_named_and_stays_quiet():
+    """The string Henry saw on 2026-09-30 — "Connection error." at the start of every answer — while the
+    session's receipt recorded 7 requests and 0 errors. It is the agent's HTTP client failing to reach
+    THIS machine's verifying proxy, so the request never got as far as being sealed.
+
+    The sim also holds the trap this fix walked into: the page's default for a failure it cannot name is
+    "retry quietly", so writing wording for these turned them LOUD. Both halves are checked, with the
+    verification and unopenable-reply refusals as controls that must stay loud.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "agent_transport_error_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "controls held" in r.stdout
+
+
+def test_a_live_sessions_failures_are_readable_while_it_is_still_running(client):
+    """What was missing on 2026-09-30, and the reason the diagnosis took hours instead of minutes.
+
+    A session failed on every turn with "Connection error.". The lane's receipt said 7 requests and 0
+    errors — correctly, because the fault was between the agent and this machine's verifying proxy and
+    never reached the lane. The only way to see the string was to tap the page's own event stream, since
+    ``last_error`` reaches disk at round end and only under IR_ROUND_LOG.
+
+    The number that identified the cause was how long it had been QUIET when it gave up: the same value
+    every time is a timer, and it was 30 s — the relay's idle teardown. So ms_quiet is asserted, not just
+    the presence of a fault.
+    """
+    b, c = client
+    assert c.get("/api/faults", headers={"authorization": ""}).status_code == 401   # gated like the rest
+
+    b.publish({"kind": "busy", "value": True})
+    b.publish({"kind": "assistant_start"})
+    later = b.history[-1]["at"] + 30_000
+    import unittest.mock
+    with unittest.mock.patch.object(W.time, "time", lambda: later / 1000.0):
+        b.publish({"kind": "assistant_end", "stopped": "error", "error": "Connection error."})
+
+    got = c.get("/api/faults").json()
+    assert len(got["faults"]) == 1
+    f = got["faults"][0]
+    assert f["stopped"] == "error" and f["raw"] == "Connection error."
+    assert f["ms_quiet"] == 30_000, "the silence before it gave up is what names the timer"
+    assert f["ms_into_turn"] == 30_000
+
+    # Every failure, not only the most recent: one per turn is exactly the shape that was being reported.
+    b.publish({"kind": "assistant_end", "stopped": "error", "error": "Connection error."})
+    assert len(c.get("/api/faults").json()["faults"]) == 2
+    # And a turn that succeeds adds nothing.
+    b.publish({"kind": "assistant_end", "text": "done"})
+    assert len(c.get("/api/faults").json()["faults"]) == 2

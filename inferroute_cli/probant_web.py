@@ -385,6 +385,15 @@ class Bridge:
         self.tool_counts: Dict[str, int] = {}
         self.last_assistant = ""            # its own last words: usually why a round produced nothing
         self.last_error = ""                # a turn that stopped on an error says so here, not in silence
+        # EVERY failed turn, not only the last, and readable WHILE the session is live. On 2026-09-30 a
+        # session showed "Connection error." at the start of every answer; the only way to see that string
+        # was to tap the page's own event stream, because last_error above reaches disk only at round end
+        # and only under IR_ROUND_LOG. The relay fault behind it was two hops below the lane, so the
+        # session's receipt read 7 requests and 0 errors throughout — correctly. Diagnosing a fault
+        # outside the lane needs a place that records faults outside the lane.
+        self.faults: List[Dict[str, Any]] = []
+        self._turn_began = 0                # server ms when the agent last went busy
+        self._quiet_since = 0               # server ms of the previous event: how long it had been silent
         self.nudged = False                 # a round gets ONE reminder, never a loop
         self._timings: Dict[str, Dict[str, Any]] = {}      # toolCallId → a search being timed
         self._search_stats: Optional[Dict[str, Any]] = None
@@ -410,6 +419,8 @@ class Bridge:
         event = {"seq": self._seq, "at": round(time.time() * 1000), **event}
         if event["kind"] == "busy":
             was, self.busy = self.busy, bool(event["value"])
+            if not was and self.busy:
+                self._turn_began = event["at"]
             if self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
         if event["kind"] == "tool_start":
@@ -423,6 +434,17 @@ class Bridge:
             # invisible in the text: 62 of 76 empty rounds made no tool call and said nothing at all.
             if event.get("error") or event.get("stopped"):
                 self.last_error = f"{event.get('stopped') or 'error'}: {str(event.get('error') or '')[:300]}"
+                self.faults.append({"at": event["at"], "turn": self.turns,
+                                    "stopped": str(event.get("stopped") or ""),
+                                    "raw": str(event.get("error") or "")[:300],
+                                    # How far into the turn it failed. A fault at a round 30 s is a timer
+                                    # somewhere, not a busy provider, and that distinction is the whole
+                                    # diagnosis — it is what identified the relay's 30 s idle teardown.
+                                    "ms_into_turn": (event["at"] - self._turn_began) if self._turn_began else None,
+                                    # And how long it had been SILENT when it gave up, which is the sharper
+                                    # fingerprint: a timer shows up as the same number every time.
+                                    "ms_quiet": (event["at"] - self._quiet_since) if self._quiet_since else None})
+                del self.faults[:-40]
         if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_")):
             self.recorded += 1
         if event["kind"] == "dialog":
@@ -435,6 +457,7 @@ class Bridge:
             self.running_tools[str(event.get("call"))] = str(event.get("tool") or "")
         if event["kind"] == "tool_end":
             self.running_tools.pop(str(event.get("call")), None)
+        self._quiet_since = event["at"]
         self.history.append(event)
         self._keep(event)
         if len(self.history) > HISTORY_CAP:
@@ -749,6 +772,20 @@ class Bridge:
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
                     "home": os.environ.get("IR_PROBANT_HOME_URL", "")}
+
+        @app.get("/api/faults")
+        async def faults():
+            """Every turn this session lost, while it is still running. Token-gated like the rest.
+
+            Not a user surface — the page never fetches this. It exists because the one thing missing when a
+            live session kept failing was the failure itself: the raw string, and how long it had been quiet
+            when it gave up. The lane's own receipt cannot answer it, and correctly so: a fault between the
+            agent and this machine's verifying proxy never reaches the lane, so the receipt reads 0 errors
+            while the page shows a failure on every turn. `ms_quiet` landing on the same number twice is a
+            timer; scattered numbers are a busy provider.
+            """
+            return {"faults": bridge.faults, "turns": bridge.turns,
+                    "now": round(time.time() * 1000), "busy": bridge.busy}
 
         @app.get("/api/disclosure")
         async def get_disclosure():

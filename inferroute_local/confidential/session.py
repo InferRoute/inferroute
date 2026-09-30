@@ -9,16 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import AsyncIterator, Callable
 
 import httpx
 
 from . import attest, e2ee, translate
-from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, lane_preamble
+from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, _now, lane_preamble
 from .transport import Transport
 
 logger = logging.getLogger("inferroute_local.confidential")
@@ -201,7 +203,54 @@ class ConfidentialSession:
         # ones that used to exist only on screen.
         self.receipt.limitations = [{"id": k, "text": t} for k, t in
                                     attest.situational_limitations(self.receipt.checks) + list(attest.LIMITATIONS)]
+        # Retain what the four assignments above just overwrote. Before this the previous machine's
+        # evidence was gone, so every request it had served became unrecomputable while the events list
+        # went on naming it — a record that contradicted itself rather than one that was merely short.
+        self._remember_served(iid, why, p)
         self.receipt.note("pinned", f"{iid} — {why}")
+
+    def _credit(self, iid: str) -> None:
+        """Count a request against the machine that carried it, newest matching entry first.
+
+        A retry inside one request touches a SECOND machine, and `requests` is incremented only on the
+        first attempt — so this credits the machine that was pinned when the attempt was made, and a
+        retried request is credited to the machine that retried it too. The per-machine numbers
+        therefore sum to at least `requests`, never less, and the receipt says so rather than implying
+        an exact partition it cannot support."""
+        for entry in reversed(self.receipt.served_by):
+            if (entry.get("instance") or {}).get("id") == iid:
+                entry["requests"] = int(entry.get("requests") or 0) + 1
+                return
+
+    def _remember_served(self, iid: str, why: str, p: "Pinned") -> None:
+        """Append this machine's row to `served_by`, with its attestation content-addressed.
+
+        The blob is ~243 KB and a session may pin up to 18 times, so it is written once under its own
+        sha256 and referenced. Re-pinning the same instance costs nothing, and the same machine seen by
+        many sessions is stored once for all of them."""
+        att = self.receipt.attestation or {}
+        sha = ""
+        if att:
+            try:
+                blob = json.dumps(att, sort_keys=True).encode()
+                sha = hashlib.sha256(blob).hexdigest()
+                store = Path(self.receipt.path).parent / "evidence" if self.receipt.path else None
+                if store is not None:
+                    store.mkdir(parents=True, exist_ok=True)
+                    f = store / f"{sha}.json"
+                    if not f.exists():
+                        f.write_bytes(blob)
+            except (OSError, TypeError, ValueError):
+                sha = sha or ""
+        self.receipt.served_by.append({
+            "at": _now(), "why": why,
+            "model_short": self.model_short, "upstream_model": self.upstream_model,
+            "fleet_id": self.fleet_id, "instance": dict(self.receipt.instance),
+            "checks": dict(self.receipt.checks), "limitations": list(self.receipt.limitations),
+            "attestation_sha256": sha,
+            "attestation_file": f"evidence/{sha}.json" if sha else "",
+            "requests": 0,
+        })
 
     # ───────────────────────── nonces / re-verification ─────────────────────────
 
@@ -335,6 +384,10 @@ class ConfidentialSession:
                 return ("error", 500, f"could not seal the request: {public_reason(e)}", CLIENT_FAULT)
             if attempt == 1:
                 c["requests"] += 1
+            # WHICH machine served this one. Without it `served_by` says a machine was used and cannot
+            # say for what, and an auditor cannot line requests up against switches — which is exactly
+            # the interleaving verify_record asks them to do and nothing could answer.
+            self._credit(pinned.instance_id)
             c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
             c["ciphertext_bytes_sent"] += len(sealed.blob)
             self._restate_claim()          # the strong claim is earned here, by a request actually sealed

@@ -142,7 +142,13 @@ def facts_table(r: Receipt) -> Table:
     per = inst.get("gpus") or {}
     model = "/".join(sorted({str(g.get("hwmodel") or "") for g in per.values()} - {""})) if per else ""
     t.add_row("Enclave", f"Intel TDX confidential VM · {gpus}× NVIDIA {model + ' ' if model else ''}GPU")
-    t.add_row("Instance", "one enclave, verified, then pinned for this whole session")
+    # FALSE WHENEVER A SESSION RE-PINS, which 246 of 1,006 receipts on this device did — and it said so
+    # unconditionally, in the panel the lane preamble tells the model to point the user at, and in the
+    # SVG `ir confidential card` exports. Meanwhile the close panel printed the switch count, so the two
+    # surfaces contradicted each other. Now it reports what happened.
+    _n = len(getattr(r, "served_by", None) or []) or 1
+    t.add_row("Instance", "one enclave, verified, then pinned for this whole session" if _n == 1 else
+              f"{_n} enclaves, each verified before it was used; the session moved between them")
     t.add_row("Build", "the enclave's measured image matches the provider's published measurements")
     t.add_row("Carrier", r.transport)
     return t

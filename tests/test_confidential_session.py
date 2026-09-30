@@ -1001,3 +1001,81 @@ def test_the_page_never_retries_an_unopenable_reply_quietly():
         "an unopenable reply can be retried silently"
     # and it must be excluded BEFORE the unrecognised-is-quiet default can claim it
     assert body.index('could not open the enclave') < body.index("UNNAMED_FAILURE")
+
+
+# ── the record follows the machines ──────────────────────────────────────────────────────────────
+
+def test_every_machine_that_served_keeps_its_evidence(world, tmp_path):
+    """FATAL finding of the 2026-09-30 review, and it was live: `_pin` overwrites instance, checks,
+    attestation and limitations, and it is called on every switch — so the previous machine's evidence
+    row was DESTROYED. For every request it had served, the audit brief's "recompute the verdicts from
+    it rather than reading them" became impossible, while the events list went on naming that machine.
+    A record that contradicts itself, not one that is merely short. 246 of 1,006 receipts on this device
+    had re-pinned."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    s.receipt.path = str(tmp_path / "r.json")
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
+    del carrier.enclaves["i-a"]
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "2"}]}))
+
+    served = s.receipt.served_by
+    assert len(served) == 2, "a machine served and left no row"
+    assert [e["instance"]["id"] for e in served] == ["i-a", "i-b"]
+    # the evidence for the machine that is NO LONGER pinned is still recoverable
+    first = served[0]
+    assert first["attestation_sha256"], "the first machine's evidence was not retained"
+    blob = (tmp_path / "evidence" / f"{first['attestation_sha256']}.json")
+    assert blob.exists(), "the referenced evidence file was not written"
+    assert json.loads(blob.read_text()), "the retained evidence is empty"
+    # every row carries the checks that were true OF THAT MACHINE
+    assert all(e["checks"] for e in served)
+
+
+def test_the_singular_fields_still_describe_the_current_machine(world, tmp_path):
+    """Purely additive, on purpose. The audit pack reads `attestation` as a dict and its brief ships a
+    runnable snippet doing `r["attestation"]["quote"]`; turning that field into a list would have made
+    the pack report `receipts_with_attestation: 0` for its best-evidenced receipts and manufactured an
+    audit finding against a correct client. So the shape nothing asked to change did not change."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    s.receipt.path = str(tmp_path / "r.json")
+    asyncio.run(s.open())
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
+    del carrier.enclaves["i-a"]
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "2"}]}))
+    assert isinstance(s.receipt.attestation, dict) and s.receipt.attestation
+    assert s.receipt.instance["id"] == "i-b", "the singular field should name the CURRENT machine"
+    assert isinstance(s.receipt.checks, dict)
+
+
+def test_requests_are_credited_to_the_machine_that_carried_them(world, tmp_path):
+    """`served_by` saying a machine was used, without saying for what, cannot answer the interleaving
+    the verifier asks auditors to perform."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    s.receipt.path = str(tmp_path / "r.json")
+    asyncio.run(s.open())
+    for _ in range(3):
+        asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "x"}]}))
+    del carrier.enclaves["i-a"]
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "y"}]}))
+    served = s.receipt.served_by
+    assert served[0]["requests"] == 3, f"first machine credited {served[0]['requests']}, expected 3"
+    assert served[1]["requests"] >= 1
+    assert sum(e["requests"] for e in served) >= s.receipt.counters["requests"]
+
+
+def test_identical_evidence_is_stored_once(world, tmp_path):
+    """243 KB a row, up to 18 pins in a real session. Content-addressing means re-pinning the same
+    machine costs nothing, and the same machine seen by many sessions is stored once for all of them."""
+    carrier = FakeCarrier(world["enclaves"], nonces_per=1)
+    s = _session(carrier)
+    s.receipt.path = str(tmp_path / "r.json")
+    asyncio.run(s.open())
+    s._remember_served("i-a", "again", s.pinned)
+    s._remember_served("i-a", "and again", s.pinned)
+    shas = {e["attestation_sha256"] for e in s.receipt.served_by if e["attestation_sha256"]}
+    files = list((tmp_path / "evidence").glob("*.json"))
+    assert len(shas) == 1 and len(files) == 1, "the same evidence was stored more than once"

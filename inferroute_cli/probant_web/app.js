@@ -1088,10 +1088,26 @@
     s();
   }
 
+  // A CONNECTION failure must not be shown as a VERIFICATION failure. Henry, 30 Sep: a reaped test
+  // enclave produced "the search enclave did not verify (… no valid offer (URLError))" — a trust verdict
+  // about a machine that was not there. The composed text still carries the "did not verify" prefix, so
+  // these branches REPLACE it rather than appending to it; the raw text stays one click away as detail.
+  //
+  // Ordering matters: "nothing answered" is checked BEFORE the verification branch, because the composed
+  // string contains both and the first match wins. The verifier now says which of the two happened.
   function plainRefusal(text) {
     const t = String(text || "").toLowerCase();
     if (t.includes("declined")) return "You didn't allow this search, so nothing was sent.";
-    if (t.includes("did not answer") || t.includes("unreachable") || t.includes("timed out")) return "The search machine isn't answering, so nothing was sent. It may not be running right now.";
+    if (t.includes("nothing answered") || t.includes("no connection"))
+      return "The search machine isn't running, so nothing was sent. Nothing about your text left this computer.";
+    if (t.includes("did not answer") || t.includes("unreachable") || t.includes("timed out"))
+      return "The search machine isn't answering, so nothing was sent. It may not be running right now.";
+    // Something WAS listening and its answer was not a usable offer — that is trust-relevant, and the
+    // wording says so rather than blaming the connection.
+    if (t.includes("not with an offer") || t.includes("not with a usable offer"))
+      return "Something answered at that address but it is not a sealed search machine, so nothing was sent.";
+    if (t.includes("did not verify"))
+      return "The search machine could not be verified, so nothing was sent.";
     return `The search was not sent: ${text}`;
   }
 

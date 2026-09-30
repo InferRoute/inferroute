@@ -579,3 +579,71 @@ def test_a_transient_drop_does_not_brick_every_later_turn():
         assert st == 200, f"turn {i} returned {st}: a transient drop bricked the session"
         assert b"healthy" in body, f"turn {i} delivered {body!r}"
     assert lane.switches == 0, "a healthy turn was treated as a failure and burned a standby"
+
+
+def test_the_fleet_that_just_failed_is_never_warmed_as_the_next_standby():
+    """`order` is computed once at open and nothing removed a fleet that failed, so after a switch the
+    warm walked straight back to it — spending a full attestation to guarantee the NEXT switch lands on
+    the machine that just broke. The default path after every switch, not a rare interleaving."""
+    async def go():
+        sessions = {"kimi-k3": FakeSession(_cands()[0], fails=1),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        await lane.messages({"messages": []})         # kimi-k3 fails, glm-5.2 carries it
+        lane.standby = None
+        await lane._warm()
+        return lane
+    lane = _run(go())
+    assert "kimi-k3" in lane.failed
+    assert lane.standby is not None and lane.standby.model_short == "deepseek-v4-flash", \
+        f"warmed {lane.standby and lane.standby.model_short} — the fleet that just failed, or nothing"
+
+
+def test_a_sweep_that_opens_nothing_backs_off():
+    """Without a cooldown the warm-retry rate is the REQUEST rate: a full attestation sweep across
+    every candidate on every turn, for the life of a session in which the others refuse this device."""
+    async def go():
+        attempts = {"n": 0}
+        async def opener(cand):
+            if cand.model_short == "kimi-k3":
+                return FakeSession(cand)
+            attempts["n"] += 1
+            raise RuntimeError("refuses this device")
+        lane = C.Continuity(_cands(), opener, beliefs=av.Beliefs(path=None),
+                            policy=av.Policy(rank=av.RANK_CAPABILITY))
+        await lane.open()
+        # open() schedules its OWN warm in the background. Let it finish before measuring, or its two
+        # opener calls land in the window and read as a cooldown that leaked.
+        if lane._warming is not None:
+            await lane._warming
+        await lane._warm()
+        after_first = attempts["n"]
+        for _ in range(5):
+            lane._warm_later()
+            await asyncio.sleep(0)
+        return after_first, attempts["n"], lane
+    after_first, total, lane = _run(go())
+    assert after_first >= 1, "the first sweep did not try"
+    assert total == after_first, f"a failed sweep restarted {total - after_first} more times with no backoff"
+    assert lane._warm_blocked_until > 0
+
+
+def test_a_standby_that_will_not_open_counts_against_it():
+    """open() records a refusal; this path did not, so a fleet that only ever fails as a standby
+    accumulated nothing against it and was retried for the life of the session."""
+    async def go():
+        async def opener(cand):
+            if cand.model_short == "kimi-k3":
+                return FakeSession(cand)
+            raise RuntimeError("no")
+        beliefs = av.Beliefs(path=None)
+        lane = C.Continuity(_cands(), opener, beliefs=beliefs,
+                            policy=av.Policy(rank=av.RANK_CAPABILITY))
+        await lane.open()
+        await lane._warm()
+        return beliefs
+    beliefs = _run(go())
+    assert beliefs.view("f-mid").verify.evidence > 0, "a refusing standby left no evidence"

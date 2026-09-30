@@ -3,6 +3,7 @@ user keeps. The display renders THIS, so nothing shown can be stronger than what
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
 import uuid
@@ -111,7 +112,13 @@ class Receipt:
     def save(self) -> Path:
         if not self.path:
             stamp = self.started_at.replace(":", "-")
-            self.path = str(receipts_dir() / f"{stamp}-{self.session_id[:8]}.json")
+            # A PREFIX IS NOT AN IDENTIFIER. The name was {stamp}-{session_id[:8]}, and the continuity
+            # lane gives its legs ids like "<uuid>:<model>" — so every leg shared the same first eight
+            # characters and, opened within the same second, the same filename. One leg's receipt
+            # silently overwrote another's, and a refusal receipt could clobber a confidential one.
+            # The atomic rename below prevents interleaved bytes, not this.
+            tail = hashlib.sha256(self.session_id.encode()).hexdigest()[:6]
+            self.path = str(receipts_dir() / f"{stamp}-{self.session_id[:8]}-{tail}.json")
         p = Path(self.path)
         # Every save stamps this, so a receipt whose session was killed still dates itself. `ended_at` is
         # written by close(), and close() does not run when the process is killed — which left `ended_at`

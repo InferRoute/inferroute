@@ -89,6 +89,13 @@ class Belief:
     t: float = 0.0                     # when a and b were last brought up to date
 
     def _decay_to(self, at: float) -> None:
+        # A STORED CLOCK AHEAD OF THIS ONE TURNS FORGETTING OFF, SILENTLY AND PERMANENTLY. Decay only
+        # runs when `at > self.t`, so a `t` restored from disk that is in the future — an NTP step back,
+        # a suspend/resume, a store written on a machine running fast — means every later observation
+        # fails that test, `t` never advances, and the module's whole premise stops operating with no
+        # symptom. Pulled back to the present instead, which costs at most the evidence of one skew.
+        if self.t > at + 1.0:
+            self.t = at
         if self.t and at > self.t:
             rho = 0.5 ** ((at - self.t) / self.half_life_s)
             # The PRIOR is not forgotten — only the evidence on top of it. Decaying the prior too would

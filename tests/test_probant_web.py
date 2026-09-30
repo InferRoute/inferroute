@@ -206,7 +206,7 @@ def test_the_deep_row_stops_offering_a_press_that_would_repeat(tmp_path):
     The extension had already stopped SUGGESTING it — and the page added it back one line later, because
     the deep row is the one action the page guarantees is reachable. Each side was checked and the seam
     between them was not, so the fix that shipped did nothing where it shows."""
-    import shutil
+    import shutil, subprocess
     import subprocess
 
     node = shutil.which("node")
@@ -799,7 +799,7 @@ def test_the_activity_bar_has_a_step_clock_and_a_since_you_asked_clock():
 def test_a_document_seen_before_names_the_search_by_what_it_was_about():
     """Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'". Runs the
     page's real shortAbout(), which both the per-document pill and the folded head use."""
-    import shutil
+    import shutil, subprocess
     import subprocess
     node = shutil.which("node")
     if not node:
@@ -835,7 +835,7 @@ def test_a_slip_in_an_optional_hint_costs_the_hint_never_the_search():
 def test_one_next_steps_panel_counts_and_covers_by_action():
     """Henry, 19 Sep: "we have NEXT STEPS and FROM YOUR MARKS … polish the double to look more together and
     adapt counts in a smart way". Drives the page's real code (tests/steps_panel_sim.js) through the cases."""
-    import shutil
+    import shutil, subprocess
     import subprocess
     node = shutil.which("node")
     if not node:
@@ -905,7 +905,7 @@ def test_search_cards_start_folded_and_the_head_carries_the_counts_and_overlap()
     """Henry, 19 Sep: "by default, could you not even expand the search results frames, just update within the
     compacted view what needs to be, and perhaps add notes describing how many appeared in what other search".
     Drives the page's real refreshCardSummary()/shortAbout() (tests/card_head_sim.js)."""
-    import shutil
+    import shutil, subprocess
     import subprocess
     node = shutil.which("node")
     if not node:
@@ -926,12 +926,24 @@ def test_search_cards_start_folded_and_the_head_carries_the_counts_and_overlap()
     assert "setCollapsed(entry, false);                 // a refusal is short and worth reading" in js
 
 
+def _fn_body(js: str, name: str) -> str:
+    """The source of ONE function, to the start of the next top-level one.
+
+    Three assertions in this file sliced a fixed byte count after `function showError` (1400, 2600). On
+    30 Sep a correct change added a comment block inside it and the button they were checking for moved past
+    the window, so they failed for a reason unrelated to what they test. A byte count is not a scope."""
+    start = js.index(f"function {name}")
+    rest = js[start + 1:]
+    nxt = rest.find("\n  function ")
+    return rest[:nxt] if nxt != -1 else rest
+
+
 def test_a_failed_answer_offers_a_way_on_that_sends_exactly_its_words():
     """Henry, 19 Sep: "The AI machine couldn't be reached … (4 times)" — "and I don't even have a button to
     retry". The button asks the assistant to continue rather than resending the question, so a failure after
     searches had run does not redo them; and it sends exactly what it says."""
     js = (STATIC / "app.js").read_text()
-    body = js[js.index("function showError"):js.index("function showError") + 1400]
+    body = _fn_body(js, "showError")
     assert 'const again = el("button", "ghost small", RETRY_TEXT);' in body
     assert "send(RETRY_TEXT)" in body
     assert 'const RETRY_TEXT = "Continue where you left off";' in js
@@ -942,11 +954,20 @@ def test_when_continuing_fails_too_the_page_offers_a_fresh_session():
     again, and again — a session's AI-machine side runs the code it started with. When the next try fails too,
     the session is stuck: the page says so and offers the way out, a fresh session, which re-checks from scratch."""
     js = (STATIC / "app.js").read_text()
-    body = js[js.index("function showError"):js.index("function showError") + 2600]
+    body = _fn_body(js, "showError")
     assert "failedTries += 1;" in body and "if (failedTries >= 2) {" in body
     assert "Start a fresh session on this matter" in body and "goHome(`/matter/${matterId}`)" in body
-    # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets through.
-    assert "if (!ev.stopped && current.text.trim()) failedTries = 0;" in js
+    # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets
+    # through. Bound to the PROPERTY, not to one line: the reset grew a block on 30 Sep when a transient
+    # failure started retrying quietly, and an assertion on the old one-liner failed for a reason unrelated
+    # to what it was testing.
+    reset = js[js.index("function assistantEnd"):js.index("function assistantEnd") + 900]
+    assert "if (!ev.stopped && current.text.trim())" in reset and "failedTries = 0;" in reset
+    # The counter must be incremented BEFORE the quiet path can return, or showing a failure discreetly
+    # would push the fresh-session offer further away than the number of failures warrants.
+    quiet_guard = body.index("if (isTransient(detail)")
+    assert body.index("failedTries += 1;") < quiet_guard
+    assert js.count("failedTries += 1;") == 1, "one failure must count once"
 
 
 def test_marked_documents_carry_their_titles_from_every_recorded_search(tmp_path):
@@ -1011,7 +1032,7 @@ def test_parallel_malformed_requests_fold_into_one_line_whatever_order_they_fail
     nothing was sent. (x10)". Ten parallel requests failed; each became its own line. Drives the page's real
     recordSlip() (tests/slip_sim.js): ten cards failing out of order end as ONE line with a count, and a later
     slip after a message starts a new line rather than joining an old one."""
-    import shutil
+    import shutil, subprocess
     import subprocess
     node = shutil.which("node")
     if not node:
@@ -1397,7 +1418,7 @@ def test_the_deep_card_says_where_the_press_did_not_reach(tmp_path):
     where a leg that contributes nothing looks like the strongest in the press.
 
     Run against the page's own function, not a copy of its wording."""
-    import shutil
+    import shutil, subprocess
     import subprocess
 
     node = shutil.which("node")
@@ -1458,7 +1479,7 @@ def test_a_deep_survey_s_legs_fold_and_start_folded():
     The fold is exercised through the page's own toggle rather than asserted on classes in the source: a
     class set at build time and never changed by the handler would pass a source check and be a dead
     control on the screen."""
-    import shutil
+    import shutil, subprocess
     import subprocess
 
     node = shutil.which("node")
@@ -1516,7 +1537,7 @@ def test_the_page_offers_to_continue_a_survey_only_once_one_is_on_screen():
 
     Run through the page's own markCandidates rather than read off the source: the extension side of this
     had a test and the page side did not, which is why the page is where Henry saw it."""
-    import shutil
+    import shutil, subprocess
     import subprocess
 
     node = shutil.which("node")
@@ -1576,3 +1597,88 @@ def test_every_audit_runs_on_its_own_copy_of_the_pack(tmp_path):
     assert before == after, "the original pack changed"
     runs = sorted(pack.parent.glob("audit-run-*"))
     assert len(runs) == 1 and (runs[0] / "AUDIT.md").read_text() == "brief"
+
+
+def test_a_verification_refusal_is_never_retried_quietly():
+    """Henry, 30 Sep: "we get this too often, it's not looking good — maybe more discreet or even silent."
+    Transport failures where nothing left this machine now retry quietly. The line that must NOT move with
+    them is a machine that could not be VERIFIED: that refusal is the product working, and retrying it in
+    silence would teach the reader to ignore the one message they must always see.
+
+    Behavioural, through the page's own isTransient(): the first version of this guard keyed on the bare
+    token "refus" and so read an ordinary "connection refused" as a verification refusal. Two senses of one
+    word, and grep could not have told them apart."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "transient_error_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert all(out["transient"]), f"a transport failure was not treated as transient: {out['transient']}"
+    assert not any(out["verification"]), \
+        f"a VERIFICATION failure would be retried quietly: {out['verification']}"
+    # An unrecognised failure is shown, not swallowed: quiet is opt-in, per token, never the default.
+    assert not any(out["unknown"]), f"an unknown failure was assumed transient: {out['unknown']}"
+
+
+def test_the_quiet_retry_still_reaches_the_loud_error_and_the_fresh_session():
+    """Discreet must not mean endless. After a bounded number of automatic tries the ordinary error block
+    appears, so a failure that never clears is still reported; and every failure counts toward the
+    "start a fresh session" offer whether it was shown loudly or quietly."""
+    js = (STATIC / "app.js").read_text()
+    body = _fn_body(js, "showError")
+    assert "AUTO_RETRIES" in js and "autoTries < AUTO_RETRIES" in body, "the quiet path is unbounded"
+    # Counted before the quiet path can return, exactly once.
+    assert body.index("failedTries += 1;") < body.index("if (isTransient(detail)")
+    assert js.count("failedTries += 1;") == 1
+    # An answer that gets through clears the muted line and restores a full budget for the next blip.
+    reset = _fn_body(js, "assistantEnd")
+    assert "autoTries = 0;" in reset and "quietNode" in reset
+
+
+def test_a_publication_number_is_clickable_from_one_helper_and_never_through_innerhtml():
+    """Henry, 30 Sep: "it would be amazing if when we clicked on a patent mentioned in the text it opened".
+    One helper renders the affordance everywhere — result rows, the documents panel, and the assistant's
+    prose — so the professional does not learn that some numbers open and others do not.
+
+    The prose path walks TEXT NODES. innerHTML there would let any sentence the model produced become markup
+    this page executes, which is the one thing a page handling a confidential disclosure must not do."""
+    js = (STATIC / "app.js").read_text()
+    assert "function docLink(" in js and "function linkifyPubNos(" in js
+    # every rendering goes through the one helper
+    assert "el(\"span\", \"key\", keyNo)" not in js, "a result row still renders the number unclickably"
+    assert "docLink(k)" in js and "docLink(keyNo)" in js
+    # a click sends exactly what it says, like every other button here, and the read lands in the record
+    assert "const OPEN_DOC = (k) =>" in js and "send(OPEN_DOC(keyNo))" in js
+    body = _fn_body(js, "linkifyPubNos")
+    assert "createTreeWalker" in body and "createTextNode" in body
+    assert "innerHTML" not in body, "model output must never be assigned as markup"
+    # only whole, finished numbers: linkifying a streaming paragraph would button half a number
+    assert "linkifyPubNos(current.node);" in _fn_body(js, "assistantEnd")
+
+
+def test_the_documents_panel_appears_only_once_a_deep_search_has_run_and_states_its_ordering():
+    """Henry, 30 Sep: "a second tab that appears when a deep search was done, with the relevance sorted list
+    of patents that can be clicked as well for opening".
+
+    The ordering is STATED in the panel rather than implied. The search machine signs a per-search order and
+    does not sign a combined one, so calling this a relevance score would be inventing a number nothing
+    attests: it is the best rank a document reached in any one search, then how many searches returned it."""
+    js = (STATIC / "app.js").read_text()
+    html = (STATIC / "index.html").read_text()
+    assert 'id="results-panel"' in html and 'id="results-list"' in html
+    body = _fn_body(js, "renderResultsPanel")
+    # hidden until a deep search has completed AND there is something to show — never an empty panel
+    assert "deepMarksAtLastPress === null || best.size === 0" in body
+    # ordering: best rank, then times seen, then a stable tie-break
+    assert "a[1].rank - b[1].rank || b[1].seen - a[1].seen || a[0].localeCompare(b[0])" in body
+    assert "Math.min(prev.rank" in body, "a document's position must be its BEST rank across searches"
+    # the method is on the page, not only in this test
+    assert "best position a document reached in any one search" in html
+    assert "not a score from" in html
+    # it re-renders when searches land, when a deep search finishes, and when marks change
+    assert js.count("renderResultsPanel();") >= 3

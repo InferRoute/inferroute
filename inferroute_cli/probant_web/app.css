@@ -545,3 +545,22 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .deep-coverage { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 13px; }
 .deep-coverage div + div { margin-top: 4px; }
 .deep-coverage .sub { color: var(--faint); font-size: 12px; }
+
+/* A transport hiccup where nothing left this machine. Deliberately quiet — it resolves by itself, and a
+   red block for it teaches the reader to ignore blocks. It escalates to .msg-error if retries run out. */
+.quiet-retry { font-style: italic; opacity: 0.75; }
+
+/* A publication number you can open. It is a <button> so it is reachable by keyboard and announced as an
+   action, but styled as the number it is — the affordance has to read as "this opens", not as a form control.
+   Same rendering in result rows, in the results panel and in the assistant's prose, from one helper. */
+.key-link { font-family: var(--mono); font-size: 13px; font-weight: 600; background: none; border: 0;
+            padding: 0; color: var(--accent); cursor: pointer; border-bottom: 1px dotted currentColor; }
+.key-link:hover, .key-link:focus-visible { background: var(--panel); border-bottom-style: solid; }
+
+/* The documents-found panel reuses the marks panel's frame deliberately: it is the same kind of thing (a
+   standing list in the side column), and a second visual language for it would read as a different feature. */
+.results-list-ol { list-style: none; margin: 0; padding: 0; }
+.result-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 5px 0;
+              border-bottom: 1px solid var(--line); }
+.result-row:last-child { border-bottom: 0; }
+.results-note { margin-top: 8px; font-size: 12px; opacity: 0.8; }

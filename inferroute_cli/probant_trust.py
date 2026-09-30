@@ -24,6 +24,24 @@ from typing import Any, Dict, List, Optional
 OK, WARN, FAIL, OFF, INFO = "ok", "warn", "fail", "off", "info"
 
 
+def machines_served(receipt) -> int:
+    """How many DISTINCT enclaves served this session, from the record rather than from intent.
+
+    Not a continuity question. Measured across 955 receipts on one device, 20% of sessions were already
+    served by more than one machine — up to five — because a session re-pins when its instance stops
+    offering nonces or fails a re-check. "Only that machine can open it" was shown to those users too.
+    """
+    seen = set()
+    for row in (getattr(receipt, "served_by", None) or []):
+        iid = ((row or {}).get("instance") or {}).get("id")
+        if iid:
+            seen.add(iid)
+    if not seen:
+        inst = (getattr(receipt, "instance", None) or {}).get("id")
+        return 1 if inst else 0
+    return len(seen)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -71,13 +89,30 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
     if _ok(receipt, "build_recorded"):
         more.append("It runs a software build InferRoute has on record, not only its operator's word.")
     if _ok(receipt, "e2e_key_bound"):
-        more.append("Your text is encrypted on this computer to a key only that machine holds. "
-                    "InferRoute, the network and the cloud host see scrambled data.")
+        more.append("Your text is encrypted on this computer to a key the machine's own hardware report "
+                    "commits to, so only a machine this computer has verified can open it. InferRoute, "
+                    "the network and the cloud host see scrambled data.")
     points = []
     if _ok(receipt, "tdx_shape") and _ok(receipt, "build_recorded"):
         points.append("Genuine sealed hardware, running a build InferRoute has on record.")
     if _ok(receipt, "e2e_key_bound"):
-        points.append("Your text is encrypted here; only that machine can open it.")
+        # THE CONDITION IS ON THE PAGE, which is this module's own rule and the one this sentence broke.
+        # It read "only that machine can open it" — singular, unconditional. A session re-pins whenever
+        # its machine stops offering nonces or fails a re-check, so across 955 receipts on one device
+        # 20% were served by MORE THAN ONE machine, up to five. Those users were shown the singular
+        # sentence too. This is a correction, not a concession to a new feature.
+        #
+        # What survives is the guarantee that was always the real one and is stronger than it sounds:
+        # never an UNVERIFIED machine. The count is stated rather than hedged, so the ordinary
+        # single-machine session still says something definite.
+        n = machines_served(receipt)
+        points.append("Your text is encrypted here; only a machine this computer has verified can open "
+                      "it — never an unverified one.")
+        points.append(
+            f"{n} machines have served this session, each verified before it was used, and the record "
+            f"names them." if n > 1 else
+            "If a machine stops responding, the session moves to another verified machine and the "
+            "record names every machine that served.")
     warn_ids = {"new-build", "pending-build"}
     caveats = [str(lim.get("text", "")) for lim in (getattr(receipt, "limitations", None) or [])
                if isinstance(lim, dict) and lim.get("id") in warn_ids]

@@ -156,7 +156,12 @@ function renderModelProof(v: Verdict | undefined, expanded: boolean, theme: Them
 	line(v.ok
 		? theme.fg("success", theme.bold(`🔒 The AI runs in a sealed machine this computer checked at ${hhmm(v.verifiedAt)}`))
 		: theme.fg("error", theme.bold(`⛔ The AI's sealed machine could NOT be verified (${v.reason}), so nothing is sent to it.`)));
-	if (v.ok) line("Genuine sealed hardware running a build InferRoute has on record. Your text is encrypted here; only that machine can open it.");
+	// THE AI LANE, where a session is not tied to one enclave: it re-pins when its machine stops offering
+	// nonces or fails a re-check, and 20% of 955 receipts on one device were served by more than one
+	// machine — up to five — while this line said "only that machine". The search lane's version of this
+	// sentence is left alone on purpose: it pins expect_lifetime_id and REFUSES any other enclave before
+	// sealing, so there the singular is earned.
+	if (v.ok) line("Genuine sealed hardware running a build InferRoute has on record. Your text is encrypted here; only a machine this computer has verified can open it — never an unverified one, and the receipt names each one that served.");
 	line(theme.fg("dim", "Checked by this computer, not by the AI, and never shown to the AI."));
 	if (CONTRACT.modified) {
 		line(theme.fg("warning", theme.bold("⚠ contract modified: the mission contract on disk differs from the pinned version.")));

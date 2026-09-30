@@ -212,17 +212,28 @@ vous proposerai quand la prochaine version du moteur sera déployée — avec un
 **Votre question sur l'IA.** Vous me demandiez si j'avais une contre-indication à ce que vous utilisiez
 l'IA de votre côté. Plutôt qu'un avis sur Claude Team ou ChatGPT Business, je préfère vous proposer
 l'assistant du client : il tourne dans une enceinte matérielle que votre poste vérifie avant le moindre
-envoi, vos échanges lui sont chiffrés à elle seule, et son usage vous est offert — les frais sont pour moi.
+envoi, vos échanges lui sont chiffrés — à une machine que votre poste a vérifiée, jamais à une autre — et
+son usage vous est offert — les frais sont pour moi.
 Les textes denses dont vous parlez sont précisément ce pour quoi il est fait : l'envoi scellé arrive
 directement sous forme de dossiers dans le client, et vous les travaillez avec l'assistant sans que rien
 n'en reparte en clair. Il vous faudra une clé pour l'activer ; je vous la donnerai de vive voix, en même
 temps que nous vérifierons l'empreinte.
 
 Une précision, parce qu'elle décide de la comparaison : l'enceinte *lit* vos textes pour vous répondre.
-Ce qu'elle apporte n'est pas qu'aucune machine ne les voie, c'est qu'aucune autre ne le puisse, et que
-votre poste l'ait vérifiée lui-même avant d'envoyer. Ce qu'elle garantit et ce qu'elle ne garantit pas est
-écrit dans le client, à l'écran, y compris ce que nous ne pouvons pas prouver. Si après l'avoir lu vous
-préférez votre serveur hébergé en France pour l'ensemble non déposé, cela ne me pose aucune difficulté.
+Ce qu'elle apporte n'est pas qu'aucune machine ne les voie, c'est qu'aucune machine non vérifiée ne le
+puisse, et que votre poste ait fait la vérification lui-même, avant d'envoyer.
+
+Une seconde précision, du même ordre : une session n'est pas liée à une seule enceinte. Si la machine qui
+la sert cesse de répondre ou échoue à un contrôle, votre poste en vérifie une autre et la session
+continue là — vos textes sont alors chiffrés à la clé de cette nouvelle machine et renvoyés, de sorte que
+plus d'une enceinte les aura déchiffrés. Chacune est vérifiée par votre poste *avant* le moindre envoi,
+jamais après, et le reçu les nomme toutes, avec les preuves. Ce que cela coûte, c'est la phrase plus
+simple « une seule machine les a vus » ; ce que cela achète, c'est qu'une machine qui tombe n'interrompt
+pas votre travail et n'envoie rien vers une machine non vérifiée.
+
+Ce qu'elle garantit et ce qu'elle ne garantit pas est écrit dans le client, à l'écran, y compris ce que
+nous ne pouvons pas prouver. Si après l'avoir lu vous préférez votre serveur hébergé en France pour
+l'ensemble non déposé, cela ne me pose aucune difficulté.
 
 Vous me demandiez aussi un ordre de préférence entre les regroupements. Je vous le donnerai de vive voix :
 la liste des objets change la question, et je préfère vous entendre dessus avant de la trancher. Dites-moi

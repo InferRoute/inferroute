@@ -1875,8 +1875,13 @@ def test_the_matter_flow_reads_through_our_own_tool_and_intake_keeps_the_built_i
     assert 'rel.startsWith("..")' in ts, "a path could climb out of the workspace"
     assert ts.index('rel.startsWith("..")') < ts.index("allowed.has(rel)"), \
         "the allowlist is consulted before the path is resolved, which is not an allowlist"
-    assert '"disclosure.md", ...String(process.env.IR_ATTESTED_READABLE' in ts, \
+    # Bound to the INTENT, not to how the first element is spelled: the allowlist starts from the
+    # disclosure and is extended by IR_ATTESTED_READABLE. An earlier version pinned the literal
+    # '"disclosure.md", ...String(...' and broke when that became the DISCLOSURE constant — a correct
+    # change failing a test that was checking the spelling rather than the property.
+    assert re.search(r"\[\s*DISCLOSURE\s*,\s*\.\.\.String\(process\.env\.IR_ATTESTED_READABLE", ts), \
         "there is no way for the professional to permit a second file"
+    assert 'const DISCLOSURE = "disclosure.md";' in ts, "the allowlist no longer starts from the disclosure"
     # the refusal tells the assistant what to do instead, rather than only saying no
     assert "ask whether to include it" in ts
     # the withheld tools are not smuggled back by another name

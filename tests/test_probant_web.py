@@ -1621,8 +1621,16 @@ def test_a_verification_refusal_is_never_retried_quietly():
     assert all(out["transient"]), f"a transport failure was not treated as transient: {out['transient']}"
     assert not any(out["verification"]), \
         f"a VERIFICATION failure would be retried quietly: {out['verification']}"
-    # An unrecognised failure is shown, not swallowed: quiet is opt-in, per token, never the default.
-    assert not any(out["unknown"]), f"an unknown failure was assumed transient: {out['unknown']}"
+    # REVERSED 2026-09-30. This asserted that an unrecognised failure is never quiet. Henry saw the
+    # unnamed sentence mid-session and the session continued normally: "really i guess that message should
+    # not have been displayed". The default was backwards — the case we understood LEAST produced the
+    # loudest, most permanent output, and failing to recognise a sentence says something about our list,
+    # not about severity.
+    #
+    # "Shown, not swallowed" still holds, but it is AUTO_RETRIES that holds it, not loudness: two quiet
+    # tries then the ordinary error block (pinned in the next test). The verification assertion above is
+    # the line that did not move, and it is checked before this one for that reason.
+    assert all(out["unknown"]), f"an unnamed failure was shown loudly rather than retried: {out['unknown']}"
 
 
 def test_the_quiet_retry_still_reaches_the_loud_error_and_the_fresh_session():
@@ -1960,3 +1968,44 @@ def test_read_matter_file_defaults_to_the_disclosure():
     assert 'const asked = String(params.path ?? "").trim() || DISCLOSURE;' in ts
     assert "path: Type.Optional(" in ts
     assert "${params.path} is outside" not in ts, "the refusal can still print 'undefined'"
+
+
+def test_mid_stream_failures_are_named_and_retried_quietly():
+    """Henry, 2026-09-30: he saw "The AI machine did not complete this request" mid-session, and the
+    session then continued normally — "really i guess that message should not have been displayed".
+
+    Three defects met in that one message. The lane's retry-on-another-instance lives in _send_sealed, so
+    once the enclave has STARTED answering it is behind us: `upstream_retries` read 0 across 26 receipts,
+    one of which counted 28 errors. None of the four mid-stream failures matched MODEL_ERROR_CASES, so all
+    fell through to the blandest sentence the page has. And three of four missed isTransient, so they were
+    shown loudly and permanently for a condition that cleared on its own.
+
+    The default was backwards: the case we understood LEAST produced the loudest output. Drives the page's
+    real classifier (tests/midstream_error_sim.js), including every exclusion the change had to leave
+    alone — a verification failure quietly retried would train someone to ignore the one message that must
+    always be read."""
+    import shutil, subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "midstream_error_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "all passed" in r.stdout
+
+
+def test_the_receipt_says_which_errors_not_only_how_many():
+    """A receipt on 2026-09-30 recorded `errors: 28` and a single event ("session opened"), so when Henry
+    asked why a request had failed, the client's own record could not say. A count with no breakdown
+    cannot be investigated, and this lane's whole argument is that its records answer questions.
+
+    The kinds are a small fixed vocabulary — never anything a user typed — so the receipt stays a handful
+    of integers."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_local" / "confidential" / "session.py").read_text()
+    assert "def _err(c: dict, kind: str)" in src
+    assert 'c["errors"] += 1' not in src, "an error site still counts without saying which kind it was"
+    for kind in ("seal_failed", "send_failed", "upstream_passthrough",
+                 "reply_unopenable", "stream_dropped", "stream_truncated"):
+        assert f'_err(c, "{kind}")' in src, f"no error site is labelled {kind}"

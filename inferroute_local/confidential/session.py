@@ -413,11 +413,11 @@ class ConfidentialSession:
         try:
             oai = translate.to_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
         except Exception as e:
-            c["errors"] += 1
+            _err(c, "seal_failed")
             return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}")
         out = await self._send_sealed(oai, streaming)
         if out[0] == "error":
-            c["errors"] += 1
+            _err(c, "send_failed")
             return self._error(streaming, out[1], out[2])
         _, pinned, sealed, raw = out
         if streaming:
@@ -436,11 +436,11 @@ class ConfidentialSession:
         try:
             oai = translate.native_openai(body, self.upstream_model, system_prefix=lane_preamble(self.receipt))
         except Exception as e:
-            c["errors"] += 1
+            _err(c, "seal_failed")
             return self._error(streaming, 500, f"could not seal the request: {public_reason(e)}", openai=True)
         out = await self._send_sealed(oai, streaming)
         if out[0] == "error":
-            c["errors"] += 1
+            _err(c, "send_failed")
             return self._error(streaming, out[1], out[2], openai=True)
         _, pinned, sealed, raw = out
         if streaming:
@@ -470,7 +470,7 @@ class ConfidentialSession:
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
                     yield ("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode()
                     yield DONE
-                    c["errors"] += 1
+                    _err(c, "upstream_passthrough")
                     return
                 if not plain:
                     continue
@@ -493,19 +493,19 @@ class ConfidentialSession:
                 done = done or _is_done(linebuf)
                 yield linebuf
         except e2ee.E2EEError as e:
-            c["errors"] += 1
+            _err(c, "reply_unopenable")
             yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
             yield DONE
             return
         except (httpx.HTTPError, OSError) as e:
-            c["errors"] += 1
+            _err(c, "stream_dropped")
             yield ("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode()
             yield DONE
             return
         finally:
             c["ciphertext_frames_received"] += opener.frames
         if not done:
-            c["errors"] += 1
+            _err(c, "stream_truncated")
             yield ("data: " + json.dumps(translate.openai_error(
                 "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode()
             yield DONE
@@ -518,11 +518,11 @@ class ConfidentialSession:
             blob = base64.b64decode(json.loads(data)["e2e"]) if data[:1] == b"{" else data
             resp = e2ee.open_response(blob, sealed.response_sk)
         except (httpx.HTTPError, OSError) as e:
-            c["errors"] += 1
+            _err(c, "stream_dropped")
             yield json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         except Exception as e:
-            c["errors"] += 1
+            _err(c, "reply_unopenable")
             yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
@@ -541,7 +541,7 @@ class ConfidentialSession:
                     ev = opener.passthrough.pop()
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
                     yield translate.sse("error", translate.error_body(f"upstream: {msg}")).encode()
-                    c["errors"] += 1
+                    _err(c, "upstream_passthrough")
                     return
                 if not plain:
                     continue
@@ -561,11 +561,11 @@ class ConfidentialSession:
                 for ev in tr.feed_line(linebuf.decode("utf-8", "replace")):
                     yield ev.encode()
         except e2ee.E2EEError as e:
-            c["errors"] += 1
+            _err(c, "reply_unopenable")
             yield translate.sse("error", translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         except (httpx.HTTPError, OSError) as e:          # connection dropped mid-stream: a clean error, never a traceback
-            c["errors"] += 1
+            _err(c, "stream_dropped")
             yield translate.sse("error", translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         finally:
@@ -579,7 +579,7 @@ class ConfidentialSession:
         try:
             data = await _drain(raw)
         except (httpx.HTTPError, OSError) as e:
-            c["errors"] += 1
+            _err(c, "stream_dropped")
             yield json.dumps(translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         try:
@@ -592,7 +592,7 @@ class ConfidentialSession:
                 blob = data
             resp = e2ee.open_response(blob, sealed.response_sk)
         except Exception as e:
-            c["errors"] += 1
+            _err(c, "reply_unopenable")
             yield json.dumps(translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
@@ -662,6 +662,17 @@ def _is_our_topup_notice(detail: str) -> bool:
     flag a regression; the body is never passed on either way."""
     low = (detail or "").lower()
     return all(m in low for m in _TOPUP_MARKERS)
+
+
+# WHICH errors, not only how many. A receipt on 2026-09-30 recorded `errors: 28` and one event
+# ("session opened"), so when Henry asked why a request had failed, the client's own record could not say
+# — the count was there and the cause was not. A number with no breakdown cannot be investigated, and this
+# lane's whole argument is that its records answer questions. Kinds are a small fixed vocabulary, so this
+# stays a handful of integers rather than a log of anything a user typed.
+def _err(c: dict, kind: str) -> None:
+    c["errors"] = c.get("errors", 0) + 1
+    key = "errors_" + kind
+    c[key] = c.get(key, 0) + 1
 
 
 UPSTREAM_PUBLIC = {

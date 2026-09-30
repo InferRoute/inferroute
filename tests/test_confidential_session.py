@@ -961,3 +961,43 @@ def test_a_relay_outage_does_not_demote_the_fleet_it_happened_to_pick():
     for _ in range(20):
         S._err(c, "send_failed", S.TRANSPORT_FAULT)
     assert c.get("errors_fleet", 0) == 0 and c["errors"] == 20
+
+
+def test_an_unopenable_reply_is_never_averaged_into_a_health_score():
+    """The most dangerous finding of the 2026-09-30 review, against a classification I had shipped hours
+    earlier in 58de466.
+
+    A reply that will not open is a ChaCha20-Poly1305 authentication failure against the key an Intel TDX
+    quote committed to. It is indistinguishable from a substituted key or a substituted machine, and it
+    is the ONLY runtime signal that the sentence the receipt offers to be quoted on its own — "No relay,
+    and no provider, could substitute the key or the hardware without failing a check on this device" —
+    is being tested in anger.
+
+    I had classified it INSTANCE_FAULT, which is the class that gets silently retried and averaged into
+    an availability score. A relay attempting key substitution across a fleet would then have presented
+    to a patent attorney as a slightly slow afternoon, and to the scorer as a marginally worse fleet.
+
+    The check failed closed throughout — nothing was ever shown unverified. What was at risk was the
+    notification."""
+    from pathlib import Path
+    from inferroute_local.confidential import session as S
+    assert S.INTEGRITY_FAULT not in S.COUNTS_AGAINST_FLEET, \
+        "an authentication failure is being averaged into an availability score"
+    src = (Path(__file__).resolve().parent.parent
+           / "inferroute_local" / "confidential" / "session.py").read_text()
+    assert '_err(c, "reply_unopenable", INSTANCE_FAULT)' not in src
+    assert src.count('_err(c, "reply_unopenable", INTEGRITY_FAULT)') == 4, \
+        "not every unopenable-reply site is classified as an integrity failure"
+
+
+def test_the_page_never_retries_an_unopenable_reply_quietly():
+    """The same finding on the display side. Quiet retry of an authentication failure turns the one
+    tripwire this product has into a metric."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent
+          / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    body = js[js.index("function isTransient"):js.index("const AUTO_RETRIES")]
+    assert 'd.includes("could not open the enclave")) return false;' in body, \
+        "an unopenable reply can be retried silently"
+    # and it must be excluded BEFORE the unrecognised-is-quiet default can claim it
+    assert body.index('could not open the enclave') < body.index("UNNAMED_FAILURE")

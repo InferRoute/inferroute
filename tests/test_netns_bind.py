@@ -4,6 +4,12 @@ It skips, with the reason, unless an unprivileged empty network namespace can ac
 one-time AppArmor profile, scripts/install-confine-profile.sh). When it runs, it asserts the properties the
 decision record asks for, from INSIDE the sandbox: secrets are not visible rather than merely unwritable, the
 matter directory is writable, the verifying proxy is reachable, and nothing else on the network is.
+
+On "secrets are not visible": the assertion is about READABLE FILES, not about path existence. bwrap has
+to materialise the parent chain of every bind, so when the interpreter lives under $HOME — a dev venv at
+~/workspaces/..., or pipx's at ~/.local/... — that chain necessarily exists inside the sandbox. An earlier
+version asserted `not os.path.exists(~/workspaces)` and failed on exactly that empty chain while the
+confinement was intact. Existence of a directory and reachability of its contents are different claims.
 """
 import http.server
 import json
@@ -30,7 +36,25 @@ matter, port = sys.argv[1], sys.argv[2]
 out = {}
 out["ssh_visible"] = os.path.exists(os.path.expanduser("~/.ssh"))
 out["confidential_visible"] = os.path.exists(os.path.expanduser("~/.inferroute/confidential"))
-out["other_home_visible"] = os.path.exists(sys.argv[3])
+# Every FILE reachable under $HOME that is not inside a tree we deliberately bound. Existence of a
+# directory is not the question: bwrap must materialise the parent chain of each bind, so ~/workspaces
+# necessarily "exists" when the interpreter lives under it. What must be empty is the set of readable
+# files outside the declared trees.
+allowed = [os.path.realpath(a) for a in sys.argv[3].split(os.pathsep) if a]
+leaked = []
+home = os.path.realpath(os.path.expanduser("~"))
+for dirpath, dirnames, filenames in os.walk(home):
+    real = os.path.realpath(dirpath)
+    if any(real == a or real.startswith(a + os.sep) for a in allowed):
+        dirnames[:] = []                      # a declared tree: do not descend, do not report
+        continue
+    for fn in filenames:
+        leaked.append(os.path.join(dirpath, fn))
+        if len(leaked) > 40:
+            break
+    if len(leaked) > 40:
+        break
+out["leaked_files"] = leaked
 try:
     pathlib.Path(matter, "written-from-inside.txt").write_text("ok"); out["matter_writable"] = True
 except Exception as e: out["matter_writable"] = type(e).__name__
@@ -76,7 +100,12 @@ def sandbox(tmp_path):
     Path(matter, "disclosure.md").write_text("the invention\n")
     probe = os.path.join(root, "probe.py")
     Path(probe).write_text(PROBE)
-    yield {"port": port, "root": root, "cfg": cfg, "matter": matter, "probe": probe}
+    # The trees the sandbox is ENTITLED to expose: the config dir, the rw paths, and the interpreter
+    # trees runtime_ro_binds must bind back in because they live under $HOME (a venv, uv's cpython, nvm).
+    # Anything readable outside this set is the leak the test is looking for.
+    from inferroute_local import netns as _netns
+    allowed = [cfg, matter, root, *_netns.runtime_ro_binds("python3")]
+    yield {"port": port, "root": root, "cfg": cfg, "matter": matter, "probe": probe, "allowed": allowed}
     srv.shutdown()
     srv.server_close()
     import shutil
@@ -85,7 +114,7 @@ def sandbox(tmp_path):
 
 def _run(sb):
     r = pi_attested.run_in_netns_bind(
-        [sys.executable, sb["probe"], sb["matter"], str(sb["port"]), str(Path.home() / "workspaces")],
+        [sys.executable, sb["probe"], sb["matter"], str(sb["port"]), os.pathsep.join(sb["allowed"])],
         ports=[sb["port"]], cfg_dir=sb["cfg"], rw=[sb["matter"], sb["root"]], binary="python3", timeout=180)
     assert r.returncode == 0, (r.returncode, r.stdout, r.stderr)
     return json.loads(r.stdout.strip().splitlines()[-1])
@@ -95,7 +124,8 @@ def test_secrets_are_absent_not_merely_unwritable(sandbox):
     out = _run(sandbox)
     assert out["ssh_visible"] is False, "~/.ssh must not be visible inside the sandbox at all"
     assert out["confidential_visible"] is False, "confidential/ must not be visible inside the sandbox at all"
-    assert out["other_home_visible"] is False, "no other part of $HOME may be reachable"
+    assert out["leaked_files"] == [], (
+        "files outside the declared binds were readable inside the sandbox: %r" % (out["leaked_files"][:10],))
 
 
 def test_the_matter_directory_is_writable_and_nothing_else_is(sandbox):

@@ -465,6 +465,12 @@ class ConfidentialSession:
     async def messages(self, body: dict) -> tuple[int, dict, AsyncIterator[bytes]]:
         """Anthropic request in → Anthropic response out; everything in between is sealed."""
         c = self.receipt.counters
+        # CLEARED ON DISPATCH, not on success. It used to be cleared only in _account — which on the
+        # STREAMING path runs at the very end of the generator, after finish_events. So a mid-stream
+        # drop returned without ever reaching it and the field stayed set for the life of the session.
+        # A caller reading it as "did THIS request fail" then saw a stale yes on every later turn.
+        # Per-request is what every reader assumes, so it is now per-request by construction.
+        self.last_fault = ""
         streaming = bool(body.get("stream"))
         t0 = time.monotonic()
         try:
@@ -489,6 +495,12 @@ class ConfidentialSession:
         is pinned, `user`/`metadata` identifiers are dropped, and the lane preamble is prepended
         to the system message."""
         c = self.receipt.counters
+        # CLEARED ON DISPATCH, not on success. It used to be cleared only in _account — which on the
+        # STREAMING path runs at the very end of the generator, after finish_events. So a mid-stream
+        # drop returned without ever reaching it and the field stayed set for the life of the session.
+        # A caller reading it as "did THIS request fail" then saw a stale yes on every later turn.
+        # Per-request is what every reader assumes, so it is now per-request by construction.
+        self.last_fault = ""
         streaming = bool(body.get("stream"))
         t0 = time.monotonic()
         try:
@@ -660,7 +672,6 @@ class ConfidentialSession:
         yield json.dumps(out).encode()
 
     def _account(self, usage: dict, latency_ms: int = 0) -> None:
-        self.last_fault = ""                 # a request got through; whatever failed before is history
         c = self.receipt.counters
         for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
             c[k] += int(usage.get(k) or 0)

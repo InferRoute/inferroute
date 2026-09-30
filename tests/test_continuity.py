@@ -12,6 +12,11 @@ from inferroute_local.confidential import availability as av
 from inferroute_local.confidential import continuity as C
 
 
+async def _aiter(chunks):
+    for c in chunks:
+        yield c
+
+
 class FakeReceipt:
     def __init__(self, sid, short):
         self.session_id, self.model_short = sid, short
@@ -36,12 +41,16 @@ class FakeSession:
     async def messages(self, body):
         self.calls += 1
         self.receipt.counters["requests"] += 1
+        # Cleared on DISPATCH, as the real session now does. And an ASYNC generator, as the real one
+        # always returns: the fake used to hand back `iter([...])`, a sync iterator, so
+        # _commit_on_first_chunk early-returned and 14 of 18 tests never executed the commit path they
+        # existed to cover. A fake that is easier to write than the real thing tests the fake.
+        self.last_fault = ""
         if self.fails > 0:
             self.fails -= 1
             self.last_fault = self.fault
-            return (503, {}, iter([b"error"]))
-        self.last_fault = ""
-        return (200, {}, iter([b"ok"]))
+            return (503, {}, _aiter([b"error"]))
+        return (200, {}, _aiter([b"ok"]))
     chat_completions = messages
     def close(self):
         # SYNCHRONOUS, like the real ConfidentialSession.close, which the launcher calls without await.
@@ -483,3 +492,64 @@ def test_a_stream_we_walk_away_from_is_closed():
     st, lane = _run(go())
     assert st == 200 and lane.switches == 1
     assert closed["n"] == 1, "the abandoned stream's cleanup never ran"
+
+
+def test_a_transient_drop_does_not_brick_every_later_turn():
+    """THE FATAL ONE, and it was mine. `last_fault` was cleared only in `_account`, which on the
+    STREAMING path runs at the very end of the generator — so a mid-stream drop returned without ever
+    reaching it and the field stayed set for the life of the session.
+
+    `_commit_on_first_chunk` then read that stale value as "did THIS request fail", threw away the next
+    perfectly healthy answer, shut its stream (so `_account` never ran and the fault stayed stale), and
+    did it again on the turn after. Reproduced before the fix: one transient drop turned every
+    subsequent turn into a 503, forever. The single-session path this replaces would have served them
+    all. A lane whose first priority is fewer errors was converting one into an unrecoverable session.
+
+    With a standby it was not fatal but still wrong: a healthy 200 discarded, a standby burned, and the
+    same disclosure re-sealed to a SECOND enclave — a privacy-surface expansion caused by a bookkeeping
+    field."""
+    class StickyFault(FakeSession):
+        """Sets last_fault mid-stream and never clears it — exactly what a real session did between
+        requests before the fix, because _account is unreachable after a mid-stream drop."""
+        def __init__(self, cand):
+            super().__init__(cand)
+            self.dropped_once = False
+        async def messages(self, body):
+            self.calls += 1
+            self.last_fault = ""                      # the real session now clears on DISPATCH
+            outer = self
+            if not self.dropped_once:
+                self.dropped_once = True
+                async def dies():
+                    yield b'{"delta":"partial"}'      # commits, then drops mid-reply
+                    outer.last_fault = "instance"
+                    raise RuntimeError("dropped mid-reply")
+                return (200, {}, dies())
+            async def fine():
+                yield b'{"delta":"healthy"}'
+            return (200, {}, fine())
+        chat_completions = messages
+
+    async def go():
+        sessions = {"kimi-k3": StickyFault(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        lane.standby = None                           # no reserve: the pure form of the bug
+        out = []
+        for _ in range(4):
+            st, _h, stream = await lane.messages({"messages": []})
+            try:
+                body = b"".join([c async for c in stream])
+            except Exception:
+                body = b"<dropped>"
+            out.append((st, body))
+        return out, lane
+    out, lane = _run(go())
+    first, rest = out[0], out[1:]
+    assert first[0] == 200, "the first turn should still commit its partial content"
+    for i, (st, body) in enumerate(rest, start=2):
+        assert st == 200, f"turn {i} returned {st}: a transient drop bricked the session"
+        assert b"healthy" in body, f"turn {i} delivered {body!r}"
+    assert lane.switches == 0, "a healthy turn was treated as a failure and burned a standby"

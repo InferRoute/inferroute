@@ -1,0 +1,304 @@
+"""Several verified sessions, one conversation: the lane where a fleet going bad is not the user's problem.
+
+Henry, 2026-09-30, in priority order: "minimise user reaching errors / maximise smoothness of the agent",
+then "prioritise big/smart models over smaller ones for this specific probant agent", and — the
+constraint that shapes everything here — "this is almost like a side lane ... it should not affect our
+current single model serving mode."
+
+WHY A FACADE AND NOT A MUTABLE SESSION. The obvious design is to let a Session change its fleet. Three
+adversarial reviews found four fatal blockers to exactly that, and every one of them is a consequence of
+MUTATION:
+
+  - the model name is sealed INSIDE the ciphertext (translate.to_openai bakes it into the body before
+    _send_sealed seals it), so a sealed request is not portable to another fleet
+  - `fleet_id` is read outside the lock that pins the instance — inert while frozen, a live race once not
+  - `_verified_at` is one clock for the whole session, so verifying fleet B would mark fleet A fresh
+  - the lane preamble asserts "The assistant in this session is {model} ... never say otherwise", and
+    `upstream_model` is never rewritten — so a switch would instruct the new model to misidentify itself
+
+Nothing here mutates. Each underlying session is today's ConfidentialSession, on one fleet, with its own
+pool, its own verification clock, its own price and its own preamble. Switching swaps WHICH session the
+next request goes to. All four blockers are answered by construction rather than by four fixes, and the
+single-model path is untouched: nothing constructs this unless a caller asks for it.
+
+WHAT SMOOTHNESS ACTUALLY REQUIRES. A cold switch is not smooth — opening a session means fetching and
+verifying attestation evidence, which the code itself calls "the slow part" and which measured 68 s. A
+user watching a 68-second pause has not been protected from anything. So the standby is opened BEFORE it
+is needed, in the background, while the user is reading or typing, and a switch is then a pointer move.
+That is the whole difference between failover that helps and failover that is just a slower error.
+
+WHAT THIS CANNOT DO. Failover is transparent only for failures that happen BEFORE the reply starts —
+which is where the retryable ones live (no eligible instance, fleet capacity, 5xx). Once a 200 and the
+first bytes have gone to the client, the conversation is committed to that machine; a mid-stream failure
+still surfaces. That boundary is stated rather than blurred, because a facade that silently restarted a
+half-delivered answer would produce a worse artefact than the error it hid.
+"""
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Optional
+
+from . import availability as av
+from .session import COUNTS_AGAINST_FLEET, TRANSPORT_FAULT
+
+# Faults another fleet can actually help with. `account` (billing) and `client` (our own bug) are true
+# everywhere at once, so switching for them would burn a standby to reach the same answer. `transport`
+# means the relay is unreachable and every fleet is equally unreachable. `integrity` is deliberately
+# absent and must stay absent: an unopenable reply is an authentication failure against the key the
+# hardware quote committed to, and quietly moving to another fleet is precisely how a key-substitution
+# attempt would be made to look like a slow afternoon.
+SWITCHABLE = frozenset(COUNTS_AGAINST_FLEET)
+
+# How long a standby may sit unverified before it is refreshed. Under the session's own re-verification
+# interval, so a standby is never promoted on evidence the active session would have refused.
+STANDBY_MAX_AGE_S = 20 * 60.0
+
+
+@dataclass
+class Candidate:
+    fleet_id: str
+    model_short: str
+    upstream_model: str
+    context_length: int = 0
+    meta: Optional[dict] = None
+
+
+class Continuity:
+    """Delegates to one open session; keeps another verified and ready behind it."""
+
+    def __init__(self, candidates, opener: Callable[[Candidate], Awaitable], *,
+                 beliefs: Optional[av.Beliefs] = None, policy: Optional[av.Policy] = None,
+                 prober: Optional[av.Prober] = None, transport=None, note=None):
+        self.candidates = list(candidates)
+        self.opener = opener                       # Candidate -> an OPEN session, or raises
+        self.beliefs = beliefs or av.Beliefs()
+        self.policy = policy or av.Policy(rank=av.RANK_CAPABILITY)
+        self.prober = prober or av.Prober()
+        self.transport = transport
+        self._on_note = note                       # optional: a display hook, e.g. the status line
+        self.active = None
+        self.standby = None
+        self.standby_at = 0.0
+        self._warming: Optional[asyncio.Task] = None   # STRONG reference: a fire-and-forget task can be
+        self._closed = False                           # collected mid-flight, which loses the standby
+        self.switches = 0
+        self.order: list = []
+
+    def note(self, kind: str, detail: str) -> None:
+        """Every continuity decision goes into the RECORD, not only onto a screen.
+
+        These events are the only place a reader can learn that the conversation moved, why, and what
+        was held in reserve — so they default to the receipt rather than to a callback nobody passed.
+        A display hook is layered on top, never in place of it."""
+        try:
+            if self.active is not None:
+                self.active.receipt.note(kind, detail)
+        except Exception:                             # noqa: BLE001 — bookkeeping never fails a turn
+            pass
+        if self._on_note is not None:
+            try:
+                self._on_note(kind, detail)
+            except Exception:                         # noqa: BLE001
+                pass
+
+    # ── what the server talks to ──
+    @property
+    def receipt(self):
+        return self.active.receipt if self.active else None
+
+    @property
+    def model_short(self) -> str:
+        return self.active.model_short if self.active else ""
+
+    @property
+    def upstream_model(self) -> str:
+        return self.active.upstream_model if self.active else ""
+
+    @property
+    def shown_model(self) -> str:
+        """The name the CLIENT is told. Deliberately the lane's, and deliberately stable across a
+        switch: the agent caches it, and renaming the model underneath a running conversation would be
+        a second failure mode invented to report the first. What actually served is in the receipt,
+        per machine and per request, which is where an auditor looks and the agent does not."""
+        first = self.order[0] if self.order else self.model_short
+        return getattr(self.active, "shown_model", first) if self.active else first
+
+    # ── opening ──
+    async def open(self):
+        """Open the best candidate the evidence and the policy agree on, then warm the next one."""
+        async def probe(fleet_id: str):
+            if self.transport is None:
+                return -1, 0
+            p = await self.prober.probe(self.transport, fleet_id)
+            return p.instances, p.nonce_depth
+
+        pairs = [(c.fleet_id, c.model_short) for c in self.candidates]
+        chosen = await av.choose(pairs, self.policy, self.beliefs, probe,
+                                 meta={c.model_short: (c.meta or {}) for c in self.candidates})
+        self.order = list(chosen.order)
+        self.note("continuity-order", f"{' > '.join(self.order)} — {chosen.reason}")
+
+        last = None
+        for short in self.order:
+            cand = self._by_short(short)
+            if cand is None:
+                continue
+            try:
+                self.active = await self.opener(cand)
+            except Exception as e:                    # noqa: BLE001 — try the next one; that is the point
+                last = e
+                self.beliefs.observed_verify(cand.fleet_id, 0, 1, time.time())
+                continue
+            self.beliefs.observed_verify(cand.fleet_id, 1, 1, time.time())
+            self._warm_later()
+            return self.active.receipt
+        raise last or RuntimeError("no candidate fleet could be opened")
+
+    def _by_short(self, short: str) -> Optional[Candidate]:
+        return next((c for c in self.candidates if c.model_short == short), None)
+
+    # ── the standby ──
+    def _warm_later(self) -> None:
+        """Start warming, at most one at a time, holding a STRONG reference to the task.
+
+        A bare `ensure_future` is only weakly held by the loop, so the standby could be collected
+        mid-open and the lane would silently be back to having no fallback at all — the same defect the
+        review found in the usage reporter, where what went missing was the data the whole design rests
+        on."""
+        if self._closed or (self._warming and not self._warming.done()):
+            return
+        try:
+            self._warming = asyncio.ensure_future(self._warm())
+        except RuntimeError:                          # no running loop (sync context): warm on demand
+            self._warming = None
+
+    async def _warm(self) -> None:
+        """Open the next acceptable candidate ahead of need. A switch is then a pointer move rather
+        than the 68-second attestation the user would otherwise wait through."""
+        if self._closed or self.standby is not None:
+            return
+        active_short = self.active.model_short if self.active else ""
+        for short in self.order:
+            if short == active_short:
+                continue
+            cand = self._by_short(short)
+            if cand is None or not self._compatible(cand):
+                continue
+            try:
+                s = await self.opener(cand)
+            except Exception:                         # noqa: BLE001 — a standby that will not open is
+                continue                              # not an error; try the next, silently
+            if self._closed:
+                await _quietly_close(s)
+                return
+            self.standby, self.standby_at = s, time.time()
+            self.note("standby-ready", f"{short} verified and held in reserve")
+            return
+
+    def _compatible(self, cand: Candidate) -> bool:
+        """A standby must be able to hold the conversation that would move to it.
+
+        Context length was missing from the first design entirely, and it is the most consequential
+        silent degradation available here: failing a long disclosure over to a smaller window truncates
+        it mid-document, which is worse than the error being avoided. Unknown context (the relay does
+        not publish it today) is treated as compatible rather than blocking every switch — stated as a
+        gap rather than hidden as a default."""
+        active = self._by_short(self.active.model_short) if self.active else None
+        if not active or not active.context_length or not cand.context_length:
+            return True
+        return cand.context_length >= active.context_length
+
+    # ── the request path ──
+    async def messages(self, body: dict):
+        return await self._call("messages", body)
+
+    async def chat_completions(self, body: dict):
+        return await self._call("chat_completions", body)
+
+    async def _call(self, name: str, body: dict):
+        sess = self.active
+        resp = await getattr(sess, name)(body)
+        status = resp[0]
+        fleet = sess.fleet_id
+        if status == 200:
+            self.beliefs.observed_serve(fleet, 1, 0, time.time())
+            self._freshen_standby()
+            return resp
+        fault = getattr(sess, "last_fault", "")
+        if fault in COUNTS_AGAINST_FLEET:
+            self.beliefs.observed_serve(fleet, 0, 1, time.time())
+        if fault in SWITCHABLE and await self._switch(fault):
+            retried = await getattr(self.active, name)(body)
+            if retried[0] == 200:
+                self.beliefs.observed_serve(self.active.fleet_id, 1, 0, time.time())
+                self.note("carried", f"{sess.model_short} failed ({fault}); "
+                                     f"{self.active.model_short} answered — the user saw nothing")
+            return retried
+        return resp
+
+    async def _switch(self, why: str = "") -> bool:
+        """Promote the standby. Only ever a pointer move — anything slow happened in the background."""
+        if self.standby is None:
+            self.note("no-standby", f"{self.active.model_short} failed ({why}) with nothing warmed")
+            return False
+        if time.time() - self.standby_at > STANDBY_MAX_AGE_S:
+            # Older than the session's own re-verification interval: promoting it would use evidence the
+            # active session would itself have refused by now.
+            stale, self.standby = self.standby, None
+            self.note("standby-stale", f"{stale.model_short} held too long to promote; reopening")
+            await _quietly_close(stale)
+            self._warm_later()
+            return False
+        old, self.active = self.active, self.standby
+        self.standby, self.standby_at = None, 0.0
+        self.switches += 1
+        self.note("switched", f"{old.model_short} -> {self.active.model_short} ({why})")
+        self._record_switch(old)
+        asyncio.ensure_future(_quietly_close(old))
+        self._warm_later()
+        return True
+
+    def _record_switch(self, old) -> None:
+        """Carry the machines the previous session used into the receipt this session now owns, so the
+        record of the CONVERSATION names every enclave that served it. Without this each session's
+        receipt is honest about itself and no artefact is honest about the whole."""
+        try:
+            prior = list(getattr(old.receipt, "served_by", []) or [])
+            for row in prior:
+                row = dict(row)
+                row["from_previous_session"] = old.receipt.session_id
+                self.active.receipt.served_by.insert(0, row)
+            self.active.receipt.counters["continuity_switches"] = self.switches
+            self.active.receipt.note(
+                "continuity", f"this conversation began on {old.model_short} "
+                              f"({old.receipt.counters.get('requests', 0)} requests) and moved here")
+        except Exception:                             # noqa: BLE001 — bookkeeping must never fail a turn
+            pass
+
+    def _freshen_standby(self) -> None:
+        if self.standby is not None and time.time() - self.standby_at > STANDBY_MAX_AGE_S:
+            stale, self.standby = self.standby, None
+            asyncio.ensure_future(_quietly_close(stale))
+        if self.standby is None:
+            self._warm_later()
+
+    async def close(self) -> None:
+        self._closed = True
+        if self._warming and not self._warming.done():
+            self._warming.cancel()
+        for s in (self.standby, self.active):
+            if s is not None:
+                await _quietly_close(s)
+        try:
+            self.beliefs.save()
+        except Exception:                             # noqa: BLE001
+            pass
+
+
+async def _quietly_close(session) -> None:
+    try:
+        await session.close()
+    except Exception:                                 # noqa: BLE001 — closing a spare must never raise
+        pass

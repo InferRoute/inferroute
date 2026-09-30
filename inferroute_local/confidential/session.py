@@ -81,6 +81,10 @@ class ConfidentialSession:
         self._reverify_failures = 0
         self._lock = asyncio.Lock()
         self._closed = False
+        # The fault class of the most recent failure, for a caller that can do something about it.
+        # Read by the continuity lane to decide whether another fleet would help; "" means no failure
+        # since the last success.
+        self.last_fault = ""
 
     # ───────────────────────── open: verify + pin ─────────────────────────
 
@@ -471,6 +475,7 @@ class ConfidentialSession:
         out = await self._send_sealed(oai, streaming)
         if out[0] == "error":
             _err(c, "send_failed", out[3])
+            self.last_fault = out[3]
             return self._error(streaming, out[1], out[2])
         _, pinned, sealed, raw = out
         if streaming:
@@ -494,6 +499,7 @@ class ConfidentialSession:
         out = await self._send_sealed(oai, streaming)
         if out[0] == "error":
             _err(c, "send_failed", out[3])
+            self.last_fault = out[3]
             return self._error(streaming, out[1], out[2], openai=True)
         _, pinned, sealed, raw = out
         if streaming:
@@ -654,6 +660,7 @@ class ConfidentialSession:
         yield json.dumps(out).encode()
 
     def _account(self, usage: dict, latency_ms: int = 0) -> None:
+        self.last_fault = ""                 # a request got through; whatever failed before is history
         c = self.receipt.counters
         for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
             c[k] += int(usage.get(k) or 0)

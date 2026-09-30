@@ -1079,3 +1079,70 @@ def test_identical_evidence_is_stored_once(world, tmp_path):
     shas = {e["attestation_sha256"] for e in s.receipt.served_by if e["attestation_sha256"]}
     files = list((tmp_path / "evidence").glob("*.json"))
     assert len(shas) == 1 and len(files) == 1, "the same evidence was stored more than once"
+
+
+# ── the continuity lane, against REAL sessions ───────────────────────────────────────────────────
+
+def test_continuity_carries_a_real_session_onto_a_second_real_fleet(world, monkeypatch):
+    """The facade proved against fakes proves only the facade. This drives two genuine
+    ConfidentialSession objects — real attestation, real pool, real sealing — and kills the first
+    fleet's instances between requests.
+
+    It is also the check that the four blockers the reviews found are answered BY CONSTRUCTION: the
+    model is sealed into the body (so the second session must re-translate, which it does because it
+    builds its own request), fleet_id is frozen per session, the verification clock is per session, and
+    each session's preamble names its own model. Nothing mutates, so none of them can bite."""
+    from inferroute_local.confidential import availability as av
+    from inferroute_local.confidential import continuity as CC
+
+    made: dict = {}
+
+    class GoneCarrier(FakeCarrier):
+        """A gateway whose fleet has emptied answers with a status, as a real one does — FakeCarrier
+        raises KeyError, which no HTTP carrier can do and which would escape _send_sealed's httpx
+        handler. Testing through an impossible failure would have proved nothing about the real path."""
+        async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path="/v1/chat/completions"):
+            if instance_id not in self.enclaves:
+                async def _body():
+                    yield b'{"error":{"message":"instance gone"}}'
+                return 503, {}, _body()
+            return await super().invoke(fleet_id=fleet_id, instance_id=instance_id, nonce=nonce,
+                                        stream=stream, blob=blob, path=path)
+
+    async def opener(cand):
+        carrier = GoneCarrier(dict(world["enclaves"]), nonces_per=5)
+        s = S.ConfidentialSession(session_id=f"s-{cand.model_short}", model_short=cand.model_short,
+                                  upstream_model=cand.upstream_model, fleet_id=cand.fleet_id,
+                                  transport=carrier, http=None)
+        await s.open()
+        made[cand.model_short] = (s, carrier)
+        return s
+
+    cands = [CC.Candidate("fleet-x1", "big", "fake/Big-TEE", context_length=100),
+             CC.Candidate("fleet-x2", "small", "fake/Small-TEE", context_length=100)]
+    lane = CC.Continuity(cands, opener, beliefs=av.Beliefs(path=None),
+                         policy=av.Policy(rank=av.RANK_PREFERENCE))
+
+    async def go():
+        await lane.open()
+        assert lane.active.model_short == "big"
+        st, _, body = await lane.messages({"stream": False, "messages": [{"role": "user", "content": "1"}]})
+        assert st == 200
+        await lane._warm()
+        assert lane.standby is not None and lane.standby.model_short == "small"
+
+        # the active fleet loses every instance, mid-conversation
+        active_carrier = made["big"][1]
+        active_carrier.enclaves.clear()
+
+        st2, _, body2 = await lane.messages({"stream": False, "messages": [{"role": "user", "content": "2"}]})
+        return st2, await _drain(body2) if hasattr(body2, "__aiter__") else b""
+
+    st2, payload = asyncio.run(go())
+    assert st2 == 200, "a real cross-fleet failover still reached the user as an error"
+    assert lane.switches == 1 and lane.active.model_short == "small"
+    # and the record of the conversation names BOTH enclaves
+    ids = [(r.get("instance") or {}).get("id") for r in lane.active.receipt.served_by]
+    assert len([i for i in ids if i]) >= 2, f"the record names only {ids}"
+    assert lane.active.receipt.counters["continuity_switches"] == 1
+    assert any(e["kind"] == "carried" for e in lane.active.receipt.events)

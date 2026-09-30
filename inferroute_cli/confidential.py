@@ -203,6 +203,59 @@ def _yield_counts(model_short: str) -> tuple[float, float]:
     return float(elig), float(inst)
 
 
+# VERIFIABLE IS NOT THE SAME AS WORKING, and fleet_yield only measures the first.
+#
+# Measured on glm-5.2, 2026-09-30, as its request failure rate climbed through the day:
+#
+#   12:07   31% of requests failed     fleet eligible/instances 3/3
+#   12:36   63% failed                 3/3
+#   13:50   95% failed                 3/3
+#   16:20   76% failed                 3/3
+#
+# Every instance verified at every point. A chooser scoring `live x yield` rates that fleet PERFECT at
+# the moment it is answering one request in twenty. Henry asked for the model with "the strongest
+# chances to stay available"; verifiability is a precondition for availability, not a measure of it.
+#
+# Counted over the same per-model window as the yield, with shrinkage toward "fine" so a fleet is
+# demoted on evidence rather than on being new.
+#
+# CAVEAT, to be narrowed once receipts carry kinds: `errors` includes our own seal failures, which are
+# this device's fault and not the fleet's. They are rare and would affect every fleet alike, so they
+# cannot flip an ordering on their own — but once `errors_seal_failed` has accumulated in real receipts
+# this should subtract it.
+_PRIOR_REQUESTS = 8.0
+
+
+def fleet_success(model_short: str) -> tuple[float, int]:
+    """(expected fraction of requests that will succeed on this fleet, requests observed)."""
+    import json as _json
+    from pathlib import Path as _P
+    d = _P.home() / ".inferroute" / "confidential" / "receipts"
+    try:
+        files = sorted(d.glob("*.json"))[-_YIELD_SCAN:]
+    except OSError:
+        return 1.0, 0
+    reqs = errs = n = 0
+    for f in reversed(files):
+        if n >= _YIELD_PER_MODEL:
+            break
+        try:
+            r = _json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if r.get("model_short") != model_short:
+            continue
+        c = r.get("counters") or {}
+        q, e = c.get("requests"), c.get("errors")
+        if isinstance(q, int) and q > 0 and isinstance(e, int):
+            reqs += q
+            errs += min(e, q)            # an error per request at most; a retry can count twice
+            n += 1
+    if not reqs:
+        return 1.0, 0
+    return (reqs - errs + _PRIOR_REQUESTS) / (reqs + _PRIOR_REQUESTS), reqs
+
+
 def fleet_yield_interval(model_short: str, *, hint_ratio=None, hint_samples=None) -> tuple[float, float]:
     """A Wilson score interval (95%) for a fleet's yield, so an ORDERING can be refused when the evidence
     does not support it.
@@ -303,8 +356,16 @@ async def health_ordered(order: list[str], catalog: list, transport, console=Non
         if live < 0:                                  # could not ask: keep its place, do not judge it
             scored.append((short, 1.0, 0.0, 1.0))
             continue
-        expected = live * y
-        scored.append((short, expected, live * lo, live * hi))
+        # Two different things have to be true for a fleet to be usable: its instances must VERIFY here,
+        # and requests to it must SUCCEED. fleet_yield answers only the first, and on 2026-09-30 glm-5.2
+        # held a perfect 3/3 yield while failing 95% of requests — rated best exactly when it was worst.
+        succ, _reqs = fleet_success(short)
+        expected = live * y * succ
+        # The interval is the yield's, scaled by the success point estimate. That understates the
+        # uncertainty in `succ` itself and so is slightly too confident; it is still far better than
+        # scoring a fleet as if the second question did not exist. Widening it properly means an
+        # interval on a product of two rates, which is worth doing when this has run for a while.
+        scored.append((short, expected, live * lo * succ, live * hi * succ))
         if expected >= 1.0 and short == order[0]:
             return order                              # the preferred model looks fine; spend nothing more
         if expected >= 1.0:

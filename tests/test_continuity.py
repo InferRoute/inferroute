@@ -295,3 +295,28 @@ def test_the_reason_a_fleet_was_chosen_reaches_the_record():
     assert "continuity-open" in kinds
     order_note = next(e for e in lane.active.receipt.events if e["kind"] == "continuity-order")
     assert "kimi-k3" in order_note["detail"] and ">" in order_note["detail"]
+
+
+def test_the_surviving_receipt_carries_the_whole_story_not_just_the_switch():
+    """Found on a live failover: the receipt that survived said the conversation had switched and been
+    carried, while the decisions that led there — which fleets were considered and why, and that a
+    standby had been verified and held in reserve — stayed on the receipt nobody reads afterwards.
+
+    Evidence without the reasoning is half a record, and the half that is missing is the half an
+    auditor would ask about."""
+    async def go():
+        sessions = {"kimi-k3": FakeSession(_cands()[0], fails=1),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        await lane.messages({"messages": []})
+        return lane
+    lane = _run(go())
+    kinds = [e["kind"] for e in lane.active.receipt.events]
+    for expected in ("continuity-order", "continuity-open", "standby-ready", "switched", "carried"):
+        assert expected in kinds, f"{expected} was lost in the switch; receipt has {kinds}"
+    # and the carried-over ones say where they came from, so the record is not silently reattributed
+    carried = [e for e in lane.active.receipt.events if e.get("from_previous_session")]
+    assert carried and all(e["from_previous_session"] == "s-kimi-k3" for e in carried)

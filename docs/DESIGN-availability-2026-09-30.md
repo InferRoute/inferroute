@@ -332,3 +332,49 @@ to a boolean inside the expression that computes it. `verdict`/`refusal`, a labe
 scorer reads.
 
 **A time-decayed model could be backfitted from the receipts already on disk, with no new instrumentation.**
+
+---
+
+## Appendix: the failures this work was blamed for were not in this lane
+
+Recorded because anyone reading the above will otherwise attribute the same symptoms to it.
+
+On the evening of 30 Sep, with continuity live, a Probant session showed **"Reconnecting… nothing was
+sent in the clear" at the start of every answer**, escalating to the generic failure block. Henry:
+"to me this a sign the system we just implemented needs more work, there is no reason this chat
+shouldnt be smooth all the time." The natural reading — a new switching layer making things worse —
+was wrong, and the evidence said so before any code was read:
+
+| what was measured | value |
+|---|---|
+| the session's own receipt, while the page failed on every turn | 7 requests, **0 errors**, no fault of any class, 0 retries |
+| the agent's error string, off the live event stream | `"Connection error."` |
+| what raises that string | the OpenAI Node SDK's `APIConnectionError` — its `fetch` **threw** |
+
+A lane that records zero errors while the page shows one per turn is not a lane that is failing. The
+fault was two hops below it: `netns._relay` dialled the proxy with `create_connection(timeout=30)`,
+and **that timeout stays on the socket for every later `recv`**, so the relay tore down any connection
+that produced no upstream bytes for 30 seconds — catching its own `socket.timeout` in
+`except OSError: pass`, silently. On that socket, silence is the model's **time-to-first-token**. So it
+failed the longest prompts first: the opening request of every turn, worsening as the conversation grew.
+
+Measured against the shipped relay and the fixed one, with an upstream that answers after N seconds:
+
+| thinking time | shipped | fixed |
+|---|---|---|
+| 5 s | survived | survived |
+| 25 s | survived | survived |
+| 35 s | **killed at 30.0 s** | survived |
+| 60 s | **killed at 30.0 s** | survived |
+
+Two further defects in the same relay could produce the same message and are fixed with it: teardown
+destroyed *both* sockets as soon as *either* direction reached EOF (turning a half-close into a reset and
+discarding a reply already on its way back), and the local endpoint held idle keep-alive connections for
+uvicorn's public-internet default of 5 s, racing its own FIN against the agent's next request.
+
+**Two things to carry forward.** First: a fault between the agent and this machine's own verifying proxy
+never reaches the lane, so **the receipt cannot see it, and is right not to** — which is why
+`/api/faults` now records a live session's failures with how long it had been quiet when it gave up. The
+same number twice is a timer; that is what named this one. Second: **a connect timeout is not an idle
+timeout.** `create_connection(timeout=…)` conflates them, and the quiet direction of a relayed stream is
+exactly where that conflation does its damage.

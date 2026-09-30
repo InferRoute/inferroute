@@ -622,10 +622,14 @@ class ConfidentialSession:
 # an availability problem "in a smooth if possible silent way". These are per-instance or per-moment
 # conditions, so a different machine in the same fleet is a real second chance.
 #
-# 402 IS DELIBERATELY ABSENT. "This lane is out of capacity" is an ACCOUNT condition — every instance in
-# every fleet bills the same account — so retrying it burns a second round trip to reach the same answer
-# and delays the one message that tells the user what is actually wrong. 400 and 404 are absent for the
-# same reason in the other direction: a malformed request or a missing route is not luck.
+# 402 IS DELIBERATELY ABSENT, and the reason is stronger than the one first written here. I had it as
+# "out of capacity is an ACCOUNT condition, so every instance bills the same account and would answer the
+# same way" — true, but an inference about scope. The director session read the relay: a 402 is raised at
+# AUTH (cc_proxy_prod/auth.py:169), before provider_fallback.py:28 has picked an instance at all. There is
+# therefore no other instance to try — not because the second one would agree, but because the request
+# never reached a first one. Retrying burns a round trip and delays the message that says what is wrong.
+# 400 and 404 are absent for the same reason in the other direction: a malformed request or a missing
+# route is not luck.
 _RETRY_ON_OTHER_INSTANCE = (429, 500, 502, 503, 504)
 
 UPSTREAM_PUBLIC = {

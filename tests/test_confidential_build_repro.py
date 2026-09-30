@@ -290,3 +290,49 @@ def test_the_mrtd_control_is_scoped_to_the_measured_volume():
     assert "leaves it at 261ce538" in text and "unchanged" in text
     assert '"any change to the firmware changes MRTD" would be false' in text
     assert "reproduces the committed blob BYTE-IDENTICALLY" in text
+
+
+# ── the direct-boot build (operator guest image 1.4.1), reproduced 2026-09-30 ──
+# Event digests measured from the operator's published kernel / initramfs / command line, and the
+# resulting registers matched LIVE quotes from 7 production instances.
+DIRECT_KERNEL_AUTHENTICODE = "e8aebb1b45dc081c83e931d3587accde82abe2d253edaf63ed079f78ee67d6397018e7fd9668e8bf5adee052b8899e25"
+DIRECT_CMDLINE_EVENT = "47d6fc939840260f569a06796fcc23c9271391a48eaf8467c35291c6fa2df3477e97361063607659275e0b9ddfef3374"
+DIRECT_INITRD_EVENT = "08fda112993fc9b5d9768917026206a70421a64c37261046f35efc8db01ad532f246eb43c2fdb1faa123cd47eaddac8a"
+
+
+def _direct():
+    return next(b for b in builds.BUNDLED if b["id"] == "tee-vm-2026-09-20")
+
+
+def test_the_direct_boot_build_claims_only_what_was_recomputed():
+    b = _direct()
+    assert b["status"] == "observed", "RTMR3 is unreproduced and the image was not audited: not `reviewed`"
+    assert b["reproduced"] == ["rtmr1", "rtmr2"], "mrtd was not recomputed for this build and rtmr3 cannot be"
+    assert set(b["reproduced_from"]) == {"vmlinuz", "initrd", "cmdline"}
+    for reg in b["reproduced"]:
+        assert b.get(reg)
+
+
+def test_direct_boot_rtmr1_and_rtmr2_reproduce_the_recorded_values():
+    import hashlib
+    s = lambda x: hashlib.sha384(x).digest()
+    assert repro._fold([bytes.fromhex(DIRECT_KERNEL_AUTHENTICODE),
+                        s(b"Calling EFI Application from Boot Option"), s(bytes(4)),
+                        s(b"Exit Boot Services Invocation"),
+                        s(b"Exit Boot Services Returned with Success")]) == _direct()["rtmr1"]
+    assert repro._fold([bytes.fromhex(DIRECT_CMDLINE_EVENT), bytes.fromhex(DIRECT_INITRD_EVENT)]) == _direct()["rtmr2"]
+
+
+def test_direct_boot_cmdline_is_measured_with_initrd_prefixed_and_a_terminator():
+    """The two ways this went wrong while building it: no prefix, and appended instead of prepended."""
+    import hashlib
+    cmd = "root=UUID=x ro console=ttyS0"
+    want = hashlib.sha384(("initrd=initrd " + cmd).encode("utf-16-le") + b"\0\0").digest()
+    got = bytes.fromhex(repro.rtmr2_direct(cmd, b"")[1][0][1])
+    assert got == want
+    assert got != hashlib.sha384((cmd + " initrd=initrd").encode("utf-16-le") + b"\0\0").digest()
+    assert got != hashlib.sha384(cmd.encode("utf-16-le") + b"\0\0").digest()
+
+
+def test_a_changed_initramfs_changes_direct_boot_rtmr2():
+    assert repro.rtmr2_direct("a b", b"initrd-one")[0] != repro.rtmr2_direct("a b", b"initrd-two")[0]

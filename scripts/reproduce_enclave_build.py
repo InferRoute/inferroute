@@ -31,12 +31,24 @@ NOT reproduced here, and deliberately not claimed:
   RTMR3  hashes a list of root-filesystem files. That filesystem is encrypted in the published
          image, so it cannot be recomputed from the download alone.
 
+Two boot models, because the operator changed how it boots between image versions:
+
+  GRUB chain (guest image 1.3.x, `--image`): firmware -> shim -> GRUB -> kernel. RTMR1 is the
+         partition table plus shim and GRUB; RTMR2 the owner-key variables, command line, initramfs.
+  direct boot (guest image 1.4.x, `--direct`): the host hands the firmware the kernel, initramfs
+         and command line itself, so shim and GRUB are not in the chain at all. RTMR1 is the raw
+         kernel PE image; RTMR2 is the command line as the firmware passes it (with `initrd=initrd `
+         PREPENDED) and the initramfs. The three files are published by the operator next to the disk
+         image. Verified 2026-09-30 by matching both registers against live quotes.
+
 No operator name, host or URL is compiled in. Pass the image locator explicitly.
 
 Usage
 -----
     reproduce_enclave_build.py --image <URL-or-path> --firmware <OVMF.fd> \
         [--tdx-measure <path>] [--build <id>] [--keep <dir>]
+    reproduce_enclave_build.py --direct <prefix-or-URL-prefix> [--build <id>] [--out f.json]
+        # reads <prefix>.vmlinuz, <prefix>.initrd, <prefix>.cmdline
 
 Requires: qemu-img and debugfs (e2fsprogs). MRTD additionally needs a build of tdx-measure
 (github.com/virtee/tdx-measure); without it the script still does RTMR1 and RTMR2, which need
@@ -308,6 +320,49 @@ def rtmr2(shim: bytes, cmdline: str, initrd: bytes) -> tuple[str, list[tuple[str
     return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
 
 
+# ── direct boot (guest image 1.4.x): no shim, no GRUB ──
+#
+# The host passes kernel, initramfs and command line to the firmware itself. The firmware measures
+# the RAW kernel PE image (any setup-header patching it does happens after the measurement, which is
+# why hashing a patched kernel gives a wrong register), and the Linux EFI stub measures the load
+# options. The firmware builds those by PREPENDING "initrd=initrd " to what the host supplied, and
+# the stub hashes them as UTF-16 with a two-byte terminator. Both models were checked against
+# live production quotes rather than taken from the tool that computes them.
+
+def rtmr1_direct(kernel: bytes) -> tuple[str, list[tuple[str, str]]]:
+    s = lambda b: hashlib.sha384(b).digest()
+    log = [
+        ("kernel (Authenticode)", authenticode_sha384(kernel)),
+        ("Calling EFI Application from Boot Option", s(b"Calling EFI Application from Boot Option")),
+        ("separator", s(bytes(4))),
+        ("Exit Boot Services Invocation", s(b"Exit Boot Services Invocation")),
+        ("Exit Boot Services Returned with Success", s(b"Exit Boot Services Returned with Success")),
+    ]
+    return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
+
+
+def rtmr2_direct(cmdline: str, initrd: bytes) -> tuple[str, list[tuple[str, str]]]:
+    s = lambda b: hashlib.sha384(b).digest()
+    opts = ("initrd=initrd " + cmdline).encode("utf-16-le") + b"\0\0"
+    log = [
+        ("kernel command line (initrd=initrd prepended, UTF-16, NUL-terminated)", s(opts)),
+        ("initramfs", s(initrd)),
+    ]
+    return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
+
+
+def _fetch(prefix: str, ext: str, dest: Path) -> bytes:
+    src = f"{prefix}.{ext}"
+    if "://" in src:
+        import urllib.request
+        with urllib.request.urlopen(src, timeout=300) as r:      # noqa: S310 — operator-published, hashed below
+            data = r.read()
+    else:
+        data = Path(src).read_bytes()
+    dest.write_bytes(data)
+    return data
+
+
 def mrtd(firmware: str, tdx_measure: str, workdir: Path) -> str | None:
     """MRTD comes from the firmware image alone. The ACPI, vCPU and memory fields are
     required by the tool's schema but only feed RTMR0, so placeholders are honest here;
@@ -335,6 +390,8 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--image", default=os.environ.get("IR_BUILD_IMAGE"),
                     help="guest disk image: an https URL or a local path (env IR_BUILD_IMAGE)")
+    ap.add_argument("--direct", help="direct-boot artifacts: a local path or https URL prefix; reads "
+                    "<prefix>.vmlinuz, <prefix>.initrd, <prefix>.cmdline (guest image 1.4.x)")
     ap.add_argument("--firmware", default=os.environ.get("IR_BUILD_FIRMWARE"),
                     help="guest firmware blob, e.g. OVMF.inteltdx.fd (env IR_BUILD_FIRMWARE)")
     ap.add_argument("--tdx-measure", default=os.environ.get("IR_TDX_MEASURE", "tdx-measure"),
@@ -343,8 +400,10 @@ def main() -> int:
     ap.add_argument("--keep", help="directory to keep the extracted artifacts in")
     ap.add_argument("--out", help="write a machine-readable record of the run to this JSON file")
     a = ap.parse_args()
+    if a.direct:
+        return _main_direct(a)
     if not a.image:
-        ap.error("--image is required (no image locator is compiled into this tool)")
+        ap.error("--image is required (no image locator is compiled into this tool; --direct is the alternative for 1.4.x images)")
 
     tmp = Path(a.keep) if a.keep else Path(tempfile.mkdtemp(prefix="ir-build-"))
     tmp.mkdir(parents=True, exist_ok=True)
@@ -453,6 +512,48 @@ def main() -> int:
         print(f"    {b['id']}: {state}")
         for k, ok in verdict.items():
             print(f"      {k.upper():5s} {'match' if ok else 'DIFFERS from the recorded value'}")
+        if state == "REPRODUCED":
+            rc = 0
+    return rc
+
+
+def _main_direct(a) -> int:
+    tmp = Path(a.keep) if a.keep else Path(tempfile.mkdtemp(prefix="ir-build-"))
+    tmp.mkdir(parents=True, exist_ok=True)
+    print(f"artifacts: {tmp}")
+    print("==> fetching the direct-boot artifacts")
+    kernel = _fetch(a.direct, "vmlinuz", tmp / "vmlinuz")
+    initrd = _fetch(a.direct, "initrd", tmp / "initrd")
+    cmdline = _fetch(a.direct, "cmdline", tmp / "cmdline").decode().rstrip("\n")
+    inputs = {n: hashlib.sha256((tmp / n).read_bytes()).hexdigest() for n in ("vmlinuz", "initrd", "cmdline")}
+    for n, d in inputs.items():
+        print(f"    {n:8s} sha256={d}")
+    print(f"    cmdline: {cmdline[:72]}…")
+    print("==> computing measurements")
+    r1, log1 = rtmr1_direct(kernel)
+    r2, log2 = rtmr2_direct(cmdline, initrd)
+    computed = {"rtmr1": r1, "rtmr2": r2}
+    for tag, log in (("rtmr1", log1), ("rtmr2", log2)):
+        for name, digest in log:
+            print(f"    {tag} event  {digest[:24]}…  {name}")
+    for k, v in computed.items():
+        print(f"    {k.upper():5s} {v}")
+    if a.out:
+        Path(a.out).write_text(json.dumps({"computed": computed, "inputs": inputs, "cmdline": cmdline,
+                                           "rtmr1_event_log": [{"event": n, "digest": d} for n, d in log1],
+                                           "rtmr2_event_log": [{"event": n, "digest": d} for n, d in log2]},
+                                          indent=2) + "\n")
+        print(f"    record written to {a.out}")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from inferroute_local.confidential import builds  # noqa: E402
+    print("==> comparing against recorded builds")
+    rc = 1
+    for b in builds.BUNDLED:
+        if a.build and b["id"] != a.build:
+            continue
+        verdict = {k: (b.get(k, "").lower() == v.lower()) for k, v in computed.items()}
+        state = "REPRODUCED" if all(verdict.values()) else "no match"
+        print(f"    {b['id']}: {state}")
         if state == "REPRODUCED":
             rc = 0
     return rc

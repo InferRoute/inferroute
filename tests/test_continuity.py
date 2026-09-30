@@ -320,3 +320,111 @@ def test_the_surviving_receipt_carries_the_whole_story_not_just_the_switch():
     # and the carried-over ones say where they came from, so the record is not silently reattributed
     carried = [e for e in lane.active.receipt.events if e.get("from_previous_session")]
     assert carried and all(e["from_previous_session"] == "s-kimi-k3" for e in carried)
+
+
+class EmptyStreamSession(FakeSession):
+    """Answers 200 and then produces nothing — a fleet that accepts a request and never delivers a
+    token. The commonest shape of a fleet going bad, and the one a status code cannot express."""
+    def __init__(self, cand, *, fault="instance", raises=False, then=None):
+        super().__init__(cand)
+        self._fault, self._raises, self._then = fault, raises, then
+    async def messages(self, body):
+        self.calls += 1
+        if self._then is not None and self.calls > 1:
+            return await FakeSession.messages(self, body)
+        outer = self
+        async def stream():
+            if outer._raises:
+                raise RuntimeError("connection dropped")
+            outer.last_fault = outer._fault
+            return
+            yield b""                                  # pragma: no cover - makes this a generator
+        self.last_fault = ""
+        return (200, {}, stream())
+    chat_completions = messages
+
+
+def test_a_stream_that_dies_before_its_first_token_is_carried():
+    """A 200 is not yet an answer: the status and headers have not reached the client, because the
+    server sends them when it starts iterating. So a fleet that accepts the request and then produces
+    nothing is still recoverable — and that is exactly how a struggling fleet fails."""
+    async def go():
+        sessions = {"kimi-k3": EmptyStreamSession(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        st, _, stream = await lane.messages({"messages": []})
+        return st, lane, sessions
+    st, lane, sessions = _run(go())
+    assert st == 200, "an empty stream reached the user"
+    assert lane.switches == 1 and lane.active.model_short == "glm-5.2"
+    assert sessions["glm-5.2"].calls == 1
+
+
+def test_a_stream_that_raises_before_its_first_token_is_carried():
+    async def go():
+        sessions = {"kimi-k3": EmptyStreamSession(_cands()[0], raises=True),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        return (await lane.messages({"messages": []}))[0], lane
+    st, lane = _run(go())
+    assert st == 200 and lane.switches == 1
+
+
+def test_once_a_token_is_committed_the_conversation_stays_where_it_is():
+    """THE BOUNDARY, and it is deliberate. Once a byte has gone to the client the answer belongs to
+    that machine; silently restarting a half-delivered reply on another model would produce a worse
+    artefact than the error it hid. The first chunk is delivered, and a later failure surfaces."""
+    async def go():
+        class DiesAfterContent(FakeSession):
+            async def messages(self, body):
+                self.calls += 1
+                outer = self
+                async def stream():
+                    yield b'{"delta":"partial"}'
+                    outer.last_fault = "instance"
+                    raise RuntimeError("dropped mid-reply")
+                return (200, {}, stream())
+            chat_completions = messages
+        sessions = {"kimi-k3": DiesAfterContent(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        st, _, stream = await lane.messages({"messages": []})
+        got, err = [], None
+        try:
+            async for c in stream:
+                got.append(c)
+        except Exception as e:
+            err = e
+        return st, got, err, lane, sessions
+    st, got, err, lane, sessions = _run(go())
+    assert st == 200 and got == [b'{"delta":"partial"}'], "the committed content was not delivered"
+    assert err is not None, "a mid-reply failure was swallowed"
+    assert lane.switches == 0, "a half-delivered answer was restarted on another model"
+    assert sessions["glm-5.2"].calls == 0
+
+
+def test_an_empty_stream_with_no_standby_reports_rather_than_hanging():
+    """The path that had a latent NameError: nothing warmed, nothing to carry it, and the caller still
+    needs a truthful answer rather than an empty body that looks like success."""
+    async def go():
+        sessions = {"kimi-k3": EmptyStreamSession(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        lane.standby = None
+        st, _, stream = await lane.messages({"messages": []})
+        body = b"".join([c async for c in stream])
+        return st, body, lane
+    st, body, lane = _run(go())
+    assert st == 503 and b"no answer" in body
+    assert lane.switches == 0

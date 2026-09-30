@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 from . import availability as av
-from .session import COUNTS_AGAINST_FLEET, TRANSPORT_FAULT
+from .session import COUNTS_AGAINST_FLEET, INSTANCE_FAULT, TRANSPORT_FAULT
 
 # Faults another fleet can actually help with. `account` (billing) and `client` (our own bug) are true
 # everywhere at once, so switching for them would burn a standby to reach the same answer. `transport`
@@ -235,6 +235,19 @@ class Continuity:
         status = resp[0]
         fleet = sess.fleet_id
         if status == 200:
+            # A 200 IS NOT YET AN ANSWER. The status and headers have not reached the client — the server
+            # sends them when it starts iterating — so a stream that dies before producing anything is
+            # still recoverable, and that is exactly where a struggling fleet fails: it accepts the
+            # request, then never produces a token.
+            #
+            # So the first chunk is drawn here, before committing. Nothing is held back from the user
+            # that they would not have been waiting for anyway: this is the time-to-first-token they are
+            # already sitting through. Once a single byte is committed the conversation belongs to that
+            # machine and a later failure surfaces — restarting a half-delivered answer would produce a
+            # worse artefact than the error it hid.
+            resp, empty_fault = await self._commit_on_first_chunk(sess, resp)
+            if resp is None:                          # died before producing anything; carried below
+                return await self._carry(sess, name, body, empty_fault)
             self.beliefs.observed_serve(fleet, 1, 0, time.time())
             self._freshen_standby()
             return resp
@@ -249,6 +262,53 @@ class Continuity:
                                      f"{self.active.model_short} answered — the user saw nothing")
             return retried
         return resp
+
+    async def _commit_on_first_chunk(self, sess, resp):
+        """Pull the first chunk. Returns (replayed response, "") or (None, fault) if it died empty."""
+        status, headers, stream = resp
+        if not hasattr(stream, "__aiter__"):
+            return resp, ""                           # non-streaming: already whole
+        first = None
+        try:
+            async for chunk in stream:
+                first = chunk
+                break
+        except Exception:                             # noqa: BLE001
+            # A stream that RAISES on its first read produced nothing, so nothing is committed — and it
+            # is a fault of the machine serving it, whatever the session managed to record before the
+            # exception. Reading last_fault here would usually find "" and send the caller down the
+            # path that re-asks the same failing session.
+            return None, INSTANCE_FAULT
+        if first is None:
+            # Ended cleanly with no content. The session's own class if it set one, an instance fault
+            # otherwise: an enclave that accepts a request and delivers nothing has failed, and the
+            # absence of a label is not the absence of a failure.
+            return None, (getattr(sess, "last_fault", "") or INSTANCE_FAULT)
+        fault = getattr(sess, "last_fault", "")
+        if fault and fault in SWITCHABLE:
+            return None, fault
+
+        async def replay():
+            yield first
+            async for chunk in stream:
+                yield chunk
+
+        return (status, headers, replay()), ""
+
+    async def _carry(self, sess, name: str, body: dict, fault: str):
+        """The failure path shared by a refused send and a stream that died empty."""
+        if fault in COUNTS_AGAINST_FLEET:
+            self.beliefs.observed_serve(sess.fleet_id, 0, 1, time.time())
+        if fault in SWITCHABLE and await self._switch(fault):
+            retried = await getattr(self.active, name)(body)
+            if retried[0] == 200:
+                self.beliefs.observed_serve(self.active.fleet_id, 1, 0, time.time())
+                self.note("carried", f"{sess.model_short} failed ({fault}); "
+                                     f"{self.active.model_short} answered — the user saw nothing")
+            return retried
+        # Nothing could carry it. Hand back a truthful failure rather than re-asking the session that
+        # just failed, which is what an earlier version did and which turns one failure into two.
+        return 503, {}, _one(b'{"error":{"message":"the enclave produced no answer"}}')
 
     async def _switch(self, why: str = "") -> bool:
         """Promote the standby. Only ever a pointer move — anything slow happened in the background."""
@@ -320,6 +380,10 @@ class Continuity:
         except Exception:                             # noqa: BLE001
             pass
         return self.active.receipt if self.active else None
+
+
+async def _one(payload: bytes):
+    yield payload
 
 
 def _quietly_close(session):

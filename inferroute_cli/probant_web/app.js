@@ -230,8 +230,17 @@
   function assistantEnd(ev) {
     if (!current) assistantStart();
     current.text = ev.text || "";
-    if (!ev.stopped && current.text.trim()) failedTries = 0;
+    if (!ev.stopped && current.text.trim()) {
+      failedTries = 0;
+      // An answer got through, so the hiccup is over: clear the muted line and give the NEXT one a
+      // full budget. Without this reset a single bad minute would leave every later blip loud.
+      autoTries = 0;
+      if (quietNode && quietNode.isConnected) { quietNode.remove(); quietNode = null; }
+    }
     renderCurrent();
+    // On END only, not per delta: a streaming paragraph can split a publication number across two chunks,
+    // and linkifying a half-written one would make "US-20151" a button to nothing.
+    linkifyPubNos(current.node);
     if (!current.text.trim()) current.node.remove();
     if (ev.stopped === "error") showError(ev.error || "");
     if (ev.stopped === "aborted") log.append(el("div", "step", "Stopped."));
@@ -251,7 +260,52 @@
   }
   const RETRY_TEXT = "Continue where you left off";
   let failedTries = 0;                  // failed answers in a row; an answer that gets through resets it
+
+  // TRANSIENT vs SUBSTANTIVE. A transport hiccup where NOTHING left this machine is not news: the honest
+  // response is to try again, not to hand the professional a red block and a button. Henry, 30 Sep: "we get
+  // this too often, it's not looking good — maybe more discreet or even silent."
+  //
+  // What is NEVER transient: a machine that could not be VERIFIED. That refusal is the product working, and
+  // quietly retrying it would train someone to ignore the one message that must always be read. It is
+  // excluded here explicitly rather than by omission, so a later edit to the list cannot swallow it.
+  function isTransient(detail) {
+    const d = String(detail || "").toLowerCase();
+    // Verification named explicitly, not by the bare token "refus". A behavioural sim caught that
+    // "connection refused" — an ordinary socket error — was being read as a verification refusal and shown
+    // loudly, while the tokens below would have called it transient. The two senses of "refused" are
+    // different events and the check has to tell them apart.
+    if (/not verified|unverified|could not be verified|verification failed|refused to seal/.test(d)) return false;
+    // Any OTHER refusal is a decision, not a hiccup: it stays loud. A socket refusal is exempted by name.
+    if (d.includes("refus") && !/connection refused|econnrefused/.test(d)) return false;
+    return d.includes("unreachable") || d.includes("502") || d.includes("503")
+        || d.includes("504") || d.includes("timeout") || d.includes("timed out")
+        || d.includes("429") || d.includes("rate") || d.includes("nonce")
+        || d.includes("connection") || d.includes("econn");
+  }
+  const AUTO_RETRIES = 2;               // then stop and say so: silence that never resolves is worse
+  let autoTries = 0;
+  let quietNode = null;                 // the one muted line, reused; removed when an answer arrives
+  function quietRetry(detail) {
+    autoTries += 1;
+    if (!quietNode || !quietNode.isConnected) {
+      quietNode = el("div", "step quiet-retry", "Reconnecting… nothing was sent in the clear.");
+      log.append(quietNode);
+    } else {
+      quietNode.textContent = `Reconnecting… nothing was sent in the clear. (attempt ${autoTries})`;
+    }
+    s();
+    setTimeout(() => { if (!ended) send(RETRY_TEXT); }, 1500 * autoTries);
+  }
+
   function showError(detail) {
+    // Counted BEFORE the quiet path can return: a failure shown discreetly is still a failure, so going
+    // quiet must not push the "this session is stuck / start a fresh one" offer further away. Display and
+    // tally are separate decisions.
+    failedTries += 1;
+    // Quiet path, while there are tries left. Escalates to the block below once they run out, so a failure
+    // that does not clear is still reported rather than hidden behind an ellipsis forever.
+    if (isTransient(detail) && autoTries < AUTO_RETRIES && !ended) { quietRetry(detail); return; }
+    if (quietNode && quietNode.isConnected) { quietNode.remove(); quietNode = null; }
     const plain = plainModelError(detail);
     if (lastError && lastError.plain === plain && lastError.node.isConnected && log.lastElementChild === lastError.node) {
       lastError.count += 1;
@@ -271,7 +325,6 @@
     // A fresh session re-checks the AI machine from scratch — the way out of stale state, and the only way
     // out of a session started on older code (19 Sep: two sessions from before a fix kept failing while every
     // new one would have worked). Nothing is lost: searches, marks and the conversation stay with the matter.
-    failedTries += 1;
     let hint = null;
     if (failedTries >= 2) {
       hint = el("p", "sub", "This session keeps failing to reach the AI machine. A fresh session checks it again "
@@ -300,8 +353,54 @@
 
   // Once something in a card is marked relevant, offer the obvious next move in one click.
   // Every button sends exactly the words it shows.
+  // Clicking a publication number OPENS it, by asking the assistant to read it in the sealed session.
+  // Deliberately routed through the conversation rather than a side fetch: the read then happens inside the
+  // attested session and lands in the record like any other operation, instead of being a lookup nothing
+  // attests. Henry, 30 Sep: "if when we clicked on a patent mentioned in the text it opened".
+  const OPEN_DOC = (k) => `Open ${k}: read that document and show me what it discloses`;
+
   const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
   const LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+  // ONE definition of "a publication number you can click", used by result rows, the results panel and the
+  // assistant's prose alike. Two renderings of the same affordance would drift, and the professional would
+  // learn that some numbers are clickable and others are not.
+  const PUBNO = /\b([A-Z]{2}-[0-9A-Z]{2,}(?:-[0-9A-Z]{1,3})?)\b/g;
+  function docLink(keyNo) {
+    const a = el("button", "key key-link", keyNo);
+    a.type = "button";
+    a.title = `Open ${keyNo}`;
+    a.addEventListener("click", (e) => { e.stopPropagation(); if (!ended) send(OPEN_DOC(keyNo)); });
+    return a;
+  }
+
+  // Turn publication numbers in a finished paragraph into the same clickable. Builds TEXT NODES and buttons
+  // rather than assigning innerHTML: this runs over model output, and innerHTML here would make any sentence
+  // it produced into markup this page executes.
+  function linkifyPubNos(root) {
+    if (!root) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const todo = [];
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (n.parentElement && n.parentElement.closest(".key-link, .mono, code, pre")) continue;
+      if (PUBNO.test(n.nodeValue || "")) todo.push(n);
+      PUBNO.lastIndex = 0;
+    }
+    for (const n of todo) {
+      const frag = document.createDocumentFragment();
+      let last = 0;
+      const text = n.nodeValue || "";
+      text.replace(PUBNO, (m, k, off) => {
+        if (off > last) frag.append(document.createTextNode(text.slice(last, off)));
+        frag.append(docLink(k));
+        last = off + m.length;
+        return m;
+      });
+      if (last < text.length) frag.append(document.createTextNode(text.slice(last)));
+      if (last > 0) n.parentNode.replaceChild(frag, n);
+    }
+  }
+
   function offerDeeper(card) {
     if (!card || card.querySelector(".deeper") || ended) return;
     const b = el("button", "deeper", DEEPER);
@@ -496,6 +595,7 @@
           refreshMarks(keyNo);
           renderMarkSteps();
           renderMarksPanel();
+      renderResultsPanel();
           for (const e of cards.values()) if (e.keys && e.keys.includes(keyNo)) refreshCardSummary(e);
           toast(clearing ? `Cleared: ${keyNo} is no longer marked.`
                          : `Saved: ${keyNo} marked ${label.toLowerCase()}.`, "info");
@@ -545,6 +645,48 @@
       groups.append(el("div", "marks-group", el("div", "steps-sub", `${label} (${keys.length})`), list));
     }
   }
+  // EVERY document the searches on screen returned, most relevant first, each one clickable. It appears only
+  // once a DEEP search has completed, because that is the point at which the list is worth reading rather than
+  // a restatement of one card. Henry, 30 Sep: "a second tab that appears when a deep search was done, with the
+  // relevance sorted list of patents that can be clicked as well for opening".
+  //
+  // The ordering is stated in the panel rather than implied. A document's position is the BEST rank it reached
+  // in any single search (rank 1 in one search beats rank 4 in three), tie-broken by how many searches returned
+  // it. The search machine signs a per-search order; it does not sign a combined one, so presenting this as a
+  // relevance SCORE would be inventing a number nothing attests.
+  function renderResultsPanel() {
+    const panel = $("results-panel");
+    if (!panel) return;
+    const best = new Map();              // key → {rank, seen, title}
+    for (const e of cards.values()) {
+      const keys = e.keys || [];
+      keys.forEach((k, i) => {
+        if (!k) return;
+        const prev = best.get(k);
+        const title = (e.titles && e.titles.get(k)) || (prev && prev.title) || "";
+        if (!prev) best.set(k, { rank: i + 1, seen: 1, title });
+        else { prev.rank = Math.min(prev.rank, i + 1); prev.seen += 1; if (!prev.title) prev.title = title; }
+      });
+    }
+    // Hidden until a deep search has run AND there is something to list, so it never appears empty.
+    panel.hidden = deepMarksAtLastPress === null || best.size === 0;
+    if (panel.hidden) return;
+    const rows = Array.from(best.entries())
+      .sort((a, b) => a[1].rank - b[1].rank || b[1].seen - a[1].seen || a[0].localeCompare(b[0]));
+    $("results-count").textContent = `${rows.length} document${rows.length === 1 ? "" : "s"} across `
+      + `${cards.size} search${cards.size === 1 ? "" : "es"}`;
+    const list = el("ol", "results-list-ol");
+    for (const [k, info] of rows) {
+      const meta = info.seen > 1 ? el("span", "year", `in ${info.seen} searches`) : null;
+      list.append(el("li", "result-row",
+        el("div", "mark-doc", docLink(k), meta, info.title ? el("span", "mark-title", info.title) : null),
+        markButtons(k, null, false)));
+    }
+    const holder = $("results-list");
+    clear(holder);
+    holder.append(list);
+  }
+
   // A title from a search card on this page, for a document marked in this session.
   function docTitleOnPage(k) {
     for (const e of cards.values()) if (e.titles && e.titles.has(k)) return e.titles.get(k);
@@ -994,6 +1136,7 @@
       // would put the same queries. A press that FAILED, or that the tool refused as an identical repeat,
       // must not arm this: the first did not cover these marks, and the second did not happen at all.
       if (ev.ok && !d.repeat && d.sent) deepMarksAtLastPress = deepMarksKeyHere();
+      renderResultsPanel();        // the deep search just finished: the list is now worth showing
       const keep = stick();
       // The head carries what you read while it is FOLDED; the body carries what you open it for. Putting
       // the whole result in `sub` — which lives in the head — meant a folded card either said nothing or
@@ -1064,7 +1207,7 @@
               const title = el("div", "dtitle", String(doc.title || ""));
               const row = el("li", "doc",
                 el("span", "rank", String(idx + 1)),
-                el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
+                el("div", "", docLink(keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
                   doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
                 markButtons(keyNo, e.card));
               title.addEventListener("click", () => row.classList.toggle("open"));
@@ -1139,9 +1282,10 @@
     docs.forEach((doc, idx) => {
       const keyNo = String(doc.key || "");
       const title = el("div", "dtitle", String(doc.title || ""));
+      const keyEl = docLink(keyNo);
       const row = el("li", "doc",
         el("span", "rank", String(idx + 1)),
-        el("div", "", el("span", "key", keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
+        el("div", "", keyEl, doc.year ? el("span", "year", String(doc.year)) : null,
           doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
         markButtons(keyNo, card));
       title.addEventListener("click", () => row.classList.toggle("open"));
@@ -1153,6 +1297,7 @@
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));
     entry.n = docs.length;
+    renderResultsPanel();                // a search's documents just landed; the panel is keyed off cards
     refreshCardSummary(entry);
     outlineUpdate(entry, "");            // the description stays; the count lives in the card head
     renderMarkSteps();                   // a search now exists, so "summarise what they surfaced" makes sense
@@ -1538,6 +1683,7 @@
       for (const [k, v] of Object.entries(m.marks || {})) marks.set(k, v);
       for (const [k, t] of Object.entries(m.titles || {})) markTitles.set(k, t);
       renderMarksPanel();
+      renderResultsPanel();
       renderMarkSteps();
     } catch (_) { /* no search in this session */ }
     renderMarkSteps();

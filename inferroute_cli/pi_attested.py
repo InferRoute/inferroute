@@ -296,7 +296,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
-        tools = MATTER_TOOLS + ((SEARCH_TOOL, DEEP_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
+        tools = MATTER_TOOLS + ((SEARCH_TOOL, DEEP_TOOL, OPEN_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
         env.pop("IR_INTAKE_OUT", None)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"
@@ -367,6 +367,9 @@ SEARCH_TOOL = "prior_art_search"
 # The fan-out: one press, several sealed queries. Offered with the search tools and only with them — a
 # session with no search machine must not see a tool it cannot use.
 DEEP_TOOL = "deep_prior_art_search"
+# Reading one document the searches returned. Offered with search because it reaches the SAME verified
+# enclave over the same approval, and is useless without a search to name a document first.
+OPEN_TOOL = "read_patent"
 # The id of the session records the search verifier writes for the current launch (set by start_search_proxy);
 # the browser page keeps its conversation beside them under the same id.
 LAST_SESSION_ID: str | None = None

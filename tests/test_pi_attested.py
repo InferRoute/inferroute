@@ -999,6 +999,13 @@ def test_the_approval_says_what_it_actually_grants():
     assert "every sealed search on " in prompt and "this matter to this machine" in prompt
     assert "queries the assistant composes itself" in prompt
     assert "which you will not read before they are sent" in prompt
+    # READS ARE PART OF THE GRANT, and the sentence has to say so. Opening a document is a second sealed
+    # operation and not a narrower one — which document someone opens is an interest signal a bare search
+    # does not carry — so a grant naming only searches would be vouching for a list that does not contain the
+    # thing it is being used to authorise.
+    assert "opening any document those searches" in prompt
+    assert "publication number to the same machine" in prompt
+    assert "Allow sealed searches and document reads on this matter?" in prompt
     # And the thing that makes the breadth acceptable: it is all recorded.
     assert "Every one of them is recorded" in prompt
 
@@ -1318,3 +1325,49 @@ def test_the_press_says_which_leg_is_the_ranking():
     assert "union.set(d.key" in body
     for banned in ("RRF", "rerank", "fuse("):
         assert banned not in body, banned
+
+
+def test_a_read_tells_the_model_what_it_did_NOT_read_before_it_shows_the_text():
+    """A read returns what the index HOLDS — usually a title and abstract, sometimes a first claim.
+
+    Hand a model a short text with no statement of scope and it will call it "the document"; the sentence
+    after that is an invented specification, which is exactly what the 2026-09-30 session refused to do when
+    it had no read tool at all. Having the tool must not reintroduce the failure it was built to avoid. So
+    the coverage line comes FIRST, in the model's own context, before the text it qualifies, and names the
+    absent parts explicitly rather than leaving them to be noticed.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    fn = ts[ts.index("function readText("):ts.index("\n}\n", ts.index("function readText(")) + 3]
+    fn = fn.replace("out: SearchVerdict, key: string): string {", "out, key) {")
+
+    def run(result):
+        js = fn + f"\nconsole.log(JSON.stringify(readText({json.dumps({'result': result})}, 'US-5958299-A')));"
+        r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                           capture_output=True, text=True, timeout=60)
+        if r.returncode != 0 and "input-type" in r.stderr:
+            pytest.skip("this node cannot run TypeScript from -e")
+        assert r.returncode == 0, r.stderr
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    # What the live enclave actually returns today: abstract only.
+    out = run({"text": "Explosive simulants for testing…", "publication_date": 19990928,
+               "coverage": {"abstract": "held", "claims": "not_held", "description": "not_held"}})
+    assert out.index("NOT in this index") < out.index("Explosive simulants"), "scope must precede the text it qualifies"
+    assert "You have NOT read the claims or description" in out
+    assert "do not supply it from memory" in out
+
+    # With the claim-1 store wired (staged, not deployed): one claim, and it must not read as "the claims".
+    c1 = run({"text": "abstract…\n\n--- CLAIM 1 ---\nA device comprising…",
+              "coverage": {"abstract": "held", "claims": "claim_1", "description": "not_held"}})
+    assert "claims: first claim only" in c1
+    assert "You have NOT read the description" in c1
+    assert "NOT read the claims" not in c1        # one claim WAS read; the sentence must not deny it
+
+    # A read that held everything says nothing alarming — the warning must be earned, not decoration.
+    full = run({"text": "everything", "coverage": {"abstract": "held", "claims": "held", "description": "held"}})
+    assert "You have NOT read" not in full

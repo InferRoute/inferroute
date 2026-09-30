@@ -524,3 +524,78 @@ def test_the_health_statistic_prefers_the_server_and_survives_its_absence():
         "local history is consulted before the server's own number"
     # a ratio outside 0..1 is not believed
     assert "0.0 <= ratio <= 1.0" in src
+
+
+def _receipts(tmp_path, monkeypatch, rows):
+    """rows: list of (model_short, instances, eligible) oldest-first. Returns nothing; points
+    fleet_yield at a synthetic receipts dir."""
+    import json, pathlib
+    d = tmp_path / ".inferroute" / "confidential" / "receipts"
+    d.mkdir(parents=True)
+    for i, (m, inst, elig) in enumerate(rows):
+        (d / f"{i:05d}.json").write_text(json.dumps(
+            {"model_short": m, "fleet": {"instances": inst, "eligible": elig}}))
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
+
+
+def test_a_rare_model_is_not_crowded_out_of_its_own_history(tmp_path, monkeypatch):
+    """THE BUG HENRY'S QUESTION FOUND. The window used to be the last 40 receipts whatever model
+    they were for. kimi-k2.6 had 487 receipts on this device and glm-5.2 had 382, so glm-5.1 — used
+    four times ever — had exactly one observation inside the window and was reported as 0.11 and
+    "weakest of all five". Its four measurements are 0.24, 0.31, 0.31, 0.11.
+
+    A per-receipt window measures HOW OFTEN A MODEL IS USED and reports it as HOW WELL IT WORKS.
+    Those are different quantities, and the second is the one being asked for.
+
+    It errs in BOTH directions, which is why it is not merely imprecise. A rare model with one bad
+    observation inside the window is condemned on that one point; a rare model with NO observation
+    inside it falls through to the unseen case and scores 1.0 — so a genuinely broken fleet that is
+    seldom used is ranked as perfectly healthy. Neither reading is about the fleet."""
+    from inferroute_cli import confidential as C
+    rows = [("common", 10, 9)] * 300 + [("rare", 20, 5)]
+    rows += [("common", 10, 9)] * 100          # bury the rare one far outside any receipt window
+    _receipts(tmp_path, monkeypatch, rows)
+
+    y, n = C.fleet_yield("rare")
+    assert n == 1, "the rare model's own history was crowded out by a busier model's receipts"
+    assert y < 0.6, "a genuinely bad observation must still count against the fleet"
+
+
+def test_one_bad_observation_does_not_condemn_a_fleet(tmp_path, monkeypatch):
+    """Shrinkage toward "fine". 2 of 18 verifying is one sample of a fleet mid-roll, not a verdict on
+    the model. Without the prior it scores 0.11 and is ranked below everything; with it, 0.27 —
+    demoted, not eliminated, and one more good observation lifts it back."""
+    from inferroute_cli import confidential as C
+    _receipts(tmp_path, monkeypatch, [("m", 18, 2)])
+    y, n = C.fleet_yield("m")
+    assert n == 1
+    assert y == pytest.approx((2 + C._PRIOR_INSTANCES) / (18 + C._PRIOR_INSTANCES))
+    assert y > 0.11, "a single observation was taken as the fleet's true rate"
+
+    # and the prior washes out: the same rate observed ten times is believed
+    _receipts(tmp_path / "b", monkeypatch, [("m", 18, 2)] * 10)
+    y2, _ = C.fleet_yield("m")
+    assert y2 < y, "more evidence of the same rate did not move the estimate toward it"
+
+
+def test_yield_is_counted_over_instances_not_as_a_mean_of_ratios(tmp_path, monkeypatch):
+    """A 1-instance observation and a 20-instance one are not equally informative. Averaging the two
+    ratios says 0.50 — halfway between "perfect" and "total failure" — when 20 of 21 instances
+    actually observed did not verify."""
+    from inferroute_cli import confidential as C
+    _receipts(tmp_path, monkeypatch, [("m", 1, 1), ("m", 20, 0)])
+    y, n = C.fleet_yield("m")
+    assert n == 2
+    assert y == pytest.approx((1 + 0 + C._PRIOR_INSTANCES) / (1 + 20 + C._PRIOR_INSTANCES))
+    assert y < 0.3, "the mean of ratios hid a 20-instance failure behind a 1-instance success"
+
+
+def test_an_old_disaster_ages_out_of_the_window(tmp_path, monkeypatch):
+    """A fleet that was broken last week and is healthy now must be choosable again, or the first bad
+    roll a model ever has retires it permanently."""
+    from inferroute_cli import confidential as C
+    rows = [("m", 20, 0)] * 5 + [("m", 12, 12)] * C._YIELD_PER_MODEL
+    _receipts(tmp_path, monkeypatch, rows)
+    y, n = C.fleet_yield("m")
+    assert n == C._YIELD_PER_MODEL
+    assert y > 0.95, "observations older than the window still counted against the fleet"

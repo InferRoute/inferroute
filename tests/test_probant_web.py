@@ -2011,8 +2011,15 @@ def test_the_receipt_says_which_errors_not_only_how_many():
     The kinds are a small fixed vocabulary — never anything a user typed — so the receipt stays a handful
     of integers."""
     src = (Path(__file__).resolve().parent.parent / "inferroute_local" / "confidential" / "session.py").read_text()
-    assert "def _err(c: dict, kind: str)" in src
+    assert "def _err(c: dict, kind: str" in src        # signature grew a fault class; the property is the kind
     assert 'c["errors"] += 1' not in src, "an error site still counts without saying which kind it was"
+    # Bound to the kind appearing in an _err call, not to the call's exact arity: a fault class was added
+    # as a second argument later the same night and an assertion on `_err(c, "kind")` failed for the
+    # punctuation rather than for the behaviour. Third time tonight a literal-bound assertion broke on a
+    # correct change.
+    import re
     for kind in ("seal_failed", "send_failed", "upstream_passthrough",
                  "reply_unopenable", "stream_dropped", "stream_truncated"):
-        assert f'_err(c, "{kind}")' in src, f"no error site is labelled {kind}"
+        assert re.search(rf'_err\(c, "{kind}"[,)]', src), f"no error site is labelled {kind}"
+    # and every site says whose fault it was, so the availability model can ignore ours
+    assert not re.search(r'_err\(c, "\w+"\)', src), "an error site records a kind but not a fault class"

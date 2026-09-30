@@ -1710,3 +1710,36 @@ def test_a_connection_failure_is_not_shown_as_a_verification_failure():
     assert "didn't allow" in out["declined"]
     # anything unanticipated still shows the raw text rather than being guessed at
     assert out["unknown"].startswith("The search was not sent:")
+
+
+def test_no_eligible_machine_is_not_reported_as_unreachable_or_an_expired_key():
+    """Measured 2026-09-30: 11 of 12 machines on one fleet failed a check this device makes, so a session
+    pinned the only survivor and then had nothing to fall back to. The lane raises "the verified instance
+    is gone and no verified alternative is available" as a 503 — and that string contains the word "nonce"
+    in its sibling note and arrives with a 503, so it tripped the expired-key and unreachable branches.
+    Either sentence sends the reader after the wrong thing; "couldn't be reached" had me looking at the
+    network for an hour when nothing was unreachable.
+
+    Also pins a bug found while fixing that: "not verified" does NOT match "could not BE verified", the
+    exact phrase the lane raises, so the most serious condition fell through to the blandest sentence in
+    the function. A verification failure must never be the quietest message here."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "model_error_wording_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    for k in ("capacity", "capacityNote"):
+        assert "capacity limit" in out[k], out[k]
+        assert "couldn't be reached" not in out[k] and "one-time key" not in out[k], out[k]
+    # the branches it must not have swallowed
+    assert "one-time key" in out["nonceOnly"]
+    assert "couldn't be reached" in out["unreachable"]
+    assert "busy" in out["rateLimited"]
+    # the serious one, which was falling through before
+    assert "could not be verified" in out["unverified"], out["unverified"]
+    assert "didn't answer" not in out["unverified"], "a verification failure got the blandest message"

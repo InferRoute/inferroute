@@ -276,3 +276,51 @@ def test_the_gpu_limitation_does_not_imply_a_binding_nvidia_does_not_provide():
     assert "no way to prove from the outside" in text.replace("\n", " ").replace("  ", " ") or \
            "provides no way" in text
     assert "confidential-computing mode" in text
+
+
+# ── model fallback, and the two lines it must not cross ──────────────────────────────────────────
+# Measured 2026-09-30: the kimi-k2.6 fleet had grown to 12 instances of which this device accepted ONE
+# (7 refused for an enclave build InferRoute has not recorded, 7 for an e2e key the quote does not commit
+# to). A pool of one is why sessions kept reporting "the AI machine couldn't be reached" — the pinned
+# instance cycles out and there is no alternative. The other fleets were healthy, so it was never a
+# carrier outage, and falling back across MODELS is the availability fix.
+
+def test_probant_runs_its_own_default_without_changing_the_lane_default():
+    """Probant is premium and low-volume, so it leads with the stronger model on the healthier fleet.
+    Bare `ir --confidential` is deliberately left alone: this is Probant's choice, not everyone's."""
+    from inferroute_cli import confidential as C
+    assert C.PROBANT_MODEL == "kimi-k3"
+    assert C.DEFAULT_MODEL == "kimi-k2.6", "the lane default must not move with Probant's"
+    # what launch() resolves: probant gets its default, an explicit --model still wins
+    assert C._resolve_model(C.PROBANT_MODEL).short == "kimi-k3"
+    assert C._resolve_model("glm-5.2").short == "glm-5.2"
+
+
+def test_the_fallback_chain_never_leaves_the_confidential_lane():
+    """The line that must not be crossed. Falling back to the plain lane would send a client's disclosure
+    to a machine nobody attested — the one thing this product exists to prevent — and it would do it at the
+    moment the user is least likely to be watching, because something had already gone wrong."""
+    from inferroute_cli import confidential as C
+    from inferroute_cli import lane as L
+    assert C.FALLBACK_MODELS, "an empty chain is not a fallback"
+    off_lane = [m for m in C.FALLBACK_MODELS if not L.enclave_backed(m)]
+    assert not off_lane, f"fallback would leave the confidential lane via {off_lane}"
+    # ordering: capability first, cheapest last. glm-5.1 ahead of deepseek (Henry, 30 Sep).
+    order = list(C.FALLBACK_MODELS)
+    assert order[0] == "kimi-k3"
+    assert order.index("glm-5.1") < order.index("deepseek-v4-flash")
+
+
+def test_a_fallback_is_announced_and_a_candidate_is_skipped_not_fatal():
+    """Never silent: a reader who assumes the preferred model answered has been misled by omission. And a
+    fallback candidate missing from the catalog is SKIPPED — _resolve_model exits the process, which is
+    right for what the user asked for and wrong for a guess this code made."""
+    from inferroute_cli import confidential as C
+    import inspect
+    src = inspect.getsource(C._open_session)
+    assert "had no machine this device accepts" in src, "a silent model swap"
+    assert "still the confidential lane" in src, "the announcement must say the lane did not change"
+    assert "IR_NO_MODEL_FALLBACK" in src, "no way to turn it off"
+    # the chain is only reached for per-fleet failures: a refused key or an unreachable carrier exits above
+    assert src.index("RelayUnavailable") < src.index("for short in order")
+    assert C._resolve_model_quietly("definitely-not-a-model") is None

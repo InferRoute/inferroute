@@ -176,6 +176,66 @@ def fleet_yield(model_short: str) -> tuple[float, int]:
     return (elig + _PRIOR_INSTANCES) / (inst + _PRIOR_INSTANCES), n
 
 
+def _yield_counts(model_short: str) -> tuple[float, float]:
+    """(eligible, instances) over the same per-model window fleet_yield uses, WITHOUT the prior. The
+    interval folds the prior in itself; taking it from the shrunk ratio would apply it twice."""
+    import json as _json
+    from pathlib import Path as _P
+    d = _P.home() / ".inferroute" / "confidential" / "receipts"
+    try:
+        files = sorted(d.glob("*.json"))[-_YIELD_SCAN:]
+    except OSError:
+        return 0.0, 0.0
+    elig = inst = n = 0
+    for f in reversed(files):
+        if n >= _YIELD_PER_MODEL:
+            break
+        try:
+            r = _json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if r.get("model_short") != model_short:
+            continue
+        fl = r.get("fleet") or {}
+        i, e = fl.get("instances"), fl.get("eligible")
+        if isinstance(i, int) and i > 0 and isinstance(e, int):
+            elig += e; inst += i; n += 1
+    return float(elig), float(inst)
+
+
+def fleet_yield_interval(model_short: str, *, hint_ratio=None, hint_samples=None) -> tuple[float, float]:
+    """A Wilson score interval (95%) for a fleet's yield, so an ORDERING can be refused when the evidence
+    does not support it.
+
+    Henry's question "measures 0.11 at what?" corrected a ranking built on one observation. The director
+    session then made the sharper point: even after the fix, glm-5.1 at ~0.30 (n=3) against kimi-k2.6 at
+    0.22 (n=10) is two numbers whose intervals overlap almost completely. A correction that had to be
+    issued because a single observation moved the ordering is the strongest argument that the ordering
+    should not come from a handful of receipts at all.
+
+    So the point estimate decides nothing on its own. Two fleets whose intervals OVERLAP are treated as
+    tied, and a tie is broken by the user's stated preference — never by a difference the samples cannot
+    distinguish. With no counts at all the interval is (0, 1): unknown, distinguishes nothing, preference
+    stands. That is also why the server hint is worth carrying `samples`.
+    """
+    if hint_ratio is not None and hint_samples:
+        k, n = float(hint_ratio) * float(hint_samples), float(hint_samples)
+    else:
+        y, obs = fleet_yield(model_short)
+        if not obs:
+            return 0.0, 1.0                       # no history: the widest possible interval, so it ties
+        k, n = _yield_counts(model_short)
+    k, n = k + _PRIOR_INSTANCES, n + _PRIOR_INSTANCES
+    if n <= 0:
+        return 0.0, 1.0
+    z = 1.96
+    ph = k / n
+    denom = 1.0 + z * z / n
+    centre = (ph + z * z / (2 * n)) / denom
+    half = (z / denom) * ((ph * (1 - ph) / n + z * z / (4 * n * n)) ** 0.5)
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 async def server_fleet_health(transport) -> dict:
     """The operator's own view of which fleets are currently usable, keyed by fleet id.
 
@@ -223,7 +283,7 @@ async def health_ordered(order: list[str], catalog: list, transport, console=Non
     A fleet whose probe FAILED keeps its place rather than being demoted: not being able to ask is not
     evidence of ill health, and demoting on it would make one flaky listing permanent.
     """
-    scored: list[tuple[str, float]] = []
+    scored: list[tuple[str, float, float, float]] = []     # (short, expected, lo, hi)
     for short in order:
         ref = next((m for m in catalog if str(m.get("name", "")).endswith(short) or m.get("name") == short), None)
         fleet = (ref or {}).get("fleet_id")
@@ -234,19 +294,35 @@ async def health_ordered(order: list[str], catalog: list, transport, console=Non
         # the case the server number exists to cover.
         hint = (server_health or {}).get(fleet) or {}
         ratio = hint.get("eligible_ratio")
-        y = float(ratio) if isinstance(ratio, (int, float)) and 0.0 <= ratio <= 1.0 else fleet_yield(short)[0]
+        use_hint = isinstance(ratio, (int, float)) and 0.0 <= ratio <= 1.0
+        y = float(ratio) if use_hint else fleet_yield(short)[0]
+        lo, hi = fleet_yield_interval(
+            short,
+            hint_ratio=ratio if use_hint else None,
+            hint_samples=hint.get("samples") if use_hint else None)
         if live < 0:                                  # could not ask: keep its place, do not judge it
-            scored.append((short, 1.0))
+            scored.append((short, 1.0, 0.0, 1.0))
             continue
         expected = live * y
-        scored.append((short, expected))
+        scored.append((short, expected, live * lo, live * hi))
         if expected >= 1.0 and short == order[0]:
             return order                              # the preferred model looks fine; spend nothing more
         if expected >= 1.0:
             break                                     # good enough, and higher-preference ones were not
     if not scored:
         return order
-    best = max(scored, key=lambda t: t[1])
+    # A DIFFERENCE MUST BE SUPPORTED BEFORE IT IS ACTED ON. Rank by the point estimate, then widen the
+    # winner to everything its interval OVERLAPS: those fleets are not distinguishable by the evidence we
+    # have, so among them the user's stated preference decides, not a gap inside the noise.
+    #
+    # This is the director session's argument, and my own correction is the evidence for it. glm-5.1 at
+    # ~0.30 (n=3) sits at [0.19, 0.43] and kimi-k2.6 at 0.22 (n=10) at [0.16, 0.29] — overlapping, so
+    # ordering one above the other is reading a difference the samples cannot support. kimi-k3 at
+    # [0.70, 0.91] against that same [0.16, 0.29] does NOT overlap, and that reorder is real.
+    top = max(scored, key=lambda t: t[1])
+    tied = [t for t in scored if t[3] >= top[2] and t[2] <= top[3]]      # intervals intersect
+    rank = {short: i for i, short in enumerate(order)}
+    best = min(tied, key=lambda t: rank.get(t[0], len(order)))           # preference breaks the tie
     if best[1] < 1.0 and console is not None:
         console.print("[grey58]no sealed model fleet looks comfortably available right now; "
                       f"trying {best[0]} first, then the rest.[/]")

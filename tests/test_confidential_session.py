@@ -869,3 +869,54 @@ def test_the_receipt_defines_what_its_counters_measure(world):
 
     from inferroute_local.confidential.receipt import Receipt
     assert Receipt.load(r.path).counters_mean == means, "the definitions did not reach the file"
+
+
+# ── the 402 tripwire ──────────────────────────────────────────────────────────────────────────────
+# cc-proxy-prod made 402 retryable across providers on 2026-07-04 after 2.4k tester 402s in 12h. A
+# provider 402 that escapes that absorption is invisible today; this notices it from the client side.
+
+def test_our_own_topup_notice_does_not_trip_the_wire():
+    """THE CORRECTION THAT MATTERS. The expected body legitimately contains an address —
+    pay_to={INFERROUTE_WALLET_ADDRESS}, inferroute's own receiving address, published on purpose so the
+    user can pay it. My first reading of this had the detector backwards, keyed on an address being
+    present, which would flag the normal case on every empty wallet forever."""
+    from inferroute_local.confidential.session import _is_our_topup_notice
+    real = ("Wallet balance empty. Deposit USDC to continue: POST a signed EIP-3009 "
+            "TransferWithAuthorization to https://inferroute.ai/api/billing/wallet-topup "
+            "(pay_to=0xAbC0000000000000000000000000000000000001, asset=USDC, network=base, "
+            "chainId=8453, min $1), then retry.")
+    assert _is_our_topup_notice(real) is True
+
+
+def test_a_provider_402_trips_the_wire():
+    """Anything that is not that notice reached us from upstream rather than from billing."""
+    from inferroute_local.confidential.session import _is_our_topup_notice
+    for body in ("Insufficient credits for this model.",
+                 "",
+                 '{"error":{"type":"payment_required","message":"quota exceeded"}}',
+                 "Payment Required",
+                 # an address alone must not buy a pass: presence of a field is not the shape
+                 "please send funds to 0xAbC0000000000000000000000000000000000001"):
+        assert _is_our_topup_notice(body) is False, body
+
+
+def test_the_tripwire_needs_both_markers_not_either():
+    """Either marker alone is reachable by accident — the phrase could appear in a provider's wording,
+    and half of our URL is just a hostname. Requiring both is what makes the match ours."""
+    from inferroute_local.confidential.session import _is_our_topup_notice
+    assert _is_our_topup_notice("Wallet balance empty. Contact support.") is False
+    assert _is_our_topup_notice("see https://inferroute.ai/api/billing/wallet-topup") is False
+
+
+def test_the_tripwire_note_never_carries_the_upstream_body():
+    """The receipt is something the user reads, so it is a place upstream text must not reach — the same
+    reason the body is withheld from the response. The note may say the shape was wrong and how long it
+    was; it may not quote it."""
+    import re
+    from inferroute_local.confidential import session as S
+    src = _fn_body(S, "_send") if "_fn_body" in globals() else open(S.__file__).read()
+    block = src[src.index("upstream-402-unexpected"):]
+    block = block[:block.index("logger.warning")] if "logger.warning" in block else block[:600]
+    assert "detail" not in block.replace("len(detail)", ""), \
+        "the tripwire note interpolates the upstream body"
+    assert "len(detail)" in block, "the note should still say how long the body was"

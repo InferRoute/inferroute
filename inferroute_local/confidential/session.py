@@ -371,6 +371,26 @@ class ConfidentialSession:
                     self._pool_expire = 0.0
                 self.receipt.note("nonce-rejected", f"the gateway refused a nonce ({status}); fetched fresh nonces and resent once")
                 continue
+            # TRIPWIRE: a 402 that is NOT our own top-up notice escaped provider_fallback upstream.
+            #
+            # The expected body legitimately carries an address — pay_to={INFERROUTE_WALLET_ADDRESS},
+            # inferroute's own receiving address, published so the user can pay it. Keying a detector on
+            # "contains an address" would flag the normal case forever; the director session corrected me
+            # on exactly that. The signal is the ABSENCE of the expected shape, not the presence of a field.
+            #
+            # cc-proxy-prod made 402 retryable across providers on 2026-07-04 after 2.4k tester 402s in
+            # 12h. The cheap half of that defect is detecting a regression; the expensive half is that
+            # nothing currently notices. This is the cheap half, and it costs a string comparison.
+            #
+            # The note records the SHAPE only. The body never enters the receipt — a receipt the user can
+            # read is a place upstream text must not reach, which is the whole reason it is withheld from
+            # the response two lines below.
+            if status == 402 and not _is_our_topup_notice(detail):
+                self.receipt.note(
+                    "upstream-402-unexpected",
+                    "a 402 arrived that is not this lane's top-up notice, so it came from a provider "
+                    "rather than from billing; upstream 402s are supposed to be absorbed before here "
+                    f"(body withheld, {len(detail)} chars, readable={readable})")
             logger.warning("upstream %s (body kept out of the client's response): %s", status, detail)
             # An UNREADABLE body is still worth telling the user about — it leaks nothing by construction
             # and a cut-off upstream is a different experience from a refusal (pinned since 2026-09-12).
@@ -631,6 +651,18 @@ class ConfidentialSession:
 # 400 and 404 are absent for the same reason in the other direction: a malformed request or a missing
 # route is not luck.
 _RETRY_ON_OTHER_INSTANCE = (429, 500, 502, 503, 504)
+
+# The two markers of OUR OWN 402, from cc_proxy_prod/auth.py: the opening phrase and our top-up path.
+# Both, not either: the phrase alone could plausibly appear in a provider's wording, and the path is ours.
+_TOPUP_MARKERS = ("wallet balance empty", "/api/billing/wallet-topup")
+
+
+def _is_our_topup_notice(detail: str) -> bool:
+    """True when a 402 body is the billing notice this lane raises itself. Used only to DECIDE whether to
+    flag a regression; the body is never passed on either way."""
+    low = (detail or "").lower()
+    return all(m in low for m in _TOPUP_MARKERS)
+
 
 UPSTREAM_PUBLIC = {
     400: "the request was rejected as malformed",

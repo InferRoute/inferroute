@@ -72,6 +72,18 @@ class Receipt:
         "response_bytes_opened_here": "the reply after this device decrypted it",
         "ciphertext_frames_received": "sealed frames read off the wire, not messages",
     })
+    # EVERY MACHINE THAT SERVED, not only the last one. `instance`, `checks`, `attestation` and
+    # `limitations` above describe the machine serving NOW, and _pin OVERWRITES all four on every switch
+    # — so before this, the moment a session re-pinned (which 246 of 1,006 receipts on this device did),
+    # the previous machine's evidence row was DESTROYED. For every request it had served, "recompute the
+    # verdicts rather than reading them" became permanently impossible, while the events list went on
+    # saying that machine had served. The record contradicted itself.
+    #
+    # Each entry carries the whole per-machine row except the 243 KB attestation blob, which is
+    # content-addressed into evidence/<sha256>.json and referenced — a session pinning 18 times (the
+    # measured maximum) would otherwise carry 4.4 MB, and re-pinning one instance would store it twice.
+    # The singular fields above are untouched, so nothing that reads this file today changes.
+    served_by: list = field(default_factory=list)
     events: list = field(default_factory=list)          # [{ts, kind, detail}] — pins, switches, re-verifications
     verified_at: str = ""
     # Stamped on every save, so a receipt dates itself even when nothing closes it. See save().

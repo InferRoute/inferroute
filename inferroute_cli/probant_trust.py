@@ -108,7 +108,13 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
                     "the network and the cloud host see scrambled data.")
     points = []
     if _ok(receipt, "tdx_shape") and _ok(receipt, "build_recorded"):
-        points.append("Genuine sealed hardware, running a build InferRoute has on record.")
+        # "SO WHICH IS IT — YOU CHECKED WHAT'S RUNNING, OR YOU CHECKED THE DOORFRAME AND NOT THE ROOM?"
+        # A reader put that to the old tick, which said "running a build InferRoute has on record" while
+        # the limitation underneath said the measurements cover firmware, boot chain and a short list of
+        # configuration files, NOT the filesystem the model runs from. Both were written by us and they
+        # do not agree; the tick was claiming the room.
+        points.append("Genuine sealed hardware. The parts of its software that are measured — firmware "
+                      "and start-up — match a build InferRoute has on record.")
     if _ok(receipt, "e2e_key_bound"):
         # THE CONDITION IS ON THE PAGE, which is this module's own rule and the one this sentence broke.
         # It read "only that machine can open it" — singular, unconditional. A session re-pins whenever
@@ -143,7 +149,12 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         # top versus 'a session is not tied to one machine' — one, or several? Which is it?" Both were
         # true and they still fought, because a ✓ announces a guarantee and this is data. Written as a
         # field, which nobody reads as a promise.
-        points.append(f"Machines that have opened it: {n} — the receipt names each.")
+        # ONE LINE, so there is no second statement to argue with. As a separate line the count kept
+        # reading as a guarantee — "I read it as a guarantee the first time. It isn't" — because it sat
+        # beside a description saying another machine may take over. Merged, it is plainly a running
+        # count with its own condition attached.
+        points.append(f"Machines that have opened it so far: {n}. If one stops responding another takes "
+                      f"over, checked the same way first; the receipt names them all.")
     warn_ids = {"new-build", "pending-build"}
     caveats = [str(lim.get("text", "")) for lim in (getattr(receipt, "limitations", None) or [])
                if isinstance(lim, dict) and lim.get("id") in warn_ids]

@@ -864,6 +864,95 @@
     return "";
   }
 
+
+  // ── documents you've opened ─────────────────────────────────────────────────────────────────────
+  //
+  // Henry, 2026-10-01: "im not seeing any popup or list of opened patents we can come back to". Two
+  // documents he had opened were buried in a 2,774-event transcript with no way back to them.
+  //
+  // The list comes from the RECORDED ARCHIVE, not from this page's memory, which is what makes it worth
+  // having: it holds documents opened in earlier sessions on this matter, it survives a reload, and showing
+  // one again spends no sealed request because the text is already on this computer.
+  let docsCache = { documents: [], readings: {} };
+
+  async function refreshDocuments() {
+    let got;
+    try {
+      got = await api("/api/documents");
+    } catch {
+      return;                                     // a list that cannot load must not break the session
+    }
+    docsCache = { documents: got.documents || [], readings: got.readings || {} };
+    const panel = $("docs-panel");
+    const list = $("docs-list");
+    list.textContent = "";
+    if (!docsCache.documents.length) { panel.hidden = true; return; }
+    for (const d of docsCache.documents) {
+      const b = el("button", "", el("span", "dkey", d.key + (yearOf(d) ? ` (${yearOf(d)})` : "")));
+      b.append(el("span", "dtitle", titleOf(d)));
+      b.type = "button";
+      b.addEventListener("click", () => showDocument(d.key));
+      list.append(el("li", "", b));
+    }
+    $("docs-note").textContent = docsCache.documents.length === 1
+      ? "Opening it again costs nothing — it is read from this computer."
+      : "Opening one again costs nothing — they are read from this computer.";
+    panel.hidden = false;
+  }
+
+  function yearOf(d) {
+    const p = String(d.published ?? "");
+    return /^\d{8}$/.test(p) ? p.slice(0, 4) : "";
+  }
+
+  // The corpus is "Title. Abstract", so the first sentence is the title.
+  function titleOf(d) {
+    const t = String(d.text || "").replace(/\s+/g, " ").trim();
+    const stop = t.indexOf(". ");
+    return (stop > 0 ? t.slice(0, stop) : t).slice(0, 140);
+  }
+
+  const COVER_WORDS = { held: "in full", truncated: "truncated", claim_1: "first claim only", not_held: "not in this index" };
+
+  function showDocument(key) {
+    const d = docsCache.documents.find((x) => x.key === key);
+    if (!d) return;
+    $("docview-title").textContent = `${d.key}${yearOf(d) ? ` · published ${yearOf(d)}` : ""}`;
+    // WHAT WAS READ AND WHAT WAS NOT, before the text — the same order the assistant is given it in, and for
+    // the same reason: a reader handed a short text without its scope takes it for the document.
+    const cov = d.coverage || {};
+    const parts = ["abstract", "claims", "description"]
+      .filter((k) => cov[k] !== undefined)
+      .map((k) => `${k} ${COVER_WORDS[cov[k]] || cov[k]}`);
+    const absent = ["claims", "description"].filter((k) => cov[k] === "not_held");
+    $("docview-scope").textContent = parts.length
+      ? `What the sealed index holds: ${parts.join(" · ")}.`
+        + (absent.length ? ` The ${absent.join(" and ")} ${absent.length > 1 ? "were" : "was"} not read — nothing here describes ${absent.length > 1 ? "them" : "it"}.` : "")
+      : "";
+    $("docview-text").textContent = String(d.text || "");
+    const said = $("docview-said");
+    said.textContent = "";
+    const reading = docsCache.readings[d.key];
+    if (reading) {
+      said.append(el("p", "sub", "What the assistant said about it in this session:"));
+      said.append(el("div", "", reading));
+    } else {
+      said.append(el("p", "sub",
+        "The assistant has not written about this document yet. Ask it about this number and its answer appears here."));
+    }
+    const prov = [];
+    if (d.index) prov.push(`index ${d.index}`);
+    if (d.measurement) prov.push(`sealed machine ${String(d.measurement).slice(0, 12)}…`);
+    if (d.at) prov.push(`read ${d.at}`);
+    $("docview-prov").textContent = prov.join(" · ");
+    $("docview").hidden = false;
+  }
+
+  function hideDocument() { $("docview").hidden = true; }
+  $("docview-close").addEventListener("click", hideDocument);
+  $("docview").addEventListener("click", (e) => { if (e.target === $("docview")) hideDocument(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("docview").hidden) hideDocument(); });
+
   function refreshMarks(keyNo) {
     const now = marks.get(keyNo);
     for (const group of docRows.get(keyNo) || []) {
@@ -1745,9 +1834,18 @@
       case "conversation_kept": $("kept-note").hidden = false; break;
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
-      case "assistant_end": assistantEnd(ev); break;
+      case "assistant_end":
+        assistantEnd(ev);
+        // The assistant's words about a document are attached when the turn ends, so a popup opened after
+        // this shows them instead of "has not written about this document yet".
+        if (docsCache.documents.length) refreshDocuments();
+        break;
       case "tool_start": toolStart(ev); break;
-      case "tool_end": toolEnd(ev); break;
+      case "tool_end":
+        toolEnd(ev);
+        // A read just landed: the archive has it now, so the list can show it.
+        if (ev.tool === "read_patent") refreshDocuments();
+        break;
       case "tool_progress": {
         const e = cards.get(ev.call);
         // A survey's position, so a press that runs for minutes shows movement rather than the same three
@@ -1839,6 +1937,9 @@
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
+    // Documents opened in EARLIER sessions on this matter, present from the first paint. That is the point of
+    // reading them from the archive rather than from this page's own history.
+    refreshDocuments();
     homeUrl = String(s.home || "");
     matterId = String(s.matter || "");
     if (HOME_LINK.test(homeUrl)) {

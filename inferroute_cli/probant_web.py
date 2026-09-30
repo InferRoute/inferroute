@@ -392,6 +392,12 @@ class Bridge:
         # session's receipt read 7 requests and 0 errors throughout — correctly. Diagnosing a fault
         # outside the lane needs a place that records faults outside the lane.
         self.faults: List[Dict[str, Any]] = []
+        # WHAT THE ASSISTANT SAID ABOUT A DOCUMENT, so reopening it does not have to buy the reading again.
+        # Keyed by publication number, captured from the turn in which that document was read — an attribution
+        # by turn, which is why the page labels it "what the assistant said in this session" and never "the
+        # summary of the document". The document TEXT is the archive's; only this is ours.
+        self.readings: Dict[str, str] = {}
+        self._read_this_turn: List[str] = []
         self._turn_began = 0                # server ms when the agent last went busy
         self._quiet_since = 0               # server ms of the previous event: how long it had been silent
         self.nudged = False                 # a round gets ONE reminder, never a loop
@@ -426,10 +432,19 @@ class Bridge:
         if event["kind"] == "tool_start":
             name = str(event.get("tool") or "")
             self.tool_counts[name] = self.tool_counts.get(name, 0) + 1
+            if name == "read_patent":
+                key = str(((event.get("args") or {}) if isinstance(event.get("args"), dict) else {}).get("key") or "").upper()
+                if key:
+                    self._read_this_turn.append(key)
         if event["kind"] == "assistant_end":
             self.turns += 1
             if str(event.get("text") or "").strip():
                 self.last_assistant = str(event.get("text"))
+                # The FIRST words after a read are the reading; a later turn in the same round is talking
+                # about something else, so it does not overwrite one already captured.
+                for key in self._read_this_turn:
+                    self.readings.setdefault(key, str(event.get("text"))[:6000])
+                self._read_this_turn = []
             # A turn that stopped on an error is the commonest reason a round records nothing, and it is
             # invisible in the text: 62 of 76 empty rounds made no tool call and said nothing at all.
             if event.get("error") or event.get("stopped"):
@@ -772,6 +787,18 @@ class Bridge:
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
                     "home": os.environ.get("IR_PROBANT_HOME_URL", "")}
+
+        @app.get("/api/documents")
+        async def documents():
+            """Every document this matter has opened, newest first, with the text as it was read.
+
+            Served from the recorded archive, so it survives a restart and costs no sealed request to reopen —
+            which is the whole point: Henry, 2026-10-01, "im not seeing any popup or list of opened patents we
+            can come back to". Read-only, and the client's own material, so it is behind the session key like
+            every other /api call.
+            """
+            docs = await asyncio.to_thread(pi_attested.matter_documents, bridge.records_dir)
+            return {"documents": docs, "readings": bridge.readings}
 
         @app.get("/api/faults")
         async def faults():

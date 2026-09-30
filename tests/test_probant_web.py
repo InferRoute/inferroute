@@ -1927,3 +1927,29 @@ def test_every_failure_the_lane_can_report_has_its_own_plain_sentence():
     # every sentence tells the reader nothing left their machine, or says what to do
     for k, v in out.items():
         assert v.strip().endswith((".", "…")), f"{k}: {v!r}"
+
+
+def test_read_matter_file_defaults_to_the_disclosure():
+    """The defect that blocked a live session on 2026-09-30, on the gate for the 0.9.69 cut.
+
+    read_matter_file's own promptSnippet is "Read the disclosure". A model took that literally, called it
+    with no argument, and the path guard threw "undefined is outside the matter workspace" — naming a path
+    that does not exist, about a boundary that was not the problem. Three retries, then it gave up.
+
+    A required argument whose only correct value is a constant is a trap, not a parameter. Drives the real
+    guard (tests/read_matter_file_sim.js) over the calls a model actually makes, and over the escapes the
+    tool exists to refuse — a default that widened the allowlist would trade this defect for the one the
+    tool was built to prevent."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "read_matter_file_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "all passed" in r.stdout
+    # and the source really carries the default, so the sim is not drifting from the tool it models
+    ts = (root / "inferroute_cli" / "pi_attested" / "ir-attested.ts").read_text()
+    assert 'const asked = String(params.path ?? "").trim() || DISCLOSURE;' in ts
+    assert "path: Type.Optional(" in ts
+    assert "${params.path} is outside" not in ts, "the refusal can still print 'undefined'"

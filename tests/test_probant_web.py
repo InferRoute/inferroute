@@ -1777,3 +1777,30 @@ def test_results_carry_their_relative_strength_and_never_a_bare_score():
     # and NOT in the cross-search panel, where the scores are not comparable
     panel = _fn_body(js, "renderResultsPanel")
     assert "relBar(" not in panel, "a bar in the cross-search panel compares scores across queries"
+
+
+def test_the_relevance_bar_renders_visibly_different_widths_for_real_scores():
+    """Geometry, over the REAL scores of a real sealed search (capture 20260929T221411Z, k=20). Logic
+    tests said the bar exists; this says it would actually look like something. Not a pixel check.
+
+    The properties that matter: widths fall monotonically with score, the strongest and weakest are far
+    apart rather than all bunched, the weakest is still VISIBLE (a zero-width bar reads as missing data,
+    not as a weak match), a search whose results all scored the same renders NO bars because there is
+    nothing to convey, and a doc with no score at all degrades to no bar rather than a broken one."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "relbar_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert out["monotonic"], f"a weaker result drew a longer bar: {out['widths']}"
+    assert out["top"] == 100.0
+    assert out["spread"] > 50, f"every bar looks the same; the point was to tell them apart: {out['widths']}"
+    assert out["bottom"] >= 4.0, "the weakest bar is invisible and reads as missing data"
+    assert out["allEqual"], "identical scores drew bars, implying a difference that is not there"
+    assert out["noScore"], "a doc without a score drew a bar"
+    assert out["hasLabel"], "the bar is unreadable to a screen reader"

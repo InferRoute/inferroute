@@ -680,3 +680,51 @@ def test_the_server_hint_needs_samples_to_narrow_anything(tmp_path, monkeypatch)
     assert C.fleet_yield_interval("m", hint_ratio=0.9, hint_samples=None) == (0.0, 1.0)
     lo, hi = C.fleet_yield_interval("m", hint_ratio=0.9, hint_samples=200)
     assert hi - lo < 0.15, "a well-sampled server hint should actually narrow the interval"
+
+
+def _receipts_c(tmp_path, monkeypatch, rows):
+    """rows: (model, instances, eligible, requests, errors) oldest-first."""
+    import json, pathlib
+    d = tmp_path / ".inferroute" / "confidential" / "receipts"
+    d.mkdir(parents=True, exist_ok=True)
+    for i, (m, inst, elig, req, err) in enumerate(rows):
+        (d / f"{i:05d}.json").write_text(json.dumps({
+            "model_short": m, "fleet": {"instances": inst, "eligible": elig},
+            "counters": {"requests": req, "errors": err}}))
+    monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
+
+
+def test_a_fleet_that_verifies_perfectly_and_fails_every_request_is_not_healthy(tmp_path, monkeypatch):
+    """THE BLIND SPOT, measured on glm-5.2 on 2026-09-30. As its request failure rate climbed 31% -> 63%
+    -> 95%, the fleet's eligible/instances went to a PERFECT 3/3 and stayed there. Every instance
+    verified; every instance failed. A chooser scoring `live x yield` rates that fleet at its best
+    exactly when it is at its worst.
+
+    Verifiability is a precondition for availability, not a measure of it."""
+    from inferroute_cli import confidential as C
+    _receipts_c(tmp_path, monkeypatch, [("broken", 3, 3, 20, 19)] * 6)
+    y, _ = C.fleet_yield("broken")
+    s, _ = C.fleet_success("broken")
+    assert y > 0.9, "fixture is wrong: this fleet must look perfect to the yield signal"
+    assert s < 0.3, "the success signal did not see a fleet failing nearly every request"
+    assert y * s < 0.3, "the combined score still rates a broken fleet as healthy"
+
+
+def test_a_thin_history_does_not_condemn_a_fleet_on_success_either(tmp_path, monkeypatch):
+    """Same discipline as the yield: demoted on evidence, never for being new. One failed request out of
+    one must not rank a fleet below one with a long good record."""
+    from inferroute_cli import confidential as C
+    _receipts_c(tmp_path, monkeypatch, [("thin", 3, 3, 1, 1)])
+    s, q = C.fleet_success("thin")
+    assert q == 1 and s > 0.8, f"one bad request condemned the fleet ({s:.2f})"
+    _receipts_c(tmp_path / "b", monkeypatch, [])
+    assert C.fleet_success("never-seen") == (1.0, 0), "an unseen fleet must not be demoted"
+
+
+def test_errors_cannot_exceed_requests_in_the_success_rate(tmp_path, monkeypatch):
+    """A retry inside one request can count two errors, so errors can exceed requests in a receipt. Left
+    unclamped that drives the rate negative and a fleet below zero, which sorts below "could not ask"."""
+    from inferroute_cli import confidential as C
+    _receipts_c(tmp_path, monkeypatch, [("odd", 3, 3, 5, 40)])
+    s, _ = C.fleet_success("odd")
+    assert 0.0 <= s <= 1.0, f"the success rate left [0,1]: {s}"

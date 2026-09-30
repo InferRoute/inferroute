@@ -1682,3 +1682,31 @@ def test_the_documents_panel_appears_only_once_a_deep_search_has_run_and_states_
     assert "not a score from" in html
     # it re-renders when searches land, when a deep search finishes, and when marks change
     assert js.count("renderResultsPanel();") >= 3
+
+
+def test_a_connection_failure_is_not_shown_as_a_verification_failure():
+    """Henry, 30 Sep: a reaped test enclave produced "the search enclave did not verify (… URLError)" — a
+    trust verdict about a machine that was not there, and he asked for a better message.
+
+    The composed refusal still carries a "did not verify" prefix, so these branches REPLACE the sentence
+    rather than appending to it, and the connection case is matched BEFORE the verification case because
+    the string contains both. The property that must survive: a REAL verification failure still says so —
+    softening that would be worse than the bug being fixed."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "refusal_wording_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert "isn't running" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
+    assert "left this computer" in out["absent"], "say plainly that nothing was sent"
+    assert "not a sealed search machine" in out["junk"], out["junk"]
+    # the one that must NOT be blunted
+    assert "could not be verified" in out["real"], out["real"]
+    assert "didn't allow" in out["declined"]
+    # anything unanticipated still shows the raw text rather than being guessed at
+    assert out["unknown"].startswith("The search was not sent:")

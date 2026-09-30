@@ -410,6 +410,17 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             # somewhere the panel has not verified, while the panel renders all-green. See
             # strip_provider_route.
             overridden_routes = strip_provider_route(env)
+            # THE SEALED PROXY IS ALWAYS A LOOPBACK HOP, for every agent, so an HTTP_PROXY in the user's
+            # environment could receive the plaintext on its way to 127.0.0.1. pi_attested has set this
+            # since it was written, with the reason stated; nothing else did. Confirmed 2026-09-30 that
+            # Claude Code's binary references HTTP_PROXY/HTTPS_PROXY/NO_PROXY/ProxyAgent, so the host
+            # honours these — whether it excludes loopback BY DEFAULT is the user's environment's business,
+            # not ours, which is exactly why we should not be relying on it. Applied here, before the
+            # per-agent branch, so every adapter gets it rather than the one that happened to think of it.
+            from .pi_attested import _with_loopback as _no_proxy_loopback
+            for _pv in ("no_proxy", "NO_PROXY"):
+                env[_pv] = _no_proxy_loopback(env.get("no_proxy") if env.get("no_proxy") is not None
+                                              else env.get("NO_PROXY"))
             env["IR_CONFIDENTIAL"] = "1"
             agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
             if probant is not None:

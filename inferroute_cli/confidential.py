@@ -717,8 +717,28 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
 
     async def _run() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
+            # CONTINUITY IS OFF UNTIL A CLAIM IS RULED ON, and the reason is not an engineering one.
+            #
+            # The lane works: verified live, a killed fleet carried mid-stream in 2.4 s, 24 tests. But
+            # the /v1/messages API is STATELESS — `body` is the whole conversation — so every switch
+            # re-sends the entire disclosure to a second enclave. And this is printed to the
+            # professional before they type anything (probant_trust.py:80, mirrored in Pi's /proof card
+            # at ir-attested.ts:159 and the browser panel), and again in French to a named client:
+            #
+            #     "Your text is encrypted here; only that machine can open it."
+            #
+            # That is a claim about WHO CAN READ THE INVENTION, and continuity makes it false in
+            # substance rather than in bookkeeping. attest.LIMITATIONS has no entry conditioning it, so
+            # the product's own rule — where the honest sentence is conditional, the condition is on the
+            # page — is unapplied to the one condition that matters most.
+            #
+            # Changing a client-facing confidentiality claim is Henry's call and an audit's, not a
+            # commit's. So the lane ships complete, tested and REACHABLE ONLY ON PURPOSE, and Probant
+            # keeps exactly the single-session behaviour it has today until that sentence is settled.
+            use_continuity = (probant is not None
+                              and os.environ.get("IR_PROBANT_CONTINUITY") == "1")
             session, receipt = await _open_session(alias, session_id, http, console,
-                                                   continuity=probant is not None)
+                                                   continuity=use_continuity)
             search_endpoint = None
             if agent == "pi" and receipt.is_confidential:
                 from . import pi_attested

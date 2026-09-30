@@ -280,12 +280,38 @@ def test_the_single_model_path_cannot_reach_this_lane():
     assert inspect.signature(C._open_session).parameters["continuity"].default is False
     src = inspect.getsource(C._open_session)
     assert "if continuity and os.environ.get(\"IR_NO_MODEL_FALLBACK\") != \"1\":" in src
-    # and only Probant asks
+    # and only Probant asks, and only when explicitly switched on
     launch = inspect.getsource(C.launch)
-    assert "continuity=probant is not None" in launch
+    assert 'os.environ.get("IR_PROBANT_CONTINUITY") == "1"' in launch, \
+        "the lane can activate without being asked for"
+    assert "continuity=use_continuity" in launch
 
     # a lane that will not open must degrade to the ordinary path, never to a worse one
     assert "Falls through to the single-session path below" in src
+
+
+def test_the_lane_is_off_until_a_confidentiality_claim_is_ruled_on():
+    """NOT an engineering gate. The API is stateless, so `body` is the whole conversation and every
+    switch re-sends the entire disclosure to a second enclave. The product prints this to the
+    professional before they type anything, and repeats it in French to a named client:
+
+        "Your text is encrypted here; only that machine can open it."
+
+    Continuity makes that false in substance, not in bookkeeping — it is a claim about who can read the
+    invention. attest.LIMITATIONS conditions nothing about it. Changing a client-facing confidentiality
+    claim is a decision, not a commit, so the lane is reachable only on purpose until it is made.
+
+    This test exists to fail loudly if someone removes the gate without removing the reason."""
+    import inspect
+    from inferroute_cli import confidential as C
+    from inferroute_cli import probant_trust
+
+    launch = inspect.getsource(C.launch)
+    assert "IR_PROBANT_CONTINUITY" in launch
+    # the claim the gate is waiting on must still be the one quoted in the gate's reasoning
+    src = open(probant_trust.__file__).read()
+    assert "only that machine can open it" in src, \
+        "the sentence the gate names has changed — re-read the gate before trusting it"
 
 
 def test_the_reason_a_fleet_was_chosen_reaches_the_record():

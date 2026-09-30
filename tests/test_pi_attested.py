@@ -472,6 +472,9 @@ def _run_marks_hook(script_tail):
                "const disclosure = { fanouts: [] };\n"
                "function deepMarksKey(relevant) { return [...relevant].sort().join('\\u0000'); }\n"
                "let FAIL = false;\nasync function searchCall(){ if (FAIL) throw new Error('down'); return STATE; }\n"
+               # The hook resets the per-turn next-steps cap (the 2026-10-01 loop fix). This harness runs the
+               # hook body alone, so it supplies the binding the same way it supplies searchCall and STATE.
+               "let nextStepsThisTurn = 0;\n"
                "const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n" + hook + "\n"
                "const run = async () => { const r = await handlers.before_agent_start(); return r ? r.message : null; };\n"
                + script_tail)
@@ -1396,4 +1399,60 @@ def test_the_contract_tells_the_agent_to_READ_a_document_rather_than_search_arou
     assert "do not quietly run a search in its place" in flat.lower()
 
     # The contract is PINNED: editing it must be a deliberate act that shows up, not a silent drift.
+    assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"
+
+
+def test_next_steps_can_be_offered_only_once_per_turn():
+    """2026-10-01, live: eight suggest_next_steps calls and fourteen assistant turns for two user messages,
+    with the same document read twice. Henry: "it seems to be looping on the read patent right now". The
+    page reported ZERO faults, so nothing was retrying — the agent was doing it unprompted.
+
+    The rule is self-triggering: end an answer that discusses search results by calling this tool, which
+    returns a result, after which the model writes another answer that also discusses search results. A
+    fixpoint with no terminator. The tool's own result ALREADY says "Your answer is complete — end your turn
+    with no further text", and the model called it eight times anyway: a loop is not closed by asking the
+    model not to loop. So the cap is enforced at the one hook that can refuse a call, and this test drives
+    that hook rather than reading the prompt.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    decl = ts[ts.index("\tlet nextStepsThisTurn = 0;"):ts.index("\n\t});\n", ts.index('pi.on("tool_call"')) + 5]
+    js = ('const NEXT_STEPS_TOOL = "suggest_next_steps";\nconst TOOLS = new Set(["suggest_next_steps","read_patent"]);\n'
+          'const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n' + decl + '\n'
+          'const call = async (t) => await handlers.tool_call({ toolName: t });\n'
+          'const out = [];\n'
+          'out.push(await call("suggest_next_steps"));\n'      # first: allowed
+          'out.push(await call("suggest_next_steps"));\n'      # second in the same turn: refused
+          'out.push(await call("read_patent"));\n'             # unrelated tools unaffected
+          'nextStepsThisTurn = 0;\n'                            # what before_agent_start does at a turn boundary
+          'out.push(await call("suggest_next_steps"));\n'      # next turn: allowed again
+          'out.push(await call("nonsense_tool"));\n'           # the pre-existing allowlist block still works
+          'console.log(JSON.stringify(out));')
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-600:]
+    first, second, other, next_turn, unknown = json.loads(r.stdout.strip().splitlines()[-1])
+
+    assert first is None, "the first offer of a turn must go through"
+    assert second and second["block"] is True, "the second offer in one turn must be REFUSED, not acknowledged"
+    assert "already offered" in second["reason"] and "End your turn" in second["reason"]
+    assert other is None, "the cap must not touch any other tool"
+    assert next_turn is None, "a new turn gets a fresh offer — the cap is per turn, not per session"
+    assert unknown and unknown["block"] is True, "the allowlist block must still work"
+
+
+def test_the_contract_does_not_ask_for_next_steps_in_a_way_that_re_triggers():
+    """The prompt half of the same fix: the instruction that produced the loop said to end any answer that
+    reports or discusses search results with the tool — which the answer it produces then satisfies again.
+    The cap makes the loop impossible; the wording should not be asking for it in the first place."""
+    contract = (Path(PA.__file__).resolve().parent / "pi_attested" / "contract.md").read_text()
+    flat = " ".join(contract.split())
+    assert "once per answer" in flat.lower() or "only once" in flat.lower(), (
+        "the contract must bound how often next steps are offered, not only when")
     assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"

@@ -184,8 +184,12 @@ def test_the_proposal_tool_is_registered_before_the_search_only_guard():
     guard = ts.index("\tif (!SEARCH) return;")
     assert ts.index('name: "propose_matter"') < guard
     # And the search tools stay below it, where a session without a search machine cannot see them.
+    # `suggest_next_steps` is registered as `name: NEXT_STEPS_TOOL` — one definition shared with the
+    # per-turn cap in the tool_call gate, so the gate and the registration cannot name different tools.
+    # `read_patent` joins the list: it reaches the same search enclave and must be just as invisible
+    # to a session that has no search machine.
     for search_only in ('name: "prior_art_search"', 'name: "deep_prior_art_search"',
-                        'name: "matter_marks"', 'name: "suggest_next_steps"'):
+                        'name: "matter_marks"', 'name: NEXT_STEPS_TOOL', 'name: "read_patent"'):
         assert ts.index(search_only) > guard, search_only
 
 

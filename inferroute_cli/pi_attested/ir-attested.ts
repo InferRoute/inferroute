@@ -22,6 +22,7 @@ const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
 // The sealed endpoint belongs to one session and checks a credential; this is that session's key.
 const ENDPOINT_KEY = process.env.IR_ATTESTED_KEY ?? "";
 const PROVIDER = process.env.IR_ATTESTED_PROVIDER ?? "inferroute";
+const NEXT_STEPS_TOOL = "suggest_next_steps";
 const TOOLS = new Set((process.env.IR_ATTESTED_TOOLS ?? "").split(",").map((t) => t.trim()).filter(Boolean));
 // The one file this tool serves. Mirrors DISCLOSURE in pi_attested.py; the host names it in the contract
 // and the tool enforces it, so the two must agree on the spelling.
@@ -778,9 +779,32 @@ export default function (pi: ExtensionAPI) {
 		if (event.previousModel?.provider === PROVIDER) await pi.setModel(event.previousModel);
 	});
 
+	// ONE NEXT-STEPS OFFER PER TURN, ENFORCED.
+	//
+	// Live, 2026-10-01: eight suggest_next_steps calls and fourteen assistant turns for two user messages,
+	// with read_patent called twice for the same document — Henry: "it seems to be looping". Zero faults on
+	// the page, so nothing was retrying: the agent was doing this by itself.
+	//
+	// The rule that causes it is self-triggering. The contract says to end an answer that reports or
+	// discusses search results by calling this tool; calling it returns a result, the model then produces
+	// another answer, that answer also discusses search results, so the rule fires again. A fixpoint with no
+	// terminator. The tool's own result already says "Your answer is complete — end your turn with no further
+	// text" and the model called it anyway, which is the lesson: a loop cannot be closed by asking the model
+	// not to loop. The cap is enforced where a call can actually be refused.
+	let nextStepsThisTurn = 0;
+
 	pi.on("tool_call", async (event) => {
 		if (TOOLS.size && !TOOLS.has(event.toolName)) {
 			return { block: true, reason: `${event.toolName} is not available in an attested session` };
+		}
+		if (event.toolName === NEXT_STEPS_TOOL) {
+			nextStepsThisTurn += 1;
+			if (nextStepsThisTurn > 1) {
+				// BLOCKED, not politely acknowledged. The professional already has their buttons; a second
+				// panel would replace them with a worse one written after the answer was over, and the model
+				// gets a refusal rather than another turn to fill.
+				return { block: true, reason: "next steps were already offered for this answer — this call is refused. End your turn now with no further text." };
+			}
 		}
 	});
 
@@ -2094,6 +2118,7 @@ export default function (pi: ExtensionAPI) {
 	// through the LLM without extra requests"). Never blocks a turn: any failure means no note.
 	let lastMarksNote = "";
 	pi.on("before_agent_start", async () => {
+		nextStepsThisTurn = 0;
 		if (!SEARCH) return;
 		let state: MatterMarks;
 		try {
@@ -2185,7 +2210,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerTool({
-		name: "suggest_next_steps",
+		name: NEXT_STEPS_TOOL,
 		label: "Next steps",
 		description:
 			"Offer the professional two to four next research actions they can send with one click, exactly as written. " +

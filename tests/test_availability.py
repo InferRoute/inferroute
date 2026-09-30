@@ -238,3 +238,27 @@ def test_beliefs_survive_a_restart(tmp_path):
     b2 = A.Beliefs(path=p)
     assert b2.load() and b2.models["f"] == "m"
     assert abs(b2.view("f", now).serve.p - b.view("f", now).serve.p) < 1e-6
+
+
+def test_no_path_means_in_memory_not_the_users_real_store(tmp_path, monkeypatch):
+    """Every test in this file and the continuity suite passes `path=None` believing it gets no
+    persistence. It was resolving to ~/.inferroute/confidential/availability.json — inert only while
+    nothing called save(), and then the live experiments in this session called it and wrote synthetic
+    failures into the user's own evidence, where they then steered real model selection.
+
+    "No path" and "the default path" are different requests."""
+    import time
+    b = A.Beliefs(path=None)
+    assert b.path is None
+    b.observed_serve("f", 0, 50, time.time())
+    b.save()                                          # must be a no-op, not a write
+    assert b.load() is False
+    assert b.backfit() == 0, "an in-memory store went looking for receipts on disk"
+
+    # and the default still persists where it always did
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path))
+    d = A.Beliefs()
+    assert d.path is not None and str(tmp_path) in str(d.path)
+    d.observed_serve("f", 1, 0, time.time())
+    d.save()
+    assert d.path.exists()

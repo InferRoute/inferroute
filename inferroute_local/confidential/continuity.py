@@ -55,6 +55,10 @@ SWITCHABLE = frozenset(COUNTS_AGAINST_FLEET)
 # interval, so a standby is never promoted on evidence the active session would have refused.
 STANDBY_MAX_AGE_S = 20 * 60.0
 
+# After a sweep that opened nothing, wait before sweeping again. Without it the retry rate is the
+# request rate: a full attestation sweep across every candidate on every turn.
+WARM_COOLDOWN_S = 120.0
+
 
 @dataclass
 class Candidate:
@@ -90,6 +94,8 @@ class Continuity:
         self._switch_lock = asyncio.Lock()
         self.switches = 0
         self.order: list = []
+        self.failed: set = set()                       # fleets this lane has seen fail; never re-warmed
+        self._warm_blocked_until = 0.0                 # cooldown after a sweep that opened nothing
 
     def note(self, kind: str, detail: str) -> None:
         """Every continuity decision goes into the RECORD, not only onto a screen.
@@ -146,7 +152,14 @@ class Continuity:
             if self.transport is None:
                 return -1, 0
             p = await self.prober.probe(self.transport, fleet_id)
-            return p.instances, p.nonce_depth
+            # `usable`, NOT `instances`. An instance without a key or without a nonce cannot be sealed
+            # to, and choose()'s own contract is "instances holding nonces". Reporting the raw listing
+            # length meant a fleet listing five instances with zero nonces read as five live machines
+            # and passed — and every signal the prober spends forty lines computing (depth, thinnest
+            # holder, restarts) was discarded at the only place it is called.
+            if not p.reachable:
+                return -1, 0
+            return p.usable, p.nonce_depth
 
         pairs = [(c.fleet_id, c.model_short) for c in self.candidates]
         chosen = await av.choose(pairs, self.policy, self.beliefs, probe,
@@ -185,6 +198,11 @@ class Continuity:
         on."""
         if self._closed or (self._warming and not self._warming.done()):
             return
+        if time.time() < self._warm_blocked_until:
+            # A sweep that opened NOTHING used to restart on the next 200, so the warm-retry rate was
+            # the request rate — a full attestation sweep across every candidate per turn, for the life
+            # of a session in which every other fleet is refusing this device.
+            return
         try:
             self._warming = asyncio.ensure_future(self._warm())
         except RuntimeError:                          # no running loop (sync context): warm on demand
@@ -197,7 +215,10 @@ class Continuity:
             return
         active_short = self.active.model_short if self.active else ""
         for short in self.order:
-            if short == active_short:
+            if short == active_short or short in self.failed:
+                # NEVER THE FLEET WE JUST LEFT. `order` is computed once at open and nothing removed a
+                # fleet that failed, so after a switch this walked straight back to it — spending a
+                # full attestation to guarantee the NEXT switch lands on the machine that just broke.
                 continue
             cand = self._by_short(short)
             if cand is None or not self._compatible(cand):
@@ -205,13 +226,18 @@ class Continuity:
             try:
                 s = await self.opener(cand)
             except Exception:                         # noqa: BLE001 — a standby that will not open is
-                continue                              # not an error; try the next, silently
+                # ...but it IS evidence. `open()` records a refusal and this path did not, so a fleet
+                # that only ever fails as a standby accumulated nothing against it and was retried for
+                # the life of the session.
+                self.beliefs.observed_verify(cand.fleet_id, 0, 1, time.time())
+                continue
             if self._closed:
                 _quietly_close(s)
                 return
             self.standby, self.standby_at = s, time.time()
             self.note("standby-ready", f"{short} verified and held in reserve")
             return
+        self._warm_blocked_until = time.time() + WARM_COOLDOWN_S
 
     def _compatible(self, cand: Candidate) -> bool:
         """A standby must be able to hold the conversation that would move to it.
@@ -313,9 +339,17 @@ class Continuity:
                 self.note("carried", f"{sess.model_short} failed ({fault}); "
                                      f"{self.active.model_short} answered — the user saw nothing")
             return retried
-        # Nothing could carry it. Hand back a truthful failure rather than re-asking the session that
-        # just failed, which is what an earlier version did and which turns one failure into two.
-        return 503, {}, _one(b'{"error":{"message":"the enclave produced no answer"}}')
+        # Nothing could carry it. Hand the failure back THROUGH THE SESSION'S OWN error path, so it
+        # speaks the dialect the caller asked in: the server forces text/event-stream for a streaming
+        # request, and this used to answer an Anthropic SSE client with a bare JSON object in the
+        # OpenAI error shape — no `event:` line, no `data:` prefix. The one error the lane invents was
+        # worse-formed than the errors it exists to avoid.
+        try:
+            return sess._error(bool(body.get("stream")), 503,
+                               "the enclave produced no answer",
+                               openai=(name == "chat_completions"))
+        except Exception:                             # noqa: BLE001 — never fail while failing
+            return 503, {}, _one(b'{"error":{"message":"the enclave produced no answer"}}')
 
     async def _switch(self, failed=None, why: str = "") -> bool:
         """Promote the standby. Only ever a pointer move — anything slow happened in the background.
@@ -342,6 +376,7 @@ class Continuity:
             _quietly_close(stale)
             self._warm_later()
             return False
+        self.failed.add(old_short := self.active.model_short)
         old, self.active = self.active, self.standby
         self.standby, self.standby_at = None, 0.0
         self.switches += 1

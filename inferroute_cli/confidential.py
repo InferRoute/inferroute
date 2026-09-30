@@ -131,22 +131,36 @@ def force_provider_route_falsy(status_args: list[str], passthrough: list[str]) -
 #          nonces and 11 of them failed verification here.
 # expected usable = live x yield. A fleet with many instances and a terrible yield scores below a small
 # healthy one, which is the judgement a human would make from the same two numbers.
-_YIELD_SAMPLE = 40            # recent receipts read; enough to reflect a fleet roll, short enough to forget one
+# WINDOW PER MODEL, NOT PER RECEIPT. The first version read the last 40 receipts whatever model they
+# were for. kimi-k2.6 has 487 receipts here and glm-5.2 has 382, so a rarely used model was crowded out
+# of the window entirely and scored on one point or none: glm-5.1 was read as 0.11 from a SINGLE
+# observation, and called the worst of five, when its four measurements ever run 0.24, 0.31, 0.31, 0.11.
+# Henry asked "measures 0.11 at what?", which is the question that found it.
+_YIELD_PER_MODEL = 10          # observations of THIS model, newest first
+_YIELD_SCAN = 400              # receipts to walk looking for them; enough to reach a rare model
+# Shrinkage toward "fine" so a thin history cannot condemn a fleet. Expressed as pseudo-instances that
+# all verified: with one bad observation of 2/18 a fleet scores 0.27 rather than 0.11, and with a long
+# history the prior washes out. A fleet is demoted on evidence, not on having been used rarely.
+_PRIOR_INSTANCES = 4.0
 
 
 def fleet_yield(model_short: str) -> tuple[float, int]:
-    """(mean eligible/instances for this model, sample size). 1.0 when unseen — an unknown fleet is
-    given the benefit of the doubt rather than ranked last, or a newly offered model could never be
-    chosen and so could never earn a history."""
+    """(expected fraction of a fleet's instances that will verify here, observations used).
+
+    Counted over INSTANCES rather than as a mean of ratios, so a 12-instance observation weighs more
+    than a 3-instance one — they are not equally informative about a fleet's state.
+    """
     import json as _json
     from pathlib import Path as _P
     d = _P.home() / ".inferroute" / "confidential" / "receipts"
     try:
-        files = sorted(d.glob("*.json"))[-_YIELD_SAMPLE:]
+        files = sorted(d.glob("*.json"))[-_YIELD_SCAN:]
     except OSError:
         return 1.0, 0
-    xs = []
-    for f in files:
+    elig = inst = n = 0
+    for f in reversed(files):                       # newest first, stop as soon as we have enough
+        if n >= _YIELD_PER_MODEL:
+            break
         try:
             r = _json.loads(f.read_text())
         except (OSError, ValueError):
@@ -154,10 +168,12 @@ def fleet_yield(model_short: str) -> tuple[float, int]:
         if r.get("model_short") != model_short:
             continue
         fl = r.get("fleet") or {}
-        inst, elig = fl.get("instances"), fl.get("eligible")
-        if isinstance(inst, int) and inst > 0 and isinstance(elig, int):
-            xs.append(elig / inst)
-    return (sum(xs) / len(xs), len(xs)) if xs else (1.0, 0)
+        i, e = fl.get("instances"), fl.get("eligible")
+        if isinstance(i, int) and i > 0 and isinstance(e, int):
+            elig += e; inst += i; n += 1
+    if not n:
+        return 1.0, 0                               # unseen gets the benefit of the doubt, as before
+    return (elig + _PRIOR_INSTANCES) / (inst + _PRIOR_INSTANCES), n
 
 
 async def server_fleet_health(transport) -> dict:

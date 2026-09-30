@@ -282,16 +282,17 @@ def test_the_single_model_path_cannot_reach_this_lane():
     assert "if continuity and os.environ.get(\"IR_NO_MODEL_FALLBACK\") != \"1\":" in src
     # and only Probant asks, and only when explicitly switched on
     launch = inspect.getsource(C.launch)
-    assert 'os.environ.get("IR_PROBANT_CONTINUITY") == "1"' in launch, \
-        "the lane can activate without being asked for"
+    assert 'os.environ.get("IR_PROBANT_CONTINUITY")' in launch, \
+        "the lane has no switch at all"
     assert "continuity=use_continuity" in launch
 
     # a lane that will not open must degrade to the ordinary path, never to a worse one
     assert "Falls through to the single-session path below" in src
 
 
-def test_the_lane_is_off_until_a_confidentiality_claim_is_ruled_on():
-    """NOT an engineering gate. The API is stateless, so `body` is the whole conversation and every
+def test_the_claim_the_lane_depends_on_is_conditioned():
+    """The lane is ON since Henry's ruling of 2026-09-30, and it is only honest because the claim it
+    would otherwise break was conditioned first. The API is stateless, so `body` is the whole conversation and every
     switch re-sends the entire disclosure to a second enclave. The product prints this to the
     professional before they type anything, and repeats it in French to a named client:
 
@@ -307,11 +308,60 @@ def test_the_lane_is_off_until_a_confidentiality_claim_is_ruled_on():
     from inferroute_cli import probant_trust
 
     launch = inspect.getsource(C.launch)
-    assert "IR_PROBANT_CONTINUITY" in launch
-    # the claim the gate is waiting on must still be the one quoted in the gate's reasoning
+    assert "IR_PROBANT_CONTINUITY" in launch, "the lane cannot be turned off"
     src = open(probant_trust.__file__).read()
+
+    # RENDERED, not grepped. The first version of this assertion searched ai_item's SOURCE and failed on
+    # the comment that quotes the old sentence to explain why it was removed — a source search cannot
+    # tell a string being printed from one being discussed.
+    from inferroute_local.confidential import attest as _att
+    class _R:
+        # The FULL required set: ai_item short-circuits to "the checks did not pass" otherwise, and the
+        # assertions below then measure the fixture instead of the wording.
+        checks = {k: {"ok": True} for k in (
+            "e2e_key_bound", "tdx_shape", "build_recorded", "gpu_verified", "measurement_ok",
+            "chain_ok", "sig_ok", "nonce_in_body", "spki_bound", "quote_sig", "root_pinned",
+            "not_revoked", "tcb_current", "qe_current", "gpu_in_signed_evidence")}
+        verdict = "confidential"; model_short = "kimi-k3"; upstream_model = "x/K3-TEE"
+        started_at = "2026-09-30T22:00:00Z"; verified_at = started_at
+        instance = {"id": "i-a"}
+        limitations = [{"id": k, "text": t} for k, t in _att.LIMITATIONS]
+        served_by = [{"instance": {"id": "i-a"}}]
+    one = " ".join(probant_trust.ai_item(_R())["points"])
+    _R.served_by = [{"instance": {"id": x}} for x in "abc"]
+    three = " ".join(probant_trust.ai_item(_R())["points"])
+
+    assert "only that machine can open it" not in one, \
+        "the AI lane still claims one machine while a session can move between several"
+    assert "3 machines have opened it so far" in three, \
+        "the count is asserted rather than read from the record"
+    # TWO naive-reader tests failed earlier wordings for the same reason: the tick and the condition
+    # ARGUED on the same screen — one machine above, more than one below — and both readers described
+    # the small print as taking back what the big print promised. "So far" makes it a running count,
+    # which cannot be contradicted by a later one.
+    # THREE naive readers, three revisions. The last one wrote the line himself: "if it just said
+    # 'your words leave this computer and go to a machine we check first; here's the record of which
+    # ones' — I'd have trusted it more. The effort is what worries me." Length was costing more trust
+    # than the condition it was explaining.
+    assert "One machine has opened it so far" in one
+    assert "3 machines have opened it so far" in three
+    # Lead with the thing no reader knew: that the text leaves at all. All three learned it from the
+    # small print or not at all.
+    assert "leaves this computer encrypted" in one, "the card no longer says the text leaves"
+    assert "opened only inside machines this computer checked first" in one, "the claim went singular"
+    # ...and it must not deny a worry the reader did not have: "nobody says that unless somebody
+    # somewhere was worried about unverified ones."
+    assert "never an unverified one" not in one
+    # ...nor argue its own case: "somebody has had this fight before and pre-loaded the answer."
+    lim = dict(_att.LIMITATIONS)["machines-per-session"]
+    assert "what it buys" not in lim and "What this costs" not in lim
+    # ...and the condition must be on the page, not in a footnote
+    from inferroute_local.confidential import attest
+    assert any(k == "machines-per-session" for k, _ in attest.LIMITATIONS), \
+        "nothing states the condition the lane introduces"
+    # ...while the SEARCH lane keeps its singular claim, which it earns by refusing any other enclave
     assert "only that machine can open it" in src, \
-        "the sentence the gate names has changed — re-read the gate before trusting it"
+        "the search lane's claim was weakened; it pins expect_lifetime_id and is still true"
 
 
 def test_the_reason_a_fleet_was_chosen_reaches_the_record():

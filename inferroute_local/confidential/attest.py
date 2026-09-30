@@ -109,18 +109,12 @@ LIMITATIONS = (
                     "does not report a GPU's confidential-computing mode, so it cannot be checked here."),
     ("metadata-visible", "Your account, session, the model, message sizes and timing are visible to relays; "
                          "the words are not."),
-    ("machines-per-session", "A session is not tied to one enclave for its whole life. If the machine "
-                             "serving it stops responding or fails a re-check, this device verifies "
-                             "another and continues there — and, where the lane is configured for it, "
-                             "that may be a different model. Your text is then sealed to the new "
-                             "machine's own key and sent again, so more than one enclave will have "
-                             "decrypted it. Every machine is verified by this device BEFORE anything is "
-                             "sent to it, never afterwards, and the receipt names each one with the "
-                             "evidence it was verified against. What this costs is the simpler sentence "
-                             "'only one machine ever saw it'; what it buys is that a machine going down "
-                             "mid-session does not end the session or send your text anywhere "
-                             "unverified."),
-)
+    ("machines-per-session", "A session is not tied to one machine. If the machine serving it stops "
+                             "responding or fails a re-check, this computer checks another and the "
+                             "session continues there, which may mean a different model. Your text is "
+                             "encrypted again, to the new machine's key, and sent — so more than one "
+                             "machine may open it. Each is checked before anything is sent to it, "
+                             "never afterwards, and the receipt names them all with the evidence."),)
 
 
 def situational_limitations(checks: dict) -> list[tuple[str, str]]:

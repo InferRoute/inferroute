@@ -1804,3 +1804,43 @@ def test_the_relevance_bar_renders_visibly_different_widths_for_real_scores():
     assert out["allEqual"], "identical scores drew bars, implying a difference that is not there"
     assert out["noScore"], "a doc without a score drew a bar"
     assert out["hasLabel"], "the bar is unreadable to a screen reader"
+
+
+def test_the_disclosure_is_named_and_other_workspace_files_are_reported_not_absorbed(tmp_path):
+    """2026-09-30: a matter folder held disclosure.md (11.6 kB, current) and disclosure.md.bak (5.2 kB,
+    the previous day's draft). The assistant read BOTH and called the backup "useful matter context", so a
+    survey was steered by text the professional had revised away — and the step log said only
+    "Read disclosure.md.bak", with nothing marking it superseded. Nothing in this codebase ever wrote that
+    file; an editor or outside tool did, and the next one will too.
+
+    Two halves, deliberately in different places. The RULE is in the contract, which is fixed and
+    sha-pinned into every session record. The per-folder FACT is a launch notice to the professional —
+    putting it in the system prompt would make that prompt vary per session and break the pin it exists
+    to provide."""
+    from inferroute_cli import pi_attested as P
+    import inspect
+
+    ws = tmp_path / "matter"; ws.mkdir()
+    (ws / "disclosure.md").write_text("the invention")
+    (ws / "disclosure.md.bak").write_text("last week's draft")
+    (ws / "notes~").write_text("editor leftover")
+    (ws / "disclosure-old.md").write_text("a stale draft with an innocent name")
+    (ws / "sketch.png").write_bytes(b"\x89PNG")
+    stale, other = P.workspace_extras(str(ws))
+
+    assert "disclosure.md" not in stale and "disclosure.md" not in other, "the disclosure is not an extra"
+    assert set(stale) == {"disclosure.md.bak", "notes~"}, stale
+    # the case a suffix denylist would MISS entirely: a stale draft with an ordinary name
+    assert "disclosure-old.md" in other, other
+    assert "sketch.png" not in stale + other, "an ordinary attachment is not flagged as a stale draft"
+
+    # the rule lives in the FIXED contract, and its pin was moved with it
+    contract = P._strip_comments(P.CONTRACT_FILE.read_text())
+    assert "`disclosure.md` is the disclosure" in contract
+    assert "name it and ask" in contract
+    assert not P.load_contract()["modified"], "the contract changed without its pin; every session flags"
+
+    # the per-session fact is a notice, NOT the system prompt
+    launch = inspect.getsource(__import__("inferroute_cli.confidential", fromlist=["x"]).launch)
+    assert "workspace_extras" in launch
+    assert "besides disclosure.md this matter folder holds" in launch

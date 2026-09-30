@@ -44,7 +44,7 @@ PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "d5fca492b93d97e3e95255cf6a5b11edcd974cfd50f88a7d0752a86d806b55c0"
+PINNED_CONTRACT_SHA = "8a985cc83e968318d08c41fc69825446fe9b9bc65908ec13ed34f09d66f90690"
 
 
 def _strip_comments(text: str) -> str:
@@ -184,6 +184,43 @@ def _protected() -> tuple[set, list]:
     exact = {rp(Path("/")), home}
     trees = [irhome] + [rp(home / n) for n in (".ssh", ".config", ".aws", ".gnupg", ".pi")]
     return exact, trees
+
+
+# The one file that IS the matter. Everything else in the workspace is the professional's, and is not
+# theirs-by-default for the assistant to read as if it were the disclosure.
+DISCLOSURE = "disclosure.md"
+
+# Artifacts no editor or tool means as content. Named so the notice can say WHY a file is not the
+# disclosure, rather than listing it flatly beside a file the professional put there on purpose.
+_ARTIFACT_SUFFIXES = (".bak", ".orig", ".swp", ".swo", ".tmp", ".rej")
+
+
+def workspace_extras(cwd: str) -> tuple[list[str], list[str]]:
+    """(stale_copies, other_files) in the matter workspace, excluding the disclosure itself.
+
+    WHY THIS EXISTS. On 2026-09-30 a matter folder held `disclosure.md` (11.6 kB, current) and
+    `disclosure.md.bak` (5.2 kB, the previous day's draft). The assistant read BOTH and reported the
+    backup as "useful matter context" -- so a survey was steered by text the professional had revised
+    away, and the step log said only "Read disclosure.md.bak" with nothing to mark it as superseded.
+    Nothing in this codebase ever wrote that file; an editor or an outside tool did, and the next one
+    will do it again. The class is "a file in the workspace that the professional does not mean as the
+    disclosure", and a stale draft named `disclosure-old.md` is in it too -- which is why `other` is
+    reported as well as `stale`, rather than matching only on suffix.
+    """
+    try:
+        names = sorted(p.name for p in Path(cwd).iterdir() if p.is_file())
+    except OSError:
+        return [], []
+    stale, other = [], []
+    for n in names:
+        if n == DISCLOSURE:
+            continue
+        low = n.lower()
+        if low.endswith(_ARTIFACT_SUFFIXES) or low.endswith("~") or low.startswith(("#", ".#")):
+            stale.append(n)
+        elif low.startswith("disclosure") or low.endswith((".md", ".txt")):
+            other.append(n)
+    return stale, other
 
 
 def check_workspace(cwd: str) -> str:

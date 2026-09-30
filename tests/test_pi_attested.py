@@ -1371,3 +1371,29 @@ def test_a_read_tells_the_model_what_it_did_NOT_read_before_it_shows_the_text():
     # A read that held everything says nothing alarming — the warning must be earned, not decoration.
     full = run({"text": "everything", "coverage": {"abstract": "held", "claims": "held", "description": "held"}})
     assert "You have NOT read" not in full
+
+
+def test_the_contract_tells_the_agent_to_READ_a_document_rather_than_search_around_it():
+    """2026-10-01, live: asked "Open US-12446781-B2: read that document and show me what it discloses", the
+    session ran a feature search and never mentioned the document. read_patent was in the launch allowlist
+    and was never called — measured from the session's own tool events.
+
+    The tool was not the gap. The contract told the model what to do WITH a document ("search for documents
+    like a returned one") and nothing about opening one, so the model followed the contract. A tool the
+    prompt never mentions is a tool the model does not reach for, which is why this is gated on the contract
+    and not on the registration.
+    """
+    contract = (Path(PA.__file__).resolve().parent / "pi_attested" / "contract.md").read_text()
+    assert "read_patent" in contract, "a tool the contract never names is a tool the model will not reach for"
+    # The decision, stated as a decision rather than as a capability note.
+    assert "open it with `read_patent`" in contract and "do not search" in contract
+    assert "read that document" in contract          # the words a professional actually uses
+    # Honest scope, because the read returns less than the document.
+    assert "what it did not" in contract
+    assert 'One claim is not "the claims"' in contract
+    # And a refused read must not become a silent search — the exact substitution that was observed.
+    flat = " ".join(contract.split())      # wrap-insensitive: the sentence, not its line breaks
+    assert "do not quietly run a search in its place" in flat.lower()
+
+    # The contract is PINNED: editing it must be a deliberate act that shows up, not a silent drift.
+    assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"

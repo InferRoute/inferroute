@@ -703,3 +703,49 @@ def test_a_standby_that_will_not_open_counts_against_it():
         return beliefs
     beliefs = _run(go())
     assert beliefs.view("f-mid").verify.evidence > 0, "a refusing standby left no evidence"
+
+
+def test_the_status_line_follows_the_session_that_is_serving(tmp_path):
+    """The status line is "the thing people screenshot", and it is a shell snippet that greps ONE
+    receipt path baked in at launch. After a switch that path is the ABANDONED session's: its byte and
+    cost counters stop moving while still rendering as live, beside the name of a model that is no
+    longer answering. A pointer the lane keeps on the active session keeps it honest without the shell
+    needing to know a lane exists."""
+    async def go():
+        sessions = {}
+        for c in _cands():
+            fs = FakeSession(c)
+            fs.receipt.path = str(tmp_path / f"{c.model_short}.json")
+            (tmp_path / f"{c.model_short}.json").write_text("{}")
+            sessions[c.model_short] = fs
+        sessions["kimi-k3"].fails = 1
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        first = (tmp_path / "current.json").resolve()
+        await lane.messages({"messages": []})
+        return first, (tmp_path / "current.json").resolve(), lane
+    before, after, lane = _run(go())
+    assert before.name == "kimi-k3.json", f"the pointer did not start on the active session ({before})"
+    assert lane.switches == 1
+    assert after.name == "glm-5.2.json", f"the pointer did not follow the switch ({after})"
+
+
+def test_a_superseded_session_is_not_stamped_as_ended_while_it_may_still_be_serving():
+    """A caller captures `self.active` and then awaits. If another request switches during that await,
+    closing the session it captured stamps ended_at and saves — and everything the in-flight request
+    goes on to seal is then recorded on a receipt that says it had already finished."""
+    async def go():
+        sessions = {c.model_short: FakeSession(c) for c in _cands()}
+        sessions["kimi-k3"].fails = 1
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        await lane.messages({"messages": []})
+        return lane, sessions
+    lane, sessions = _run(go())
+    assert lane.switches == 1
+    assert not sessions["kimi-k3"].closed, "the superseded session was stamped as ended mid-flight"
+    assert sessions["kimi-k3"] in lane.retired
+    lane.close()
+    assert sessions["kimi-k3"].closed, "a retired session was never closed at all"

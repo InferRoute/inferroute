@@ -440,9 +440,15 @@ async def choose(candidates, policy: Policy, beliefs: Beliefs, probe, *,
             reason = reason or f"{short}: measured {v.serve.p:.0%} of requests served, {v.serve.evidence:.0f} recent observations"
             break                                      # evidence is enough; spend nothing more
 
-        if v.known and v.serve.p < policy.floor:
+        # GATED ON THE SAME QUANTITY IT PROMOTES ON. The promotion test above uses the interval of
+        # serve x verify; this used to demote on `serve` alone, so a fleet that served perfectly and
+        # never verified — one that cannot be opened at all — was never set aside. It was probed, found
+        # to have instances, ranked first by capability, and burned a full attestation on every launch.
+        if v.known and v.p_usable() < policy.floor:
             unusable.append(((policy.key(short, meta.get(short), i)), short))
-            reason = reason or f"{short} set aside: {v.serve.p:.0%} served over {v.serve.evidence:.0f} observations"
+            reason = reason or (f"{short} set aside: {v.serve.p:.0%} of requests served and "
+                                f"{v.verify.p:.0%} of its machines verify, over {v.serve.evidence:.0f} "
+                                f"observations")
             continue
 
         # UNKNOWN, or known-but-middling: ask the fleet itself before judging it.

@@ -523,11 +523,17 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
     else:
         # PROACTIVE: look before attesting. The old loop learned a fleet was unusable by paying a full
         # attestation against it — the slow part of an open — and only then moved on.
-        try:
-            order = await health_ordered(order, catalog, transport, console,
-                                         server_health=await server_fleet_health(transport))
-        except Exception:                             # noqa: BLE001 — a failed probe must never block a launch
-            pass
+        #
+        # SKIPPED FOR THE CONTINUITY LANE, which does its own looking with a better instrument and then
+        # re-sorts this output by capability anyway, using it only as a tie-break. Running both meant
+        # two probe rounds across every fleet on the critical path of every launch, and discarding the
+        # first one's conclusion.
+        if not continuity:
+            try:
+                order = await health_ordered(order, catalog, transport, console,
+                                             server_health=await server_fleet_health(transport))
+            except Exception:                         # noqa: BLE001 — a failed probe must never block a launch
+                pass
     if continuity and os.environ.get("IR_NO_MODEL_FALLBACK") != "1":
         lane = await _open_continuity(order, alias, catalog, session_id, transport, http,
                                       economy, console)
@@ -642,14 +648,29 @@ async def _open_continuity(order, alias, catalog, session_id, transport, http, e
     return lane
 
 
-def _strip_prefix(receipt) -> str:
+def _strip_prefix(receipt, *, live: bool = False) -> str:
     """The static half of the status line: `🔒 confidential · kimi-k2.6 · enclave verified 01:04Z`.
-    No instance id here (it is on the receipt; the status line is the thing people screenshot)."""
+    No instance id here (it is on the receipt; the status line is the thing people screenshot).
+
+    `live`: the continuity lane can change which model is answering, and a baked-in name would then be
+    the one that ISN'T. The model is left to the shell half, which reads it from the pointer the lane
+    keeps on the session serving now."""
+    if live:
+        return "🔒 confidential"
     when = (receipt.verified_at or receipt.started_at or "")[11:16]
     return f"🔒 confidential · {receipt.model_short} · enclave verified {when}Z"
 
 
-def _attach_counter(status_args: list[str], receipt_path: str) -> None:
+def _current_receipt_path(receipt_path: str, live: bool) -> str:
+    """The path the status line should read. For the continuity lane that is the pointer the lane keeps
+    on whichever session is serving, not the receipt that happened to open first — whose counters stop
+    moving at the switch while still rendering as though they had not."""
+    if not live or not receipt_path:
+        return receipt_path
+    return str(Path(receipt_path).parent / "current.json")
+
+
+def _attach_counter(status_args: list[str], receipt_path: str, *, live: bool = False) -> None:
     """Append the live privacy figures to the status-line command, read from the receipt on every
     render (the session rewrites it after each turn): how much was sealed on this device and
     that nothing left in the clear. Dependency-free shell; exit status stays 0."""
@@ -663,6 +684,13 @@ def _attach_counter(status_args: list[str], receipt_path: str) -> None:
     except (ValueError, KeyError, TypeError):
         return
     rp = shlex.quote(receipt_path)
+    if live:
+        # The model and the verify time come from the receipt too, so a switch is reflected rather than
+        # contradicted. Read on every render, like the counters beside them.
+        cmd += (f"; m=$(grep -o '\"model_short\": \"[^\"]*\"' {rp} 2>/dev/null | head -1 | cut -d'\"' -f4); "
+                f"[ -n \"$m\" ] && printf ' · %s' \"$m\"; "
+                f"v=$(grep -o '\"verified_at\": \"[^\"]*\"' {rp} 2>/dev/null | head -1 | cut -d'\"' -f4); "
+                f"[ -n \"$v\" ] && printf ' · enclave verified %s' \"$(echo \"$v\" | cut -c12-16)Z\"")
     cmd += (f"; b=$(grep -o '\"plaintext_bytes_sealed_here\": [0-9]*' {rp} 2>/dev/null | head -1 | grep -o '[0-9]*$'); "
             f"if [ -n \"$b\" ]; then if [ \"$b\" -ge 1048576 ]; then printf ' · %s.%s MB sealed here' $((b/1048576)) $(( (b%1048576)*10/1048576 )); "
             f"else printf ' · %s KB sealed here' $((b/1024)); fi; printf ' · nothing in the clear (by construction, not a count)'; fi; "
@@ -865,9 +893,10 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 # Pinned inside Claude Code's TUI for the whole session (the pre-launch panel
                 # scrolls away in fullscreen mode): lane · model · enclave · when verified, plus a
                 # live "N sealed" count read from the receipt the session keeps updating.
+                _live = hasattr(session, "switches")        # the continuity lane can change model
                 status_args = launch_mod._product_strip_settings_args(
-                    _strip_prefix(receipt), passthrough, disable_connectors=True)
-                _attach_counter(status_args, receipt.path)
+                    _strip_prefix(receipt, live=_live), passthrough, disable_connectors=True)
+                _attach_counter(status_args, _current_receipt_path(receipt.path, _live), live=_live)
                 # A settings FILE could re-enable a route the env strip removed; this cannot be skipped.
                 force_provider_route_falsy(status_args, passthrough)
                 if overridden_routes:

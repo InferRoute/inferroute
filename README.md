@@ -11,7 +11,7 @@ and your inferroute key, so you don't have to set env vars every time.
 **Your normal `claude` is never touched** — `ir` only configures the
 subprocess it spawns.
 
-You choose the model per session — there's no auto-routing. Optionally, an
+You choose the model per session. The Probant lane may move to another verified machine, and to another model, if the one serving stops responding — every one checked before anything is sent to it, and named in the receipt. Optionally, an
 on-device recorder logs your choices privately (see [Local recording](#local-recording-optional)).
 
 ## Install

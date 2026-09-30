@@ -15,7 +15,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, relative } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
 const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
@@ -1072,6 +1072,58 @@ export default function (pi: ExtensionAPI) {
 		}
 		return { sp, out, earlier };
 	}
+
+	// READING IS SCOPED IN THE MATTER FLOW. Pi's built-in `read` and `grep` are withheld here (see
+	// MATTER_TOOLS) and replaced by this, so "only the disclosure" is enforced by the tool rather than
+	// asked for in the prompt. On 2026-09-30 an assistant read a disclosure.md.bak from the previous day
+	// and called it "useful matter context": the survey then ran partly on text the professional had
+	// revised away. A contract line alone would have been advice; this refuses.
+	//
+	// It is a real boundary here, unusually: the attested session has NO shell tool, so there is no second
+	// route to a file. `grep` goes too — it returns matching LINES, which is reading by another name.
+	//
+	// Intake is untouched: reading an arbitrary document IS the task there, and it has no search tool, so
+	// nothing can leave while a whole document is in context.
+	pi.registerTool({
+		name: "read_matter_file",
+		label: "Read a matter file",
+		description:
+			"Read a file from the matter workspace. `disclosure.md` is the disclosure and is always readable — read it " +
+			"first and search from it. ANY OTHER FILE IS REFUSED unless the professional has named it for this session: " +
+			"a backup, an earlier draft, an export or a file whose name merely begins with \"disclosure\" is not the " +
+			"disclosure, and a survey steered by a superseded draft searches for an invention they are no longer " +
+			"describing. If you think another file bears on the matter, NAME IT AND ASK rather than trying to read it.",
+		promptSnippet: "Read the disclosure",
+		parameters: Type.Object({
+			path: Type.String({ description: "File name inside the matter workspace, e.g. disclosure.md" }),
+		}),
+		execute: async (params: { path: string }) => {
+			const root = process.cwd();
+			const want = resolve(root, String(params.path ?? ""));
+			const rel = relative(root, want);
+			// Outside the workspace, or reached by climbing out of it, is refused before the allowlist is
+			// even consulted — an allowlist checked on an unresolved path is not an allowlist.
+			if (rel.startsWith("..") || rel === "" || resolve(root, rel) !== want) {
+				throw new Error(`${params.path} is outside the matter workspace; nothing was read`);
+			}
+			const allowed = new Set(
+				["disclosure.md", ...String(process.env.IR_ATTESTED_READABLE ?? "").split(",")]
+					.map((x) => x.trim()).filter(Boolean),
+			);
+			if (!allowed.has(rel)) {
+				throw new Error(
+					`${rel} is not the disclosure and has not been named for this session, so it was not read. ` +
+					`disclosure.md is the disclosure. If ${rel} bears on this matter, tell the professional it is ` +
+					`there and ask whether to include it — do not read it on your own judgement.`,
+				);
+			}
+			try {
+				return { content: [{ type: "text", text: readFileSync(want, "utf8") }] };
+			} catch (e) {
+				throw new Error(`could not read ${rel}: ${(e as Error).message}`);
+			}
+		},
+	});
 
 	pi.registerTool({
 		name: "prior_art_search",

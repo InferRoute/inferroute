@@ -32,6 +32,21 @@ from . import agents
 EXTENSION = Path(__file__).resolve().parent / "pi_attested" / "ir-attested.ts"
 PROVIDER = "inferroute"
 TOOLS = ("read", "edit", "write", "grep", "find", "ls")
+
+# THE MATTER FLOW READS THROUGH OUR OWN TOOL, not Pi's. `read` and `grep` are withheld and replaced by
+# `read_matter_file`, which refuses anything but disclosure.md unless the professional named it for this
+# session — so "only the disclosure" is ENFORCED rather than asked for in the prompt. `grep` goes with
+# `read` because it returns matching lines, which is reading by another name. `find` and `ls` stay: the
+# assistant may still SEE that a file exists, which is what lets it tell the professional a stale draft
+# is sitting there instead of silently absorbing it.
+#
+# A real boundary here, unusually for a tool restriction: the attested session has NO shell tool, so
+# there is no second route to a file.
+#
+# INTAKE KEEPS THE BUILT-INS: reading an arbitrary document is the task there, and that flow has no
+# search tool, so nothing can leave while a whole document is in context.
+READ_TOOL = "read_matter_file"
+MATTER_TOOLS = tuple(t for t in TOOLS if t not in ("read", "grep")) + (READ_TOOL,)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 # ── the mission contract (see pi_attested/{preamble,contract}.md and the decision record) ──
@@ -281,7 +296,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
-        tools = TOOLS + ((SEARCH_TOOL, DEEP_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
+        tools = MATTER_TOOLS + ((SEARCH_TOOL, DEEP_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
         env.pop("IR_INTAKE_OUT", None)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env["PI_OFFLINE"] = "1"

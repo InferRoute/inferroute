@@ -1844,3 +1844,51 @@ def test_the_disclosure_is_named_and_other_workspace_files_are_reported_not_abso
     launch = inspect.getsource(__import__("inferroute_cli.confidential", fromlist=["x"]).launch)
     assert "workspace_extras" in launch
     assert "besides disclosure.md this matter folder holds" in launch
+
+
+def test_the_matter_flow_reads_through_our_own_tool_and_intake_keeps_the_built_ins():
+    """Henry, 2026-09-30, on whether the disclosure rule should be enforced by the tool and not only by
+    the contract: yes. Pi's built-in `read` and `grep` are withheld in the MATTER flow and replaced by
+    `read_matter_file`, which refuses anything but disclosure.md unless the professional named it.
+
+    `grep` goes with `read` because it returns matching LINES — reading by another name. `find` and `ls`
+    stay, deliberately: the assistant may still SEE that a file exists, which is what lets it tell the
+    professional a stale draft is there instead of silently absorbing it.
+
+    A tool restriction is usually advisory because an agent routes around it through a shell. This
+    session has no shell tool, so there is no second route — which is what makes it a real boundary.
+
+    INTAKE KEEPS THE BUILT-INS: reading an arbitrary document is the task there, and that flow has no
+    search tool, so nothing can leave while a whole document is in context. Narrowing it would have
+    broken the feature while looking like security."""
+    from inferroute_cli import pi_attested as P
+
+    assert "read" not in P.MATTER_TOOLS and "grep" not in P.MATTER_TOOLS
+    assert P.READ_TOOL in P.MATTER_TOOLS
+    assert "ls" in P.MATTER_TOOLS and "find" in P.MATTER_TOOLS, "the assistant can no longer see a stale draft to report it"
+    # intake untouched
+    assert "read" in P.TOOLS and "grep" in P.TOOLS
+
+    ts = P.EXTENSION.read_text()
+    assert 'name: "read_matter_file"' in ts
+    # the allowlist, and the escape check that must come BEFORE it
+    assert 'rel.startsWith("..")' in ts, "a path could climb out of the workspace"
+    assert ts.index('rel.startsWith("..")') < ts.index("allowed.has(rel)"), \
+        "the allowlist is consulted before the path is resolved, which is not an allowlist"
+    assert '"disclosure.md", ...String(process.env.IR_ATTESTED_READABLE' in ts, \
+        "there is no way for the professional to permit a second file"
+    # the refusal tells the assistant what to do instead, rather than only saying no
+    assert "ask whether to include it" in ts
+    # the withheld tools are not smuggled back by another name
+    assert ts.count('name: "read_matter_file"') == 1
+
+
+def test_narrowing_the_tools_changes_the_recorded_config_hash():
+    """The tool set is part of what the session record pins, so withholding `read` is visible in the
+    record rather than a quiet change of what the assistant could do."""
+    from inferroute_cli import pi_attested as P
+    class _A:
+        short = "kimi-k3"
+    before = P.config_hash(_A(), P.TOOLS)
+    after = P.config_hash(_A(), P.MATTER_TOOLS)
+    assert before != after, "the record would not show that reading was scoped"

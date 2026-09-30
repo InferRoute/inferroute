@@ -14,6 +14,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from .session import ConfidentialSession
 
+# How long this endpoint holds an idle keep-alive connection open. Uvicorn's default is 5 seconds,
+# which is a public-internet number: it protects a shared server from parked sockets. This endpoint is
+# loopback-only, has exactly one client, and lives as long as one session, so the default bought nothing
+# and cost a race — the server's FIN crossing the agent's next request on a pooled connection, which the
+# agent can only report as a connection error. Hold the connection for the session instead.
+SEALED_KEEPALIVE_S = 600
+
 
 def create_app(session: ConfidentialSession, token: str) -> FastAPI:
     """`token` is minted per session by the launcher and given only to the agent it starts.

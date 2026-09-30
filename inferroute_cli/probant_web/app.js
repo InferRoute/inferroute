@@ -309,6 +309,15 @@
      "That model is not available on the sealed lane right now, so nothing was sent. Another one is tried automatically."],
     [(d) => d.includes("rejected as malformed"),
      "The AI provider rejected the request as malformed, so nothing was sent. This is a fault at our end; starting a fresh session usually clears it."],
+    // The agent's HTTP client could not reach this machine's own verifying proxy: its request never got
+    // as far as being sealed. LAST in the list on purpose — it is the least specific wording any client
+    // can produce, so an earlier case that knows more must win. Named rather than left unnamed because
+    // the honest thing to say about it is stronger than the generic sentence: nothing was sent because
+    // nothing was ever SENT, and this one really does clear by itself.
+    [(d) => d.includes("connection error") || d.includes("econnreset") || d.includes("socket hang up")
+            || d.includes("fetch failed") || d.includes("epipe"),
+     "This machine's own connection to the checking step dropped before the request left it, so nothing "
+     + "was sent in the clear and the AI machine never saw it. Continuing retries it."],
   ];
 
   // The sentence for a failure this page could not name. Named so isTransient can ASK whether we
@@ -372,6 +381,12 @@
         || d.includes("504") || d.includes("timeout") || d.includes("timed out")
         || d.includes("429") || d.includes("rate") || d.includes("nonce")
         || d.includes("connection") || d.includes("econn")) return true;
+    // TRANSPORT BETWEEN THE AGENT AND THIS MACHINE. Listed by name rather than left to the default
+    // below, because NAMING a failure takes away its quiet retry: the default is "we could not name it",
+    // so the moment wording was added for these they became loud. A sim caught that the same edit that
+    // made the sentence honest made the page shout it.
+    if (d.includes("socket hang up") || d.includes("fetch failed") || d.includes("epipe")
+        || d.includes("broken pipe")) return true;
     // Mid-stream: the reply started and did not finish. Retrying is the right move and nothing left the
     // machine in the clear either way.
     if (d.includes("ended part-way") || d.includes("without finishing the answer")
@@ -395,11 +410,15 @@
   let quietNode = null;                 // the one muted line, reused; removed when an answer arrives
   function quietRetry(detail) {
     autoTries += 1;
+    // Say WHICH attempt from the first one. A bare ellipsis that might be the last thing this session
+    // ever says is worse than a line that shows where it is in a bounded budget: the reader can see the
+    // page is still trying, and how much trying is left, without being handed a red block.
+    const line = `Reconnecting… nothing was sent in the clear. (${autoTries} of ${AUTO_RETRIES})`;
     if (!quietNode || !quietNode.isConnected) {
-      quietNode = el("div", "step quiet-retry", "Reconnecting… nothing was sent in the clear.");
+      quietNode = el("div", "step quiet-retry", line);
       log.append(quietNode);
     } else {
-      quietNode.textContent = `Reconnecting… nothing was sent in the clear. (attempt ${autoTries})`;
+      quietNode.textContent = line;
     }
     s();
     setTimeout(() => { if (!ended) send(RETRY_TEXT); }, 1500 * autoTries);

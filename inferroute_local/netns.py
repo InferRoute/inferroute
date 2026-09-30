@@ -49,25 +49,40 @@ socket its verifying proxy listens on outside, THEN confines itself, then runs t
 relays stay alive for its lifetime. Written by the launcher; not part of the agent's own tree."""
 import argparse, os, socket, subprocess, sys, threading
 
-def _pump(a, b):
-    try:
-        while True:
-            data = a.recv(65536)
-            if not data:
-                break
-            b.sendall(data)
-    except OSError:
-        pass
-    finally:
-        for s in (a, b):
+def _splice(client, up):
+    """Pump both directions until BOTH end, then close. A quiet direction is not a dead connection,
+    and one direction's EOF says nothing about the other; shutting both down on either one turns a
+    normal half-close into a reset the agent reports as "Connection error.". No idle timeout is set
+    on either socket: the model's time-to-first-token is silence on this path."""
+    pending = [2]
+    lock = threading.Lock()
+
+    def pump(a, b):
+        try:
+            while True:
+                data = a.recv(65536)
+                if not data:
+                    break
+                b.sendall(data)
+        except OSError:
+            pass
+        finally:
             try:
-                s.shutdown(socket.SHUT_RDWR)
+                b.shutdown(socket.SHUT_WR)
             except OSError:
                 pass
-            try:
-                s.close()
-            except OSError:
-                pass
+            with lock:
+                pending[0] -= 1
+                last = pending[0] == 0
+            if last:
+                for s in (client, up):
+                    try:
+                        s.close()
+                    except OSError:
+                        pass
+
+    threading.Thread(target=pump, args=(client, up), daemon=True).start()
+    threading.Thread(target=pump, args=(up, client), daemon=True).start()
 
 def _accept(listener, sock_path):
     while True:
@@ -84,8 +99,7 @@ def _accept(listener, sock_path):
             except OSError:
                 pass
             continue
-        threading.Thread(target=_pump, args=(client, up), daemon=True).start()
-        threading.Thread(target=_pump, args=(up, client), daemon=True).start()
+        _splice(client, up)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -157,25 +171,48 @@ def _relay(sock_path: str, port: int, stop: threading.Event) -> threading.Thread
     srv.listen(128)
     srv.settimeout(0.5)
 
-    def pump(a: socket.socket, b: socket.socket) -> None:
-        try:
-            while True:
-                data = a.recv(65536)
-                if not data:
-                    break
-                b.sendall(data)
-        except OSError:
-            pass
-        finally:
-            for s in (a, b):
+    def splice(client: socket.socket, up: socket.socket) -> None:
+        """Pump both directions until BOTH are done, then close.
+
+        Two properties this has to hold, each of which was missing and each of which showed up as
+        "Connection error." in the agent:
+
+        1. NO IDLE TIMEOUT. A relayed connection that is quiet is not a broken one. The model's
+           time-to-first-token is silence on this socket, and it grows with the conversation, so an
+           idle timeout here fails the LONGEST prompts first — the opening request of every turn.
+        2. HALF-CLOSE, NOT MUTUAL DESTRUCTION. One direction reaching EOF says nothing about the
+           other. Shut down only the direction that ended and let its peer drain; close the pair
+           once both pumps have finished.
+        """
+        pending = [2]
+        lock = threading.Lock()
+
+        def pump(a: socket.socket, b: socket.socket) -> None:
+            try:
+                while True:
+                    data = a.recv(65536)
+                    if not data:
+                        break
+                    b.sendall(data)
+            except OSError:
+                pass
+            finally:
                 try:
-                    s.shutdown(socket.SHUT_RDWR)
+                    b.shutdown(socket.SHUT_WR)          # propagate EOF, this direction only
                 except OSError:
                     pass
-                try:
-                    s.close()
-                except OSError:
-                    pass
+                with lock:
+                    pending[0] -= 1
+                    last = pending[0] == 0
+                if last:
+                    for s in (client, up):
+                        try:
+                            s.close()
+                        except OSError:
+                            pass
+
+        threading.Thread(target=pump, args=(client, up), daemon=True).start()
+        threading.Thread(target=pump, args=(up, client), daemon=True).start()
 
     def loop() -> None:
         try:
@@ -187,12 +224,12 @@ def _relay(sock_path: str, port: int, stop: threading.Event) -> threading.Thread
                 except OSError:
                     break
                 try:
-                    up = socket.create_connection(("127.0.0.1", port), timeout=30)
+                    up = socket.create_connection(("127.0.0.1", port), timeout=10)
                 except OSError:
                     client.close()
                     continue
-                threading.Thread(target=pump, args=(client, up), daemon=True).start()
-                threading.Thread(target=pump, args=(up, client), daemon=True).start()
+                up.settimeout(None)   # the 10s bounded CONNECT, never a bound on being quiet
+                splice(client, up)
         finally:
             try:
                 srv.close()

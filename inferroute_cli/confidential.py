@@ -710,7 +710,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     from inferroute_local.confidential import display
     import httpx
     import uvicorn
-    from inferroute_local.confidential.server import create_app
+    from inferroute_local.confidential.server import SEALED_KEEPALIVE_S, create_app
 
     from .main import _extract_model_override
     from . import resume as resume_mod
@@ -853,8 +853,11 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             # published source, so it was a label rather than a credential.
             import secrets as _secrets
             local_key = "ir-" + _secrets.token_urlsafe(32)
+            # Loopback, one client, for the life of one session: uvicorn's 5s idle close buys nothing here
+            # and costs a race — the server's FIN can cross the agent's next request on a pooled connection.
             server = uvicorn.Server(uvicorn.Config(create_app(session, local_key), host="127.0.0.1",
-                                                   port=port, log_level="critical"))
+                                                   port=port, log_level="critical",
+                                                   timeout_keep_alive=SEALED_KEEPALIVE_S))
             server_task = asyncio.create_task(server.serve())
             while not server.started:
                 if server_task.done():

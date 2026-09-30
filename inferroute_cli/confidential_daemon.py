@@ -125,7 +125,7 @@ def serve(model: str | None) -> int:
     import httpx
     import uvicorn
 
-    from inferroute_local.confidential.server import create_app
+    from inferroute_local.confidential.server import SEALED_KEEPALIVE_S, create_app
     from . import confidential as C
     from . import launch as launch_mod
 
@@ -143,8 +143,11 @@ def serve(model: str | None) -> int:
                 return 3
             port = C._free_port()
             token = "ir-" + secrets.token_urlsafe(32)
+            # Loopback, one client, for the life of one session: uvicorn's 5s idle close buys nothing here
+            # and costs a race — the server's FIN can cross the agent's next request on a pooled connection.
             server = uvicorn.Server(uvicorn.Config(create_app(session, token), host="127.0.0.1",
-                                                   port=port, log_level="critical"))
+                                                   port=port, log_level="critical",
+                                                   timeout_keep_alive=SEALED_KEEPALIVE_S))
             task = asyncio.create_task(server.serve())
             while not server.started:
                 await asyncio.sleep(0.05)

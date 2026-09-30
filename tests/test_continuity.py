@@ -428,3 +428,24 @@ def test_an_empty_stream_with_no_standby_reports_rather_than_hanging():
     st, body, lane = _run(go())
     assert st == 503 and b"no answer" in body
     assert lane.switches == 0
+
+
+def test_parallel_requests_meeting_one_outage_spend_only_one_standby():
+    """An agent issues PARALLEL tool calls, so `_call` is re-entrant and several requests can meet the
+    same failing fleet at once. Unserialised, each would switch — and one bad fleet would burn every
+    standby in sequence, the lane spending its whole reserve on a single outage."""
+    async def go():
+        sessions = {"kimi-k3": FakeSession(_cands()[0], fails=5),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        results = await asyncio.gather(*[lane.messages({"messages": []}) for _ in range(4)])
+        return [r[0] for r in results], lane, sessions
+    statuses, lane, sessions = _run(go())
+    assert lane.switches == 1, f"one outage cost {lane.switches} standbys"
+    assert lane.active.model_short == "glm-5.2"
+    assert statuses.count(200) >= 1, "no request survived the outage"
+    # the ones that arrived after the move are told so rather than switching again
+    assert any(e["kind"] in ("already-carried", "carried") for e in lane.active.receipt.events)

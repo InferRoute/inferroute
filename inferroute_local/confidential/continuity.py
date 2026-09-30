@@ -84,6 +84,10 @@ class Continuity:
         self._warming: Optional[asyncio.Task] = None   # STRONG reference: a fire-and-forget task can be
         self._closed = False                           # collected mid-flight, which loses the standby
         self._pending_notes: list = []                 # notes made before a receipt exists to hold them
+        # An agent issues PARALLEL tool calls, so _call is re-entrant and several requests can meet the
+        # same outage at once. Without this each would switch, and one bad fleet would burn every
+        # standby in sequence — the lane spending its whole reserve on a single failure.
+        self._switch_lock = asyncio.Lock()
         self.switches = 0
         self.order: list = []
 
@@ -254,7 +258,7 @@ class Continuity:
         fault = getattr(sess, "last_fault", "")
         if fault in COUNTS_AGAINST_FLEET:
             self.beliefs.observed_serve(fleet, 0, 1, time.time())
-        if fault in SWITCHABLE and await self._switch(fault):
+        if fault in SWITCHABLE and await self._switch(sess, fault):
             retried = await getattr(self.active, name)(body)
             if retried[0] == 200:
                 self.beliefs.observed_serve(self.active.fleet_id, 1, 0, time.time())
@@ -299,7 +303,7 @@ class Continuity:
         """The failure path shared by a refused send and a stream that died empty."""
         if fault in COUNTS_AGAINST_FLEET:
             self.beliefs.observed_serve(sess.fleet_id, 0, 1, time.time())
-        if fault in SWITCHABLE and await self._switch(fault):
+        if fault in SWITCHABLE and await self._switch(sess, fault):
             retried = await getattr(self.active, name)(body)
             if retried[0] == 200:
                 self.beliefs.observed_serve(self.active.fleet_id, 1, 0, time.time())
@@ -310,8 +314,20 @@ class Continuity:
         # just failed, which is what an earlier version did and which turns one failure into two.
         return 503, {}, _one(b'{"error":{"message":"the enclave produced no answer"}}')
 
-    async def _switch(self, why: str = "") -> bool:
-        """Promote the standby. Only ever a pointer move — anything slow happened in the background."""
+    async def _switch(self, failed=None, why: str = "") -> bool:
+        """Promote the standby. Only ever a pointer move — anything slow happened in the background.
+
+        Serialised, and idempotent per outage: a caller whose session has ALREADY been replaced by
+        someone else's switch has nothing to do and says so, rather than spending a second standby on a
+        failure that has been dealt with."""
+        async with self._switch_lock:
+            return await self._switch_locked(failed, why)
+
+    async def _switch_locked(self, failed, why: str) -> bool:
+        if failed is not None and self.active is not failed:
+            self.note("already-carried", f"{getattr(failed, 'model_short', '?')} failed ({why}); "
+                                         f"another request had already moved us to {self.active.model_short}")
+            return True                               # someone else moved us; the caller may just retry
         if self.standby is None:
             self.note("no-standby", f"{self.active.model_short} failed ({why}) with nothing warmed")
             return False

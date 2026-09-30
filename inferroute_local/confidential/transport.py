@@ -232,6 +232,22 @@ class InferRouteRelay(Transport):
         r.raise_for_status()
         return [{**m, "fleet_id": m.get("fleet_id") or m.get("fleet_id")} for m in r.json().get("models", [])]
 
+    async def fleet_health(self) -> dict:
+        """The operator's view of which fleets are currently usable: {"fleets": {<fleet_id>: {...}}}.
+
+        A HINT FOR SELECTION ONLY. The client attests whatever it chooses regardless, so a wrong or
+        hostile answer costs one wasted attestation and nothing else — no trust moves to the operator by
+        reading it. It exists because the statistic it carries (how many of a fleet's instances actually
+        pass a client's checks) is one the operator can see across every session and a single client
+        cannot: a new client has no history at all.
+
+        Not yet served: absent or erroring, callers fall back to local history. Short timeout because a
+        hint that delays a launch is worse than no hint.
+        """
+        r = await self.http.get(f"{self.base}/confidential/fleet-health", headers=self._auth(), timeout=5)
+        r.raise_for_status()
+        return r.json()
+
     async def instances(self, fleet_id: str) -> dict:
         r = await self.http.get(f"{self.base}/confidential/instances/{fleet_id}", headers=self._auth(), timeout=30)
         if r.status_code == 404:

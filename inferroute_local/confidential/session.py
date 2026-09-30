@@ -350,6 +350,22 @@ class ConfidentialSession:
                 detail = (await _drain(raw))[:400].decode("utf-8", "replace")
             except Exception as e:                       # the error body itself may be cut short
                 detail, readable = f"(body unreadable: {type(e).__name__})", False
+            # SMOOTH RECOVERY: a transient provider failure gets one more go on a DIFFERENT verified
+            # instance before the user is told anything. The failing instance is dropped from the pool
+            # first, so the retry cannot land on the same machine that just failed — a retry to the same
+            # place is a delay, not a recovery.
+            if attempt == 1 and status in _RETRY_ON_OTHER_INSTANCE:
+                async with self._lock:
+                    self._pool.pop(pinned.instance_id, None)
+                    if self.pinned is not None and self.pinned.instance_id == pinned.instance_id:
+                        self.pinned = None
+                    if not self._pool:
+                        self._pool_expire = 0.0      # nothing left here: force a refresh on the way round
+                self.receipt.note("upstream-retry",
+                                  f"the provider answered {status} on {pinned.instance_id[:8]}; "
+                                  "retried once on another verified instance")
+                c["upstream_retries"] = c.get("upstream_retries", 0) + 1
+                continue
             if attempt == 1 and status in (400, 401, 403) and "nonce" in detail.lower():
                 async with self._lock:
                     self._pool_expire = 0.0
@@ -601,6 +617,16 @@ class ConfidentialSession:
             self.receipt.save()
         return self.receipt
 
+
+# A provider failure worth trying ONE other verified instance for. Henry, 2026-09-30: a user should see
+# an availability problem "in a smooth if possible silent way". These are per-instance or per-moment
+# conditions, so a different machine in the same fleet is a real second chance.
+#
+# 402 IS DELIBERATELY ABSENT. "This lane is out of capacity" is an ACCOUNT condition — every instance in
+# every fleet bills the same account — so retrying it burns a second round trip to reach the same answer
+# and delays the one message that tells the user what is actually wrong. 400 and 404 are absent for the
+# same reason in the other direction: a malformed request or a missing route is not luck.
+_RETRY_ON_OTHER_INSTANCE = (429, 500, 502, 503, 504)
 
 UPSTREAM_PUBLIC = {
     400: "the request was rejected as malformed",

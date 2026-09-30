@@ -117,6 +117,127 @@ def force_provider_route_falsy(status_args: list[str], passthrough: list[str]) -
     status_args.extend(["--settings", json.dumps({"env": falsy})])
 
 
+# ── choosing a model that will STAY available, before paying for an attestation ────────────────────
+# Henry, 2026-09-30: the fallback must "first choose the model that has the strongest chances to stay
+# available", not discover a dead fleet by failing on it. The old loop tried the preferred model and
+# learned it was unusable only after a full attestation — the slow part of a session open.
+#
+# TWO SIGNALS, because neither is enough alone:
+#   LIVE   `instances(fleet)` needs no attestation and shows which instances are offering nonces RIGHT
+#          NOW. It cannot see which will pass this device's checks.
+#   YIELD  how many instances of that fleet HAVE passed our checks historically, read from our own
+#          receipts. On 2026-09-30 this separated kimi-k2.6 (0.20) from kimi-k3 (0.88) — exactly the
+#          distinction a live probe is blind to, because all 12 of k2.6's instances were offering
+#          nonces and 11 of them failed verification here.
+# expected usable = live x yield. A fleet with many instances and a terrible yield scores below a small
+# healthy one, which is the judgement a human would make from the same two numbers.
+_YIELD_SAMPLE = 40            # recent receipts read; enough to reflect a fleet roll, short enough to forget one
+
+
+def fleet_yield(model_short: str) -> tuple[float, int]:
+    """(mean eligible/instances for this model, sample size). 1.0 when unseen — an unknown fleet is
+    given the benefit of the doubt rather than ranked last, or a newly offered model could never be
+    chosen and so could never earn a history."""
+    import json as _json
+    from pathlib import Path as _P
+    d = _P.home() / ".inferroute" / "confidential" / "receipts"
+    try:
+        files = sorted(d.glob("*.json"))[-_YIELD_SAMPLE:]
+    except OSError:
+        return 1.0, 0
+    xs = []
+    for f in files:
+        try:
+            r = _json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if r.get("model_short") != model_short:
+            continue
+        fl = r.get("fleet") or {}
+        inst, elig = fl.get("instances"), fl.get("eligible")
+        if isinstance(inst, int) and inst > 0 and isinstance(elig, int):
+            xs.append(elig / inst)
+    return (sum(xs) / len(xs), len(xs)) if xs else (1.0, 0)
+
+
+async def server_fleet_health(transport) -> dict:
+    """The operator's own view of which fleets are currently usable, keyed by fleet id.
+
+    THIS BELONGS ON THE SERVER AND THE LOCAL VERSION IS A FALLBACK, not the other way round (Henry,
+    2026-09-30: "put on server side what should be there rather than on the client"). `fleet_yield`
+    below learns the same statistic from THIS device's receipts, which has two faults the server does
+    not: a new client has no history at all, so the very first session gets no benefit from any of this;
+    and one client's sample is tiny — ours was n=1 and n=2 for two of five models. The operator sees
+    every session across every client, so its number is both fresh and real.
+
+    IT IS A HINT, AND NOTHING RESTS ON IT. The client still attests whatever it chooses and records what
+    it attested; a wrong or hostile hint costs one wasted attestation and the next candidate is tried.
+    That is why consuming it does not move any trust to the server: it steers, it does not vouch.
+
+    Absent endpoint, error, or nonsense shape: {} — and selection falls back to local history.
+    """
+    try:
+        got = await transport.fleet_health()
+    except Exception:                                    # noqa: BLE001 — absent or broken: fall back quietly
+        return {}
+    fleets = (got or {}).get("fleets")
+    return fleets if isinstance(fleets, dict) else {}
+
+
+async def probe_fleet(transport, fleet_id: str) -> int:
+    """Instances offering a nonce right now. No attestation, so this is cheap enough to run before
+    choosing. A probe that fails returns -1 (unknown) rather than 0 — "we could not ask" must not read
+    as "there is nothing there", or one flaky listing would rule out a healthy fleet."""
+    try:
+        e2 = await transport.instances(fleet_id)
+    except Exception:                                    # noqa: BLE001
+        return -1
+    return sum(1 for i in (e2.get("instances") or [])
+               if i.get("e2e_pubkey") and (i.get("nonces") or []))
+
+
+async def health_ordered(order: list[str], catalog: list, transport, console=None,
+                         server_health: dict | None = None) -> list[str]:
+    """`order` re-ranked by expected usable instances, preference preserved where health allows.
+
+    Probing stops at the first candidate that looks healthy, so the common case costs ONE extra listing
+    call and the preferred model still wins. Only when the preferred fleet looks thin do we pay to look
+    further — which is the case that used to cost a failed attestation instead.
+
+    A fleet whose probe FAILED keeps its place rather than being demoted: not being able to ask is not
+    evidence of ill health, and demoting on it would make one flaky listing permanent.
+    """
+    scored: list[tuple[str, float]] = []
+    for short in order:
+        ref = next((m for m in catalog if str(m.get("name", "")).endswith(short) or m.get("name") == short), None)
+        fleet = (ref or {}).get("fleet_id")
+        if not fleet:
+            continue
+        live = await probe_fleet(transport, fleet)
+        # Server first, this device's own history second. A new client has no history, which is exactly
+        # the case the server number exists to cover.
+        hint = (server_health or {}).get(fleet) or {}
+        ratio = hint.get("eligible_ratio")
+        y = float(ratio) if isinstance(ratio, (int, float)) and 0.0 <= ratio <= 1.0 else fleet_yield(short)[0]
+        if live < 0:                                  # could not ask: keep its place, do not judge it
+            scored.append((short, 1.0))
+            continue
+        expected = live * y
+        scored.append((short, expected))
+        if expected >= 1.0 and short == order[0]:
+            return order                              # the preferred model looks fine; spend nothing more
+        if expected >= 1.0:
+            break                                     # good enough, and higher-preference ones were not
+    if not scored:
+        return order
+    best = max(scored, key=lambda t: t[1])
+    if best[1] < 1.0 and console is not None:
+        console.print("[grey58]no sealed model fleet looks comfortably available right now; "
+                      f"trying {best[0]} first, then the rest.[/]")
+    rest = [m for m in order if m != best[0]]
+    return [best[0]] + rest
+
+
 def _console():
     from rich.console import Console
     return Console()
@@ -229,6 +350,14 @@ async def _open_session(alias, session_id: str, http, console):
     order = [alias.short] + [m for m in FALLBACK_MODELS if m != alias.short]
     if os.environ.get("IR_NO_MODEL_FALLBACK") == "1":
         order = [alias.short]
+    else:
+        # PROACTIVE: look before attesting. The old loop learned a fleet was unusable by paying a full
+        # attestation against it — the slow part of an open — and only then moved on.
+        try:
+            order = await health_ordered(order, catalog, transport, console,
+                                         server_health=await server_fleet_health(transport))
+        except Exception:                             # noqa: BLE001 — a failed probe must never block a launch
+            pass
     tried: list[str] = []
     for short in order:
         cand = alias if short == alias.short else _resolve_model_quietly(short)

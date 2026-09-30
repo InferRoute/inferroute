@@ -250,27 +250,53 @@
   // An error from the AI's side, said plainly, with the raw detail one click away. The same error repeated
   // (the agent retries) updates one line instead of stacking.
   let lastError = null;
+  // EVERY FAILURE THE LANE CAN REPORT, matched on OUR OWN sanitised phrases rather than on status
+  // numbers. The lane never passes an upstream body through (a 402 body once reached a user carrying a
+  // crypto wallet address), so what arrives is one of a bounded set of sentences this product writes —
+  // and matching those is exact, where matching "502" catches any sentence that happens to contain it.
+  //
+  // Before this, five of the ten provider statuses fell through to "didn't answer this request", the
+  // blandest sentence here, including 402 — the one status that tells you the actual problem. And
+  // 401/403 ("our credentials were refused") matched /refus/ and were reported as a VERIFICATION
+  // failure: a billing problem shown as a broken trust chain. Henry saw the fallthrough four times.
+  //
+  // Order is by specificity. Each entry is [test, sentence]; the first match wins.
+  const MODEL_ERROR_CASES = [
+    // ── lane-internal: our own conditions, most specific first ────────────────────────────────
+    [(d) => d.includes("no verified alternative") || d.includes("instance is gone") || d.includes("no-eligible-instance"),
+     "No verified AI machine was free just then, so nothing was sent in the clear. That is a capacity limit, not a failed check — the session tries another verified machine by itself."],
+    [(d) => /not verified|not be verified|unverified|verification failed|refusing to continue/.test(d),
+     "The AI machine could not be verified, so nothing was sent to it."],
+    // A nonce rejected TWICE, one of them from a fresh pool, is not an expiry — we already did the thing
+    // the expiry message tells the reader to wait for. Checked before the ordinary nonce case.
+    [(d) => d.includes("nonce twice") || d.includes("rejected our request nonce twice"),
+     "The AI machine rejected this session's one-time keys twice, including a fresh one, so nothing was sent. Retrying will not clear it — start a fresh session on this matter."],
+    [(d) => d.includes("nonce"),
+     "The AI machine turned this request away because its one-time key had expired. Try again; a fresh key is fetched automatically."],
+    [(d) => d.includes("relay is unreachable") || d.includes("could not seal") || d.includes("could not be sent"),
+     "The AI machine couldn't be reached. Nothing was sent in the clear; try again in a minute."],
+    // ── the provider's own outcome, via UPSTREAM_PUBLIC in the lane ───────────────────────────
+    [(d) => d.includes("out of capacity"),
+     "The sealed AI lane is out of capacity right now, so nothing was sent. This is an account limit rather than a fault: another model is tried automatically, and if you keep seeing this the lane needs topping up."],
+    [(d) => d.includes("credentials were refused"),
+     "The AI provider refused our credentials, so nothing was sent. That is a problem at our end, not with your matter or your machine."],
+    [(d) => d.includes("rate-limited") || d.includes("429"),
+     "The AI machine is busy right now. Wait a moment and try again."],
+    [(d) => d.includes("temporarily unavailable") || d.includes("provider failed") || d.includes("provider timed out") || d.includes("timed out"),
+     "The AI provider is having trouble right now, so nothing was sent. Another machine is tried automatically; if it persists, wait a few minutes."],
+    [(d) => d.includes("model or route was not found"),
+     "That model is not available on the sealed lane right now, so nothing was sent. Another one is tried automatically."],
+    [(d) => d.includes("rejected as malformed"),
+     "The AI provider rejected the request as malformed, so nothing was sent. This is a fault at our end; starting a fresh session usually clears it."],
+  ];
+
   function plainModelError(detail) {
-    const d = detail.toLowerCase();
-    // CAPACITY IS NOT UNREACHABILITY, and it is checked FIRST because the refusal text trips two later
-    // branches by accident: it contains the word "nonce" ("no verified alternative has nonces") and it
-    // arrives as a 503. Either match produces a sentence that sends the reader after the wrong thing —
-    // "couldn't be reached" had me looking at the network when the real condition was that 11 of 12
-    // machines failed a check this device makes (measured 2026-09-30). Nothing was unreachable and no
-    // key expired: there was no machine that met the bar.
-    if (d.includes("no verified alternative") || d.includes("instance is gone") || d.includes("no-eligible-instance"))
-      return "No verified AI machine was free just then, so nothing was sent in the clear. That is a capacity limit, not a failed check — the session tries another verified machine by itself.";
-    if (d.includes("nonce")) return "The AI machine turned this request away because its one-time key had expired. Try again; a fresh key is fetched automatically.";
-    if (d.includes("429") || d.includes("rate")) return "The AI machine is busy right now. Wait a moment and try again.";
-    if (d.includes("unreachable") || d.includes("502") || d.includes("503")) return "The AI machine couldn't be reached. Nothing was sent in the clear; try again in a minute.";
-    // "not verified" did NOT match "could not BE verified" — the exact phrase the lane raises — so the
-    // most serious condition fell through to the blandest sentence, "didn't answer this request". Found
-    // by a sim on 2026-09-30 while fixing the branch above. A verification failure must never be the
-    // quietest message in this function.
-    if (/not verified|not be verified|unverified|verification failed|refus/.test(d))
-      return "The AI machine could not be verified, so nothing was sent to it.";
-    return "The AI machine didn't answer this request.";
+    const d = String(detail || "").toLowerCase();
+    for (const [test, sentence] of MODEL_ERROR_CASES) if (test(d)) return sentence;
+    // Anything unanticipated stays honest rather than being guessed at, and says nothing left the machine.
+    return "The AI machine did not complete this request, and nothing was sent in the clear.";
   }
+
   const RETRY_TEXT = "Continue where you left off";
   let failedTries = 0;                  // failed answers in a row; an answer that gets through resets it
 

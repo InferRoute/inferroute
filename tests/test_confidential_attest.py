@@ -421,3 +421,106 @@ def test_the_loopback_hop_is_never_proxied_for_any_adapter():
     assert _with_loopback("corp.example.com").endswith("corp.example.com")
     # and it does not duplicate an entry they already had
     assert _with_loopback("127.0.0.1,corp.example.com").count("127.0.0.1") == 1
+
+
+# ── choosing a model that will stay available, and recovering without telling the user ───────────
+# Henry, 2026-09-30: the fallback must "first choose the model that has the strongest chances to stay
+# available" and otherwise "react to it in a smooth if possible silent way". The previous version was
+# reactive and open-time only: it learned a fleet was unusable by paying a full attestation against it.
+
+def test_fleet_yield_learns_from_our_own_receipts_and_trusts_the_unseen():
+    """The signal a live probe is blind to. On 2026-09-30 all 12 kimi-k2.6 instances were offering
+    nonces and 11 failed THIS DEVICE's checks; a liveness probe cannot see that, and our own receipts
+    can. An unseen model scores 1.0 rather than 0 — ranking it last would mean a newly offered model
+    could never be chosen, so could never earn a history."""
+    from inferroute_cli import confidential as C
+    y, n = C.fleet_yield("a-model-no-receipt-mentions")
+    assert (y, n) == (1.0, 0), "an unseen fleet was ranked last and can never earn a history"
+    y2, n2 = C.fleet_yield("kimi-k3")
+    assert 0.0 <= y2 <= 1.0 and n2 >= 0
+
+
+def test_a_probe_that_fails_is_unknown_not_empty():
+    """"We could not ask" must not read as "there is nothing there", or one flaky listing call would
+    rule out a healthy fleet for the whole session."""
+    import asyncio
+    from inferroute_cli import confidential as C
+
+    class _Boom:
+        async def instances(self, fleet):
+            raise RuntimeError("listing unavailable")
+    assert asyncio.run(C.probe_fleet(_Boom(), "f")) == -1
+
+
+def test_health_ordering_keeps_the_preferred_model_when_it_is_healthy_and_moves_on_when_it_is_not():
+    import asyncio
+    from inferroute_cli import confidential as C
+
+    catalog = [{"name": m, "fleet_id": f"fleet-{m}"} for m in ("kimi-k3", "kimi-k2.6", "glm-5.2")]
+
+    class _T:
+        def __init__(self, live): self.live = live; self.calls = 0
+        async def instances(self, fleet):
+            self.calls += 1
+            n = self.live.get(fleet.replace("fleet-", ""), 0)
+            return {"instances": [{"e2e_pubkey": "k", "nonces": ["n"]} for _ in range(n)]}
+
+    order = ["kimi-k3", "kimi-k2.6", "glm-5.2"]
+    healthy = _T({"kimi-k3": 4, "kimi-k2.6": 12, "glm-5.2": 4})
+    assert asyncio.run(C.health_ordered(order, catalog, healthy)) == order
+    assert healthy.calls == 1, "a healthy preferred model must not cost probes of the others"
+
+    # preferred fleet is empty: something else must lead
+    thin = _T({"kimi-k3": 0, "kimi-k2.6": 12, "glm-5.2": 4})
+    got = asyncio.run(C.health_ordered(order, catalog, thin))
+    assert got[0] != "kimi-k3", got
+    assert set(got) == set(order), "re-ranking must not drop a candidate"
+
+
+def test_only_per_moment_failures_are_retried_and_an_account_limit_is_not():
+    """402 is an ACCOUNT condition — every instance in every fleet bills the same account — so retrying
+    it spends a second round trip to reach the same answer and delays the one message that says what is
+    actually wrong. 400/404 are excluded from the other direction: a malformed request is not luck."""
+    from inferroute_local.confidential import session as S
+    assert set(S._RETRY_ON_OTHER_INSTANCE) == {429, 500, 502, 503, 504}
+    for wrong in (400, 402, 404, 401, 403):
+        assert wrong not in S._RETRY_ON_OTHER_INSTANCE, f"{wrong} would be retried pointlessly"
+    src = __import__("inspect").getsource(S.ConfidentialSession._send_once) \
+        if hasattr(S.ConfidentialSession, "_send_once") else open(S.__file__).read()
+    # the failing instance is removed before the retry: a retry to the same machine is a delay, not a recovery
+    assert "self._pool.pop(pinned.instance_id, None)" in src
+    assert "upstream-retry" in src
+
+
+def test_the_health_statistic_prefers_the_server_and_survives_its_absence():
+    """Henry, 2026-09-30: "put on server side what should be there rather than on the client". The
+    statistic — how many of a fleet's instances actually pass a client's checks — is one the OPERATOR can
+    see across every session and a single client cannot. Our own local sample was n=1 and n=2 for two of
+    five models, and a NEW client has no history at all, which is precisely the session this is meant to
+    improve.
+
+    It is a HINT: the client still attests what it chooses, so a wrong or hostile answer costs one wasted
+    attestation and no trust moves to the operator. And the endpoint is not served yet, so its absence
+    must be ordinary rather than fatal."""
+    import asyncio
+    from inferroute_cli import confidential as C
+
+    class _NoEndpoint:
+        async def fleet_health(self): raise RuntimeError("404")
+    class _Nonsense:
+        async def fleet_health(self): return {"fleets": "not a dict"}
+    class _Good:
+        async def fleet_health(self): return {"fleets": {"fleet-x": {"eligible_ratio": 0.9, "samples": 400}}}
+
+    assert asyncio.run(C.server_fleet_health(_NoEndpoint())) == {}, "an absent endpoint must not be fatal"
+    assert asyncio.run(C.server_fleet_health(_Nonsense())) == {}, "a nonsense shape must not be trusted"
+    assert asyncio.run(C.server_fleet_health(_Good()))["fleet-x"]["eligible_ratio"] == 0.9
+
+    # the server number is preferred, and a fleet the server says nothing about falls back to local history
+    import inspect
+    src = inspect.getsource(C.health_ordered)
+    assert "server_health" in src and "fleet_yield(short)[0]" in src
+    assert src.index("hint.get(\"eligible_ratio\")") < src.index("fleet_yield(short)[0]"), \
+        "local history is consulted before the server's own number"
+    # a ratio outside 0..1 is not believed
+    assert "0.0 <= ratio <= 1.0" in src

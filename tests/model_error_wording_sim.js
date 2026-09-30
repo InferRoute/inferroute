@@ -4,7 +4,10 @@
 // accident unless it is matched first.
 import fs from "fs";
 const src = fs.readFileSync("inferroute_cli/probant_web/app.js", "utf8");
-const a = src.indexOf("  function plainModelError(detail) {");
+// Lift the CASES ARRAY as well as the function: they were separated on 2026-09-30 when the
+// classifier was rewritten over the lane's bounded phrase set, and a slice that starts at the
+// function alone leaves MODEL_ERROR_CASES undefined.
+const a = src.indexOf("  const MODEL_ERROR_CASES = [");
 const b = src.indexOf("\n  const RETRY_TEXT", a);
 if (a < 0 || b < 0) { console.error("HARNESS: plainModelError moved"); process.exit(2); }
 const f = new Function("detail", `${src.slice(a, b)}\n return plainModelError(detail);`);

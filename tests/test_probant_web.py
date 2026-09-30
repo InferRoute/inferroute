@@ -1892,3 +1892,38 @@ def test_narrowing_the_tools_changes_the_recorded_config_hash():
     before = P.config_hash(_A(), P.TOOLS)
     after = P.config_hash(_A(), P.MATTER_TOOLS)
     assert before != after, "the record would not show that reading was scoped"
+
+
+def test_every_failure_the_lane_can_report_has_its_own_plain_sentence():
+    """Henry saw "The AI machine didn't answer this request. (4 times)" — the FALLTHROUGH branch, which
+    means the detail matched nothing. Tracing it: five of the ten provider statuses fell through,
+    including 402, the one that names the actual problem ("this lane is temporarily out of capacity").
+    And 401/403 ("our credentials were refused") matched /refus/ and were reported as a VERIFICATION
+    failure: a billing problem shown as a broken trust chain.
+
+    Matched on OUR OWN sanitised phrases, not on status numbers. The lane never passes an upstream body
+    through, so what arrives is a bounded set of sentences this product writes — matching those is exact,
+    where matching "502" catches any sentence that happens to contain it."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "model_error_coverage_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout)
+
+    generic = "did not complete this request"
+    fell = [k for k, v in out.items() if generic in v]
+    assert fell == ["unknownStatus"], f"these have no sentence of their own: {fell}"
+
+    # the ones that were actively WRONG before, not merely bland
+    assert "out of capacity" in out["provider_402"], out["provider_402"]
+    assert "verif" not in out["provider_401"].lower(), "a credentials problem shown as a trust failure"
+    assert "credentials" in out["provider_401"]
+    # a nonce rejected twice is not an expiry: the advice to wait for a fresh key is already spent
+    assert "fresh session" in out["nonceTwice"] and "automatically" not in out["nonceTwice"]
+    # every sentence tells the reader nothing left their machine, or says what to do
+    for k, v in out.items():
+        assert v.strip().endswith((".", "…")), f"{k}: {v!r}"

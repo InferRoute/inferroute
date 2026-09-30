@@ -272,6 +272,32 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?
 	};
 }
 
+// What the model is told a read returned — and, as plainly as the text itself, what it did NOT.
+//
+// A read returns what this index HOLDS, which today is usually a title and abstract. A model handed a short
+// text with no statement of scope will describe it as "the document", and the next sentence is an invented
+// specification. So the coverage line goes FIRST, in the model's own context, before the text it qualifies.
+function readText(out: SearchVerdict, key: string): string {
+	const res = (out.result ?? {}) as { text?: string; coverage?: Record<string, string>; publication_date?: number; country?: string };
+	const cov = res.coverage ?? {};
+	const says: Record<string, string> = {
+		held: "in full", truncated: "truncated", claim_1: "first claim only", not_held: "NOT in this index",
+	};
+	const parts = ["abstract", "claims", "description"]
+		.map((k) => `${k}: ${says[String(cov[k] ?? "")] ?? String(cov[k] ?? "not stated")}`)
+		.join(" · ");
+	const absent = ["abstract", "claims", "description"].filter((k) => String(cov[k] ?? "") === "not_held");
+	return [
+		`${key}${res.publication_date ? ` (published ${res.publication_date})` : ""} — read from the sealed index.`,
+		`What this index holds for it — ${parts}.`,
+		absent.length
+			? `You have NOT read the ${absent.join(" or ")}. Say so if asked about ${absent.join(" or ")}; do not supply it from memory.`
+			: "",
+		"",
+		String(res.text ?? ""),
+	].filter(Boolean).join("\n");
+}
+
 async function searchCall(path: string, body: unknown, signal: AbortSignal | undefined): Promise<SearchVerdict> {
 	const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
 	const res = await fetch(`${SEARCH}${path}`, {
@@ -953,26 +979,18 @@ export default function (pi: ExtensionAPI) {
 	// `prior_art_search` and the deep fan-out both come through here, and that is the point: the question
 	// "did the professional agree to this machine" must have ONE answer in this extension. A second copy of
 	// that logic is a second opinion about consent, and the two would drift the first time either changed.
-	async function sealedSearch(o: {
-		text: string; k: number; feature?: string; like?: string;
-		ctx: ExtensionContext; signal: AbortSignal | undefined; phase: (name: string) => void;
-	}): Promise<{ sp: SearchProof; out: SearchVerdict; earlier: Map<string, number> }> {
-		const { text, k, ctx, signal } = o;
-		const feature = o.feature ?? "";
-		const like = o.like ?? "";
-		let verified: SearchVerdict;
-		o.phase("verifying");
-		try {
-			verified = await searchCall("/enclave", undefined, signal);
-		} catch {
-			throw new Error("the local search verifier did not answer; nothing was sent");
-		}
+	// ONE answer to "did the professional agree to this machine", for every sealed operation.
+	//
+	// This was inline in sealedSearch, under a comment saying a second copy would be "a second opinion about
+	// consent". Reading a document is a second sealed operation, so the choice was to copy it (the thing that
+	// comment forbids) or to lift it out. Lifted. `want` only changes the one line that previews what is about
+	// to be sent; the GRANT is identical whichever operation asks first, and names both.
+	async function ensureApproved(o: {
+		verified: SearchVerdict; ctx: ExtensionContext; signal: AbortSignal | undefined;
+		phase: (name: string) => void; want: { kind: "search" | "read"; preview: string };
+	}): Promise<void> {
+		const { verified, ctx, signal } = o;
 		const vp = searchProofOf(verified, "verify");
-		searchStatus(ctx, vp);
-		if (!verified.ok) {
-			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
-			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
-		}
 		const e = verified.enclave ?? {};
 		let matter: { approved?: string[]; cutoff_date?: number | null } = {};
 		try {
@@ -989,13 +1007,13 @@ export default function (pi: ExtensionAPI) {
 				const identity = isInferRoutes(verified)
 					? "running exactly the software InferRoute published (signed reference checked)"
 					: "running exactly the software this computer expects";
-				const preview = text.length > 400 ? `${text.slice(0, 400)}…` : text;
+				const preview = o.want.preview.length > 400 ? `${o.want.preview.slice(0, 400)}…` : o.want.preview;
 				pending = (async () => {
 					const ok = await ctx.ui.confirm(
 						"Allow a sealed patent search?",
 						[
 							vp.testRoots ? "⚠ TEST machine: checked against test keys, not a real verification.\n\n" : "",
-							"The assistant wants to search for:\n",
+							o.want.kind === "read" ? "The assistant wants to open:\n" : "The assistant wants to search for:\n",
 							`  "${preview}"\n\n`,
 							`Checked just now: the search machine is genuine sealed hardware, ${identity}. `,
 							"This text is encrypted here and only that machine can open it. ",
@@ -1012,9 +1030,10 @@ export default function (pi: ExtensionAPI) {
 							"This is the only time you will be asked. Saying yes allows every sealed search on ",
 							"this matter to this machine — including queries the assistant composes itself, from ",
 							"your description split into features and from documents earlier searches returned, ",
-							"which you will not read before they are sent. Every one of them is recorded, and the ",
-							"record shows you what was put.\n\n",
-							"Allow sealed searches on this matter?\n",
+							"which you will not read before they are sent — AND opening any document those searches ",
+							"return, which sends that document\u2019s publication number to the same machine. ",
+							"Every one of them is recorded, and the record shows you what was put.\n\n",
+							"Allow sealed searches and document reads on this matter?\n",
 							`(technical: software ${String(e.host_data ?? "").slice(0, 12)}… · index ${e.index_snapshot ?? ""} · key ${e.enclave_key ?? ""}…)`,
 						].join(""),
 					);
@@ -1036,6 +1055,81 @@ export default function (pi: ExtensionAPI) {
 				throw new Error("the user declined to send a sealed query to the search enclave; nothing was sent");
 			}
 		}
+	}
+
+	// One sealed READ, end to end. Same verify, same single approval, same proof card — because to the
+	// professional it is the same question ("is this machine the one I agreed to?") and a different answer
+	// here would be a different product on the same screen.
+	async function sealedRead(o: {
+		key: string; ctx: ExtensionContext; signal: AbortSignal | undefined; phase: (name: string) => void;
+	}): Promise<{ sp: SearchProof; out: SearchVerdict }> {
+		const { key, ctx, signal } = o;
+		let verified: SearchVerdict;
+		o.phase("verifying");
+		try {
+			verified = await searchCall("/enclave", undefined, signal);
+		} catch {
+			throw new Error("the local search verifier did not answer; nothing was sent");
+		}
+		const vp = searchProofOf(verified, "verify");
+		searchStatus(ctx, vp);
+		if (!verified.ok) {
+			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
+		}
+		const e = verified.enclave ?? {};
+		await ensureApproved({ verified, ctx, signal, phase: o.phase, want: { kind: "read", preview: key } });
+		let out: SearchVerdict;
+		o.phase("reading");
+		let beat: ReturnType<typeof setInterval> | undefined;
+		try {
+			beat = setInterval(() => o.phase("reading"), SEARCH_HEARTBEAT_MS);
+			out = await searchCall("/document", { key, expect_lifetime_id: e.lifetime_id }, signal);
+		} catch {
+			throw new Error("the local search verifier did not answer; the read did not complete");
+		} finally {
+			if (beat) clearInterval(beat);
+		}
+		const sp = searchProofOf(out, "search", verified);
+		sp.like = key;
+		searchStatus(ctx, sp);
+		pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
+		if (!out.ok) {
+			const why = String(sp.refusal ?? "");
+			// The two refusals a professional will actually meet, said in their own terms rather than as codes.
+			if (why.includes("date_out_of_bound")) {
+				throw new Error(`${key} was published on or after this matter's date bound, so the sealed machine refused to return it; nothing of it was read`);
+			}
+			if (why.includes("not_found")) {
+				throw new Error(`${key} is not in this index, so there is nothing to read; do not describe it from memory`);
+			}
+			throw new Error(`the sealed read was refused (${why})`);
+		}
+		return { sp, out };
+	}
+
+	async function sealedSearch(o: {
+		text: string; k: number; feature?: string; like?: string;
+		ctx: ExtensionContext; signal: AbortSignal | undefined; phase: (name: string) => void;
+	}): Promise<{ sp: SearchProof; out: SearchVerdict; earlier: Map<string, number> }> {
+		const { text, k, ctx, signal } = o;
+		const feature = o.feature ?? "";
+		const like = o.like ?? "";
+		let verified: SearchVerdict;
+		o.phase("verifying");
+		try {
+			verified = await searchCall("/enclave", undefined, signal);
+		} catch {
+			throw new Error("the local search verifier did not answer; nothing was sent");
+		}
+		const vp = searchProofOf(verified, "verify");
+		searchStatus(ctx, vp);
+		if (!verified.ok) {
+			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
+		}
+		const e = verified.enclave ?? {};
+		await ensureApproved({ verified, ctx, signal, phase: o.phase, want: { kind: "search", preview: text } });
 		let out: SearchVerdict;
 		o.phase("searching");
 		// A heartbeat while the sealed call is outstanding. The page stops claiming work after two minutes
@@ -1208,6 +1302,69 @@ export default function (pi: ExtensionAPI) {
 			const { sp, out, earlier } = await sealedSearch({ text, k, feature, like, ctx, signal, phase });
 			const label = `Search ${searchNo}${feature ? ` (feature: ${feature})` : ""}${like ? ` (documents like ${like})` : ""}`;
 			return { content: [{ type: "text", text: hitsText(out, label, earlier) }], details: sp };
+		},
+
+		renderResult(result, { expanded }, theme) {
+			return renderSearchProof(result.details as SearchProof | undefined, expanded, theme);
+		},
+	});
+
+	// ── reading one document the searches returned ────────────────────────────────────────────────
+	//
+	// On 2026-09-30 a session was asked "Open US-5958299-A: read that document" and answered, correctly,
+	// "I have no way to open or read a patent document ... there is no fetch or document-viewing capability
+	// in this session", then refused to reconstruct it from memory. The refusal was right and the capability
+	// was already there: the enclave advertises supports: ["search", "document"], and the whole sealed read
+	// path — signed text_sha256, date-bound refusal, record verifier, bundle rendering — was built, tested
+	// and reachable from nothing, because no tool and no route led to it.
+	//
+	// WHAT IT SENDS: a publication number, and nothing else. Not the disclosure, not the matter, not a
+	// query. The number came back from THIS enclave, for THIS matter, in a result it produced itself.
+	//
+	// CONSENT: the same one-per-machine-per-matter approval as a search, and the approval sentence now NAMES
+	// reading documents rather than saying only "every sealed search". A read is not a search and it is not
+	// strictly narrower either — which document someone opens is an interest signal a bare search does
+	// not carry — so a sentence that vouched only for searches must not be stretched to cover it. Matters
+	// approved under the older sentence keep their approval: the read goes to the same machine that already
+	// surfaced that document to this matter under this session id, and the next enclave image changes the
+	// measurement, which re-asks everyone under the wording that names reads. Stated here rather than left
+	// to be discovered; Henry can overrule it.
+	pi.registerTool({
+		name: "read_patent",
+		label: "Read a document (sealed)",
+		description:
+			"Read one patent document that a search on this matter returned, by publication number. The number is " +
+			"sealed to the same search enclave this machine verified, which returns the text it holds and signs it. " +
+			"Only documents within the matter's date bound can be read; the enclave refuses one published on or after " +
+			"it. What comes back is what the index HOLDS, which is stated per read — usually the title and abstract, " +
+			"sometimes a first claim. It is not the full specification: do not describe unread parts, and do not fill " +
+			"them in from memory.",
+		promptSnippet: "Read one document a search returned (sealed, date-bound)",
+		promptGuidelines: [
+			"Use read_patent when the user asks what a specific returned document says, discloses, or claims.",
+			"Say what the read actually returned and what it did not: if coverage says the description is absent, the description was NOT read and nothing about it may be asserted.",
+			"Never reconstruct a document's contents from memory. If a read is refused or a document is not in the index, say so plainly.",
+		],
+		parameters: Type.Object({
+			key: Type.String({ description: "A publication number a search on this matter returned, e.g. US-5958299-A" }),
+		}),
+
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+			if (!ctx.hasUI) {
+				throw new Error("read_patent needs the user at this machine to approve sealed requests; refused without sending anything");
+			}
+			const key = String(params.key ?? "").trim().toUpperCase();
+			if (!key) throw new Error("read_patent needs a publication number; nothing was sent");
+			// THE NUMBER MUST HAVE COME FROM A SEARCH ON THIS MATTER. Without this the model could put any
+			// string on the wire — including one it invented, which would both leak an interest this matter
+			// never had and invite an answer about a document nobody surfaced.
+			if (!docText.has(key) && !priorDocs.has(key)) {
+				throw new Error(`${key} was not returned by any search on this matter, so there is nothing to open; nothing was sent`);
+			}
+			const out = await sealedRead({ key, ctx, signal, phase: (name: string) => {
+				try { onUpdate?.({ content: [], details: { phase: name } }); } catch { /* decoration */ }
+			} });
+			return { content: [{ type: "text", text: readText(out.out, key) }], details: out.sp };
 		},
 
 		renderResult(result, { expanded }, theme) {

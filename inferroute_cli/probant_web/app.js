@@ -252,10 +252,23 @@
   let lastError = null;
   function plainModelError(detail) {
     const d = detail.toLowerCase();
+    // CAPACITY IS NOT UNREACHABILITY, and it is checked FIRST because the refusal text trips two later
+    // branches by accident: it contains the word "nonce" ("no verified alternative has nonces") and it
+    // arrives as a 503. Either match produces a sentence that sends the reader after the wrong thing —
+    // "couldn't be reached" had me looking at the network when the real condition was that 11 of 12
+    // machines failed a check this device makes (measured 2026-09-30). Nothing was unreachable and no
+    // key expired: there was no machine that met the bar.
+    if (d.includes("no verified alternative") || d.includes("instance is gone") || d.includes("no-eligible-instance"))
+      return "No verified AI machine was free just then, so nothing was sent in the clear. That is a capacity limit, not a failed check — the session tries another verified machine by itself.";
     if (d.includes("nonce")) return "The AI machine turned this request away because its one-time key had expired. Try again; a fresh key is fetched automatically.";
     if (d.includes("429") || d.includes("rate")) return "The AI machine is busy right now. Wait a moment and try again.";
     if (d.includes("unreachable") || d.includes("502") || d.includes("503")) return "The AI machine couldn't be reached. Nothing was sent in the clear; try again in a minute.";
-    if (d.includes("not verified") || d.includes("refus")) return "The AI machine could not be verified, so nothing was sent to it.";
+    // "not verified" did NOT match "could not BE verified" — the exact phrase the lane raises — so the
+    // most serious condition fell through to the blandest sentence, "didn't answer this request". Found
+    // by a sim on 2026-09-30 while fixing the branch above. A verification failure must never be the
+    // quietest message in this function.
+    if (/not verified|not be verified|unverified|verification failed|refus/.test(d))
+      return "The AI machine could not be verified, so nothing was sent to it.";
     return "The AI machine didn't answer this request.";
   }
   const RETRY_TEXT = "Continue where you left off";

@@ -282,6 +282,16 @@ class Continuity:
                 row = dict(row)
                 row["from_previous_session"] = old.receipt.session_id
                 self.active.receipt.served_by.insert(0, row)
+            # The continuity EVENTS too, not only the evidence. A live run showed the surviving receipt
+            # carrying `switched` and `carried` while the decisions that led there — which fleets were
+            # considered and why, and that a standby had been verified and held — stayed behind on the
+            # receipt nobody reads afterwards. Evidence without the reasoning is half a record.
+            carried_kinds = ("continuity-order", "continuity-open", "standby-ready",
+                             "switched", "carried", "no-standby", "standby-stale")
+            prior_events = [dict(e, from_previous_session=old.receipt.session_id)
+                            for e in (getattr(old.receipt, "events", []) or [])
+                            if e.get("kind") in carried_kinds]
+            self.active.receipt.events[:0] = prior_events
             self.active.receipt.counters["continuity_switches"] = self.switches
             self.active.receipt.note(
                 "continuity", f"this conversation began on {old.model_short} "

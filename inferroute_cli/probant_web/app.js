@@ -414,6 +414,33 @@
     }
   }
 
+  // HOW STRONGLY THIS SEARCH MATCHED, relative to the others IN THE SAME SEARCH. A fixed k means the last
+  // results are simply the weakest the pool had, not ten equally-relevant documents — measured on a real
+  // search, rank 1 scored about ten times rank 12 and eight of twenty fell below zero, while the page
+  // showed all twenty identically. Henry, 2026-09-30: "as if they all [have] the same-level relevance".
+  //
+  // NO NUMBER IS SHOWN, and there is no bar in the cross-search panel. The engine's score is a LambdaRank
+  // output: an ordering signal, not a calibrated probability. It is comparable within ONE query and NOT
+  // across two, so printing it would invent a precision it does not have, and comparing it between
+  // searches would be simply wrong. A bar normalised inside its own search says exactly what the number
+  // supports and nothing more.
+  function relBar(score, lo, hi) {
+    if (typeof score !== "number" || !isFinite(score) || !(hi > lo)) return null;
+    const frac = Math.max(0.04, Math.min(1, (score - lo) / (hi - lo)));   // floor: never an invisible bar
+    const bar = el("span", "relbar");
+    const fill = el("span", "relbar-fill");
+    fill.style.width = `${(frac * 100).toFixed(1)}%`;
+    bar.append(fill);
+    bar.title = "how strongly this matched, relative to the other results of this same search";
+    bar.setAttribute("aria-label", bar.title);
+    return bar;
+  }
+
+  function scoreRange(docs) {
+    const xs = (docs || []).map((d) => d && d.score).filter((x) => typeof x === "number" && isFinite(x));
+    return xs.length >= 2 ? [Math.min(...xs), Math.max(...xs)] : [NaN, NaN];
+  }
+
   function offerDeeper(card) {
     if (!card || card.querySelector(".deeper") || ended) return;
     const b = el("button", "deeper", DEEPER);
@@ -681,8 +708,11 @@
         else { prev.rank = Math.min(prev.rank, i + 1); prev.seen += 1; if (!prev.title) prev.title = title; }
       });
     }
-    // Hidden until a deep search has run AND there is something to list, so it never appears empty.
-    panel.hidden = deepMarksAtLastPress === null || best.size === 0;
+    // Hidden only while there is nothing to list. It WAS gated on a deep search having completed, from a
+    // literal reading of "a second tab that appears when a deep search was done" — which made it invisible
+    // after an ordinary search and read as not built at all (Henry, 2026-09-30: "did you implement...").
+    // The list is worth reading as soon as any search has returned documents.
+    panel.hidden = best.size === 0;
     if (panel.hidden) return;
     const rows = Array.from(best.entries())
       .sort((a, b) => a[1].rank - b[1].rank || b[1].seen - a[1].seen || a[0].localeCompare(b[0]));
@@ -1231,11 +1261,13 @@
           const docs = leg.docs || [];
           if (docs.length) {
             const list = el("ol", "docs");
+            const [_llo, _lhi] = scoreRange(docs);
             docs.forEach((doc, idx) => {
               const keyNo = String(doc.key || "");
               const title = el("div", "dtitle", String(doc.title || ""));
               const row = el("li", "doc",
                 el("span", "rank", String(idx + 1)),
+                relBar(doc.score, _llo, _lhi),
                 el("div", "", docLink(keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
                   doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
                 markButtons(keyNo, e.card));
@@ -1308,12 +1340,14 @@
     if (d.testRoots) body.append(el("div", "card-note warn", "TEST machine: checked against test keys, not a real verification."));
     else body.append(el("div", "card-note", `🔒 ${d.ours ? "InferRoute's sealed search machine" : "Sealed search machine"}, checked just before the search. Only that machine could read the query.`));
     const list = el("ol", "docs");
+    const [_lo, _hi] = scoreRange(docs);
     docs.forEach((doc, idx) => {
       const keyNo = String(doc.key || "");
       const title = el("div", "dtitle", String(doc.title || ""));
       const keyEl = docLink(keyNo);
       const row = el("li", "doc",
         el("span", "rank", String(idx + 1)),
+        relBar(doc.score, _lo, _hi),
         el("div", "", keyEl, doc.year ? el("span", "year", String(doc.year)) : null,
           doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
         markButtons(keyNo, card));
@@ -1321,7 +1355,7 @@
       list.append(row);
     });
     body.append(list);
-    body.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty."));
+    body.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty. The bar shows how strongly each one matched RELATIVE TO THE OTHERS IN THIS SEARCH — a search returns the best it found, not only the ones worth reading, so a short bar means this one was among the weakest here, not that it is irrelevant."));
     if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));

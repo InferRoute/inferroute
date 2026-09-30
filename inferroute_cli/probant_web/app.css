@@ -564,3 +564,11 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
               border-bottom: 1px solid var(--line); }
 .result-row:last-child { border-bottom: 0; }
 .results-note { margin-top: 8px; font-size: 12px; opacity: 0.8; }
+
+/* How strongly a result matched, relative to the others in the SAME search. Deliberately a bar and not a
+   number: the engine's score is an ordering signal, not a calibrated probability, so a figure would imply
+   a precision it does not carry. Never rendered in the cross-search panel, where the scores are not
+   comparable at all. */
+.relbar { display: inline-block; width: 28px; height: 4px; border-radius: 2px; background: var(--line);
+          margin: 0 6px 0 0; vertical-align: middle; flex: 0 0 auto; }
+.relbar-fill { display: block; height: 100%; border-radius: 2px; background: var(--accent); }

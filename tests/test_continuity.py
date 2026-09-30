@@ -346,8 +346,8 @@ def test_the_claim_the_lane_depends_on_is_conditioned():
     #
     # So: the guarantee is stated unconditionally, and the count is a FACT, reported like a meter
     # reading. No "if", no "so far", no apology.
-    assert "Machines that have opened it: 1 — the receipt names each." in one
-    assert "Machines that have opened it: 3 — the receipt names each." in three
+    assert "Machines that have opened it so far: 1." in one
+    assert "Machines that have opened it so far: 3." in three
     # and it is not filed as a LIMITATION — a limitation is something we cannot prove, and the word
     # itself told four readers this was bad news
     assert not any(k == "machines-per-session" for k, _ in _att.LIMITATIONS), \

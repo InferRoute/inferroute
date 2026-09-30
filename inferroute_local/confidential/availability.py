@@ -218,7 +218,13 @@ def capability_of(model_short: str, meta: Optional[dict] = None) -> float:
 class Policy:
     """How a caller wants fleets ordered, and how good is good enough."""
     rank: str = RANK_PREFERENCE
-    floor: float = 0.80                # the service level a fleet must clear to be used at all
+    floor: float = 0.80                # below this, prefer something measurably better if one exists
+    # And below THIS, set aside whatever else is on offer. There is a point where "we have never tried
+    # it" really is a better bet than "we have tried it and it fails", and a rule that only ever demotes
+    # against a measured alternative would keep a fleet measured at zero because the others are merely
+    # unknown. The two thresholds answer different questions: `floor` is "is there better?", `broken` is
+    # "is this worth sending anything to at all?"
+    broken: float = 0.30
     # A fleet whose lower bound clears this is good enough to stop looking — a SERVICE LEVEL, a
     # probability, not the "expected usable instance count >= 1.0" that every fleet passed.
     good_enough: float = 0.90
@@ -425,6 +431,7 @@ async def choose(candidates, policy: Policy, beliefs: Beliefs, probe, *,
 
     usable: list[tuple[tuple, str]] = []
     unusable: list[tuple[tuple, str]] = []
+    weak: list = []                    # below the floor; set aside only if something beats them
     probed: list[str] = []
     views: dict = {}
     reason = ""
@@ -440,15 +447,24 @@ async def choose(candidates, policy: Policy, beliefs: Beliefs, probe, *,
             reason = reason or f"{short}: measured {v.serve.p:.0%} of requests served, {v.serve.evidence:.0f} recent observations"
             break                                      # evidence is enough; spend nothing more
 
-        # GATED ON THE SAME QUANTITY IT PROMOTES ON. The promotion test above uses the interval of
-        # serve x verify; this used to demote on `serve` alone, so a fleet that served perfectly and
-        # never verified — one that cannot be opened at all — was never set aside. It was probed, found
-        # to have instances, ranked first by capability, and burned a full attestation on every launch.
-        if v.known and v.p_usable() < policy.floor:
+        # A FLOOR ALONE SETS ASIDE THE BEST FLEET YOU HAVE. Measured live on 2026-09-30: kimi-k3 was
+        # opening perfectly — 4 of 4 machines eligible — with the best record of any fleet (78% of
+        # requests served, 95% of machines verifying). p_usable = 0.74, under an 0.80 floor, so it was
+        # discarded; and glm-5.1, which had NO record at all and ranks lower on capability, was probed,
+        # found to have instances, and used instead. A measured-good fleet lost to an unmeasured one and
+        # the session ran on the worse model.
+        #
+        # Being below a bar is not a reason to refuse the best thing available. A fleet is set aside
+        # only when something else is MEASURABLY better — the same separation rule used for promotion,
+        # so a fleet is never discarded in favour of one we know less about.
+        if v.known and v.p_usable() < policy.broken:
             unusable.append(((policy.key(short, meta.get(short), i)), short))
             reason = reason or (f"{short} set aside: {v.serve.p:.0%} of requests served and "
-                                f"{v.verify.p:.0%} of its machines verify, over {v.serve.evidence:.0f} "
-                                f"observations")
+                                f"{v.verify.p:.0%} of its machines verify, over "
+                                f"{v.serve.evidence:.0f} observations")
+            continue
+        if v.known and v.p_usable() < policy.floor:
+            weak.append(((policy.key(short, meta.get(short), i)), short, v))
             continue
 
         # UNKNOWN, or known-but-middling: ask the fleet itself before judging it.
@@ -469,12 +485,47 @@ async def choose(candidates, policy: Policy, beliefs: Beliefs, probe, *,
                       if not v.known else
                       f"{short}: {v.serve.p:.0%} served recently, {live} instance(s) live")
 
+    # Now decide the weak ones, with everything else in hand. A weak fleet is set aside only if some
+    # usable fleet's LOWER bound clears its UPPER bound — measurably better, not merely different, and
+    # never an unknown standing in for a better one.
+    best_lo = max((views[s_].interval()[0] for _, s_ in usable if views[s_].known), default=None)
+    for key, short, v in weak:
+        lo, hi = v.interval()
+        if best_lo is not None and best_lo > hi:
+            unusable.append((key, short))
+            reason = reason or (f"{short} set aside: {v.serve.p:.0%} of requests served and "
+                                f"{v.verify.p:.0%} of its machines verify, over {v.serve.evidence:.0f} "
+                                f"observations, and something measurably better is available")
+        else:
+            usable.append((key, short))
+            reason = reason or (f"{short}: {v.serve.p:.0%} served, {v.verify.p:.0%} of machines verify "
+                                f"— below par, and nothing measurably better is available")
+
     usable.sort(key=lambda t_: t_[0])
     unusable.sort(key=lambda t_: t_[0])
-    seen = [s for _, s in usable] + [s for _, s in unusable]
-    # Anything never reached (we stopped early) keeps its policy order behind what we did look at.
-    rest = [pairs[i][1] for i in ordered if pairs[i][1] not in seen]
-    return Choice(order=seen + rest, reason=reason or "no fleet could be assessed", probed=probed, views=views)
+    # USABLE, THEN NEVER-EXAMINED, THEN KNOWN-BAD. A fleet we looked at and set aside used to sort
+    # AHEAD of one nobody assessed, so a fallback chain would try the fleet we know is failing before
+    # the one we simply have not tried — and _warm, which reads this order, drew its standby
+    # preferentially from the set that was just rejected.
+    examined = [s for _, s in usable] + [s for _, s in unusable]
+    rest = [pairs[i][1] for i in ordered if pairs[i][1] not in examined]
+    order_out = [s for _, s in usable] + rest + [s for _, s in unusable]
+
+    # THE REASON MUST DESCRIBE THE FLEET THAT WILL SERVE. It latched on the first fleet EXAMINED, which
+    # in policy order is frequently one that was then set aside — so the line written into the receipt
+    # explained a fleet that is not the one running. Re-stated from the winner, with whatever was
+    # learned along the way kept as the tail.
+    if order_out:
+        head = order_out[0]
+        v = views.get(head)
+        if v is not None:
+            chosen = (f"{head}: {v.serve.p:.0%} of requests served over {v.serve.evidence:.0f} recent "
+                      f"observations" if v.known else
+                      f"{head}: no recent record, probed live and found "
+                      f"{v.live_instances if v.live_instances >= 0 else 'no'} instance(s)")
+            reason = chosen + (f"; {reason}" if reason and not reason.startswith(head) else "")
+    return Choice(order=order_out, reason=reason or "no fleet could be assessed",
+                  probed=probed, views=views)
 
 
 # ── what a live probe can actually tell us ───────────────────────────────────────────────────────

@@ -1722,3 +1722,55 @@ def test_pack_refreshes_verification_instructions_with_its_verifier(tmp_path, V,
     pack = E.write_audit_pack(rec, tmp_path / "fresh-pack")
     assert (pack / "VERIFY.md").read_text() == E.VERIFY_MD
     assert (pack / "verify_record.py").read_bytes() == E._installed_verifier()
+
+
+def test_the_pack_ships_the_evidence_its_receipts_point_at(tmp_path):
+    """A receipt now keeps a row per machine that served, with the 243 KB attestation content-addressed
+    into evidence/<sha>.json beside it rather than inlined. The pack shipped the receipt and not those
+    files, so an auditor received a record CITING EVIDENCE THAT IS NOT IN THE BUNDLE.
+
+    That is worse than a record admitting the evidence is gone: a dangling pointer reads as an
+    omission, and "nothing was removed" is the claim this pack exists to support."""
+    import json as J
+    from inferroute_cli.probant_export import _carry_served_evidence
+
+    rdir = tmp_path / "receipts"
+    (rdir / "evidence").mkdir(parents=True)
+    sha = "a" * 64
+    (rdir / "evidence" / f"{sha}.json").write_text(J.dumps({"quote": "QUOTE-BYTES"}))
+    raw = J.dumps({"served_by": [
+        {"instance": {"id": "i-1"}, "attestation_sha256": sha, "attestation_file": f"evidence/{sha}.json"},
+        {"instance": {"id": "i-2"}, "attestation_sha256": "b" * 64, "attestation_file": "evidence/bb.json"},
+    ]}).encode()
+
+    files = {}
+    out, carried, missing = _carry_served_evidence(raw, rdir, files)
+    rec = J.loads(out)
+
+    # the evidence that exists travels, under the name the receipt now points at
+    assert carried == 1
+    packed = f"{sha[:16]}.attestation.json"
+    assert packed in files and b"QUOTE-BYTES" in files[packed]
+    assert rec["served_by"][0]["attestation_file"] == packed, "the pointer still names a path not in the pack"
+
+    # the evidence that does not exist is NAMED, not silently dropped
+    assert missing == ["b" * 16]
+    gone = rec["served_by"][1]
+    assert gone["attestation_file"] == ""
+    assert "absence is visible" in gone["attestation_absent"]
+
+
+def test_identical_evidence_is_packed_once_across_sessions(tmp_path):
+    """Several sessions of one matter usually meet the same machines. Content addressing is the whole
+    reason the blob is 243 KB and the receipt is 9 KB; the pack must not undo it."""
+    import json as J
+    from inferroute_cli.probant_export import _carry_served_evidence
+    rdir = tmp_path / "receipts"
+    (rdir / "evidence").mkdir(parents=True)
+    sha = "c" * 64
+    (rdir / "evidence" / f"{sha}.json").write_text(J.dumps({"quote": "SHARED"}))
+    raw = J.dumps({"served_by": [{"instance": {"id": "i"}, "attestation_sha256": sha}]}).encode()
+    files = {}
+    _carry_served_evidence(raw, rdir, files)
+    _carry_served_evidence(raw, rdir, files)
+    assert len([k for k in files if k.endswith(".attestation.json")]) == 1

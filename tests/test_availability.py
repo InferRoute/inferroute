@@ -289,3 +289,98 @@ def test_a_fleet_that_serves_perfectly_but_never_verifies_is_set_aside(tmp_path,
     pairs = [("f-cap", "kimi-k3"), ("f-mid", "glm-5.2")]
     c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
     assert c.order[0] != "kimi-k3", "a fleet that cannot be opened was still ranked first"
+
+
+def test_a_fleet_is_set_aside_only_when_something_beats_it(tmp_path, monkeypatch):
+    """MEASURED LIVE, 2026-09-30, and the system chose the worse model because of it. kimi-k3 was
+    opening perfectly — 4 of 4 machines eligible — with the best record of any fleet: 78% of requests
+    served, 95% of machines verifying. p_usable 0.74, under an 0.80 floor, so it was discarded. glm-5.1
+    had NO record at all and ranks lower on capability; it was probed, found to have instances, and
+    used instead.
+
+    Being below a bar is not a reason to refuse the best thing available, and an unknown fleet must
+    never stand in for a better one."""
+    import asyncio
+    import time
+    from inferroute_local.confidential import availability as A
+    now = time.time()
+    b = A.Beliefs(path=None)
+    for _ in range(14):                                # good, but under an absolute floor
+        b.observed_serve("f-cap", 8, 2, now)
+        b.observed_verify("f-cap", 19, 1, now)
+    v = b.view("f-cap", now)
+    assert v.known and v.p_usable() < A.Policy().floor, "fixture: must sit below the floor"
+
+    async def probe(_f):
+        return 4, 40
+    pairs = [("f-cap", "kimi-k3"), ("f-unknown", "glm-5.1")]
+    c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
+    assert c.order[0] == "kimi-k3", \
+        f"a measured-good fleet lost to an unmeasured one: {c.order}"
+
+
+def test_the_reason_describes_the_fleet_that_will_serve(tmp_path, monkeypatch):
+    """It latched on the first fleet EXAMINED, which in policy order is frequently one that was then
+    set aside — so the line written into the receipt explained a fleet that is not the one running."""
+    import asyncio
+    import time
+    from inferroute_local.confidential import availability as A
+    now = time.time()
+    b = A.Beliefs(path=None)
+    for _ in range(12):
+        b.observed_serve("f-mid", 10, 0, now)
+        b.observed_verify("f-mid", 4, 0, now)
+
+    async def probe(_f):
+        return 4, 40
+    pairs = [("f-cap", "kimi-k3"), ("f-mid", "glm-5.2")]
+    c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
+    assert c.reason.startswith(c.order[0]), \
+        f"the reason explains {c.reason.split(':')[0]} but {c.order[0]} will serve"
+
+
+def test_a_fleet_measured_at_zero_is_set_aside_even_with_only_unknowns_beside_it():
+    """The companion to the rule above, and the reason it needs two thresholds rather than one. Setting
+    aside only against a MEASURED alternative would keep a fleet measured at zero for as long as the
+    others were merely unknown. There is a point where "never tried" really is the better bet."""
+    import asyncio
+    import time
+    from inferroute_local.confidential import availability as A
+    now = time.time()
+    b = A.Beliefs(path=None)
+    for _ in range(60):
+        b.observed_serve("f-cap", 0, 1, now)
+    assert b.view("f-cap", now).p_usable() < A.Policy().broken
+
+    async def probe(_f):
+        return 4, 40
+    pairs = [("f-cap", "kimi-k3"), ("f-unknown", "glm-5.1")]
+    c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
+    assert c.order[0] != "kimi-k3", "a fleet measured at zero was still ranked first"
+    assert c.order[-1] == "kimi-k3"
+
+
+def test_a_fleet_we_know_is_failing_sorts_behind_one_we_have_never_tried():
+    """A fleet examined and set aside used to rank AHEAD of one nobody had assessed, so a fallback
+    chain would reach for the machine known to be failing before the one simply untried — and the
+    continuity lane's warm, which reads this order, drew its standby preferentially from the set that
+    had just been rejected."""
+    import asyncio
+    import time
+    from inferroute_local.confidential import availability as A
+    now = time.time()
+    b = A.Beliefs(path=None)
+    for _ in range(60):
+        b.observed_serve("f-bad", 0, 1, now)           # measured, broken
+    for _ in range(12):
+        b.observed_serve("f-ok", 10, 0, now)           # measured, good
+        b.observed_verify("f-ok", 4, 0, now)
+
+    async def probe(_f):
+        return 4, 40
+    # policy order puts the bad one second and the never-seen one last
+    pairs = [("f-ok", "kimi-k3"), ("f-bad", "kimi-k2.6"), ("f-new", "glm-5.2")]
+    c = asyncio.run(A.choose(pairs, A.Policy(rank=A.RANK_CAPABILITY), b, probe, now=now))
+    assert c.order[0] == "kimi-k3"
+    assert c.order.index("glm-5.2") < c.order.index("kimi-k2.6"), \
+        f"the known-failing fleet ranked ahead of the untried one: {c.order}"

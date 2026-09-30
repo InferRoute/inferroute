@@ -359,8 +359,13 @@ async def health_ordered(order: list[str], catalog: list, transport, console=Non
             short,
             hint_ratio=ratio if use_hint else None,
             hint_samples=hint.get("samples") if use_hint else None)
-        if live < 0:                                  # could not ask: keep its place, do not judge it
-            scored.append((short, 1.0, 0.0, 1.0))
+        if live < 0:
+            # COULD NOT ASK. The old sentinel was exactly 1.0, which SATISFIES the `expected >= 1.0` gate
+            # below — so one flaky instances() listing on the preferred model silently returned "looks
+            # fine" without looking, and `best[1] < 1.0` was false so nothing was printed either. Keep its
+            # place without declaring it healthy: just under the gate, widest interval, ties with
+            # everything, preference decides.
+            scored.append((short, 1.0 - 1e-9, 0.0, 1.0))
             continue
         # Two different things have to be true for a fleet to be usable: its instances must VERIFY here,
         # and requests to it must SUCCEED. fleet_yield answers only the first, and on 2026-09-30 glm-5.2

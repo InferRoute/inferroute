@@ -34,6 +34,13 @@
     <h2>This session</h2>
     <ol id="outline-list"></ol>
     <p id="outline-empty" class="sub">Your questions and each sealed search appear here, so you can jump back.</p>
+    <!-- Documents opened on this matter, in any session. Served from the recorded archive, so the list
+         survives a restart and opening one again costs no sealed request. -->
+    <section id="docs-panel" class="docs-panel" hidden aria-label="Documents you have opened">
+      <h2>Documents you've opened</h2>
+      <ol id="docs-list"></ol>
+      <p class="sub" id="docs-note"></p>
+    </section>
   </nav>
   <section class="chat" aria-label="Conversation">
     <div id="empty" class="empty">
@@ -92,6 +99,23 @@
 </main>
 
 <footer id="statusbar" class="statusbar" hidden></footer>
+
+<!-- One opened document: what the sealed machine returned on the left, what the assistant said about it on
+     the right. No sealed request is spent to show this again — the text comes off this computer's own record. -->
+<div id="docview" class="modal" hidden>
+  <div class="modal-card docview-card" role="dialog" aria-modal="true" aria-labelledby="docview-title">
+    <div class="docview-head">
+      <h2 id="docview-title"></h2>
+      <button type="button" class="ghost" id="docview-close" aria-label="Close">Close</button>
+    </div>
+    <p class="sub" id="docview-scope"></p>
+    <div class="docview-panes">
+      <article class="docview-text" id="docview-text" aria-label="The document as it was read"></article>
+      <aside class="docview-said" id="docview-said" aria-label="What the assistant said about it"></aside>
+    </div>
+    <p class="sub" id="docview-prov"></p>
+  </div>
+</div>
 
 <div id="dialog" class="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">

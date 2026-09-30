@@ -254,6 +254,56 @@ def check_workspace(cwd: str) -> str:
     return str(real)
 
 
+def matter_documents(records_dir) -> list:
+    """Every document this matter has OPENED, newest first, from the recorded archive.
+
+    Henry, 2026-10-01: "im not seeing any popup or list of opened patents we can come back to". Two reads sat
+    buried in a 2,774-event transcript with no way back to them.
+
+    There is no new store for this on purpose. The verifier already appends every answered read to the
+    matter's `*.searches.jsonl` — outside the sandbox, 0600, the same file the record and the export are built
+    from — carrying the opened text, the signed coverage, and which enclave answered. Inventing a second store
+    would be a second version of what the record says, free to drift from it. So this reads THAT file, which
+    also makes reopening free: the text is already on disk and costs no new sealed request.
+
+    Host-side and read-only. Deduplicated by publication number, keeping the FIRST read of each — the archive
+    is append-only and a document read twice is still one document.
+    """
+    out: dict = {}
+    rd = Path(records_dir) if records_dir else None
+    if not rd or not rd.is_dir():
+        return []
+    for f in sorted(rd.glob("*.searches.jsonl")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            st, res = row.get("statement") or {}, row.get("result") or {}
+            if st.get("kind") != "document" or st.get("outcome") != "answered":
+                continue
+            key = str(res.get("key") or st.get("key") or "")
+            if not key or key in out:
+                continue
+            out[key] = {
+                "key": key,
+                "text": str(res.get("text") or ""),
+                # SIGNED coverage, from the statement, not the result: what the enclave committed to holding.
+                "coverage": st.get("coverage") if isinstance(st.get("coverage"), dict) else {},
+                "published": st.get("publication_date") or res.get("publication_date"),
+                "country": res.get("country"),
+                "at": row.get("at"),
+                # Which machine answered, so the popup can show the same provenance as a search card.
+                "measurement": row.get("measurement"), "index": row.get("index_snapshot"),
+                "session": str(f.name).split(".")[0],
+            }
+    return sorted(out.values(), key=lambda d: str(d.get("at") or ""), reverse=True)
+
+
 def matter_titles(records_dir, keys=None) -> dict:
     """{publication number: title} for documents the matter's recorded searches returned — all of them, or only
     `keys`. Host-side and read-only: numbers and public titles out, nothing written."""

@@ -117,6 +117,9 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
                      # error strings and how long it had been quiet. Added 2026-09-30 because a session
                      # failing on every turn could not be diagnosed from outside it.
                      "/api/faults",
+                     # Read-only: the documents this matter has opened, served from the recorded archive so
+                     # reopening one costs no sealed request. Added 2026-10-01.
+                     "/api/documents",
                      "/api/close", "/api/end"}
 
 
@@ -2107,3 +2110,58 @@ def test_a_live_sessions_failures_are_readable_while_it_is_still_running(client)
     # And a turn that succeeds adds nothing.
     b.publish({"kind": "assistant_end", "text": "done"})
     assert len(c.get("/api/faults").json()["faults"]) == 2
+
+
+def test_the_documents_you_opened_survive_the_session_that_opened_them(tmp_path):
+    """Henry, 2026-10-01: "im not seeing any popup or list of opened patents we can come back to". Four
+    documents he had opened existed only inside a 2,774-event transcript, one of them in a session that had
+    already been killed.
+
+    There is deliberately no new store: the verifier already appends every answered read to the matter's
+    `*.searches.jsonl`, outside the sandbox, which is the same file the record and export are built from. A
+    second store would be a second version of what the record says and free to drift from it. Reading THAT
+    file is also what makes reopening free — no sealed request is spent to show a document again.
+    """
+    from inferroute_cli import pi_attested as PA
+    rd = tmp_path / "records"
+    rd.mkdir()
+    def row(session, key, at, kind="document", outcome="answered", text="T. abstract", cov=None):
+        return json.dumps({"at": at, "measurement": "m1", "index_snapshot": "idx@1",
+                           "statement": {"kind": kind, "outcome": outcome, "key": key, "publication_date": 19990101,
+                                         "coverage": cov if cov is not None else {"abstract": "held", "claims": "not_held"}},
+                           "result": {"kind": kind, "key": key, "text": text, "country": "US"}})
+    # An EARLIER session's archive, plus this one's — both must be read.
+    (rd / "sessA.searches.jsonl").write_text(
+        row("A", "US-1-A", "2026-09-30T10:00:00Z") + "\n"
+        + json.dumps({"at": "x", "statement": {"kind": "search", "outcome": "answered"}, "result": {"hits": []}}) + "\n"
+        + row("A", "US-2-B", "2026-09-30T11:00:00Z", outcome="refused") + "\n")      # refused: not an opened document
+    (rd / "sessB.searches.jsonl").write_text(
+        row("B", "US-3-C", "2026-10-01T09:00:00Z", cov={"abstract": "held", "claims": "claim_1"}) + "\n"
+        + row("B", "US-1-A", "2026-10-01T09:30:00Z", text="DIFFERENT") + "\n")        # same document, read twice
+
+    got = PA.matter_documents(rd)
+    keys = [d["key"] for d in got]
+    assert keys == ["US-3-C", "US-1-A"], keys        # newest first; the refused read is absent
+    assert "US-2-B" not in keys, "a refused read never became an opened document"
+    first = next(d for d in got if d["key"] == "US-1-A")
+    assert first["text"] == "T. abstract", "a document read twice keeps the first read, not the last"
+    assert next(d for d in got if d["key"] == "US-3-C")["coverage"]["claims"] == "claim_1"
+    assert first["index"] == "idx@1" and first["at"].startswith("2026-09-30")
+    # A matter that has opened nothing, and a missing directory, are both empty rather than errors.
+    assert PA.matter_documents(tmp_path / "nope") == []
+
+
+def test_the_document_popup_states_what_was_not_read_before_showing_what_was(client):
+    """Drives the page's real showDocument() (tests/opened_docs_sim.js). The scope comes first and names the
+    absent parts, in the same order the model is given them and for the same reason: a short text handed over
+    without its scope gets taken for the document. `claim_1` must read as one claim, never as "the claims"."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "opened_docs_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "all held" in r.stdout

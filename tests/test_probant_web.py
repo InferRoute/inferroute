@@ -2023,3 +2023,25 @@ def test_the_receipt_says_which_errors_not_only_how_many():
         assert re.search(rf'_err\(c, "{kind}"[,)]', src), f"no error site is labelled {kind}"
     # and every site says whose fault it was, so the availability model can ignore ours
     assert not re.search(r'_err\(c, "\w+"\)', src), "an error site records a kind but not a fault class"
+
+
+def test_the_result_row_has_as_many_columns_as_children():
+    """Seen on henry-ft, 2026-09-30: expanded search results showed the mark buttons clipped to "evant"
+    and "nown", the document pushed far right, and rows twice as tall as they should be.
+
+    `.doc` declared THREE grid columns — rank, document, marks — and a relevance bar had been added as a
+    fourth child without widening it. Every later child shifted one column left: the bar took the
+    document's column, the document took the marks' column, and the buttons wrapped onto an implicit
+    second row into the 26px rank column.
+
+    A count, because that is what broke. No screenshot and no eye needed to catch it again."""
+    import shutil, subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "doc_row_columns_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "all passed" in r.stdout

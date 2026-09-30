@@ -21,7 +21,7 @@ const docs = scores.map((s, i) => ({ key: `US-${i}`, score: s }));
 const [lo, hi] = mk.scoreRange(docs);
 const widths = docs.map((d) => {
   const bar = mk.relBar(d.score, lo, hi);
-  return bar ? parseFloat(bar.children[0].style.width) : null;
+  return bar && bar.children.length ? parseFloat(bar.children[0].style.width) : null;
 });
 console.log(JSON.stringify({
   range: [lo, hi],
@@ -30,8 +30,13 @@ console.log(JSON.stringify({
   top: widths[0], bottom: widths[widths.length - 1],
   spread: widths[0] - widths[widths.length - 1],
   // a search where every result scored the same must render NO bars rather than all-full ones
-  allEqual: mk.relBar(0.5, ...mk.scoreRange([{score:0.5},{score:0.5}])) === null,
+  // An empty TRACK, not null: the row is a four-column grid and a missing child shifts every later
+  // column left — which is how the mark buttons ended up clipped in the rank column. The property is
+  // that no bar is DRAWN, so check the rendering rather than the return type.
+  allEqual: (() => { const b = mk.relBar(0.5, ...mk.scoreRange([{score:0.5},{score:0.5}]));
+                     return b !== null && String(b.cls).includes("relbar-none") && !b.children.length; })(),
   // older sessions have no score at all
-  noScore: mk.relBar(undefined, 0, 1) === null,
+  noScore: (() => { const b = mk.relBar(undefined, 0, 1);
+                    return b !== null && String(b.cls).includes("relbar-none") && !b.children.length; })(),
   hasLabel: !!mk.relBar(0.5, 0, 1).attrs["aria-label"],
 }));

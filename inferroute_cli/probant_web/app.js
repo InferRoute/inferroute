@@ -531,7 +531,10 @@
   // searches would be simply wrong. A bar normalised inside its own search says exactly what the number
   // supports and nothing more.
   function relBar(score, lo, hi) {
-    if (typeof score !== "number" || !isFinite(score) || !(hi > lo)) return null;
+    // ALWAYS A NODE, never null. The row is a four-column grid and a missing child shifts every later
+    // column left by one — which is how the mark buttons ended up clipped in the 26px rank column. An
+    // empty track holds the place and shows nothing.
+    if (typeof score !== "number" || !isFinite(score) || !(hi > lo)) return el("span", "relbar relbar-none");
     const frac = Math.max(0.04, Math.min(1, (score - lo) / (hi - lo)));   // floor: never an invisible bar
     const bar = el("span", "relbar");
     const fill = el("span", "relbar-fill");

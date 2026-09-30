@@ -219,7 +219,13 @@ interface SearchProof {
 	hits: number;
 	// The documents themselves, for a surface that shows results (the local browser page). Tool `details`
 	// never reach the model; the model gets hitsText in `content`.
-	docs: { key: string; year?: number; title?: string; alsoIn?: number }[];
+	// `score` is the engine's stage-2 relevance for THIS query. It was received and dropped one line
+	// below for as long as this file has existed, so the page rendered ten results with nothing to
+	// tell them apart — and a fixed k means the last of them are simply the weakest the pool had.
+	// Henry, 2026-09-30: "as if they all [have] the same-level relevance". Comparable WITHIN one
+	// search only: it is a LambdaRank output, not a calibrated probability, so it does not mean the
+	// same thing across two queries and must never be shown as an absolute score.
+	docs: { key: string; year?: number; title?: string; alsoIn?: number; score?: number }[];
 	// What this search was, as the professional sees it on the card: its number in the session, the feature it
 	// covered, the document it looked for neighbours of, and how many references were asked for.
 	searchNo?: number;
@@ -253,7 +259,7 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?
 		index: String(out.enclave?.index_snapshot ?? ""),
 		enclaveKey: String(out.enclave?.enclave_key ?? ""),
 		hits: Number(out.statement?.hits_n ?? 0),
-		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title })),
+		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title, score: h.score })),
 		at: new Date().toISOString(),
 	};
 }
@@ -1089,7 +1095,7 @@ export default function (pi: ExtensionAPI) {
 			feature: Type.Optional(Type.String({ description: "A short name — a few words, under 80 characters — for the one feature of the disclosure this search covers; a longer one is shortened" })),
 			like: Type.Optional(Type.String({ description: "A publication number returned by a search on this matter, in this session or an earlier one: search for documents like it" })),
 			depth: Type.Optional(Type.String({ description: "How many references: quick 10 (default), standard 25, broad 50" })),
-			k: Type.Optional(Type.Integer({ description: "Exact number of references to return, 1 to 50; overrides depth" })),
+			k: Type.Optional(Type.Integer({ description: "At most this many references, 1 to 50; overrides depth. Fewer is correct when the rest are weak — the record checks 'at most k', never exactly k." })),
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {

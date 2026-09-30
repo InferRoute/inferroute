@@ -1661,7 +1661,7 @@ def test_a_publication_number_is_clickable_from_one_helper_and_never_through_inn
     assert "linkifyPubNos(current.node);" in _fn_body(js, "assistantEnd")
 
 
-def test_the_documents_panel_appears_only_once_a_deep_search_has_run_and_states_its_ordering():
+def test_the_documents_panel_appears_as_soon_as_a_search_returns_documents_and_states_its_ordering():
     """Henry, 30 Sep: "a second tab that appears when a deep search was done, with the relevance sorted list
     of patents that can be clicked as well for opening".
 
@@ -1672,8 +1672,12 @@ def test_the_documents_panel_appears_only_once_a_deep_search_has_run_and_states_
     html = (STATIC / "index.html").read_text()
     assert 'id="results-panel"' in html and 'id="results-list"' in html
     body = _fn_body(js, "renderResultsPanel")
-    # hidden until a deep search has completed AND there is something to show — never an empty panel
-    assert "deepMarksAtLastPress === null || best.size === 0" in body
+    # Hidden only while there is nothing to list. It was gated on a DEEP search first, from a literal
+    # reading of "a second tab that appears when a deep search was done" — which made it invisible after an
+    # ordinary search and read as never built (Henry, 30 Sep). The gate must not come back: a panel nobody
+    # sees is indistinguishable from one nobody wrote.
+    assert "panel.hidden = best.size === 0;" in body
+    assert "deepMarksAtLastPress" not in body, "the deep-search gate is back; the panel will look unbuilt"
     # ordering: best rank, then times seen, then a stable tie-break
     assert "a[1].rank - b[1].rank || b[1].seen - a[1].seen || a[0].localeCompare(b[0])" in body
     assert "Math.min(prev.rank" in body, "a document's position must be its BEST rank across searches"
@@ -1743,3 +1747,33 @@ def test_no_eligible_machine_is_not_reported_as_unreachable_or_an_expired_key():
     # the serious one, which was falling through before
     assert "could not be verified" in out["unverified"], out["unverified"]
     assert "didn't answer" not in out["unverified"], "a verification failure got the blandest message"
+
+
+def test_results_carry_their_relative_strength_and_never_a_bare_score():
+    """Henry, 30 Sep: "why is every search returning 10 results as if they all [have] the same-level
+    relevance". Because the tool asks for an exact count and the extension DROPPED the engine's score one
+    line after receiving it, so the page had nothing to tell ten results apart. Measured on a real search:
+    rank 1 scored ~10x rank 12 and 8 of 20 fell below zero, all rendered identically.
+
+    The bar is normalised WITHIN one search and no number is shown, both deliberately. The engine's score
+    is a LambdaRank output — an ordering signal, not a calibrated probability — so it is comparable inside
+    one query and not across two. A printed figure would imply precision it does not carry, and a bar in
+    the cross-search panel would compare things that cannot be compared."""
+    js = (STATIC / "app.js").read_text()
+    ts = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "ir-attested.ts").read_text()
+
+    # the score now survives the trip to the page
+    assert "score: h.score" in ts, "the extension still drops the engine's score"
+    assert "score?: number }[];" in ts, "the doc type does not carry a score"
+
+    body = _fn_body(js, "relBar")
+    assert "hi > lo" in body, "an unnormalisable range must not render a bar"
+    assert "Math.max(0.04" in body, "a zero-width bar is invisible and reads as missing data"
+    # relative, and said so where the reader sees it
+    assert "relative to the other results of this same search" in body
+    assert "RELATIVE TO THE OTHERS IN THIS SEARCH" in js, "the card never explains what the bar means"
+    # applied in BOTH renderers -- the deep-search legs are the twin that was missed last time
+    assert js.count("relBar(") >= 3, "one of the two document renderers has no bar"
+    # and NOT in the cross-search panel, where the scores are not comparable
+    panel = _fn_body(js, "renderResultsPanel")
+    assert "relBar(" not in panel, "a bar in the cross-search panel compares scores across queries"

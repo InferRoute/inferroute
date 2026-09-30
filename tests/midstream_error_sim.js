@@ -14,7 +14,7 @@ const cut = (a, b) => src.slice(src.indexOf(a), src.indexOf(b));
 // explicitly rather than re-declared here — a copy would pass while the page said something else.
 eval(cut("const MODEL_ERROR_CASES", "  // The sentence for a failure")
    + cut("  // The sentence for a failure", "const RETRY_TEXT")
-   + cut("function isTransient", "const AUTO_RETRIES")
+   + cut("  // Failures no retry can clear.", "const AUTO_RETRIES")
    + "\nglobalThis.UNNAMED_FAILURE = UNNAMED_FAILURE;");
 const { UNNAMED_FAILURE } = globalThis;
 
@@ -63,5 +63,27 @@ check("an ordinary nonce expiry is still quiet", isTransient("its one-time key h
 // a socket refusal is not a verification refusal — two senses of one word
 check("connection refused is quiet", isTransient("connection refused") === true);
 
+
+// ── TERMINAL: conditions no retry can clear, which must not be swallowed by the quiet default.
+// These arrive as Pi's `message.errorMessage`, not as a sentence this lane wrote. Pi carries 338
+// distinct error strings, so "unrecognised" is the normal case here and the quiet default is right —
+// but for these three, retrying is WORSE than showing: a context overflow gets one more message added
+// to the context that just overflowed, twice, while the sentence telling the reader what to do is
+// hidden behind an ellipsis.
+const TERMINAL_CASES = [
+  "Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.",
+  "Context overflow detected, ",
+  "Compaction failed: the model refused",
+  "the gateway rejected our request nonce twice, including one from a fresh pool",
+];
+for (const d of TERMINAL_CASES) check(`terminal, never quiet: ${d.slice(0, 40)}`, isTransient(d) === false);
+// and the two Pi conditions say what to do rather than falling through to the unnamed sentence
+check("context overflow points at a fresh session",
+      /fresh session/.test(plainModelError("Context overflow recovery failed after one compact-and-retry attempt.")));
+check("compaction failure points at a fresh session",
+      /fresh session/.test(plainModelError("Compaction failed: the model refused")));
+// Pi's OWN truncation detection for the dialect our lane does not check is still transient
+check("pi's truncated-stream message stays quiet",
+      isTransient("Anthropic stream ended before message_stop") === true);
 console.log(bad ? `\n${bad} FAILED` : "\nall passed");
 process.exit(bad ? 1 : 0);

@@ -586,15 +586,25 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
    documents he had opened were buried in a 2,774-event transcript. */
 .docs-panel { margin-top: 18px; border-top: 1px solid var(--rule); padding-top: 14px; }
 .docs-panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
-.docs-panel ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+/* min-width: 0 on the items, for the reason .o-link already carries it: the outline is a FIXED 244px
+   column, and a grid or flex item defaults to min-width:auto, which refuses to shrink below its content.
+   A nowrap title then overflowed the column and was clipped at the panel edge with no ellipsis — Henry,
+   2026-10-01, "small display issue here with the texts being cut with the window". The ellipsis was in the
+   rule and could never fire, because the clipping was happening one box further out. */
+.docs-panel ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 0; }
+.docs-panel li { min-width: 0; }
 .docs-panel button {
-  display: block; width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
+  display: block; width: 100%; min-width: 0; text-align: left; background: none; border: 0; cursor: pointer;
   padding: 5px 6px; border-radius: 6px; color: inherit; font: inherit; line-height: 1.35;
 }
 .docs-panel button:hover, .docs-panel button:focus-visible { background: var(--hover); outline: none; }
-.docs-panel .dkey { font-variant-numeric: tabular-nums; font-weight: 600; }
-.docs-panel .dtitle { display: block; color: var(--muted); font-size: 12px; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
+.docs-panel .dkey { display: block; font-variant-numeric: tabular-nums; font-weight: 600;
+  overflow-wrap: anywhere; }
+/* TWO LINES, not an ellipsis. A patent title carries the distinguishing words late ("… using near infrared
+   light emitting diodes"), so cutting it at one line hides exactly the part that tells two documents apart,
+   and a sidebar has vertical room to spare. Clamped at two so the list stays scannable. */
+.docs-panel .dtitle { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  line-clamp: 2; overflow: hidden; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
 /* The popup: the document on one side, what the assistant said on the other. */
 .docview-card { max-width: min(1040px, 94vw); width: 100%; }

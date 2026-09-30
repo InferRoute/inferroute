@@ -2165,3 +2165,27 @@ def test_the_document_popup_states_what_was_not_read_before_showing_what_was(cli
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "all held" in r.stdout
+
+
+def test_a_long_document_title_cannot_overflow_the_fixed_outline_column():
+    """Henry, 2026-10-01, with a screenshot: "small display issue here with the texts being cut with the
+    window". Titles in the documents panel were hard-clipped at the panel edge with NO ellipsis, although
+    the rule set `text-overflow: ellipsis`.
+
+    The ellipsis could never fire: the outline is a fixed 244px track, and a grid item defaults to
+    `min-width: auto`, which refuses to shrink below its content — so a nowrap title overflowed the column
+    and was clipped one box further out than the rule meant to handle it. `.o-link` already carried
+    `min-width: 0` for exactly this, which is the part I should have copied.
+
+    Drives tests/docs_panel_width_sim.js, which fails against the CSS in Henry's screenshot.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "docs_panel_width_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "clamped to two lines" in r.stdout

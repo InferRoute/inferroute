@@ -23,6 +23,9 @@ const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
 const ENDPOINT_KEY = process.env.IR_ATTESTED_KEY ?? "";
 const PROVIDER = process.env.IR_ATTESTED_PROVIDER ?? "inferroute";
 const TOOLS = new Set((process.env.IR_ATTESTED_TOOLS ?? "").split(",").map((t) => t.trim()).filter(Boolean));
+// The one file this tool serves. Mirrors DISCLOSURE in pi_attested.py; the host names it in the contract
+// and the tool enforces it, so the two must agree on the spelling.
+const DISCLOSURE = "disclosure.md";
 const STATUS_KEY = "ir-model-enclave";
 const SEARCH_STATUS_KEY = "ir-search-enclave";
 const LIFECYCLE_STATUS_KEY = "ir-enclave-lifecycle";
@@ -1095,19 +1098,29 @@ export default function (pi: ExtensionAPI) {
 			"describing. If you think another file bears on the matter, NAME IT AND ASK rather than trying to read it.",
 		promptSnippet: "Read the disclosure",
 		parameters: Type.Object({
-			path: Type.String({ description: "File name inside the matter workspace, e.g. disclosure.md" }),
+			path: Type.Optional(Type.String({
+				description: "File name inside the matter workspace. Omit it to read disclosure.md, which is what this tool is for.",
+			})),
 		}),
-		execute: async (params: { path: string }) => {
+		execute: async (params: { path?: string }) => {
 			const root = process.cwd();
-			const want = resolve(root, String(params.path ?? ""));
+			// NO PATH MEANS THE DISCLOSURE. This tool exists to read disclosure.md; its own promptSnippet is
+			// "Read the disclosure". A model that takes that literally calls it with no argument, and before
+			// this default that produced `resolve(root, "")` === root, so rel === "" and the guard threw
+			// "undefined is outside the matter workspace" — an error that is both wrong and unactionable,
+			// because the path it names does not exist and the workspace was never the problem.
+			// It blocked a real session on 2026-09-30. A required argument whose only correct value is a
+			// constant is not a parameter, it is a trap.
+			const asked = String(params.path ?? "").trim() || DISCLOSURE;
+			const want = resolve(root, asked);
 			const rel = relative(root, want);
 			// Outside the workspace, or reached by climbing out of it, is refused before the allowlist is
 			// even consulted — an allowlist checked on an unresolved path is not an allowlist.
 			if (rel.startsWith("..") || rel === "" || resolve(root, rel) !== want) {
-				throw new Error(`${params.path} is outside the matter workspace; nothing was read`);
+				throw new Error(`${asked} is outside the matter workspace; nothing was read`);
 			}
 			const allowed = new Set(
-				["disclosure.md", ...String(process.env.IR_ATTESTED_READABLE ?? "").split(",")]
+				[DISCLOSURE, ...String(process.env.IR_ATTESTED_READABLE ?? "").split(",")]
 					.map((x) => x.trim()).filter(Boolean),
 			);
 			if (!allowed.has(rel)) {

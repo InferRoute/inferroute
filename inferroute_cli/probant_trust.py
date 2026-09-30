@@ -88,6 +88,15 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         more.append("Genuine sealed hardware (Intel TDX), with debugging switched off." + gpus)
     if _ok(receipt, "build_recorded"):
         more.append("It runs a software build InferRoute has on record, not only its operator's word.")
+    # "IS ANYTHING KEPT?" — asked by four of five naive readers and answered on no screen. One of them:
+    # "It says opened, never says deleted. Does it sit there?" It is the question a person with an
+    # unfiled invention actually has, and the card talked about encryption instead.
+    #
+    # The honest answer differs by lane and the difference is the point. For the SEARCH machine there is
+    # a signed, graded plaintext-handling contract: logging, crash dumps and unencrypted scratch are
+    # denied by the policy the hardware signature covers. For the AI machine there is nothing
+    # comparable — retention is its operator's claim, which is exactly what attest.LIMITATIONS
+    # build-review already says in a parenthetical nobody reaches.
     # Where it belongs: a description of how the session behaves, beside the other descriptions, not
     # filed under Limitations where the word itself told four readers it was bad news.
     more.append("A session is not tied to one machine. If the one serving it stops responding, this "
@@ -203,7 +212,11 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
              "It runs exactly the software this computer is set up to expect. Once the signed reference is checked "
              "here, this line will say it is InferRoute's published software."),
             "Your search text is encrypted here and only that machine can open it; each answer comes back "
-            "encrypted to this computer alone."]
+            "encrypted to this computer alone.",
+            # The strong half of the retention answer, and it is ENFORCED rather than promised: those
+            # three denials are in the container policy that the signed HOST_DATA is the hash of.
+            "Nothing of your search is written on that machine: its policy — covered by the hardware "
+            "signature — denies logging, crash dumps and unencrypted scratch."]
     if date_bound:
         more.append(f"Only documents published before {date_bound} are returned. The limit is kept on this "
                     "computer, out of the assistant's reach.")

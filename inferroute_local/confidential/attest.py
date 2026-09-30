@@ -94,14 +94,20 @@ LABELS: dict[str, tuple[str, str]] = {
 }
 
 LIMITATIONS = (
-    ("build-review", "InferRoute records the enclave builds it has seen and refuses unrecorded ones, and "
-                     "recomputes what it can — stated per session above. But the measurements cover the "
-                     "firmware, the boot chain and a short list of configuration files, NOT the whole "
-                     "filesystem the model runs from. The enclave operator holds the disk key, so they could "
-                     "change code outside that list without changing any measurement. What the hardware "
-                     "proves is that your words reach a genuine, non-debuggable enclave and are readable "
-                     "nowhere else in transit. That the enclave's own software does not retain them is a "
-                     "claim about the operator's published image, not something this device can verify."),
+    # LEADS WITH RETENTION. Four of five naive readers asked "is anything kept?" — one of them: "it says
+    # opened, never says deleted. Does it sit there?" — and the answer was the LAST sentence of a long
+    # paragraph about measurements and disk keys, which none of them reached. It is the question a person
+    # with an unfiled invention actually has, so it goes first, in their words.
+    ("build-review", "Whether the AI machine keeps your text after answering it is the operator's claim, "
+                     "not something this computer can check. The copy that lasts is the record on this "
+                     "computer. What the hardware DOES prove is that your words reach a genuine, "
+                     "non-debuggable enclave and are readable nowhere else in transit.\n\n"
+                     "Why this computer cannot check it: InferRoute records the enclave builds it has "
+                     "seen and refuses unrecorded ones, and recomputes what it can — stated per session "
+                     "above. But the measurements cover the firmware, the boot chain and a short list of "
+                     "configuration files, NOT the whole filesystem the model runs from. The enclave "
+                     "operator holds the disk key, so they could change code outside that list without "
+                     "changing any measurement."),
     ("gpu-binding", "The GPU reports are signed by the same quote-bound key as the rest of the evidence, so "
                     "the enclave itself vouches that these are its GPUs — but NVIDIA provides no way to prove "
                     "from the outside that an attested GPU is attached to an attested CPU enclave. That step "

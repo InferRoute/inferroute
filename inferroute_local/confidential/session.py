@@ -529,7 +529,7 @@ class ConfidentialSession:
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
                     yield ("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode()
                     yield DONE
-                    _err(c, "upstream_passthrough", UPSTREAM_UNKNOWN)
+                    _err(c, "upstream_passthrough", UPSTREAM_UNKNOWN); self.last_fault = UPSTREAM_UNKNOWN
                     return
                 if not plain:
                     continue
@@ -552,19 +552,19 @@ class ConfidentialSession:
                 done = done or _is_done(linebuf)
                 yield linebuf
         except e2ee.E2EEError as e:
-            _err(c, "reply_unopenable", INTEGRITY_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
             yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
             yield DONE
             return
         except (httpx.HTTPError, OSError) as e:
-            _err(c, "stream_dropped", INSTANCE_FAULT)
+            _err(c, "stream_dropped", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
             yield ("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode()
             yield DONE
             return
         finally:
             c["ciphertext_frames_received"] += opener.frames
         if not done:
-            _err(c, "stream_truncated", INSTANCE_FAULT)
+            _err(c, "stream_truncated", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
             yield ("data: " + json.dumps(translate.openai_error(
                 "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode()
             yield DONE
@@ -577,11 +577,11 @@ class ConfidentialSession:
             blob = base64.b64decode(json.loads(data)["e2e"]) if data[:1] == b"{" else data
             resp = e2ee.open_response(blob, sealed.response_sk)
         except (httpx.HTTPError, OSError) as e:
-            _err(c, "stream_dropped", INSTANCE_FAULT)
+            _err(c, "stream_dropped", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
             yield json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         except Exception as e:
-            _err(c, "reply_unopenable", INTEGRITY_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
             yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
@@ -600,7 +600,7 @@ class ConfidentialSession:
                     ev = opener.passthrough.pop()
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
                     yield translate.sse("error", translate.error_body(f"upstream: {msg}")).encode()
-                    _err(c, "upstream_passthrough", UPSTREAM_UNKNOWN)
+                    _err(c, "upstream_passthrough", UPSTREAM_UNKNOWN); self.last_fault = UPSTREAM_UNKNOWN
                     return
                 if not plain:
                     continue
@@ -620,11 +620,11 @@ class ConfidentialSession:
                 for ev in tr.feed_line(linebuf.decode("utf-8", "replace")):
                     yield ev.encode()
         except e2ee.E2EEError as e:
-            _err(c, "reply_unopenable", INTEGRITY_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
             yield translate.sse("error", translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         except (httpx.HTTPError, OSError) as e:          # connection dropped mid-stream: a clean error, never a traceback
-            _err(c, "stream_dropped", INSTANCE_FAULT)
+            _err(c, "stream_dropped", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
             yield translate.sse("error", translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         finally:
@@ -638,7 +638,7 @@ class ConfidentialSession:
         try:
             data = await _drain(raw)
         except (httpx.HTTPError, OSError) as e:
-            _err(c, "stream_dropped", INSTANCE_FAULT)
+            _err(c, "stream_dropped", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
             yield json.dumps(translate.error_body(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")).encode()
             return
         try:
@@ -651,7 +651,7 @@ class ConfidentialSession:
                 blob = data
             resp = e2ee.open_response(blob, sealed.response_sk)
         except Exception as e:
-            _err(c, "reply_unopenable", INTEGRITY_FAULT)
+            _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
             yield json.dumps(translate.error_body(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)

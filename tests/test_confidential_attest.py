@@ -599,3 +599,84 @@ def test_an_old_disaster_ages_out_of_the_window(tmp_path, monkeypatch):
     y, n = C.fleet_yield("m")
     assert n == C._YIELD_PER_MODEL
     assert y > 0.95, "observations older than the window still counted against the fleet"
+
+
+# ── a difference must be supported before it is acted on ──────────────────────────────────────────
+
+def test_thin_evidence_cannot_promote_a_fleet_over_the_users_preference(tmp_path, monkeypatch):
+    """The director session's argument, with my own correction as its evidence. glm-5.1 at ~0.30 from
+    THREE observations against kimi-k2.6 at 0.22 from ten: the point estimates differ, the intervals
+    overlap almost entirely, and a correction that had to be issued because one observation moved the
+    ordering is the strongest possible argument that the ordering should not come from those samples.
+
+    Overlapping intervals mean tied. A tie is broken by what the user asked for."""
+    import asyncio
+    from inferroute_cli import confidential as C
+
+    # preferred model: solid, ten observations, middling. challenger: one lucky thin observation.
+    _receipts(tmp_path, monkeypatch, [("preferred", 10, 5)] * 10 + [("thin", 2, 2)])
+    lo_p, hi_p = C.fleet_yield_interval("preferred")
+    lo_t, hi_t = C.fleet_yield_interval("thin")
+    assert hi_t >= lo_p and lo_t <= hi_p, "fixture is wrong: these intervals must overlap"
+
+    catalog = [{"name": "x/preferred", "fleet_id": "fp"}, {"name": "x/thin", "fleet_id": "ft"}]
+
+    class _T:
+        async def instances(self, fleet):
+            return [{"instance_id": f"{fleet}-0"}]
+
+    # live=1 ON PURPOSE. With a comfortable live count the preferred model's expected usable count clears
+    # 1.0 and health_ordered returns at the "preferred looks fine" branch, never reaching the tie rule —
+    # the test would then pass while exercising nothing. The tie rule only decides when the preferred
+    # fleet is thin, so that is the state it has to be measured in.
+    monkeypatch.setattr(C, "probe_fleet", lambda t, f: _ok(1))
+    out = asyncio.run(C.health_ordered(["preferred", "thin"], catalog, _T()))
+    assert out[0] == "preferred", \
+        "a thin sample promoted a fleet over the user's stated preference on a difference inside the noise"
+
+
+def test_a_separated_difference_still_reorders(tmp_path, monkeypatch):
+    """The rule must not be inert. When the intervals do NOT overlap the evidence really does
+    distinguish the fleets, and then the healthier one is chosen even against preference — which is the
+    entire point of measuring."""
+    import asyncio
+    from inferroute_cli import confidential as C
+
+    _receipts(tmp_path, monkeypatch, [("preferred", 20, 1)] * 10 + [("healthy", 20, 20)] * 10)
+    lo_p, hi_p = C.fleet_yield_interval("preferred")
+    lo_h, hi_h = C.fleet_yield_interval("healthy")
+    assert hi_p < lo_h, "fixture is wrong: these intervals must be separated"
+
+    catalog = [{"name": "x/preferred", "fleet_id": "fp"}, {"name": "x/healthy", "fleet_id": "fh"}]
+
+    class _T:
+        async def instances(self, fleet):
+            return [{"instance_id": f"{fleet}-{i}"} for i in range(4)]
+
+    monkeypatch.setattr(C, "probe_fleet", lambda t, f: _ok(4))
+    out = asyncio.run(C.health_ordered(["preferred", "healthy"], catalog, _T()))
+    assert out[0] == "healthy", "a real, separated difference in health was ignored"
+
+
+async def _ok(n):
+    return n
+
+
+def test_no_counts_at_all_means_the_interval_distinguishes_nothing(tmp_path, monkeypatch):
+    """A fleet with no history must tie with everything rather than rank first or last. Ranking it last
+    means a newly offered model can never be chosen and so can never earn a history; ranking it first
+    means an unmeasured fleet outranks a measured one."""
+    from inferroute_cli import confidential as C
+    _receipts(tmp_path, monkeypatch, [("other", 10, 9)])
+    assert C.fleet_yield_interval("never-seen") == (0.0, 1.0)
+
+
+def test_the_server_hint_needs_samples_to_narrow_anything(tmp_path, monkeypatch):
+    """A ratio with no sample count is a number with no weight. It must not be treated as precise — that
+    would let the server's hint override a client's own measured history on nothing at all. This is why
+    the endpoint is being asked to carry `samples` alongside `eligible_ratio`."""
+    from inferroute_cli import confidential as C
+    _receipts(tmp_path, monkeypatch, [])
+    assert C.fleet_yield_interval("m", hint_ratio=0.9, hint_samples=None) == (0.0, 1.0)
+    lo, hi = C.fleet_yield_interval("m", hint_ratio=0.9, hint_samples=200)
+    assert hi - lo < 0.15, "a well-sampled server hint should actually narrow the interval"

@@ -43,8 +43,12 @@ class FakeSession:
         self.last_fault = ""
         return (200, {}, iter([b"ok"]))
     chat_completions = messages
-    async def close(self):
+    def close(self):
+        # SYNCHRONOUS, like the real ConfidentialSession.close, which the launcher calls without await.
+        # The fake had it async; the facade then "closed" spares by building a coroutine nobody ran, so
+        # a promoted-away session would have been left open in production while the test passed.
         self.closed = True
+        return self.receipt
 
 
 def _cands():
@@ -241,12 +245,35 @@ def test_no_candidate_opening_raises_rather_than_returning_a_broken_lane():
 
 # ── the constraint: the single-model path must not change ────────────────────────────────────────
 
-def test_nothing_constructs_this_lane_unless_asked():
-    """Henry: "it should not affect our current single model serving mode." The facade is inert until
-    something builds one, and the underlying session class is untouched by its existence."""
-    import subprocess, pathlib
+def test_the_single_model_path_cannot_reach_this_lane():
+    """Henry: "it should not affect our current single model serving mode."
+
+    The invariant is not that nothing builds the lane — Probant does — but that NOTHING ELSE CAN. One
+    construction site, reached only when a caller passes `continuity=True`, defaulting to False, and
+    disabled by IR_NO_MODEL_FALLBACK even for the caller that asks."""
+    import inspect
+    import pathlib
+    import subprocess
+
+    from inferroute_cli import confidential as C
+
     root = pathlib.Path(__file__).resolve().parent.parent
     r = subprocess.run(["grep", "-rn", "Continuity(", "--include=*.py",
                         "inferroute_cli/", "inferroute_local/"], cwd=root, capture_output=True, text=True)
-    callers = [ln for ln in r.stdout.splitlines() if ln.strip() and "continuity.py" not in ln]
-    assert not callers, "the continuity lane is being constructed outside its own module:\n" + "\n".join(callers)
+    sites = [ln for ln in r.stdout.splitlines() if ln.strip() and "continuity.py" not in ln]
+    assert len(sites) == 1, "more than one way into the side lane:\n" + "\n".join(sites)
+    # The ENCLOSING function, not the line: grep returns the call site's text, which of course does not
+    # contain the name of the function it sits in.
+    assert "cont.Continuity(" in inspect.getsource(C._open_continuity), \
+        "the one construction site is not inside _open_continuity"
+
+    # opt-in, and off by default
+    assert inspect.signature(C._open_session).parameters["continuity"].default is False
+    src = inspect.getsource(C._open_session)
+    assert "if continuity and os.environ.get(\"IR_NO_MODEL_FALLBACK\") != \"1\":" in src
+    # and only Probant asks
+    launch = inspect.getsource(C.launch)
+    assert "continuity=probant is not None" in launch
+
+    # a lane that will not open must degrade to the ordinary path, never to a worse one
+    assert "Falls through to the single-session path below" in src

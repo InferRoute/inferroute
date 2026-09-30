@@ -116,14 +116,12 @@ class Continuity:
     def upstream_model(self) -> str:
         return self.active.upstream_model if self.active else ""
 
-    @property
-    def shown_model(self) -> str:
-        """The name the CLIENT is told. Deliberately the lane's, and deliberately stable across a
-        switch: the agent caches it, and renaming the model underneath a running conversation would be
-        a second failure mode invented to report the first. What actually served is in the receipt,
-        per machine and per request, which is where an auditor looks and the agent does not."""
-        first = self.order[0] if self.order else self.model_short
-        return getattr(self.active, "shown_model", first) if self.active else first
+    # The name the CLIENT is told, ASSIGNED by the launcher (so an attribute, not a property). It is
+    # deliberately the lane's and deliberately stable across a switch: the agent caches the model list,
+    # and renaming the model underneath a running conversation would be a second failure mode invented
+    # to report the first. What actually served is in the receipt, per machine and per request — where
+    # an auditor looks and the agent does not.
+    shown_model = ""
 
     # ── opening ──
     async def open(self):
@@ -191,7 +189,7 @@ class Continuity:
             except Exception:                         # noqa: BLE001 — a standby that will not open is
                 continue                              # not an error; try the next, silently
             if self._closed:
-                await _quietly_close(s)
+                _quietly_close(s)
                 return
             self.standby, self.standby_at = s, time.time()
             self.note("standby-ready", f"{short} verified and held in reserve")
@@ -248,7 +246,7 @@ class Continuity:
             # active session would itself have refused by now.
             stale, self.standby = self.standby, None
             self.note("standby-stale", f"{stale.model_short} held too long to promote; reopening")
-            await _quietly_close(stale)
+            _quietly_close(stale)
             self._warm_later()
             return False
         old, self.active = self.active, self.standby
@@ -256,7 +254,7 @@ class Continuity:
         self.switches += 1
         self.note("switched", f"{old.model_short} -> {self.active.model_short} ({why})")
         self._record_switch(old)
-        asyncio.ensure_future(_quietly_close(old))
+        _quietly_close(old)
         self._warm_later()
         return True
 
@@ -280,25 +278,28 @@ class Continuity:
     def _freshen_standby(self) -> None:
         if self.standby is not None and time.time() - self.standby_at > STANDBY_MAX_AGE_S:
             stale, self.standby = self.standby, None
-            asyncio.ensure_future(_quietly_close(stale))
+            _quietly_close(stale)
         if self.standby is None:
             self._warm_later()
 
-    async def close(self) -> None:
+    def close(self):
+        """SYNCHRONOUS, because ConfidentialSession.close is and the launcher calls it without await.
+        Returns the active receipt, as a single session does, so this stays a drop-in."""
         self._closed = True
-        if self._warming and not self._warming.done():
+        if self._warming is not None and not self._warming.done():
             self._warming.cancel()
         for s in (self.standby, self.active):
             if s is not None:
-                await _quietly_close(s)
+                _quietly_close(s)
         try:
             self.beliefs.save()
         except Exception:                             # noqa: BLE001
             pass
+        return self.active.receipt if self.active else None
 
 
-async def _quietly_close(session) -> None:
+def _quietly_close(session):
     try:
-        await session.close()
+        return session.close()
     except Exception:                                 # noqa: BLE001 — closing a spare must never raise
-        pass
+        return None

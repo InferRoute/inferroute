@@ -121,6 +121,20 @@ def _run(sb):
 
 
 def test_secrets_are_absent_not_merely_unwritable(sandbox):
+    """SCOPE, so a later reader widens this deliberately instead of discovering it.
+
+    The probe walks $HOME. What this proves is: NO FILE READABLE UNDER $HOME OUTSIDE THE DECLARED TREES.
+    That is narrower than "the agent is confined". A readable file outside $HOME is outside its reach.
+
+    That narrowness is deliberate, not an oversight to be fixed by widening the walk: wrap() ro-binds
+    /usr, /bin, /sbin, /lib, /lib64, /etc and /opt on purpose, because a process needs a system to run in.
+    "No file readable anywhere" is not the property and never was. The secrets this test was written about
+    — ~/.ssh, ~/.config/inferroute/credentials, ~/.pg_cluster_credentials, the matter of other clients —
+    all live under $HOME, which is why $HOME is the right scope for THIS assertion.
+
+    Widening it means deciding what a system tree may contain that the agent must not read, which is a
+    different question with a different answer. Whoever takes it up should start there, not here.
+    """
     out = _run(sandbox)
     assert out["ssh_visible"] is False, "~/.ssh must not be visible inside the sandbox at all"
     assert out["confidential_visible"] is False, "confidential/ must not be visible inside the sandbox at all"

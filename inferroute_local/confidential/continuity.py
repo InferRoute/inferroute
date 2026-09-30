@@ -282,14 +282,17 @@ class Continuity:
             # is a fault of the machine serving it, whatever the session managed to record before the
             # exception. Reading last_fault here would usually find "" and send the caller down the
             # path that re-asks the same failing session.
+            await _shut(stream)
             return None, INSTANCE_FAULT
         if first is None:
             # Ended cleanly with no content. The session's own class if it set one, an instance fault
             # otherwise: an enclave that accepts a request and delivers nothing has failed, and the
             # absence of a label is not the absence of a failure.
+            await _shut(stream)
             return None, (getattr(sess, "last_fault", "") or INSTANCE_FAULT)
         fault = getattr(sess, "last_fault", "")
         if fault and fault in SWITCHABLE:
+            await _shut(stream)
             return None, fault
 
         async def replay():
@@ -396,6 +399,22 @@ class Continuity:
         except Exception:                             # noqa: BLE001
             pass
         return self.active.receipt if self.active else None
+
+
+async def _shut(stream) -> None:
+    """Close a stream we are walking away from.
+
+    Abandoning an async generator leaves its `finally` to run whenever the collector gets to it — and
+    session.py's _open_stream closes over an httpx response and only folds its frame counts in there,
+    so an abandoned stream means a connection held and counters silently short. Closing it explicitly
+    runs that cleanup now, at the moment the decision to leave is actually made."""
+    closer = getattr(stream, "aclose", None)
+    if closer is None:
+        return
+    try:
+        await closer()
+    except Exception:                                 # noqa: BLE001 — a stream we already left behind
+        pass
 
 
 async def _one(payload: bytes):

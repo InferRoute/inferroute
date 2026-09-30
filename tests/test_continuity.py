@@ -449,3 +449,37 @@ def test_parallel_requests_meeting_one_outage_spend_only_one_standby():
     assert statuses.count(200) >= 1, "no request survived the outage"
     # the ones that arrived after the move are told so rather than switching again
     assert any(e["kind"] in ("already-carried", "carried") for e in lane.active.receipt.events)
+
+
+def test_a_stream_we_walk_away_from_is_closed():
+    """Abandoning an async generator leaves its `finally` to the collector, whenever that is.
+    session.py's stream closes over an httpx response and folds its frame counts in there, so an
+    abandoned stream means a connection held open and counters silently short — at exactly the moment
+    the lane is already coping with a failing fleet and needs its connections most."""
+    closed = {"n": 0}
+
+    class Watched(FakeSession):
+        async def messages(self, body):
+            self.calls += 1
+            outer = self
+            async def stream():
+                try:
+                    outer.last_fault = "instance"
+                    return
+                    yield b""                          # pragma: no cover
+                finally:
+                    closed["n"] += 1
+            return (200, {}, stream())
+        chat_completions = messages
+
+    async def go():
+        sessions = {"kimi-k3": Watched(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        return (await lane.messages({"messages": []}))[0], lane
+    st, lane = _run(go())
+    assert st == 200 and lane.switches == 1
+    assert closed["n"] == 1, "the abandoned stream's cleanup never ran"

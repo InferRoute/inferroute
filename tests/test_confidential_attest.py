@@ -391,3 +391,33 @@ def test_malformed_settings_still_get_an_override_rather_than_a_crash():
     assert status_args[1] == "{not json", "a malformed value was rewritten"
     assert status_args.count("--settings") == 2, "no override layer was added"
     assert json.loads(status_args[-1])["env"]["CLAUDE_CODE_USE_BEDROCK"] == "0"
+
+
+def test_the_loopback_hop_is_never_proxied_for_any_adapter():
+    """The sealed proxy is a loopback hop for EVERY agent, so an HTTP_PROXY in the user's environment
+    could receive the plaintext on its way to 127.0.0.1. pi_attested has set no_proxy since it was
+    written, with the reason in its header; nothing else did — the other five adapters inherited whatever
+    the user had.
+
+    Confirmed 2026-09-30 that Claude Code's shipped binary references HTTP_PROXY/HTTPS_PROXY/NO_PROXY and
+    ProxyAgent, so the host honours these. Whether it excludes loopback BY DEFAULT is a property of the
+    user's environment, which is the reason not to depend on it."""
+    import inspect
+    from inferroute_cli import confidential as C
+    from inferroute_cli.pi_attested import _with_loopback, LOOPBACK
+
+    src = inspect.getsource(C.launch)
+    # applied BEFORE the per-agent branch, so a new adapter cannot forget it
+    assert "no_proxy" in src and "NO_PROXY" in src, "the loopback hop is proxied for some adapters"
+    # Landmark is the ADAPTER CHAIN, not `if agent == "claude":` — that string also appears earlier, in a
+    # pre-launch check, so the first version of this assertion compared against the wrong position and
+    # failed on correct code. `elif agent == "pi":` occurs once and only in the chain.
+    assert src.count('elif agent == "pi":') == 1
+    assert src.index("_no_proxy_loopback") < src.index('elif agent == "pi":')
+
+    # both spellings, because the lowercase one takes precedence in most clients
+    assert _with_loopback(None).split(",")[:3] == list(LOOPBACK)
+    # the user's own exclusions survive — this defends the hop, it does not seize their proxy config
+    assert _with_loopback("corp.example.com").endswith("corp.example.com")
+    # and it does not duplicate an entry they already had
+    assert _with_loopback("127.0.0.1,corp.example.com").count("127.0.0.1") == 1

@@ -257,10 +257,19 @@ class Beliefs:
     timestamp, so a new install is not starting from zero and today's belief reflects today.
     """
 
-    def __init__(self, path: Optional[Path] = None):
-        self.path = Path(path) if path else (
-            Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute"))
-            / "confidential" / "availability.json")
+    # `Beliefs()` persists to the usual place. `Beliefs(path=None)` is IN MEMORY, which is what every
+    # caller passing None already believed it meant — tests wrote `Beliefs(path=None)` expecting no
+    # persistence and were resolving to the real store. Inert while nothing called save(), and then the
+    # live experiments in this session called it and wrote synthetic failures into the user's own
+    # evidence. "No path" and "the default path" are different requests and now look different.
+    _DEFAULT = object()
+
+    def __init__(self, path=_DEFAULT):
+        if path is self._DEFAULT:
+            self.path = (Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute"))
+                         / "confidential" / "availability.json")
+        else:
+            self.path = Path(path) if path else None
         self.serve: Dict[str, Belief] = {}
         self.verify: Dict[str, Belief] = {}
         self.models: Dict[str, str] = {}        # fleet_id -> model_short, for the policy
@@ -282,6 +291,8 @@ class Beliefs:
 
     def backfit(self, receipts_dir: Optional[Path] = None, *, limit: int = 2000) -> int:
         """Replay every receipt in timestamp order. Returns how many rows were learned from."""
+        if receipts_dir is None and self.path is None:
+            return 0
         d = Path(receipts_dir) if receipts_dir else self.path.parent / "receipts"
         try:
             files = sorted(d.glob("*.json"))[-limit:]
@@ -347,6 +358,8 @@ class Beliefs:
         return FleetView(fleet_id=fleet, serve=self._s(fleet).at(t), verify=self._v(fleet).at(t))
 
     def save(self) -> None:
+        if self.path is None:
+            return                                     # in-memory: asked for, not a failure
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
@@ -360,6 +373,8 @@ class Beliefs:
             pass                                       # telemetry must never break a session
 
     def load(self) -> bool:
+        if self.path is None:
+            return False
         try:
             d = json.loads(self.path.read_text())
         except (OSError, ValueError):

@@ -477,7 +477,13 @@ def _lane_price(alias, economy: bool) -> dict:
     return dict((row.get("economy") if economy else row.get("standard")) or {})
 
 
-async def _open_session(alias, session_id: str, http, console):
+async def _open_session(alias, session_id: str, http, console, *, continuity: bool = False):
+    """`continuity`: open the side lane instead of a single session — several verified sessions, one
+    conversation, with a standby warmed in the background so a fleet going bad never reaches the user.
+
+    Set ONLY by Probant, where live availability is what the product is for. Every other caller gets
+    exactly the single-session path it got before, byte for byte: the branch below is the only place
+    this differs, and `IR_NO_MODEL_FALLBACK=1` turns it off even there."""
     from inferroute_local.confidential.session import ConfidentialSession
     from inferroute_local.confidential.transport import RelayUnavailable, make_transport
     from . import config as cfg
@@ -522,6 +528,14 @@ async def _open_session(alias, session_id: str, http, console):
                                          server_health=await server_fleet_health(transport))
         except Exception:                             # noqa: BLE001 — a failed probe must never block a launch
             pass
+    if continuity and os.environ.get("IR_NO_MODEL_FALLBACK") != "1":
+        lane = await _open_continuity(order, alias, catalog, session_id, transport, http,
+                                      economy, console)
+        if lane is not None:
+            return lane, lane.receipt
+        # Falls through to the single-session path below. A side lane that cannot open must never be
+        # worse than not having one, so it degrades to exactly what a caller would have had anyway.
+
     tried: list[str] = []
     for short in order:
         cand = alias if short == alias.short else _resolve_model_quietly(short)
@@ -553,6 +567,62 @@ async def _open_session(alias, session_id: str, http, console):
     console.print("[red]no confidential model could give this device a verified machine[/]"
                   f"\n[grey58]tried {', '.join(tried) or '(none)'}[/]\n[grey58]Nothing was sent.[/]")
     sys.exit(3)
+
+
+async def _open_continuity(order, alias, catalog, session_id, transport, http, economy, console):
+    """Build the continuity lane over the candidates the catalog actually offers."""
+    from inferroute_local.confidential import availability as av
+    from inferroute_local.confidential import continuity as cont
+    from inferroute_local.confidential.session import ConfidentialSession
+
+    cands = []
+    for short in order:
+        cand = alias if short == alias.short else _resolve_model_quietly(short)
+        if cand is None:
+            continue
+        fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == cand.ref_key), None)
+        if not fleet_id:
+            continue
+        meta = next((m for m in catalog if m.get("name") == cand.ref_key), {}) or {}
+        cands.append(cont.Candidate(
+            fleet_id=fleet_id, model_short=cand.short, upstream_model=cand.ref_key,
+            # The relay publishes only {fleet_ref, fleet_id, name} today, so this is usually 0 and every
+            # standby is treated as context-compatible. Stated as a gap rather than hidden as a default;
+            # it becomes a real guard the moment /confidential/models carries the field.
+            context_length=int(meta.get("context_length") or 0), meta=meta))
+    if not cands:
+        return None
+
+    beliefs = av.Beliefs()
+    beliefs.load() or beliefs.backfit()          # what this device already knows, decayed to now
+
+    async def opener(c):
+        s = ConfidentialSession(session_id=f"{session_id}:{c.model_short}", model_short=c.model_short,
+                                upstream_model=c.upstream_model, fleet_id=c.fleet_id,
+                                transport=transport, http=http,
+                                price=_lane_price(_resolve_model_quietly(c.model_short) or alias, economy),
+                                economy=economy)
+        await s.open()
+        if not s.receipt.is_confidential:
+            s.close()
+            raise RuntimeError(s.receipt.refusal or "not confidential")
+        return s
+
+    lane = cont.Continuity(cands, opener, beliefs=beliefs,
+                           policy=av.Policy(rank=av.RANK_CAPABILITY), transport=transport)
+    status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
+    status.start()
+    try:
+        await lane.open()
+    except Exception:                                 # noqa: BLE001 — fall back to the ordinary path
+        return None
+    finally:
+        status.stop()
+    if lane.active.model_short != alias.short:
+        console.print(f"[yellow]{alias.short} had no machine this device accepts, so this session runs "
+                      f"{lane.active.model_short}[/]\n[grey58]still the confidential lane — a verified "
+                      f"enclave, never the plain one.[/]")
+    return lane
 
 
 def _strip_prefix(receipt) -> str:
@@ -647,7 +717,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
 
     async def _run() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
-            session, receipt = await _open_session(alias, session_id, http, console)
+            session, receipt = await _open_session(alias, session_id, http, console,
+                                                   continuity=probant is not None)
             search_endpoint = None
             if agent == "pi" and receipt.is_confidential:
                 from . import pi_attested

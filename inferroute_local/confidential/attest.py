@@ -108,13 +108,8 @@ LIMITATIONS = (
                     "rests on the enclave's measured software, like everything else inside it. NVIDIA also "
                     "does not report a GPU's confidential-computing mode, so it cannot be checked here."),
     ("metadata-visible", "Your account, session, the model, message sizes and timing are visible to relays; "
-                         "the words are not."),
-    ("machines-per-session", "A session is not tied to one machine. If the machine serving it stops "
-                             "responding or fails a re-check, this computer checks another and the "
-                             "session continues there, which may mean a different model. Your text is "
-                             "encrypted again, to the new machine's key, and sent — so more than one "
-                             "machine may open it. Each is checked before anything is sent to it, "
-                             "never afterwards, and the receipt names them all with the evidence."),)
+                         "the words are not.")
+)
 
 
 def situational_limitations(checks: dict) -> list[tuple[str, str]]:

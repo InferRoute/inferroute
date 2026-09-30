@@ -88,6 +88,11 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         more.append("Genuine sealed hardware (Intel TDX), with debugging switched off." + gpus)
     if _ok(receipt, "build_recorded"):
         more.append("It runs a software build InferRoute has on record, not only its operator's word.")
+    # Where it belongs: a description of how the session behaves, beside the other descriptions, not
+    # filed under Limitations where the word itself told four readers it was bad news.
+    more.append("A session is not tied to one machine. If the one serving it stops responding, this "
+                "computer checks another and the session continues there — which may mean a different "
+                "model. Each is checked before anything is sent to it, and the receipt names them all.")
     if _ok(receipt, "e2e_key_bound"):
         more.append("Your text is encrypted on this computer to a key the machine's own hardware report "
                     "commits to, so only a machine this computer has verified can open it. InferRoute, "
@@ -105,39 +110,28 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         # What survives is the guarantee that was always the real one and is stronger than it sounds:
         # never an UNVERIFIED machine. The count is stated rather than hedged, so the ordinary
         # single-machine session still says something definite.
+        # THE COUNT WAS NEVER THE GUARANTEE. Henry, 2026-09-30: "i dont understand why allowing
+        # machines to switch has to weaken the claim." It does not, and four rounds of wording were
+        # spent on a problem I invented.
+        #
+        # Every request is sealed to ONE machine's key (session.py: seal_request(pinned.pubkey_b64)),
+        # and `e2e_key_bound` verifies that that machine's hardware quote commits to that key before
+        # anything is sent. So for every request, exactly one machine can open it, and it proved it held
+        # the key first. That is identical whether a session uses one machine or five.
+        #
+        # The old sentence conflated the guarantee — only verified hardware can open your text — with an
+        # incidental fact about how many machines happened to be involved. Conditioning it meant
+        # apologising for a number that was never the promise, and the readers reacted to the apology
+        # rather than to any risk: "the effort is what worries me."
+        #
+        # So: the guarantee is stated unconditionally, and the count is reported as a fact, the way a
+        # meter reading is. It is NOT a limitation — a limitation is something we cannot prove, and this
+        # is something we do and can show.
         n = machines_served(receipt)
-        # REWRITTEN AFTER A NAIVE-READER TEST, which the first attempt failed in three distinct ways.
-        #
-        # 1. The two lines argued with each other in front of the reader: the tick said "only A MACHINE
-        #    ... can open it", singular, and the limitation said several will have decrypted it. Their
-        #    words: "those two sentences are having an argument in front of me ... I felt slightly
-        #    handled, and once you feel handled you start rereading everything." Plural throughout now,
-        #    so the tick and the condition cannot disagree.
-        # 2. "never an unverified one" was a defensive negation and it backfired: "nobody says that
-        #    unless somebody somewhere was worried about unverified ones. It's a denial of a thing I
-        #    hadn't thought to worry about, so now I'm worried about it." The exclusion is now about
-        #    the parties a reader already has in mind — the company, the network, the host — which is
-        #    what they were actually asking.
-        # 3. The condition used "enclave", a word the reassuring lines never introduced: "if you're
-        #    going to use a word I don't know, use it where you're reassuring me, not where you're
-        #    warning me." One vocabulary — machine — everywhere.
-        points.append("Your text leaves this computer encrypted, and is opened only inside machines "
+        points.append("Your text leaves this computer encrypted, and can be opened only inside hardware "
                       "this computer checked first.")
-        # "SO FAR", because a count is not a promise. Two independent naive readers found the same
-        # argument on the screen: the tick said "one machine has served this session" and the condition
-        # said "more than one will have opened it", and both read the second as the small print taking
-        # back what the big print promised. The second reader named the fix — "I'd take it better if the
-        # top line said one or more from the start, so the honest bit isn't the bit that ambushes me at
-        # the bottom." A running count reads as a running count and cannot be contradicted later.
-        #
-        # The enumerated exclusions that used to end this line are gone. They were accurate, and the
-        # first reader still reacted: "it lists three people who can't, and that's a suspiciously
-        # specific list — when someone tells me three things they're not doing, I start wondering about
-        # the fourth." They remain one level down, where a reader who wants them goes looking.
-        points.append(
-            f"{n} machines have opened it so far. The receipt names every machine that does."
-            if n > 1 else
-            "One machine has opened it so far. The receipt names every machine that does.")
+        points.append(f"{n} machines have opened it. The receipt names each one." if n > 1 else
+                      "One machine has opened it. The receipt names each one.")
     warn_ids = {"new-build", "pending-build"}
     caveats = [str(lim.get("text", "")) for lim in (getattr(receipt, "limitations", None) or [])
                if isinstance(lim, dict) and lim.get("id") in warn_ids]

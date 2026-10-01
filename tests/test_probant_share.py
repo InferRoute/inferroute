@@ -437,3 +437,44 @@ def test_reopening_the_same_delivery_replaces_its_own_files_instead_of_leaving_a
     assert r3["written"] == ["reading-guide-2.md"]
     assert (d / "reading-guide.md").read_text() == "Second open, same delivery."
     assert (d / "reading-guide-2.md").read_text() == "Someone else, same corpus id."
+
+
+def test_opening_a_delivery_bounds_its_documents_the_same_way_sending_one_does(tmp_path, monkeypatch):
+    """`corpus_files()` bounds a delivery when WE build one, which bounds nothing about one we are HANDED.
+
+    The count and the sizes in an incoming payload are the sender's, and a sender who assembles a payload by
+    hand never calls that function — so opening a delivery wrote whatever it named into the recipient's own
+    directory, with no ceiling on how much or how many. The refusal comes before anything is written: a
+    delivery that is refused must not leave a half-opened one behind.
+    """
+    monkeypatch.setattr(SH.S, "_irhome", lambda: tmp_path / "ir")
+    monkeypatch.setattr(SH.S, "probant_root", lambda: tmp_path / "Probant")
+
+    def doc(name, text):
+        raw = text.encode()
+        return {"name": name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "text": text}
+
+    def payload(files):
+        return {"corpus": {"id": "c1", "name": "Portfolio", "files": files}, "matters": [],
+                "from_fingerprint": "FP", "made_at": "2026-10-01T00:00:00Z"}
+
+    # Too many documents.
+    many = [doc(f"guide-{i}.md", "x") for i in range(SH.MAX_CORPUS_FILES + 1)]
+    with pytest.raises(SH.S.ProbantError, match="carries up to"):
+        SH.write_corpus(payload(many), "Acme")
+    assert not (tmp_path / "Probant" / "Acme" / "shared-corpus").exists(), "a refusal writes nothing"
+
+    # One document too large.
+    with pytest.raises(SH.S.ProbantError, match="MB"):
+        SH.write_corpus(payload([doc("huge.md", "x" * (SH.MAX_CORPUS_FILE + 1))]), "Acme")
+
+    # Each one small enough, the delivery as a whole too large — the limit the per-file check cannot see.
+    chunk = "x" * (SH.MAX_CORPUS_FILE - 1)
+    n = SH.MAX_CORPUS_TOTAL // len(chunk) + 1
+    with pytest.raises(SH.S.ProbantError, match="come to more than"):
+        SH.write_corpus(payload([doc(f"g-{i}.md", chunk) for i in range(n)]), "Acme")
+    assert not (tmp_path / "Probant" / "Acme" / "shared-corpus").exists()
+
+    # And an ordinary delivery still opens.
+    r = SH.write_corpus(payload([doc("reading-guide.md", "Read US-1-A1 first.")]), "Acme")
+    assert r["written"] == ["reading-guide.md"]

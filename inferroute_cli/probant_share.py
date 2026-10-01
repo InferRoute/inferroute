@@ -39,6 +39,7 @@ from . import probant as S
 SCHEMA = "inferroute.probant-share/3"        # /2 shares still open: the corpus block is optional
 MAX_CORPUS_FILE = 4_000_000                  # one side document; the reading guide of a 9-filing cluster is 47 KB
 MAX_CORPUS_TOTAL = 16_000_000
+MAX_CORPUS_FILES = 64                        # 4 context files a folder, plus a cluster's matter list and guide
 SUFFIX = ".probant-share"
 
 
@@ -388,6 +389,26 @@ def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
     files = corpus.get("files") or []
     if not corpus:
         return {"id": "", "written": [], "corpus": {}}
+
+    # THE SAME LIMITS ON THE WAY IN AS ON THE WAY OUT. corpus_files() bounds a delivery when WE build one,
+    # which bounds nothing about one we are handed: the count and the sizes in an incoming payload are the
+    # sender's, and a sender who assembles a payload by hand never calls that function. Unbounded, opening a
+    # delivery writes whatever it names into the recipient's own directory. Checked before anything is
+    # written, so a refusal leaves nothing half-opened.
+    if len(files) > MAX_CORPUS_FILES:
+        raise S.ProbantError(f"this delivery carries {len(files)} documents; a corpus carries up to "
+                             f"{MAX_CORPUS_FILES}. Nothing was written \u2014 ask the sender what it is.")
+    total = 0
+    for f in files:
+        size = len(str(f.get("text") or "").encode("utf-8"))
+        name = str(f.get("name") or "document.txt")
+        if size > MAX_CORPUS_FILE:
+            raise S.ProbantError(f"{name} is {size / 1e6:.1f} MB; a corpus document may be up to "
+                                 f"{MAX_CORPUS_FILE / 1e6:.0f} MB. Nothing was written.")
+        total += size
+        if total > MAX_CORPUS_TOTAL:
+            raise S.ProbantError(f"this delivery's documents come to more than {MAX_CORPUS_TOTAL / 1e6:.0f} MB. "
+                                 "Nothing was written \u2014 ask the sender to send fewer.")
     d = corpus_dir(client)
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)

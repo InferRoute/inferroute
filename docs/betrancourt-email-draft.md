@@ -157,9 +157,9 @@ vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux mi
 Il me faut pour cela votre **clé publique**. Quatre commandes dans un terminal, et la dernière l'affiche :
 
 ```
-curl -LO https://inferroute.ai/client/inferroute-0.9.71-py3-none-any.whl
+curl -LO https://inferroute.ai/client/inferroute-0.9.72-py3-none-any.whl
 python3 -m venv ~/probant
-~/probant/bin/pip install "./inferroute-0.9.71-py3-none-any.whl[confidential]"
+~/probant/bin/pip install "./inferroute-0.9.72-py3-none-any.whl[confidential]"
 ~/probant/bin/ir probant identity
 ```
 
@@ -180,7 +180,7 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 ~/probant/bin/ir probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.71-py3-none-any.whl
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.72-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce

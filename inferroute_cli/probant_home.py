@@ -957,6 +957,16 @@ def run(open_browser: bool = True) -> int:
     print(f"\n  Probant home:  {url}", flush=True)
     print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
     print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
+    # SAY IT HERE, NOT AT THE CLICK. Started from inside a coding assistant, the page comes up, hands out a
+    # working link and looks healthy — and then refuses the one action it exists for, because every session it
+    # launches inherits CLAUDECODE=1 and `ir` will not nest agent sessions. Henry hit exactly that on 1 Oct
+    # after I started it from my own tool: the failure arrived at "Start a session", several minutes and one
+    # browser round-trip after the decision that caused it. The page is still worth having for reading records,
+    # so this warns rather than refuses — but it warns where the mistake is still cheap to undo.
+    if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
+        print("  ⚠ Started from inside a coding assistant (CLAUDECODE=1). You can read matters and records,", flush=True)
+        print("    but STARTING A SESSION FROM THIS PAGE WILL BE REFUSED: sessions must not nest. Stop this", flush=True)
+        print("    and run `ir probant home` in an ordinary terminal window instead.\n", flush=True)
     if open_browser:
         launch_browser(url)
     # timeout_graceful_shutdown: Ctrl-C and `kill` must end this, not wait on whatever request a

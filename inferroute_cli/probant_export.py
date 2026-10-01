@@ -836,7 +836,17 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     print(f"wrote {dest}")
     print(f"  {len(b['searches'])} sealed search(es), {len(b['evidence'])} evidence bundle(s)")
     print(f"  check it here:        ir probant verify-export {dest}")
-    print("  anyone, without ir:   python3 verify_record.py .   (in that folder; needs Python's cryptography 42 or newer)")
+    # THE COMMAND THAT ANSWERS THE QUESTION, not the shortest one that runs. Printed without a reference, a
+    # bare `verify_record.py .` exits 1 with one FAIL per search saying the identity could not be
+    # established — a true answer to a question nobody asked, and the first thing anyone handed this record
+    # would see. Measured 1 Oct: bare exit 1 / 32 FAIL; with reference only exit 4; with reference and key
+    # exit 0, 1150 PASS.
+    print("  anyone, without ir:   python3 verify_record.py . --reference <InferRoute's reference> "
+          "--reference-key <its key>")
+    print("                        (in that folder; needs Python's cryptography 42 or newer. Without those "
+          "two it can only show a genuine")
+    print("                        Azure confidential machine, not that it was InferRoute's — every identity "
+          "line FAILs and it exits 1.)")
     print("  contains the disclosure in plain text — store it accordingly")
     if anchor:
         _anchor(dest / "MANIFEST.json")
@@ -864,13 +874,38 @@ def _anchor(manifest_path: Path) -> None:
 
 def verify_bundle(bundle_dir: str, extra_args: Optional[List[str]] = None) -> int:
     """Run the bundle's own verify_record.py (or this package's copy) over the bundle. Convenience only —
-    the point of the bundled verifier is that it needs no `ir` at all."""
+    the point of the bundled verifier is that it needs no `ir` at all.
+
+    IT SUPPLIES THIS COMPUTER'S REFERENCE unless the caller passed one. Without a reference the verifier
+    answers a different and much weaker question: measured 1 Oct on a 32-search pack, a bare run exits 1 with
+    32 FAIL "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT
+    InferRoute's", and with the reference and its key it exits 0 with 1150 PASS. Both numbers describe the
+    same record. The command this client prints for its own user should not be the one that produces the
+    first, and for six weeks it was.
+
+    It says out loud that it used the local copy. A reference this machine holds cannot establish whose
+    enclave it was — that is the whole reason the verifier wants one from out of band — so a convenience run
+    is corroboration, never the independent check, and it must not be mistakable for one.
+    """
     d = Path(bundle_dir)
     script = d / "verify_record.py"
     if not script.exists():
         script = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"
+    args = list(extra_args or [])
+    if "--reference" not in args:
+        from . import probant_check
+        ref, key = probant_check.published_reference()
+        if ref:
+            args += ["--reference", ref]
+            if key:
+                args += ["--reference-key", key]
+            print(f"  using this computer's own reference ({ref}) — corroboration, not an independent check: "
+                  "an auditor must obtain it from InferRoute out of band and rerun.")
+        else:
+            print("  NO REFERENCE on this computer: the run below can only show a genuine Azure confidential "
+                  "container, not that it was InferRoute's. Every identity line will FAIL for that reason.")
     import sys
-    r = subprocess.run([sys.executable, str(script), str(d), *(extra_args or [])])
+    r = subprocess.run([sys.executable, str(script), str(d), *args])
     return r.returncode
 
 

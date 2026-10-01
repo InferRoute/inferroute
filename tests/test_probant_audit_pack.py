@@ -1974,3 +1974,71 @@ def test_a_pack_only_links_a_published_wheel_it_can_stand_behind(tmp_path, monke
 
     # And the brief tells the auditor what an empty link means, where they meet it.
     assert "If `client_wheel_url` is empty, read `client_wheel_url_absent_because`" in X.AUDIT_MD
+
+
+def test_the_convenience_check_supplies_the_reference_and_says_that_it_did(tmp_path, monkeypatch, capsys,
+                                                                          V, kms):
+    """Measured on a 32-search pack, 1 Oct, three invocations of the SAME verifier over the SAME record:
+
+        bare `verify_record.py .`              exit 1, 32 FAIL "NO REFERENCE SUPPLIED"
+        --reference only                       exit 4 (signed reference, no key to check it with)
+        --reference and --reference-key         exit 0, 1150 PASS, 85 SKIP, 3 advisory FAIL
+
+    All three are honest answers to different questions. `ir probant verify-export` — the first command this
+    client prints after writing a record, the one its own user runs — asked the first one, so the product's
+    own instruction produced a wall of failures about a record that is sound.
+
+    It now supplies this computer's reference, and SAYS SO: a reference this machine holds cannot establish
+    whose enclave it was, which is the whole reason the verifier wants one from out of band. A convenience run
+    is corroboration, and must not be mistakable for the independent check.
+    """
+    from inferroute_cli import probant_export as X, probant_check
+
+    seen = {}
+    def fake_run(cmd, **k):
+        seen["cmd"] = cmd
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(X.subprocess, "run", fake_run)
+    ref = tmp_path / "reference.json"
+    ref.write_text("{}")
+
+    # With a reference on this computer: passed through, and announced.
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (str(ref), "748e4c8e"))
+    X.verify_bundle(str(tmp_path))
+    assert "--reference" in seen["cmd"] and str(ref) in seen["cmd"]
+    assert "--reference-key" in seen["cmd"] and "748e4c8e" in seen["cmd"]
+    out = capsys.readouterr().out
+    assert "corroboration, not an independent check" in out
+    assert "out of band" in out
+
+    # Without one: the run still happens, and the reason every identity line will fail is said FIRST.
+    seen.clear()
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (None, None))
+    X.verify_bundle(str(tmp_path))
+    assert "--reference" not in seen["cmd"]
+    out = capsys.readouterr().out
+    assert "NO REFERENCE on this computer" in out and "FAIL for that reason" in out
+
+    # A caller that passed its own reference is never overridden.
+    seen.clear()
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (str(ref), "748e4c8e"))
+    X.verify_bundle(str(tmp_path), ["--reference", "/theirs.json"])
+    assert seen["cmd"].count("--reference") == 1 and "/theirs.json" in seen["cmd"]
+    assert str(ref) not in seen["cmd"]
+
+
+def test_the_printed_command_is_the_one_that_answers_the_question(tmp_path, V, kms, capsys):
+    """The line a person copies. It used to read `python3 verify_record.py .`, which exits 1 on a sound
+    record because identity cannot be established without a reference — and that was the first thing anyone
+    handed a record would see."""
+    from inferroute_cli import probant_export as X
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    capsys.readouterr()
+    X.write_audit_pack(rec, tmp_path / "pack")           # any path that prints the block
+    # The export block is printed by write_bundle; assert on the source of truth for the wording instead,
+    # so this test cannot pass on a record that happens not to print.
+    src = Path(X.__file__).read_text()
+    assert 'print("  anyone, without ir:   python3 verify_record.py . --reference' in src
+    assert "--reference-key <its key>" in src
+    assert "not that it was InferRoute's" in src
+    assert 'python3 verify_record.py .   (in that folder' not in src, "the bare command is back"

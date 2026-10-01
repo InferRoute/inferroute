@@ -749,3 +749,75 @@ def test_a_superseded_session_is_not_stamped_as_ended_while_it_may_still_be_serv
     assert sessions["kimi-k3"] in lane.retired
     lane.close()
     assert sessions["kimi-k3"].closed, "a retired session was never closed at all"
+
+
+def test_a_machine_that_accepts_a_request_and_says_nothing_is_switched_away_from(monkeypatch):
+    """The failure this lane was built for, and the one it could not see.
+
+    Live, 2026-10-01: one turn, zero tool calls, zero requests reaching the proxy, and the page reporting
+    "Request timed out." at 300,036 ms — a round number, so a timer. The upstream had accepted the sealed
+    request and produced nothing; our HTTP client allows 600 s and the agent's idle timeout is 300 s, so the
+    user met the error while this lane waited. Every switch here fires on a fault the session REPORTS, and
+    silence reports nothing — so a stalled machine stayed rated healthy and was never switched away from.
+    _commit_on_first_chunk's own comment describes this exact failure; it simply had no clock.
+
+    Asserts the chain, not just the timeout: the stall is counted against the fleet, the standby answers the
+    SAME request (nothing was committed, so the user loses nothing), and it is recorded rather than hidden.
+    """
+    monkeypatch.setattr(C, "FIRST_BYTE_S", 0.05)      # the deadline, not a real wait
+
+    class Stalling(FakeSession):
+        async def messages(self, body):
+            self.calls += 1
+            self.last_fault = ""
+            async def silent():
+                await asyncio.sleep(30)               # accepted, then nothing — the measured shape
+                yield b"too late"
+            return (200, {}, silent())
+        chat_completions = messages
+
+    async def go():
+        sessions = {"kimi-k3": Stalling(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        t0 = time.monotonic()
+        status, _h, stream = await lane.messages({"messages": []})
+        body = b"".join([c async for c in stream])
+        return status, body, time.monotonic() - t0, lane, sessions
+
+    status, body, waited, lane, sessions = _run(go())
+    assert status == 200 and body == b"ok", "the standby must answer the same request"
+    assert waited < 5, f"the stall must be bounded by the deadline, not by the client ({waited:.1f}s)"
+    assert lane.switches == 1 and lane.active.model_short == "glm-5.2"
+    assert sessions["glm-5.2"].calls == 1, "the standby did not actually serve it"
+    # Attributed: a machine holding a request open while saying nothing is not serving, and a belief that
+    # counted only refusals would rate it healthy forever.
+    assert lane.beliefs._s(_cands()[0].fleet_id).p < lane.beliefs._s(_cands()[1].fleet_id).p
+    # Recorded on the receipt of the machine that stalled — its failure, on its own record — while the
+    # surviving leg records the carry. Both halves, because a reader of either should learn what happened.
+    stalled_ev = sessions["kimi-k3"].receipt.events
+    assert "stalled" in [e["kind"] for e in stalled_ev], f"the stall must be recorded: {stalled_ev}"
+    assert any("sent nothing" in str(e.get("detail", "")) for e in stalled_ev)
+    assert any(e["kind"] == "carried" for e in lane.active.receipt.events)
+
+
+def test_a_prompt_answered_promptly_is_never_called_a_stall(monkeypatch):
+    """The control for the test above: with the same tiny deadline, a fleet that answers at once is left
+    alone. Without this, a deadline that fired on everything would pass the test it was written for."""
+    monkeypatch.setattr(C, "FIRST_BYTE_S", 0.05)
+    async def go():
+        sessions = {"kimi-k3": FakeSession(_cands()[0]),
+                    "glm-5.2": FakeSession(_cands()[1]),
+                    "deepseek-v4-flash": FakeSession(_cands()[2])}
+        lane = _lane(sessions)
+        await lane.open()
+        await lane._warm()
+        status, _h, stream = await lane.messages({"messages": []})
+        return status, b"".join([c async for c in stream]), lane
+    status, body, lane = _run(go())
+    assert status == 200 and body == b"ok"
+    assert lane.switches == 0
+    assert "stalled" not in [e["kind"] for e in lane.active.receipt.events]

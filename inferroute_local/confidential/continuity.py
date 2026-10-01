@@ -55,6 +55,23 @@ SWITCHABLE = frozenset(COUNTS_AGAINST_FLEET)
 
 # How long a standby may sit unverified before it is refreshed. Under the session's own re-verification
 # interval, so a standby is never promoted on evidence the active session would have refused.
+# HOW LONG A MACHINE MAY SAY NOTHING BEFORE IT IS TREATED AS GONE.
+#
+# _commit_on_first_chunk was written for exactly the failure described in its own comment — a fleet that
+# "accepts the request, then never produces a token" — and had no clock, so it waited as long as the HTTP
+# client allowed (600 s). The agent's own idle timeout is 300 s, so the user met "Request timed out." while
+# this lane, which exists to switch away from precisely this, was still politely waiting and had seen no
+# error to react to. Measured live on 2026-10-01: one turn, zero tool calls, zero requests reaching the
+# proxy, and a fault at 300,036 ms — a round number, which is always a timer.
+#
+# A STALL IS NOT AN ERROR, and that is why it was invisible: every switch in this file is triggered by a
+# fault the session reported. Silence reports nothing. So silence gets a deadline of its own.
+#
+# 90 s: far above any honest time-to-first-token (tens of seconds on a healthy fleet, even with the larger
+# prompts the hits' abstracts now carry) and far enough below the agent's 300 s that a switch AND the
+# standby's own first token still land inside the user's patience rather than after it.
+FIRST_BYTE_S = 90.0
+
 STANDBY_MAX_AGE_S = 20 * 60.0
 
 # After a sweep that opened nothing, wait before sweeping again. Without it the retry rate is the
@@ -331,9 +348,19 @@ class Continuity:
             return resp, ""                           # non-streaming: already whole
         first = None
         try:
-            async for chunk in stream:
-                first = chunk
-                break
+            async with asyncio.timeout(FIRST_BYTE_S):
+                async for chunk in stream:
+                    first = chunk
+                    break
+        except TimeoutError:
+            # SILENCE, treated as the failure it is. Nothing was committed, so the standby can answer this
+            # same request and the user sees a pause rather than an error. Counted against the fleet like
+            # any other instance fault: a machine that holds a request open and says nothing is not serving,
+            # and a belief that only counted refusals would rate it as healthy forever.
+            await _shut(stream)
+            self.note("stalled", f"{sess.model_short} accepted the request and sent nothing for "
+                                 f"{int(FIRST_BYTE_S)}s — treating that machine as gone")
+            return None, INSTANCE_FAULT
         except Exception:                             # noqa: BLE001
             # A stream that RAISES on its first read produced nothing, so nothing is committed — and it
             # is a fault of the machine serving it, whatever the session managed to record before the

@@ -2221,3 +2221,28 @@ def test_the_page_says_it_is_still_working_where_the_reader_is_looking(client):
     assert "prefers-reduced-motion" in css
     block = css[css.index("@media (prefers-reduced-motion: reduce) {", css.index(".thinking {")):]
     assert "thinking-fade" in block[:400], "reduced motion must substitute a pulse, not remove the signal"
+
+
+def test_clicking_a_document_we_already_have_opens_it_instead_of_buying_it_again(client):
+    """Henry, 2026-10-01: "i just clicked a second time on the same patent and instead of opening the popup
+    for that patent that was already just computed/loaded it redid the processing and conversation
+    processing".
+
+    Every publication number on the page goes through one builder, and it always sent a prompt. Re-reading
+    a document already on this computer costs a sealed request, spends a turn of the conversation
+    re-answering an answered question, and pushes the first reading further up the log — to produce the
+    same text, which the matter's own record already holds.
+
+    Drives the page's real docLink() (tests/doc_link_sim.js), including the hover label, which is decided
+    at hover time because a document can become "already read" at any point in a session.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "doc_link_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "asks only for what we do not" in r.stdout

@@ -540,7 +540,25 @@
     const a = el("button", "key key-link", keyNo);
     a.type = "button";
     a.title = `Open ${keyNo}`;
-    a.addEventListener("click", (e) => { e.stopPropagation(); if (!ended) send(OPEN_DOC(keyNo)); });
+    // WHICH OF THE TWO IT WILL DO, decided at the moment of the hover rather than when the button was
+    // built: a document can become "already read" at any point in the session, and a label fixed at build
+    // time would promise the wrong one.
+    a.addEventListener("pointerenter", () => {
+      a.title = haveDocument(keyNo)
+        ? `Show ${keyNo} — already read on this matter, nothing new is sent`
+        : `Ask the assistant to read ${keyNo}`;
+    });
+    a.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (ended) return;
+      // ALREADY READ? SHOW IT. Henry, 2026-10-01: "i just clicked a second time on the same patent and
+      // instead of opening the popup for that patent that was already just computed/loaded it redid the
+      // processing and conversation processing". Re-reading costs a sealed request, spends a turn of the
+      // conversation on something already answered, and buries the first reading further up the log — all
+      // to produce the same text, which is already on this computer in the matter's own record.
+      if (haveDocument(keyNo)) { showDocument(keyNo); return; }
+      send(OPEN_DOC(keyNo));
+    });
     return a;
   }
 
@@ -907,6 +925,11 @@
   // having: it holds documents opened in earlier sessions on this matter, it survives a reload, and showing
   // one again spends no sealed request because the text is already on this computer.
   let docsCache = { documents: [], readings: {} };
+  // Read on this matter ALREADY — in this session or an earlier one, since the list comes from the record
+  // rather than from this page's memory.
+  function haveDocument(key) {
+    return docsCache.documents.some((d) => d.key === key);
+  }
 
   async function refreshDocuments() {
     let got;

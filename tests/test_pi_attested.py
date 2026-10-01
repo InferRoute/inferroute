@@ -1527,3 +1527,31 @@ def test_the_reach_figure_does_not_vouch_for_a_leg_it_never_measured():
     assert "legs.some((l) => l.like)" in ts, "the figure must be scoped on whether a like-leg is present"
     assert "composed from your description (52.8% against 38.4%)" in ts
     assert "that measurement does " in ts and "not cover them" in ts
+
+
+def test_the_agent_cannot_write_outside_the_matter_without_the_kernels_help():
+    """Henry, 2026-10-01: "cant we just limit read access at the agent level?"
+
+    Reading already was: `read` and `grep` are withheld for `read_matter_file`, and the attested session has
+    NO shell, so there is no second route to a file. Writing was not — `edit` and `write` are Pi's built-ins
+    and the tool_call hook only checked the allowlist, so the thing actually stopping a write outside the
+    matter was LANDLOCK. `confinement.apply` raises on anything but Linux, which is why macOS looked like a
+    platform to refuse rather than one missing a backstop.
+
+    Drives the extension's real hook against a real temp matter, a real directory outside it, and a real
+    SYMLINK out of it (tests/write_fence_sim.js). Paths are resolved before the check, because an allowlist
+    checked on an unresolved path is not an allowlist — the same lesson read_matter_file learned.
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "write_fence_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "symlink and home" in r.stdout, r.stdout
+    # ls stays unfenced on purpose: seeing THAT a file exists is not reading it, and it is what lets the
+    # assistant say a stale draft is sitting there instead of silently absorbing it.
+    assert "ls untouched" in r.stdout

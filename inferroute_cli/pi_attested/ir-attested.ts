@@ -14,8 +14,8 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve, relative } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, relative, sep } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
 const SEARCH = (process.env.IR_SEARCH_ENDPOINT ?? "").replace(/\/+$/, "");
@@ -829,9 +829,58 @@ export default function (pi: ExtensionAPI) {
 	// not to loop. The cap is enforced where a call can actually be refused.
 	let nextStepsThisTurn = 0;
 
+	// WRITES STAY IN THE MATTER, enforced by the tool rather than by the kernel.
+	//
+	// Reading was already fenced here — `read` and `grep` are withheld for `read_matter_file`, and there is
+	// no shell, so there is no second route to a file. Writing was not: `edit` and `write` are Pi's
+	// built-ins and this hook only checked the allowlist, so what actually stopped a write outside the
+	// matter was LANDLOCK. That is Linux-only (`confinement.apply` raises on anything else), which is why
+	// macOS looked like a platform to refuse rather than one missing a backstop. Henry, 2026-10-01: "cant
+	// we just limit read access at the agent level?" — most of it already was; this is the half that wasn't.
+	//
+	// RESOLVED FIRST, always: `../` and a symlink out are the whole attack, and an allowlist checked on an
+	// unresolved path is not an allowlist. read_matter_file learned this already.
+	//
+	// What the agent legitimately writes: files in the matter workspace, and nothing else. The contract
+	// never asks it to write a file at all — every "write" there means "write prose in your answer" — and
+	// the one real case is the professional asking it to edit their own disclosure, which lives in the
+	// workspace. Pi's own state goes to its config dir without passing through these tools.
+	const WRITE_TOOLS = new Set(["edit", "write"]);
+	function insideMatter(target: string): boolean {
+		try {
+			const root = realpathSync(process.cwd());
+			const abs = resolve(root, target);
+			// Resolve the NEAREST EXISTING ANCESTOR and re-attach the rest. A file about to be created has
+			// no realpath of its own, and neither does a new subfolder two levels down — resolving only the
+			// target, or only its immediate parent, refuses "sub/new.md" in a matter that has no sub/ yet.
+			// Resolving the string alone would be worse: it would miss a symlinked ancestor entirely, which
+			// is the escape this check exists for.
+			let existing = abs;
+			const rest: string[] = [];
+			for (;;) {
+				try { existing = realpathSync(existing); break; } catch { /* not there yet; climb */ }
+				const parent = dirname(existing);
+				if (parent === existing) return false;          // climbed to the root and found nothing real
+				rest.unshift(basename(existing));
+				existing = parent;
+			}
+			const full = rest.length ? resolve(existing, ...rest) : existing;
+			return full === root || full.startsWith(root + sep);
+		} catch {
+			return false;                      // cannot resolve it ⇒ cannot vouch for it ⇒ refuse
+		}
+	}
+
 	pi.on("tool_call", async (event) => {
 		if (TOOLS.size && !TOOLS.has(event.toolName)) {
 			return { block: true, reason: `${event.toolName} is not available in an attested session` };
+		}
+		if (WRITE_TOOLS.has(event.toolName)) {
+			const target = String((event as { input?: { path?: unknown } }).input?.path ?? "");
+			if (!target || !insideMatter(target)) {
+				return { block: true, reason: `refused: ${event.toolName} may only touch files in this `
+					+ `matter's folder, and ${target || "(no path given)"} is outside it. Nothing was written.` };
+			}
 		}
 		if (event.toolName === NEXT_STEPS_TOOL) {
 			nextStepsThisTurn += 1;

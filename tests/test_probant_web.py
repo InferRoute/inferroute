@@ -2165,6 +2165,10 @@ def test_the_document_popup_states_what_was_not_read_before_showing_what_was(cli
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "all held" in r.stdout
+    # Two things Henry asked for on 2026-10-01 after reading a popup: the assistant's side was showing raw
+    # markdown ("**bold**", "- item") as characters, and the mark controls were a panel away from the moment
+    # an opinion actually forms. Both are behavioural, so the sim asserts them rather than the source.
+    assert "reading rendered" in r.stdout and "marks present" in r.stdout
 
 
 def test_a_long_document_title_cannot_overflow_the_fixed_outline_column():

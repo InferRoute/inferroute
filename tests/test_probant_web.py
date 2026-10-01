@@ -2368,3 +2368,40 @@ def test_this_version_offers_two_judgements_and_still_shows_a_retired_one(client
     # And the step that acts on exclusions no longer claims to leave out something nothing can mark.
     assert "leaving out what I marked not relevant" in js
     assert "leaving out what I marked known" not in js
+
+
+def test_a_question_sent_while_the_assistant_is_busy_waits_outside_the_transcript(client):
+    """Henry, 2026-10-01: "when many instructions are given in a short time all the questions display and
+    then all the answers display in that order. it would be better if the unprocessed questions remain
+    unanchored in the chat until they are processed so that it can look like actual conversation".
+
+    The server publishes a `user` event the moment it RECEIVES a message, and a message sent while the
+    agent is mid-answer is only queued (streamingBehavior: followUp). So three quick questions anchored
+    themselves above the first answer and the transcript read Q Q Q A A A — an order that never happened,
+    and that nobody reading the record afterwards could follow.
+
+    Drives the page's real addUser/takeUpQuestion (tests/waiting_questions_sim.js).
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "waiting_questions_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "anchored one per turn, in order" in r.stdout
+
+    # Waiting is SHOWN, not hidden: the professional must see what they have already asked, and the
+    # queue must not be dressed up as activity — the dots below the last answer are what says "working".
+    css = (root / "inferroute_cli" / "probant_web" / "app.css").read_text()
+    assert ".msg-waiting" in css
+    start = css.index(".msg-waiting")
+    rule = css[start:css.index("}", start)]         # THIS rule only — a wider window catches the next one
+    # DECLARATIONS, not prose. An assertion over raw source matches the comments too, and the comment here
+    # says "No animation:" — the third time today a grep-shaped test has matched my own writing about the
+    # code instead of the code.
+    decls = re.sub(r"/\*.*?\*/", "", rule, flags=re.S)
+    assert "dashed" in decls, "a waiting question must look unlike one in the transcript"
+    assert "animation:" not in decls, "a queue must not be dressed up as activity"

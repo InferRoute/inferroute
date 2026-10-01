@@ -2246,3 +2246,58 @@ def test_clicking_a_document_we_already_have_opens_it_instead_of_buying_it_again
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "asks only for what we do not" in r.stdout
+
+
+def test_what_the_assistant_wrote_about_a_document_outlives_the_session(tmp_path):
+    """Henry, 2026-10-01: "the agent processing of patent doesnt seem to be saved locally accross sessions?
+    im seeing now 'The assistant has not written about this document yet' on patents that were already
+    processed before".
+
+    The document TEXT was persisted (it comes from the archive); the reading was a dict on the Bridge and
+    died with the process. The whole point of keeping readings is that reopening a document costs nothing,
+    and a cache that does not outlive the process is not a cache. My own commit said "only this is ours"
+    and then gave "ours" no home on disk.
+    """
+    rd = tmp_path / "records"
+    rd.mkdir()
+    b = _bridge(tmp_path)
+    b.records_dir = rd
+    b._load_readings()
+
+    # A read, then the turn that reports it.
+    b.publish({"kind": "busy", "value": True})
+    b.publish({"kind": "tool_start", "tool": "read_patent", "args": {"key": "US-1-A"}})
+    b.publish({"kind": "tool_end", "tool": "read_patent"})
+    b.publish({"kind": "assistant_end", "text": "It is an optical sensor using two wavelengths."})
+    assert b.readings["US-1-A"].startswith("It is an optical sensor")
+
+    # ON CAPTURE, not at round end: most sessions are killed mid-work and would otherwise save nothing.
+    saved = rd / "readings.json"
+    assert saved.exists(), "the reading must be on disk before the session ends"
+    assert stat.S_IMODE(saved.stat().st_mode) == 0o600, "it is the client's work product"
+
+    # A LATER SESSION on the same matter sees it — the actual complaint.
+    b2 = _bridge(tmp_path)
+    b2.records_dir = rd
+    b2._load_readings()
+    assert b2.readings.get("US-1-A", "").startswith("It is an optical sensor"), \
+        "a new session must show what an earlier one wrote about this document"
+    assert (b2._readings_meta.get("US-1-A") or {}).get("at"), "when it was written is kept too"
+
+    # A second turn about the same document does not overwrite the reading with unrelated words.
+    b2.publish({"kind": "busy", "value": True})
+    b2.publish({"kind": "assistant_end", "text": "Something else entirely."})
+    assert b2.readings["US-1-A"].startswith("It is an optical sensor")
+
+    # Robustness: a corrupt or unreadable file is "no readings", never a session that will not open.
+    saved.write_text("{ this is not json")
+    b3 = _bridge(tmp_path)
+    b3.records_dir = rd
+    b3._load_readings()
+    assert b3.readings == {}
+    # And a matter with no records directory at all simply keeps nothing.
+    b4 = _bridge(tmp_path)
+    b4.records_dir = None
+    b4._load_readings()
+    b4.readings["X"] = "y"
+    b4._save_readings()        # must not raise

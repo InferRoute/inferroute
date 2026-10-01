@@ -761,8 +761,10 @@
     // "CONTINUE the survey" presupposes one. Marks belong to the MATTER and outlive a sitting, so a fresh
     // session opens holding every mark the professional ever made and was offering to continue a survey
     // that had not started — Henry, 25 Sep: "now im seeing this while the session is still fully empty".
-    // The other mark steps are fine with nothing on screen: "find documents like US-X" is a new search,
-    // not a continuation. This one is the only one whose words claim something about what has happened.
+    // That fix narrowed one step's WORDING and left the others, reasoning that "find documents like US-X" is
+    // a new search rather than a continuation and so reads fine on an empty session. Henry corrected that on
+    // 1 Oct: none of them belong there, because the welcome panel's own buttons already are. renderSteps now
+    // shows nothing before the first message, so this check is only about the wording when it does show.
     const canContinue = excluded && cards.size > 0;
     if (onlyNew) return [...like.slice(0, 1), ...(relevant.length ? [DEEPER] : []), ...like.slice(1), ...(canContinue ? [LEAVE_OUT] : [])];
     return [...(relevant.length ? [DEEPER] : []), ...like, ...(canContinue ? [LEAVE_OUT] : [])];
@@ -784,6 +786,15 @@
     const list = $("mark-steps-list");
     clear(list);
     const started = $("empty").hidden;
+    // NOTHING BEFORE THE FIRST MESSAGE. The welcome panel is on screen with its own recommendation buttons,
+    // so a second panel of suggestions below it offers the same decision twice in two voices.
+    //
+    // Henry, 1 Oct: "on an empty session right now it was showing next steps while it shouldnt because we
+    // already have the initial recommendation buttons". The cause was one branch gated and its sibling not —
+    // "Ideas" waited for a conversation and said so in a comment, while "From your marks" beside it did not,
+    // so any matter carrying marks from an earlier session showed the bar on a session with no messages at
+    // all. Gated ONCE here instead of per branch, so a branch added later cannot be the next one to miss it.
+    if (!started) { bar.hidden = true; return; }
     const groups = [];
     const mine = assistantSteps.slice(0, 4);
     if (mine.length) {
@@ -796,12 +807,11 @@
       // A new session is its own sitting (Henry, 19 Sep): what earlier marks suggest is worth offering, but
       // until THIS session has run a search, running one comes first. Before the first message the welcome
       // already offers it.
-      const survey = started && cards.size === 0 && fromMarks.length ? [SURVEY] : [];
+      const survey = cards.size === 0 && fromMarks.length ? [SURVEY] : [];
       if (survey.length) groups.push({ title: "", steps: survey });
       if (fromMarks.length) groups.push({ title: "From your marks", steps: fromMarks.slice(0, STEPS_MAX - survey.length) });
-      // Ideas wait for a conversation: before the first message the welcome's own suggestions are on screen,
-      // and nothing presumes what has not happened — no summary before a search.
-      else if (started) groups.push({ title: "Ideas", steps: IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0) });
+      // Nothing presumes what has not happened: no summary before a search.
+      else groups.push({ title: "Ideas", steps: IDEAS.filter((i) => i !== SUMMARISE_IDEA || cards.size > 0) });
     }
     // The deep search is offered on its own row and does not compete for the five places. It is the one
     // action the page guarantees is reachable: leaving it to the assistant to remember would make the
@@ -813,7 +823,7 @@
     const deepWouldRepeat = deepMarksAtLastPress !== null && deepMarksAtLastPress === deepMarksKeyHere();
     // After a press, the row asks for the follow-up rather than repeating the first press's own words.
     const deepStep = deepMarksAtLastPress === null ? DEEP : DEEP_FOCUSED;
-    if (started && searchOffered && !deepWouldRepeat
+    if (searchOffered && !deepWouldRepeat
         && !groups.some((g) => g.steps.includes(DEEP) || g.steps.includes(DEEP_FOCUSED))) {
       groups.push({ title: "", steps: [deepStep] });
     }

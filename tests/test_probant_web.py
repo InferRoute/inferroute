@@ -1210,7 +1210,11 @@ def test_the_page_learns_about_the_search_machine_from_the_session_payload():
     assert '"search": bool(bridge.search_endpoint)' in py
     # The page reads THAT key into the flag the steps panel gates on.
     assert "searchOffered = Boolean(s.search);" in js
-    assert "started && searchOffered &&" in js, "the guaranteed deep row is no longer gated on it"
+    # Both halves of the old `started && searchOffered` gate still hold; the "started" half moved to the one
+    # check at the top of renderSteps on 1 Oct, so that a branch added later cannot miss it (see
+    # test_the_next_steps_bar_shows_nothing_before_the_first_message). Assert where each half lives now.
+    assert "if (searchOffered && !deepWouldRepeat" in js, "the deep row is no longer gated on a search machine"
+    assert 'if (!started) { bar.hidden = true; return; }' in js, "the bar is no longer gated on a conversation"
 
 
 # ── launching the audit in a terminal (24 Sep) ──
@@ -2491,3 +2495,40 @@ def test_a_question_held_while_busy_is_delivered_the_moment_the_assistant_goes_i
         assert b.pending_prompts == ["Q4"], "a send that failed must put the question back, not drop it"
 
     asyncio.run(go())
+
+
+def test_the_next_steps_bar_shows_nothing_before_the_first_message():
+    """Henry, 1 Oct: "on an empty session right now it was showing next steps while it shouldnt because we
+    already have the initial recommendation buttons".
+
+    Marks belong to the MATTER and outlive a sitting, so a fresh session opens holding every mark ever made —
+    and that was the state that showed the bar under the welcome panel, offering the same decision twice in
+    two voices. The cause was one branch gated on a started conversation and its sibling not: "Ideas" waited
+    and said so in a comment, "From your marks" beside it did not.
+
+    This runs the page's REAL renderSteps(), lifted verbatim, so it tests the gate rather than the comment
+    above it. The same mistake had already been made on 25 Sep and fixed one step at a time; it is gated once
+    now, which is the only version of this fix that a branch added later cannot slip past.
+    """
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "empty_session_steps_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+
+    # THE CASE HENRY SAW: no messages yet, marks carried in from an earlier sitting. Nothing.
+    assert out["emptySessionWithOldMarks"] is None
+    assert out["emptySessionNoMarks"] is None
+
+    # And once the conversation has begun the bar does its job, including the guaranteed deep row.
+    started = out["startedNoMarks"]
+    assert started and "SUB:Ideas" in started
+    assert any(s.startswith("Search deeply:") for s in started)
+    marked = out["startedWithMarks"]
+    assert "SUB:From your marks" in marked and "Find documents like US-1-A1" in marked
+    # The assistant's own list comes first when it has one.
+    assert out["startedWithAssistantSteps"][0] == "Read US-1-A1 against claim 1"

@@ -1405,7 +1405,7 @@ def test_the_contract_tells_the_agent_to_READ_a_document_rather_than_search_arou
     assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"
 
 
-def test_next_steps_can_be_offered_only_once_per_turn():
+def test_next_steps_can_be_offered_only_once_per_question():
     """2026-10-01, live: eight suggest_next_steps calls and fourteen assistant turns for two user messages,
     with the same document read twice. Henry: "it seems to be looping on the read patent right now". The
     page reported ZERO faults, so nothing was retrying — the agent was doing it unprompted.
@@ -1423,7 +1423,7 @@ def test_next_steps_can_be_offered_only_once_per_turn():
     if not node:
         pytest.skip("node is not on PATH here")
     ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
-    decl = ts[ts.index("\tlet nextStepsThisTurn = 0;"):ts.index("\n\t});\n", ts.index('pi.on("tool_call"')) + 5]
+    decl = ts[ts.index("\tlet nextStepsThisRound = 0;"):ts.index("\n\t});\n", ts.index('pi.on("tool_call"')) + 5]
     js = ('const NEXT_STEPS_TOOL = "suggest_next_steps";\nconst TOOLS = new Set(["suggest_next_steps","read_patent"]);\n'
           'const handlers = {};\nconst pi = { on(n, f) { handlers[n] = f; } };\n' + decl + '\n'
           'const call = async (t) => await handlers.tool_call({ toolName: t });\n'
@@ -1431,7 +1431,7 @@ def test_next_steps_can_be_offered_only_once_per_turn():
           'out.push(await call("suggest_next_steps"));\n'      # first: allowed
           'out.push(await call("suggest_next_steps"));\n'      # second in the same turn: refused
           'out.push(await call("read_patent"));\n'             # unrelated tools unaffected
-          'nextStepsThisTurn = 0;\n'                            # what before_agent_start does at a turn boundary
+          'nextStepsThisRound = 0;\n'                           # what the `input` hook does when a NEW QUESTION arrives
           'out.push(await call("suggest_next_steps"));\n'      # next turn: allowed again
           'out.push(await call("nonsense_tool"));\n'           # the pre-existing allowlist block still works
           'console.log(JSON.stringify(out));')
@@ -1443,10 +1443,11 @@ def test_next_steps_can_be_offered_only_once_per_turn():
     first, second, other, next_turn, unknown = json.loads(r.stdout.strip().splitlines()[-1])
 
     assert first is None, "the first offer of a turn must go through"
-    assert second and second["block"] is True, "the second offer in one turn must be REFUSED, not acknowledged"
+    assert second and second["block"] is True, "the second offer in one round must be REFUSED, not acknowledged"
     assert "already offered" in second["reason"] and "End your turn" in second["reason"]
+    assert "for this question" in second["reason"], "the cap is per question, and the refusal says so"
     assert other is None, "the cap must not touch any other tool"
-    assert next_turn is None, "a new turn gets a fresh offer — the cap is per turn, not per session"
+    assert next_turn is None, "a new QUESTION gets a fresh offer — the cap is per round, not per session"
     assert unknown and unknown["block"] is True, "the allowlist block must still work"
 
 
@@ -1611,3 +1612,23 @@ def test_a_client_install_needs_no_paths_from_this_machine():
     # The vendor dir is on PYTHONPATH rather than installed as a top-level package, so a machine that has
     # the real sealedresearch keeps using it and the two never compete for one name on sys.path.
     assert (PA.VENDOR_DIR / "sealedresearch" / "search_verifier.py").exists()
+
+
+def test_the_folder_is_mentioned_once_and_not_after_an_unrelated_answer():
+    """Live, 2026-10-01: asked to open ONE patent, the session read it, answered — and then listed the
+    matter folder twice and closed with a paragraph about a `.bak` file.
+
+    The observation was true and the capability is deliberate: `ls` and `find` are left available so the
+    assistant can see THAT a stale draft exists and say so, since `read_matter_file` refuses to open it.
+    What was wrong is WHEN. A true remark attached to a question nobody asked is drift, it costs a turn
+    and tokens, and here it arrived in place of the answer that was due.
+    """
+    contract = (Path(PA.__file__).resolve().parent / "pi_attested" / "contract.md").read_text()
+    flat = " ".join(contract.split())
+    assert "Say it ONCE, when you read the disclosure, and not again" in contract
+    assert "not after an answer about something else" in flat
+    assert "never in the middle of an unrelated answer" in flat
+    # And the read tool's own rule: finish the question that was asked.
+    assert "Answer about that document, then stop" in contract
+    assert "is not an invitation to" in flat and "audit the matter folder" in flat
+    assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"

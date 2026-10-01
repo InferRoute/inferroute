@@ -1098,10 +1098,13 @@ other order would have been marked down by a rule this brief had broken itself.
 
    1. **The build recipe is published** — https://inferroute.ai/build/ (`Dockerfile.m2`, `requirements.txt`,
       `REBUILD.md`). You can read it and rebuild from it today.
-   2. **Its determinism is OUR dated claim, not one you have checked.** Two independent `--no-cache` builds on
-      2026-09-28 produced byte-identical layers for an EARLIER image (content digest `03495ffa…` over 37,441
-      files). `REBUILD.md` states this and labels it as our claim. That measurement does not cover the image in
-      this record, which is newer. Treat it as an assertion with a date on it.
+   2. **Its determinism is OUR dated claim, measured twice, not once — and not by you.** Two independent
+      `--no-cache` builds on 2026-09-28 produced byte-identical layers (content digest `03495ffa…` over 37,441
+      files), and two more on 2026-10-02, on the tree as it stands, produced the identical image id
+      `bacbf8e3…`. `REBUILD.md` states both and labels them as ours. **Neither says anything about the image
+      THIS record was served by:** they say the recipe is deterministic on the day it ran. The image ids differ
+      between those dates, and from what is deployed, because the code moved — expected, not a discrepancy.
+      Tying a rebuild to a specific record's image runs through `acipolicygen` and needs rung 4.
    3. **The application's own source files are NOT published.** So even a bit-identical rebuild shows the
       recipe is deterministic, not that the program does what a reader would want. This is an open publication
       decision at InferRoute, not an oversight, and it is the rung that matters most.

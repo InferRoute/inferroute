@@ -1090,24 +1090,34 @@ other order would have been marked down by a rule this brief had broken itself.
    twenty-eight-operation hole coexist without contradiction. A reader who saw only the exit code in your
    report's header would never learn the hole exists. If you find one, put it in the header too.
 
-   **THE ONE STEP THAT WOULD TAKE INFERROUTE OUT OF THE TRUST SET, and which this brief did not ask for until
-   now.** The verifier reports `image_source is only a reference field` as a permanent gap, and the plain
-   statement tells the client to "ask your provider to show that the published source was built into the exact
-   program that ran". That reads as something not yet provided. It has been: the build recipe is published at
-   **https://inferroute.ai/build/** (`Dockerfile.m2`, `requirements.txt`, `REBUILD.md`), and the policy in
-   this folder pins, per container, the `layers` roots of the filesystem that ran — the chip signed
-   `sha256(policy)`, so those digests are committed, not asserted.
+   **WHAT WOULD TAKE INFERROUTE OUT OF THE TRUST SET, how far it has got, and where it stops today.** The
+   verifier reports `image_source is only a reference field` as a permanent gap, and the plain statement tells
+   the client to "ask your provider to show that the published source was built into the exact program that
+   ran". Here is the whole ladder, so you can see which rungs exist and which are missing, rather than
+   discovering it yourself:
 
-   So the check exists and nobody has been asked to run it. Rebuild from the published recipe and compare the
-   layer roots you get against the `layers` arrays in the policy. **Report the outcome, whichever it is. We are
-   not telling you it will match** — if it does not, that is the most important finding available about this
-   product and it belongs in your header. And if it does, say what it buys and what it does not: that the code
-   which ran is the code anyone can read, so the operator's honesty is no longer what the program's behaviour
-   rests on. It says nothing about what that code does with text once it has it, which you can now read for
-   yourself, and nothing about the platform containers beside it.
+   1. **The build recipe is published** — https://inferroute.ai/build/ (`Dockerfile.m2`, `requirements.txt`,
+      `REBUILD.md`). You can read it and rebuild from it today.
+   2. **Its determinism is OUR dated claim, not one you have checked.** Two independent `--no-cache` builds on
+      2026-09-28 produced byte-identical layers for an EARLIER image (content digest `03495ffa…` over 37,441
+      files). `REBUILD.md` states this and labels it as our claim. That measurement does not cover the image in
+      this record, which is newer. Treat it as an assertion with a date on it.
+   3. **The application's own source files are NOT published.** So even a bit-identical rebuild shows the
+      recipe is deterministic, not that the program does what a reader would want. This is an open publication
+      decision at InferRoute, not an oversight, and it is the rung that matters most.
+   4. **The deployment template is NOT published**, and `HOST_DATA` cannot be derived without it.
 
-   A reproducible build is also what separates this from the question you cannot settle: whether a FUTURE
-   deployment behaves. This is about the one that ran.
+   **Do not expect to compare a rebuild against the policy's `layers` arrays directly — that comparison does
+   not typecheck.** Those values are dm-verity roots over layer filesystems, not layer digests, and getting
+   from a built image to them runs through Azure's `acipolicygen`, which needs the unpublished template. An
+   earlier revision of this brief told you to make that comparison; it was wrong, and the correction is here
+   because an instruction that cannot be completed wastes your time and reads as our evidence failing.
+
+   So the honest state: rungs 1 and 2 you can inspect, 3 and 4 are blocked on decisions InferRoute has not
+   made. **Report it that way.** If you rebuild and the recipe is not deterministic, that is a finding and it
+   is ours. If rungs 3 and 4 are still missing when you read this, the correct sentence is that the program's
+   behaviour rests on the operator's honesty — and say that plainly, because it is the difference between this
+   record and the one it could be.
 
    **A reference window opens AFTER the enclave it describes, always, and that is not evidence of anything.**
    An auditor measured the gap on 1 Oct — "the entry matching this enclave opens 3 minutes 32 seconds after

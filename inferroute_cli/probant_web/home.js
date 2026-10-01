@@ -314,10 +314,8 @@
     if (!watching.has("search-status")) watching.set("search-status", setInterval(paint, 60000));
   }
 
-  // ONE definition of a matter card, used by every folder group and by the unfiled list. It was inline in
-  // the loop; folders need the same card in several places and a second copy would drift the first time
-  // either changed.
-  function matterCard(m, folders, refresh) {
+  // ONE definition of a matter card.
+  function matterCard(m) {
     const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
     const start = button("Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
@@ -333,8 +331,7 @@
         m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
       el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
       el("div", "matter-open", "Open this matter →"));
-    const cardNode = el("div", "matter-card clickable", body,
-      el("div", "matter-foot", start, moveControl(m, folders, refresh)));
+    const cardNode = el("div", "matter-card clickable", body, el("div", "matter-foot", start));
     cardNode.tabIndex = 0;
     cardNode.setAttribute("role", "link");
     cardNode.setAttribute("aria-label", `Open ${m.client} / ${m.matter}`);
@@ -343,50 +340,6 @@
       if (e.target === cardNode && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); }
     });
     return cardNode;
-  }
-
-  // Moving a matter is a select, not a drag: drag-and-drop is unusable by keyboard, invisible on touch, and
-  // this list is read as often as it is rearranged.
-  function moveControl(m, folders, refresh) {
-    if (!folders.length) return null;
-    const sel = document.createElement("select");
-    sel.className = "move-select";
-    sel.title = `Which folder ${m.matter} belongs to`;
-    const none = document.createElement("option");
-    none.value = ""; none.textContent = "No folder";
-    sel.append(none);
-    for (const f of folders) {
-      const o = document.createElement("option");
-      o.value = f.id; o.textContent = f.name;
-      if (f.matters.includes(m.id)) o.selected = true;
-      sel.append(o);
-    }
-    sel.addEventListener("click", (e) => e.stopPropagation());   // the card opens on click; this must not
-    sel.addEventListener("change", async () => {
-      try {
-        await api("/api/folders/assign", { matter: m.id, folder: sel.value });
-        if (refresh) refresh();
-      } catch (e) { toast(`Could not move it: ${e.message}`, "error"); }
-    });
-    return sel;
-  }
-
-  function newFolderDialog(onDone) {
-    const name = input("text", "e.g. Bétrancourt portfolio");
-    dialog("New folder", [
-      el("p", "", "A folder groups matters for your own use. It is also what you seal and send as a corpus."),
-      field("Name", name, "Letters, digits, spaces, dots, dashes."),
-    ], [
-      button("Cancel", "ghost", closeDialog),
-      button("Create", "primary", async () => {
-        try {
-          await api("/api/folders/create", { name: name.value });
-          closeDialog();
-          if (onDone) onDone();
-        } catch (e) { toast(e.message, "error"); }
-      }),
-    ]);
-    setTimeout(() => name.focus(), 0);
   }
 
   async function renderMatters() {
@@ -422,39 +375,8 @@
       await renderDeleted(p);
       return;
     }
-    // FOLDERS. Henry, 2026-10-01: "organise matters in clusters, just like file and folders". The folders
-    // come from their own endpoint rather than the overview, so a slow or absent folders file can never
-    // stop the matters rendering — the list a person came for is never blocked by the way it is grouped.
-    let fdata = { folders: [], unfiled: data.matters.map((m) => m.id) };
-    try { fdata = await api("/api/folders"); } catch { /* ungrouped is a fine fallback */ }
-    const byId = new Map(data.matters.map((m) => [m.id, m]));
-
-    p.append(el("div", "row folder-bar",
-      button("New folder", "ghost small", () => newFolderDialog(renderMatters)),
-      el("span", "sub", fdata.folders.length
-        ? `${fdata.folders.length} folder${fdata.folders.length === 1 ? "" : "s"}`
-        : "Folders group matters for your own use — and a folder is what you seal and send as a corpus.")));
-
-    const card = (m) => matterCard(m, fdata.folders, renderMatters);
-    for (const f of fdata.folders) {
-      const head = el("div", "folder-head",
-        el("h2", "section", f.name),
-        el("span", "sub", plural(f.matters.length, "matter", "matters")),
-        button("Open folder", "ghost small", () => { location.hash = `#/folder/${enc(f.id)}`; }));
-      p.append(head);
-      const g = el("div", "matters");
-      for (const id of f.matters) if (byId.has(id)) g.append(card(byId.get(id)));
-      if (!f.matters.length) g.append(el("p", "sub", "Nothing in this folder yet — move matters in from below."));
-      p.append(g);
-    }
-    if (fdata.folders.length && fdata.unfiled.length) {
-      // NAMED, not silent: matters outside every folder must never look like matters that vanished.
-      p.append(el("h2", "section", "Not in a folder"));
-    }
     const grid = el("div", "matters");
-    for (const m of (fdata.folders.length ? fdata.unfiled.map((id) => byId.get(id)).filter(Boolean) : data.matters)) {
-      grid.append(matterCard(m, fdata.folders, renderMatters));
-    }
+    for (const m of data.matters) grid.append(matterCard(m));
     p.append(grid);
     if (data.recent.length) {
       p.append(el("h2", "section", "Recent sessions"));
@@ -839,123 +761,10 @@
   // Nothing secret is ever shown or sent: what leaves this page is a card of PUBLIC keys, and what the
   // other person receives is sealed to their key alone. The one thing a person must do off-screen is read
   // a fingerprint aloud — so the page says that where they will read it, not in a help page.
-  // ── one folder: its matters, its own documents, and sealing it as a corpus ─────────────────────
-  async function renderFolder(folderId) {
-    const p = page();
-    clear(p);
-    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
-    let data, over;
-    try { [data, over] = await Promise.all([api("/api/folders"), api("/api/overview")]); }
-    catch (e) { p.append(el("p", "warn-text", "Could not load this folder.")); return; }
-    const f = (data.folders || []).find((x) => x.id === folderId);
-    if (!f) { p.append(el("p", "sub", "That folder is gone.")); return; }
-    const byId = new Map((over.matters || []).map((m) => [m.id, m]));
-
-    p.append(el("div", "page-head", el("h1", "", f.name),
-      el("p", "sub", `${plural(f.matters.length, "matter", "matters")} · a folder is what you seal and send as one corpus.`)));
-    p.append(el("div", "row",
-      button("Rename", "ghost small", () => renameFolderDialog(f, () => renderFolder(folderId))),
-      // Sealing takes a SNAPSHOT: the corpus is signed and dated, and the folder is free to change after.
-      button("Seal and send this folder", "primary small", () => { location.hash = `#/sharing?folder=${enc(f.id)}`; }),
-      button("Delete folder", "ghost small", async () => {
-        if (!(await confirmBox("Delete this folder?",
-              "The folder goes. Its matters are NOT deleted — they simply stop being in a folder.",
-              "Delete the folder"))) return;
-        try { await api("/api/folders/delete", { id: f.id }); location.hash = "#/"; }
-        catch (e) { toast(e.message, "error"); }
-      })));
-
-    // THE FOUR KINDS, always all four, present or not. A fixed set is the point: a reader sees the same
-    // slots every time and knows which are empty, which a free list of files never tells them.
-    p.append(el("h2", "section", "About this folder"));
-    p.append(el("p", "sub", "Short notes that apply across every matter here. They travel with the corpus "
-      + "when you seal it, and the assistant reads them. They are never searched and are never evidence."));
-    const docs = el("div", "folder-docs");
-    for (const d of f.documents || []) {
-      const row = el("div", "folder-doc",
-        el("div", "", el("b", "", d.title),
-          el("div", "sub", d.about),
-          el("div", "sub", d.present ? `${d.words} words` : "empty")),
-        el("div", "row",
-          button(d.present ? "Edit" : "Write", "ghost small", () => editDocDialog(f, d, () => renderFolder(folderId))),
-          button("Draft it for me", "ghost small", () => draftDocDialog(f, d, () => renderFolder(folderId)))));
-      docs.append(row);
-    }
-    p.append(docs);
-
-    p.append(el("h2", "section", "Matters in this folder"));
-    const grid = el("div", "matters");
-    for (const id of f.matters) if (byId.has(id)) grid.append(matterCard(byId.get(id), data.folders, () => renderFolder(folderId)));
-    if (!f.matters.length) grid.append(el("p", "sub", "Nothing here yet — move matters in from the Matters page."));
-    p.append(grid);
-  }
-
-  function renameFolderDialog(f, onDone) {
-    const name = input("text", f.name);
-    name.value = f.name;
-    dialog("Rename folder", [field("Name", name, "")], [
-      button("Cancel", "ghost", closeDialog),
-      button("Save", "primary", async () => {
-        try { await api("/api/folders/rename", { id: f.id, name: name.value }); closeDialog(); onDone(); }
-        catch (e) { toast(e.message, "error"); }
-      }),
-    ]);
-    setTimeout(() => name.focus(), 0);
-  }
-
-  async function editDocDialog(f, d, onDone) {
-    let text = "";
-    try { text = (await api(`/api/folders/document?id=${enc(f.id)}&kind=${enc(d.kind)}`)).text || ""; } catch { /* new */ }
-    const ta = input("textarea", d.about);
-    ta.value = text;
-    ta.rows = 12;
-    dialog(d.title, [el("p", "sub", d.about), field("", ta, "Yours to write. Short is the point.")], [
-      button("Cancel", "ghost", closeDialog),
-      button("Save", "primary", async () => {
-        try { await api("/api/folders/document", { id: f.id, kind: d.kind, text: ta.value }); closeDialog(); onDone(); }
-        catch (e) { toast(e.message, "error"); }
-      }),
-    ]);
-    setTimeout(() => ta.focus(), 0);
-  }
-
-  // DRAFTED, NEVER APPLIED. The draft arrives in the same editor the person writes in, so what gets saved
-  // is always what they read and accepted — the assistant proposes, they decide, which is the same rule the
-  // rest of the product follows for marks and for matters.
-  function draftDocDialog(f, d, onDone) {
-    dialog(`Draft the ${d.title.toLowerCase()}?`, [
-      el("p", "", `The assistant reads this folder's matters over the sealed lane and proposes a ${d.title.toLowerCase()}. `
-        + "It opens in the editor for you to change or discard — nothing is saved until you save it."),
-      el("p", "sub", "This is a sealed request like any other: the matters' text is encrypted on this computer "
-        + "to a machine it checks first."),
-    ], [
-      button("Cancel", "ghost", closeDialog),
-      button("Draft it", "primary", async () => {
-        closeDialog();
-        toast("Drafting — this takes a moment.", "info");
-        try {
-          const r = await api("/api/folders/draft", { id: f.id, kind: d.kind });
-          await editDocDialog(f, { ...d, present: true }, onDone);
-          const ta = $("dialog-body").querySelector("textarea");
-          if (ta) { ta.value = r.text || ""; ta.focus(); }
-        } catch (e) { toast(`Could not draft it: ${e.message}`, "error"); }
-      }),
-    ]);
-  }
-
-  // `sealFolder` is a folder id arriving from its page's "Seal and send this folder" button. It PRE-FILLS
-  // this form — the folder's matters ticked, its own documents ticked, the corpus named after it — and
-  // nothing more: the person still reads who it is going to and presses the button. Pre-filling is not
-  // pre-approving, and sealing to the wrong contact is not undoable once the file is out.
-  async function renderSharing(sealFolder) {
+  async function renderSharing() {
     const p = page();
     let d;
     try { d = await api("/api/sharing"); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
-    let folder = null;
-    if (sealFolder) {
-      try { folder = ((await api("/api/folders")).folders || []).find((x) => x.id === sealFolder) || null; }
-      catch (_) { folder = null; }
-    }
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Sharing"),
       el("p", "sub", "Send a corpus of matters to another Probant user — your lawyer, your co-counsel. "
@@ -1023,12 +832,7 @@
     p.append(el("div", "row", button("Add someone", "ghost", () => addContactDialog(() => renderSharing())),
       button("Open a delivery sent to you", "ghost", () => openShareDialog())));
 
-    p.append(el("h2", "section", folder ? `Send the folder \u201c${folder.name}\u201d` : "Send matters"));
-    if (folder) {
-      p.append(el("p", "sub", `Its ${plural(folder.matters.length, "matter", "matters")} and its own documents `
-        + "are ticked below, and the corpus is named after it. Change any of it before you send \u2014 what "
-        + "you seal is a snapshot, and the folder stays free to change afterwards."));
-    }
+    p.append(el("h2", "section", "Send matters"));
     if (!d.contacts.length) {
       p.append(el("p", "sub", "Add someone first: a corpus is sealed to their key, so you need their public key."));
       return;
@@ -1037,21 +841,10 @@
     try { matters = (await api("/api/overview")).matters; } catch (_) { matters = []; }
     if (!matters.length) { p.append(el("p", "sub", "No matters to send yet.")); return; }
     const chosen = new Set();
-    const inFolder = new Set(folder ? folder.matters : []);
     const list = el("div", "sessions");
-    // Un-ticking a matter also un-ticks the folder documents that DESCRIBE it — a reading guide names every
-    // matter in its folder, so leaving it ticked would disclose the matter just removed. The server refuses
-    // that combination outright; this only means the person is not walked into the refusal.
-    const docBoxes = [];
     for (const m of matters) {
       const box = input("checkbox");
-      box.addEventListener("change", () => {
-        box.checked ? chosen.add(m.id) : chosen.delete(m.id);
-        if (!box.checked && folder && inFolder.has(m.id)) {
-          for (const [b, id] of docBoxes) { if (b.checked) { b.checked = false; docs.delete(id); } }
-        }
-      });
-      if (inFolder.has(m.id)) { box.checked = true; chosen.add(m.id); }
+      box.addEventListener("change", () => { box.checked ? chosen.add(m.id) : chosen.delete(m.id); });
       list.append(el("label", "record-row pick", box, el("span", "", m.id),
         el("span", "sub", `date bound ${m.date_bound || "—"}`),
         el("span", "sub", plural(m.marks, "mark", "marks"))));
@@ -1063,7 +856,6 @@
     for (const f of d.documents || []) {
       const box = input("checkbox");
       box.addEventListener("change", () => { box.checked ? docs.add(f.id) : docs.delete(f.id); });
-      if (folder && f.folder === folder.id) { box.checked = true; docs.add(f.id); docBoxes.push([box, f.id]); }
       docBox.append(el("label", "record-row pick", box, el("span", "", f.name),
         el("span", "sub", f.run), el("span", "sub", `${Math.round((f.bytes || 0) / 1000)} KB`)));
     }
@@ -1098,7 +890,6 @@
       } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }
     });
     const corpusName = input("text", "e.g. InferRoute cluster — 9 filings + surplus");
-    if (folder) corpusName.value = folder.name;
     p.append(list);
     if ((d.documents || []).length) {
       p.append(el("h2", "section", "Documents about the whole corpus"),
@@ -1252,19 +1043,14 @@
     stopWatching();
     closeDialog();
     const h = location.hash || "#/";
-    // A hash may carry a query: #/sharing?folder=abc. It is split off BEFORE the path is parsed — glued to
-    // the last segment it makes the route stop matching, which looks like a dead button rather than a bug.
-    const q = h.indexOf("?");
-    const query = new URLSearchParams(q < 0 ? "" : h.slice(q + 1));
-    const parts = (q < 0 ? h : h.slice(0, q)).replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
+    const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
     for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === here);
     // A matter id ("client/matter") travels encoded as ONE segment: #/matter/Acme%2Fcooling.
     if (parts[0] === "matter" && parts[1]) return renderMatter(parts[1]);
     if (parts[0] === "session" && parts[1] && parts[2]) return renderSession(parts[1], parts[2]);
     if (parts[0] === "document" && parts[1]) return renderDocument(parts[1]);
-    if (parts[0] === "folder" && parts[1]) return renderFolder(parts[1]);
-    if (parts[0] === "sharing") return renderSharing(query.get("folder") || "");
+    if (parts[0] === "sharing") return renderSharing();
     if (parts[0] === "help") return renderHelp();
     return renderMatters();
   }

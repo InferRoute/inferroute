@@ -391,7 +391,10 @@ def test_no_tool_can_make_a_mark_and_a_suggested_step_is_never_a_command():
     for at in writes:
         enclosing = re.findall(r"function (\w+)\(", ts[:at])[-1]
         assert enclosing == "markCommand", f"/matter/mark is posted from {enclosing}, not only from the typed mark commands"
-    assert ts.count("markCommand(") == 4          # the definition and /relevant, /not-relevant, /known
+    # The definition plus /relevant and /not-relevant. "known" was retired on 2026-10-01 — Henry:
+    # "either something is relevant or not, even if it was already known" — and it did the same
+    # thing as relevant in the engine (MARK_CONFIRM is ("relevant", "known"); neither prunes).
+    assert ts.count("markCommand(") == 3
     # A step chosen by the professional is sent as their message: leading "/" (extension command, e.g. a mark)
     # and "!" (shell) are stripped before it is stored or shown.
     assert 'replace(/^[\\/!\\s]+/, "")' in ts

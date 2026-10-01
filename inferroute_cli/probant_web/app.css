@@ -633,3 +633,23 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 /* The document pane is pre-wrap for the enclave's own line breaks; keep long tokens from widening it. */
 .docview-text { overflow-wrap: anywhere; }
 @media (max-width: 620px) { .docview-head { flex-wrap: wrap; } .docview-actions { width: 100%; justify-content: space-between; } }
+
+/* "still working", in the flow. Three dots that rise in sequence — the smallest thing that reads as
+   ONGOING rather than as a decoration, placed where the next words will appear. */
+.thinking { display: flex; gap: 5px; align-items: center; padding: 10px 2px 14px; }
+.thinking .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--faint);
+  animation: thinking-bob 1.25s ease-in-out infinite;
+}
+.thinking .dot:nth-child(2) { animation-delay: .18s; }
+.thinking .dot:nth-child(3) { animation-delay: .36s; }
+@keyframes thinking-bob {
+  0%, 60%, 100% { transform: translateY(0); opacity: .35; }
+  30%           { transform: translateY(-4px); opacity: 1; }
+}
+/* Motion is the whole signal, so without it the dots must still say "ongoing" some other way — a
+   pulse rather than a bob. Never nothing: a reader who turned motion off still needs to know. */
+@media (prefers-reduced-motion: reduce) {
+  .thinking .dot { animation: thinking-fade 1.6s ease-in-out infinite; }
+  @keyframes thinking-fade { 0%, 100% { opacity: .3; } 50% { opacity: .9; } }
+}

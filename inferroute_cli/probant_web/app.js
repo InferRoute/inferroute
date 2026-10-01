@@ -208,6 +208,37 @@
     s();
   }
 
+  // ── "still working", in the flow where the reader is actually looking ───────────────────────────
+  //
+  // Henry, 2026-10-01, on a screenshot of a finished deep-search card above ~450px of blank page: "it
+  // would be nice to add animated ... right below the deep search just to remove doubt within the user
+  // that the more text is working and the model is still working".
+  //
+  // The page already said it — "The assistant is working… 33 s" — but pinned to the bottom bar, far below
+  // the card the eye is on, where it reads as chrome rather than as this conversation still producing. The
+  // bar keeps its job (elapsed time, the stop button); this is the same fact placed where the next words
+  // will appear, so the gap between a finished tool and the first token is occupied rather than empty.
+  //
+  // It is removed by the FIRST token, not by assistant_start: the prose that follows is its own proof, and
+  // two indicators at once would be the page hedging.
+  let thinkingNode = null;
+  function showThinking() {
+    if (ended || !busy) return;
+    if (current) return;                       // text is already streaming; it speaks for itself
+    if (thinkingNode && thinkingNode.isConnected) { log.append(thinkingNode); return; }
+    const n = el("div", "thinking");
+    n.setAttribute("aria-label", "The assistant is still working");
+    for (let i = 0; i < 3; i++) n.append(el("span", "dot"));
+    thinkingNode = n;
+    const s = stick();
+    log.append(n);
+    s();
+  }
+  function hideThinking() {
+    if (thinkingNode && thinkingNode.isConnected) thinkingNode.remove();
+    thinkingNode = null;
+  }
+
   function assistantStart() {
     hideWelcome();
     const node = el("div", "msg msg-assistant");
@@ -223,6 +254,7 @@
     s();
   }
   function assistantDelta(text) {
+    hideThinking();                            // the words themselves now show the work
     if (!current) assistantStart();
     current.text += text;
     if (!renderQueued) { renderQueued = true; requestAnimationFrame(renderCurrent); }
@@ -237,6 +269,7 @@
       autoTries = 0;
       if (quietNode && quietNode.isConnected) { quietNode.remove(); quietNode = null; }
     }
+    hideThinking();
     renderCurrent();
     // On END only, not per delta: a streaming paragraph can split a publication number across two chunks,
     // and linkifying a half-written one would make "US-20151" a button to nothing.
@@ -1841,6 +1874,7 @@
         // What the assistant is shown of your marks is fixed when it takes up your message; marks after that
         // are ones it has not seen.
         if (busy) marksAtTurn = new Map(marks);
+        if (busy) showThinking(); else hideThinking();
         updateActivity();
         renderSteps();
         break;
@@ -1857,6 +1891,8 @@
       case "tool_start": toolStart(ev); break;
       case "tool_end":
         toolEnd(ev);
+        showThinking();                        // the gap after a card is where the doubt lives
+
         // A read just landed: the archive has it now, so the list can show it.
         if (ev.tool === "read_patent") refreshDocuments();
         break;

@@ -396,7 +396,13 @@ class Bridge:
         # Keyed by publication number, captured from the turn in which that document was read — an attribution
         # by turn, which is why the page labels it "what the assistant said in this session" and never "the
         # summary of the document". The document TEXT is the archive's; only this is ours.
+        # PERSISTED, per matter, beside the record the document text itself comes from. It was in memory
+        # only, so the readings died with the session that made them and a document opened tomorrow said
+        # "the assistant has not written about this document yet" about one it had already read — Henry,
+        # 2026-10-01. The whole point of keeping these is that reopening costs nothing, and a cache that
+        # does not outlive the process is not a cache.
         self.readings: Dict[str, str] = {}
+        self._readings_meta: Dict[str, Dict[str, Any]] = {}
         self._read_this_turn: List[str] = []
         self._turn_began = 0                # server ms when the agent last went busy
         self._quiet_since = 0               # server ms of the previous event: how long it had been silent
@@ -410,6 +416,9 @@ class Bridge:
         # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
         self.conversation_file = conversation_file
         self.records_dir = records_dir                      # the matter's search records, for mark titles
+        # Last, because it needs records_dir: every reading from every earlier session on this matter,
+        # so a document opened today shows what was already written about it rather than claiming none.
+        self._load_readings()
 
     # ── events ──
     def publish(self, event: Dict[str, Any], *, agent: bool = False) -> None:
@@ -443,7 +452,10 @@ class Bridge:
                 # The FIRST words after a read are the reading; a later turn in the same round is talking
                 # about something else, so it does not overwrite one already captured.
                 for key in self._read_this_turn:
-                    self.readings.setdefault(key, str(event.get("text"))[:6000])
+                    if key not in self.readings:
+                        self.readings[key] = str(event.get("text"))[:6000]
+                        self._readings_meta[key] = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+                        self._save_readings()
                 self._read_this_turn = []
             # A turn that stopped on an error is the commonest reason a round records nothing, and it is
             # invisible in the text: 62 of 76 empty rounds made no tool call and said nothing at all.
@@ -568,6 +580,52 @@ class Bridge:
             fd = os.open(self.conversation_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"at": at, **row}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    # ── the assistant's readings, kept with the matter ────────────────────────────────────────────
+    #
+    # Beside the searches archive and the conversation, in the matter's own records directory, which is
+    # outside the sandbox and already where this session's material lives. Not a new location and not a
+    # global cache: these are the client's work product about one matter.
+    def _readings_path(self) -> Optional[Path]:
+        return (self.records_dir / "readings.json") if self.records_dir else None
+
+    def _load_readings(self) -> None:
+        """Readings from every earlier session on this matter. A missing or unreadable file is simply no
+        readings — it must never stop a session opening, because the readings are a convenience and the
+        record is the thing that matters."""
+        path = self._readings_path()
+        if not path or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        for key, row in (data.get("readings") or {}).items():
+            if not isinstance(row, dict):
+                continue
+            text = str(row.get("text") or "")
+            if text:
+                self.readings.setdefault(str(key), text)
+                self._readings_meta.setdefault(str(key), {"at": row.get("at")})
+
+    def _save_readings(self) -> None:
+        """Written on capture, not at round end: a session that is killed mid-work — which is how most of
+        them end — would otherwise save nothing. Atomic, so a kill during the write cannot leave a
+        half-written file that reads as no readings at all."""
+        path = self._readings_path()
+        if not path:
+            return
+        payload = {"schema": "inferroute.probant-readings/1", "matter": self.matter,
+                   "readings": {k: {"text": v, "at": (self._readings_meta.get(k) or {}).get("at")}
+                                for k, v in self.readings.items()}}
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, path)
         except OSError:
             pass
 

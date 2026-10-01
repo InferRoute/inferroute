@@ -78,6 +78,17 @@
     $("dialog").hidden = false;
   }
   const closeDialog = () => { $("dialog").hidden = true; };
+
+  // A yes/no on the page's own dialog. Ending a session stops work in progress, so it is never a bare
+  // click — but it must still be reachable, which is the whole point of putting it here.
+  function confirmBox(title, text, confirmLabel = "End the session") {
+    return new Promise((resolve) => {
+      dialog(title, [el("p", "", text)], [
+        button("Cancel", "ghost", () => { closeDialog(); resolve(false); }),
+        button(confirmLabel, "primary", () => { closeDialog(); resolve(true); }),
+      ]);
+    });
+  }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDialog(); });
 
   function field(label, input, hint) {
@@ -153,7 +164,20 @@
       } else if (l.state === "ready") {
         box.className = "launch ready";
         box.append(el("div", "", el("b", "", "Your session is ready. "), "It opens in its own tab, checked and private."),
-          button("Open the session", "primary", () => openLocal(l.url)));
+          el("div", "row actions",
+            button("Open the session", "primary", () => openLocal(l.url)),
+            // END IT FROM HERE. Without this a session could only be ended from inside its own tab, so one
+            // whose page is unreachable — closed, crashed, or a 127.0.0.1 link opened from another machine
+            // — left its matter permanently undeletable with no remedy the reader could reach.
+            button("End this session", "ghost", async () => {
+              if (!(await confirmBox("End this session?",
+                    "The session stops and its page closes. Searches and marks already recorded are kept."))) return;
+              try {
+                await api("/api/sessions/end", { id: matterId });
+                toast("Session ended.", "info");
+                if (onChange) onChange();
+              } catch (e) { toast(`Could not end it: ${e.message}`, "error"); }
+            })));
       } else if (l.state === "failed") {
         box.className = "launch failed";
         box.append(el("div", "", el("b", "", "The session didn't start. "), l.message));
@@ -307,7 +331,13 @@
     }
     for (const l of data.running || []) {
       p.append(el("div", "running-row", el("span", "", `Session for ${l.matter}: `),
-        l.state === "ready" ? button("Open the session", "primary small", () => openLocal(l.url)) : el("span", "sub", "starting…")));
+        l.state === "ready" ? button("Open the session", "primary small", () => openLocal(l.url)) : el("span", "sub", "starting…"),
+        l.state === "ready" ? button("End it", "ghost small", async () => {
+          if (!(await confirmBox("End this session?",
+                "The session stops and its page closes. Searches and marks already recorded are kept."))) return;
+          try { await api("/api/sessions/end", { id: l.matter }); toast("Session ended.", "info"); refresh(); }
+          catch (e) { toast(`Could not end it: ${e.message}`, "error"); }
+        }) : null));
     }
     if (!data.matters.length) {
       p.append(el("div", "empty-card",

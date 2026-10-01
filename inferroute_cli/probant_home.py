@@ -280,6 +280,26 @@ class Launches:
                     return it
         return None
 
+    def stop_running(self, matter_id: str) -> bool:
+        """End a session this page started, from this page. Returns whether one was ended.
+
+        Without this a running session could only be ended from its own tab, so a session whose page is
+        unreachable — a closed tab, a crashed browser, a link to 127.0.0.1 opened from another machine —
+        made its matter permanently undeletable, and the refusal named a remedy the person could not reach.
+        A refusal has to name something the reader can actually do.
+        """
+        with self.lock:
+            live = [it for it in self.items.values()
+                    if it["matter"] == matter_id and it["proc"].poll() is None]
+        for it in live:
+            it["proc"].terminate()
+            try:
+                it["proc"].wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                it["proc"].kill()
+            it["state"] = "ended"
+        return bool(live)
+
     def stop_ended(self, matter_id: str) -> None:
         """End the lingering process of a FINISHED session on this matter (its page stays up for exporting).
         Deleting the matter is the person saying they are done with it."""
@@ -398,8 +418,8 @@ class Home:
         app.get("/common.js")(static("common.js", "text/javascript; charset=utf-8"))
         app.get("/app.css")(static("app.css", "text/css; charset=utf-8"))
 
-        def problem(msg: str, code: int = 400):
-            return JSONResponse({"error": msg}, status_code=code)
+        def problem(msg: str, code: int = 400, extra: Optional[Dict[str, Any]] = None):
+            return JSONResponse({"error": msg, **(extra or {})}, status_code=code)
 
         def matter_of(matter_id: str):
             client, matter = S._split_matter(str(matter_id or ""))
@@ -503,6 +523,22 @@ class Home:
                 return problem(str(e), 404)
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
+        @app.post("/api/sessions/end")
+        async def end_session(request: Request):
+            """End a running session this page started. The remedy the delete refusal names.
+
+            Deliberate, never automatic: a session holds the person's work, so deleting a matter does not
+            quietly kill one. This is the button they press having been told why.
+            """
+            d = await body(request)
+            mid = str(d.get("id") or "")
+            try:
+                matter_of(mid)
+            except S.ProbantError as e:
+                return problem(str(e), 404)
+            ended = home.launches.stop_running(mid)
+            return {"ok": True, "ended": ended}
+
         @app.get("/api/launch")
         async def launch_view(id: str = ""):
             it = home.launches.items.get(id)
@@ -577,8 +613,13 @@ class Home:
                 return problem(str(e), 404)
             if str(d.get("confirm") or "").strip() != matter:
                 return problem("type the matter's name exactly to delete it", 400)
-            if home.launches.running_for(mid):
-                return problem("a session is still open on this matter. End it first.", 409)
+            # The refusal NAMES WHAT TO DO and the page can do it — see /api/sessions/end. It used to say
+            # "End it first" about a session whose only control was inside its own tab, which is no remedy
+            # at all when that tab is gone or the link points at a loopback port on another machine.
+            live = home.launches.running_for(mid)
+            if live:
+                return problem("a session is still open on this matter. End it from here, or close its page, "
+                               "then delete.", 409, extra={"running_session": live.get("id"), "can_end": True})
             home.launches.stop_ended(mid)          # a finished session whose page is still up
             try:
                 out = D.delete(client, matter)

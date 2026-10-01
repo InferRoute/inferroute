@@ -66,7 +66,12 @@ def test_no_route_beyond_what_the_page_needs(home):
     h, c, _ = home
     paths = {r.path for r in h.app().routes}
     assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
-                     "/api/disclosure", "/api/sessions", "/api/launch", "/api/session", "/api/export",
+                     "/api/disclosure", "/api/sessions",
+                     # Ending a session FROM HERE (1 Oct): without it a session could only be stopped from
+                     # inside its own tab, so one whose page was unreachable left its matter undeletable
+                     # and the refusal named a remedy the reader could not reach.
+                     "/api/sessions/end",
+                     "/api/launch", "/api/session", "/api/export",
                      "/api/check", "/record",
                      # deleting a matter (19 Sep): restorable for 30 days, then erased
                      "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase",

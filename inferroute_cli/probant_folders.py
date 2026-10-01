@@ -94,6 +94,21 @@ def folder_dir(folder_id: str) -> Path:
     return S.probant_root() / "_folders" / re.sub(r"[^A-Za-z0-9-]+", "-", folder_id)[:60]
 
 
+def _make_dir(folder_id: str) -> Path:
+    """Create the folder's directory 0700, like every other directory under ~/Probant.
+
+    These held a client's folder NAMES at the umask default (0775 as created, measured 1 Oct) while every
+    sibling sets 0700 explicitly. Nothing leaked — ~/Probant itself is 0700 — but a defence that rests on one
+    ancestor's mode is one chmod away from gone, and the names of a professional's matters are the part of
+    this they would least expect to be the loose one.
+    """
+    d = folder_dir(folder_id)
+    d.mkdir(parents=True, exist_ok=True)
+    for x in (d.parent, d):
+        os.chmod(x, 0o700)
+    return d
+
+
 def _load() -> Dict[str, Any]:
     try:
         d = json.loads(folders_path().read_text(encoding="utf-8"))
@@ -287,8 +302,7 @@ def write_document(folder_id: str, kind: str, text: str) -> Dict[str, Any]:
     if len(text) > 20000:
         raise S.ProbantError(f"{spec['title']} is at most 20,000 characters — these are meant to be short")
     _require(folder_id)
-    d = folder_dir(folder_id)
-    d.mkdir(parents=True, exist_ok=True)
+    d = _make_dir(folder_id)
     p = d / spec["file"]
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")

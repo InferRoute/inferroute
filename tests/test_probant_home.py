@@ -1029,3 +1029,20 @@ def test_deleting_a_folder_takes_its_documents_with_it_into_the_30_day_bin(home)
     # A folder that never had a document deletes cleanly and says so rather than inventing a path.
     g = c.post("/api/folders/create", json={"name": "Empty"}).json()["folder"]
     assert c.post("/api/folders/delete", json={"id": g["id"]}).json()["documents_moved"] is None
+
+
+def test_a_folders_directory_is_0700_like_every_other_directory_under_probant(home):
+    """Measured on the real tree, 1 Oct: ~/Probant/_folders and the folder inside it were 0775, created at the
+    umask default, while ~/Probant and every matter under it are 0700.
+
+    Nothing was exposed — the 0700 parent covered it, and the documents themselves are 0600. But a folder
+    directory's listing is the NAMES of a professional's matters, and a defence that rests on one ancestor's
+    mode is one chmod away from gone.
+    """
+    h, c, tmp = home
+    f = c.post("/api/folders/create", json={"name": "Portfolio"}).json()["folder"]
+    c.post("/api/folders/document", json={"id": f["id"], "kind": "brief", "text": "Freedom to operate."})
+    d = tmp / "Probant" / "_folders" / f["id"]
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+    assert stat.S_IMODE(d.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE((d / "brief.md").stat().st_mode) == 0o600

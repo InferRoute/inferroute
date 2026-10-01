@@ -277,6 +277,17 @@ def preexec(ports: List[int], *, write_paths: List[str] | None = None, min_landl
     return _fn
 
 
+def os_confinement_available() -> bool:
+    """Can this PLATFORM fence the agent at the OS level at all?
+
+    One answer for the question `apply()` asks first, so the label a record carries and the thing that
+    actually runs cannot disagree. Before this existed, a macOS launch reported "best-effort (port-level;
+    not required)" into the disclosure record while `apply()` had raised Unavailable and nothing whatever
+    was enforced — a record claiming a fence the platform cannot build.
+    """
+    return sys.platform == "linux"
+
+
 def netns_bind_available() -> bool:
     """Both halves of the address-level path: an unprivileged empty netns, and bubblewrap to build it."""
     import shutil

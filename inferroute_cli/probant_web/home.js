@@ -227,6 +227,26 @@
     if (!d.configured) {
       head = "Patent search is not set up on this computer";
       sub = "Nothing can leave this computer until it is. You can still work on a disclosure.";
+    } else if (d.mode === "always") {
+      // A MACHINE THAT KEEPS NO TIMETABLE IS NEVER GIVEN ONE. Every sentence below names opening hours,
+      // and on 2026-10-01 the search enclave was deployed to run continuously while this page still had a
+      // 13:00–15:00 window compiled in — so it would have told a client "closed until 13:00" about a
+      // machine that was up. A confident timetable is worse than none: nobody questions a timetable.
+      if (d.reachable) {
+        dot = "open";
+        head = "Search is available";
+        sub = "";
+      } else if (d.found === false) {
+        dot = "trouble";
+        head = "Search is not available from this computer";
+        sub = "The search machine cannot be found at the address this computer is set up to use. "
+          + "It needs looking at. Everything else on this page works as usual.";
+      } else {
+        dot = "trouble";
+        head = "Search is not answering";
+        sub = "It runs continuously, so this is not a closing time — try again in a few minutes. "
+          + "Nothing is lost if a search cannot start.";
+      }
     } else if (d.open_now && d.reachable) {
       dot = "open";
       head = `Search is open until ${parisClose} Paris time`;

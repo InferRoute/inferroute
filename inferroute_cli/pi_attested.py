@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import re
 import shutil
 from pathlib import Path
@@ -640,6 +641,14 @@ def confinement_label() -> str:
         return "unconfined (developer override)"
     if confine_disabled():
         return "not confined"
+    # A PLATFORM THAT CANNOT FENCE AT THE OS LEVEL SAYS SO, rather than reporting the fence it would have
+    # asked for. On darwin this used to return "best-effort (port-level; not required)" while
+    # confinement.apply() had raised Unavailable and nothing was enforced — a record carrying a claim the
+    # platform cannot keep. What IS still enforced there is the tool set, which is platform-independent:
+    # no shell, no read beyond the matter, no network tool, and writes fenced to the matter folder.
+    from inferroute_local import confinement as _conf
+    if not _conf.os_confinement_available():
+        return f"tool-level only (no OS confinement on {sys.platform})"
     if netns_bind_intended():
         from inferroute_local import netns
         return netns.ADDRESS_LEVEL_LABEL

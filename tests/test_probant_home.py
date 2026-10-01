@@ -564,7 +564,12 @@ def test_the_search_window_is_named_in_paris_hours_whatever_the_season():
     paris = ZoneInfo("Europe/Paris")
 
     def at(y, m, d, hh, mm=0):
-        return H._search_window(dt.datetime(y, m, d, hh, mm, tzinfo=paris).astimezone(dt.timezone.utc))
+        # SCHEDULED explicitly: since 2026-10-01 an installation with no `availability` in its config is
+        # always-on, which has no window. This test is about the window's arithmetic across DST, so it
+        # names the mode it is testing rather than relying on what the default happens to be.
+        return H._search_window(dt.datetime(y, m, d, hh, mm, tzinfo=paris).astimezone(dt.timezone.utc),
+                                avail={"mode": "scheduled", "from_hour": H.SEARCH_WINDOW[0],
+                                       "to_hour": H.SEARCH_WINDOW[1], "tz": H.SEARCH_WINDOW_TZ})
 
     def local(iso):
         return dt.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(paris)
@@ -597,12 +602,25 @@ def test_search_status_says_closed_without_naming_the_machine(home, monkeypatch)
     cfg = tmp / "ir" / "confidential"
     cfg.mkdir(parents=True, exist_ok=True)
     # Port 1 on loopback: refuses at once, so this asserts the closed path without waiting for a timeout.
-    (cfg / "search.json").write_text(json.dumps({"enclave": "http://127.0.0.1:1", "python": "python3"}))
+    # SCHEDULED is named in the config: an installation that does not name it is always-on (2026-10-01),
+    # and this test is about the closed-window path, which only exists in scheduled mode.
+    (cfg / "search.json").write_text(json.dumps({
+        "enclave": "http://127.0.0.1:1", "python": "python3",
+        "availability": {"mode": "scheduled", "window": [13, 15], "tz": "Europe/Paris"}}))
     H._search_probe.update({"at": 0.0, "reachable": False})
     body = c.get("/api/search-status").json()
     assert body["configured"] is True and body["reachable"] is False
     assert body["found"] is True                       # it refused us, so something is there to refuse
+    assert body["mode"] == "scheduled"
     assert body["from_hour"] == 13 and body["to_hour"] == 15 and body["tz"] == "Europe/Paris"
+
+    # And the same installation declared always-on carries NO hours for the page to show.
+    (cfg / "search.json").write_text(json.dumps({"enclave": "http://127.0.0.1:1", "python": "python3"}))
+    H._search_probe.update({"at": 0.0, "reachable": False})
+    always = c.get("/api/search-status").json()
+    assert always["mode"] == "always" and always["open_now"] is True
+    assert "from_hour" not in always and "opens_at" not in always, \
+        "a machine that keeps no timetable must not be given instants to render"
     # The one thing this endpoint must never do is publish the address of the sealed machine.
     assert "127.0.0.1:1" not in json.dumps(body)
 
@@ -680,3 +698,48 @@ def test_the_probe_is_cached_so_a_page_refresh_does_not_hammer_the_machine(home)
     finally:
         urllib.request.urlopen = real
     assert len(calls) == 1, f"probed {len(calls)} times; the cache is not holding"
+
+
+def test_a_continuously_running_search_machine_is_never_given_a_timetable():
+    """Henry, 2026-10-01: control from the backend whether the enclave opens a window each day — in which
+    case the page says so — or runs continuously, in which case it must not mention a schedule at all.
+
+    This was live-wrong when he asked. The search enclave had been deployed that morning to run
+    continuously, and the window was compiled into this file as 13:00–15:00 Europe/Paris, so the home page
+    would have told a client "closed until 13:00" about a machine that was up. A confident timetable is
+    worse than none: nobody questions a timetable.
+
+    ABSENT MEANS ALWAYS. A schedule is the special case, and claiming one that does not exist is the error
+    this was changed to prevent.
+    """
+    from inferroute_cli import probant_home as H
+
+    assert H.search_availability({}) == {"mode": "always"}
+    assert H.search_availability({"availability": {"mode": "always"}})["mode"] == "always"
+    w = H._search_window(avail=H.search_availability({}))
+    assert w == {"mode": "always", "open_now": True}, "always-on has no instants for the page to format"
+
+    sched = {"availability": {"mode": "scheduled", "window": [13, 15], "tz": "Europe/Paris"}}
+    a = H.search_availability(sched)
+    assert a == {"mode": "scheduled", "from_hour": 13, "to_hour": 15, "tz": "Europe/Paris"}
+    w2 = H._search_window(avail=a)
+    assert w2["mode"] == "scheduled" and w2["opens_at"].endswith("Z") and w2["tz"] == "Europe/Paris"
+
+    # A malformed window falls back to the compiled default rather than crashing a page.
+    bad = H.search_availability({"availability": {"mode": "scheduled", "window": "nonsense"}})
+    assert bad["from_hour"] == H.SEARCH_WINDOW[0] and bad["to_hour"] == H.SEARCH_WINDOW[1]
+
+
+def test_the_home_page_says_nothing_about_hours_when_search_runs_continuously():
+    """Drives the page's real searchStatusBar (tests/availability_mode_sim.js) over both modes, including
+    the two failure states, because "down" on a continuous machine must never read as "closed"."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "availability_mode_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "scheduled keeps its timetable" in r.stdout

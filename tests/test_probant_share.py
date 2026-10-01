@@ -7,6 +7,7 @@ that an unknown sender is SAID to be unknown rather than quietly accepted, and t
 decides what any later search may return — arrives as the sender set it.
 """
 import base64
+import hashlib
 import json
 import os
 import stat
@@ -368,3 +369,71 @@ def test_the_handout_writes_nothing_when_it_cannot_run(tmp_path):
     assert r.returncode == 1
     assert "cryptography" in r.stderr and "venv" in r.stderr
     assert not ir_home.exists(), "it wrote something on the path where it should have refused"
+
+
+def test_two_corpus_documents_arriving_under_one_name_are_both_kept(tmp_path, monkeypatch):
+    """A folder's reading-guide.md and another folder's reading-guide.md are two documents with one name.
+
+    The name comes from the SENDER, so this is also the cheap way to make the delivery record lie: send two
+    files called the same thing and the second overwrites the first, while the record still says two arrived
+    and the recipient reads one believing they have both. Keep both; let the record name what is on disk.
+    """
+    monkeypatch.setattr(SH.S, "_irhome", lambda: tmp_path / "ir")
+    monkeypatch.setattr(SH.S, "probant_root", lambda: tmp_path / "Probant")
+
+    def doc(name, text):
+        raw = text.encode()
+        return {"name": name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "text": text}
+
+    payload = {"corpus": {"id": "c1", "name": "Portfolio", "files": [
+        doc("reading-guide.md", "FIRST guide, cooling matters."),
+        doc("reading-guide.md", "SECOND guide, sensor matters."),
+        doc("reading-guide.md", "THIRD guide."),
+    ]}, "matters": [], "made_at": "2026-10-01T00:00:00Z"}
+
+    r = SH.write_corpus(payload, "Acme")
+    assert len(r["written"]) == 3 and len(set(r["written"])) == 3, r["written"]
+    d = Path(r["dir"])
+    bodies = sorted((d / n).read_text() for n in r["written"])
+    assert bodies == ["FIRST guide, cooling matters.", "SECOND guide, sensor matters.", "THIRD guide."]
+    # The record must name the files that EXIST, not the names the sender used.
+    assert r["corpus"]["files"] == r["written"]
+    assert all((d / n).is_file() for n in r["corpus"]["files"])
+
+
+def test_reopening_the_same_delivery_replaces_its_own_files_instead_of_leaving_an_orphan(tmp_path, monkeypatch):
+    """Keeping both files under one name (above) is right ACROSS deliveries and wrong WITHIN one.
+
+    A corpus id's record is overwritten by each open of that delivery. So on a re-open the suffixing would
+    keep the previous open's reading-guide.md while the record named only reading-guide-2.md — an
+    unattributable copy of verbatim filing quotes in the recipient's directory, which is strictly worse than
+    the tidy overwrite it replaced.
+
+    Only THIS sender's previous open is cleared. The corpus id comes from the sender, so a different signer
+    reusing someone else's id must not be able to delete their files.
+    """
+    monkeypatch.setattr(SH.S, "_irhome", lambda: tmp_path / "ir")
+    monkeypatch.setattr(SH.S, "probant_root", lambda: tmp_path / "Probant")
+
+    def doc(name, text):
+        raw = text.encode()
+        return {"name": name, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(), "text": text}
+
+    def payload(text, who="FP-sender"):
+        return {"corpus": {"id": "c1", "name": "Portfolio", "files": [doc("reading-guide.md", text)]},
+                "matters": [], "from_fingerprint": who, "made_at": "2026-10-01T00:00:00Z"}
+
+    r1 = SH.write_corpus(payload("First open."), "Acme")
+    d = Path(r1["dir"])
+    assert r1["written"] == ["reading-guide.md"]
+
+    r2 = SH.write_corpus(payload("Second open, same delivery."), "Acme")
+    assert r2["written"] == ["reading-guide.md"], "the same delivery re-opened keeps one copy, not two"
+    assert sorted(p.name for p in d.iterdir()) == ["reading-guide.md"]
+    assert (d / "reading-guide.md").read_text() == "Second open, same delivery."
+
+    # A DIFFERENT signer reusing the id may not delete what the first sender's open wrote.
+    r3 = SH.write_corpus(payload("Someone else, same corpus id.", who="FP-impostor"), "Acme")
+    assert r3["written"] == ["reading-guide-2.md"]
+    assert (d / "reading-guide.md").read_text() == "Second open, same delivery."
+    assert (d / "reading-guide-2.md").read_text() == "Someone else, same corpus id."

@@ -5,6 +5,8 @@ every word that was withheld; the second by running the SAME verifier over the r
 the only check lines allowed to differ are the ones that need the withheld text, and they may only turn into
 SKIP, never PASS.
 """
+import hashlib
+import sys
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -1834,3 +1836,56 @@ def test_a_record_newer_than_this_verifier_skips_rather_than_fails():
 
     # The table is the whole of teaching a newer verifier a kind, so it must stay a table.
     assert set(V.CONTENT_CHECKS) == {"search", "document"}
+
+
+def test_the_delivery_letter_names_the_version_this_tree_publishes():
+    """The letter hands a client four commands to run, each naming a wheel version. On 1 Oct it named 0.9.38
+    while the tree built 0.9.68 — four commands that 404, in the one document whose whole purpose is that the
+    client succeeds on the first try without asking us anything.
+
+    Worse than a dead link: the same letter tells them to run `audit-client --url <that wheel>` and compare it
+    to their install. A version the tree no longer builds makes that comparison fail, and the honest reading of
+    a failed comparison is tampering.
+    """
+    import re
+    root = Path(__file__).resolve().parents[1]
+    version = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(), re.M).group(1)
+    letter = (root / "docs" / "betrancourt-email-draft.md").read_text(encoding="utf-8")
+    named = set(re.findall(r"inferroute-(\d+\.\d+\.\d+)-py3-none-any\.whl", letter))
+    assert named, "the letter must name the wheel it asks them to install"
+    assert named == {version}, f"the letter says {sorted(named)}; this tree builds {version}"
+
+
+def test_publishing_a_version_twice_with_different_bytes_is_refused(tmp_path):
+    """The collision found on 1 Oct, made unrepeatable.
+
+    Same bytes is a no-op — republishing after a site rebuild must not need a version bump. DIFFERENT bytes
+    under a name already published is refused, because `audit-client --url` compares the installed copy to
+    that URL, and a collision turns that comparison into a tampering report about ourselves.
+    """
+    import subprocess
+    script = Path(__file__).resolve().parents[1] / "scripts" / "publish_client_wheel.py"
+    dest = tmp_path / "client"
+    dest.mkdir()
+    first = tmp_path / "inferroute-0.9.70-py3-none-any.whl"
+    first.write_bytes(b"PK\x03\x04 the wheel as built on Tuesday")
+
+    run = lambda w: subprocess.run([sys.executable, str(script), str(w), str(dest)],  # noqa: E731
+                                   capture_output=True, text=True)
+    r = run(first)
+    assert r.returncode == 0, r.stdout + r.stderr
+    digest = hashlib.sha256(first.read_bytes()).hexdigest()
+    assert (dest / first.name).read_bytes() == first.read_bytes()
+    assert (dest / f"{first.name}.sha256").read_text() == f"{digest}  {first.name}\n"
+    assert "Not live yet" in r.stdout, "putting the file in place is not a deploy; say so"
+
+    r = run(first)                                           # idempotent: the same wheel again
+    assert r.returncode == 0 and "byte for byte" in r.stdout
+
+    second = tmp_path / "rebuilt" / first.name               # same version, rebuilt differently
+    second.parent.mkdir()
+    second.write_bytes(b"PK\x03\x04 the wheel as built on Wednesday, bigger")
+    r = run(second)
+    assert r.returncode == 1, r.stdout
+    assert "REFUSED" in r.stdout and "Bump the version" in r.stdout
+    assert (dest / first.name).read_bytes() == first.read_bytes(), "the published wheel must be untouched"

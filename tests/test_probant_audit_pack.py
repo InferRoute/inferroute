@@ -638,9 +638,15 @@ def test_the_census_classifies_rows_the_way_the_verifier_does():
     import re
 
     src = (pathlib.Path(E.__file__).parent / "pi_attested" / "verify_record.py").read_text()
-    # The verifier's rule, verbatim. Written as a regex only to tolerate whitespace, not wording.
-    assert re.search(r'str\(st\.get\("kind"\) or "search"\) == "document"', src), \
-        "verify_record.py no longer classifies a document read this way; the census below is now wrong"
+    # The verifier's rule is a TABLE since 2026-10-01: a kind in CONTENT_CHECKS is one it knows how to
+    # open, and a kind absent from it is one it predates — which is exactly this census's `unknown_kind`
+    # bucket. Pinned by reading the table out of the source rather than by matching a sentence, so the two
+    # files are compared on what they MEAN and not on how either is phrased.
+    m = re.search(r"CONTENT_CHECKS = \{(.*?)\}", src, re.S)
+    assert m, "verify_record.py no longer dispatches on a kind table; the census below is now wrong"
+    verifier_knows = set(re.findall(r'"([a-z_]+)":', m.group(1)))
+    assert verifier_knows == {"search", "document"}, \
+        f"the verifier opens {sorted(verifier_knows)}; this census counts only searches and document reads"
 
     doc = {"statement": {"kind": "document"}}
     search = {"statement": {"kind": "search"}}
@@ -1774,3 +1780,52 @@ def test_identical_evidence_is_packed_once_across_sessions(tmp_path):
     _carry_served_evidence(raw, rdir, files)
     _carry_served_evidence(raw, rdir, files)
     assert len([k for k in files if k.endswith(".attestation.json")]) == 1
+
+
+def test_a_record_newer_than_this_verifier_skips_rather_than_fails():
+    """sealed-research, 2026-10-01, before the client freeze: future records will carry shapes tonight's
+    verifier predates, and an unknown feature must SKIP with a stated reason — never crash, never pass
+    silently, never FAIL in a way that reads as the record being bad.
+
+    It read as bad. The dispatch was two branches — document, or else treated as a search — so every future
+    kind fell into check_search_content, whose last line is `len(hits) == st["hits_n"]`. A statement without
+    hits_n gave `0 == None` → FAIL, printed as "0 hits, statement says None". Measured across every archive
+    on this machine at the time: search 147 (all with hits_n), document 13 (none, correctly routed), so it
+    had not bitten yet and would have bitten the first new kind — like=<pn>, survey, round-2.
+
+    The three outcomes are asserted together, because a clause that skips everything is worse than the bug.
+    """
+    import sys
+    from inferroute_cli import pi_attested as PA
+    sys.path.insert(0, str(Path(PA.__file__).resolve().parent / "pi_attested"))
+    import verify_record as V
+
+    def content(st, row):
+        c = V.Checks()
+        rid = st.get("request_id", "r1")
+        fn = V.CONTENT_CHECKS.get(str(st.get("kind") or "search"))
+        if fn is not None:
+            fn(c, st, row, rid)
+        else:
+            c.add(None, "content bindings for this operation", "predates")
+        return c
+
+    res = {"hits": [{"key": "US-1234567-A"}]}
+    signed = {"kind": "search", "request_id": "r1", "hits_n": 1,
+              "result_sha256": V.salted("r1", res), "query_sha256": V.salted("r1", "q")}
+
+    # 1. A kind from the future: SKIP, and nothing counted as failed.
+    future = content({"kind": "like", "request_id": "r1"}, {"result": {"key": "US-1234567-A"}})
+    assert [s for s, _, _ in future.rows] == ["SKIP"]
+    assert future.failed == [], "a record this verifier predates must not read as a bad record"
+
+    # 2. A known kind is still CHECKED, not waved through.
+    good = content(signed, {"result": res, "query_text": "q"})
+    assert good.failed == [] and all(s == "PASS" for s, _, _ in good.rows)
+
+    # 3. And a tampered one still FAILS — the clause must not have made the verifier credulous.
+    tampered = content({**signed, "hits_n": 9}, {"result": res, "query_text": "q"})
+    assert "hit count as signed" in tampered.failed
+
+    # The table is the whole of teaching a newer verifier a kind, so it must stay a table.
+    assert set(V.CONTENT_CHECKS) == {"search", "document"}

@@ -2251,10 +2251,23 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     # 5. content bindings — what this operation was, and that the record shows exactly what was signed.
     rid = str(st.get("request_id") or "")
     check_recipient(c, st, row)
-    if str(st.get("kind") or "search") == "document":
-        check_document(c, st, row, rid)
+    # A RECORD MAY BE NEWER THAN THE PROGRAM READING IT. This used to be two branches — document, or else
+    # treated as a search — so every future kind fell into check_search_content, whose last line is
+    # `len(hits) == st["hits_n"]`. A statement without hits_n then gave 0 == None → FAIL, printed as
+    # "0 hits, statement says None": a record from a later build reading as a BAD record, which is the one
+    # verdict a verifier must never give by accident. Measured 2026-10-01 across every archive on this
+    # machine: search 147 (all carry hits_n), document 13 (none do, correctly routed) — so it did not bite
+    # yet, and would have bitten the first new kind.
+    #
+    # Unknown is now its own answer: SKIP, which `failed` does not count, with a sentence that says the
+    # verifier is behind rather than the record being wrong.
+    checker = CONTENT_CHECKS.get(str(st.get("kind") or "search"))
+    if checker is not None:
+        checker(c, st, row, rid)
     else:
-        check_search_content(c, st, row, rid)
+        c.add(None, "content bindings for this operation",
+              f"this record is a {str(st.get('kind'))!r} operation, which this verifier predates — a newer "
+              "client can open this check. Nothing failed, and every check above still applies.")
     # The enclave-SIGNED cutoff is the fact; the MANIFEST's is the record's unsigned claim about the matter.
     if matter_cutoff is not None:
         c.add(st.get("cutoff_date") == matter_cutoff, "date bound the enclave was given",
@@ -2401,6 +2414,12 @@ def check_document(c: Checks, st: Dict[str, Any], row: Dict[str, Any], rid: str)
         c.add(pub < cut, "the document predates the date bound",
               f"published {pub}, before the matter's bound {cut}" if pub < cut
               else f"published {pub}, NOT before the matter's bound {cut} — this read went outside the matter's date bound")
+
+
+# WHAT THIS VERIFIER KNOWS HOW TO OPEN. A kind absent from this table is not an error — it is a record this
+# program predates, and it is answered with a SKIP above. Adding a kind here is the whole of teaching a
+# newer verifier to check it.
+CONTENT_CHECKS = {"search": check_search_content, "document": check_document}
 
 
 # ───────────────────────────── bundle-level ─────────────────────────────

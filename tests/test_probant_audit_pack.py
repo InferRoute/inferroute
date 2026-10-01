@@ -2231,3 +2231,34 @@ def test_the_brief_disarms_the_two_misreadings_the_1_oct_audits_produced():
     # The open part is still named: this must not read as "nothing to see here".
     assert "whether the window was written to fit a record already made" in b
     assert "Report the ordering as inherent, not as a finding against this record." in b
+
+
+def test_the_brief_asks_the_auditor_to_rebuild_the_published_image():
+    """Henry, 2 Oct: "arent we aiming at a statement where inferroute doesnt need to be trusted and only azure
+    box background standard code was still able to access it?"
+
+    That is the right target, and it is reachable on Azure where confidentiality_reach 1 is not — reach 1 needs
+    a policy with NO external fragments, and ACI always injects its own. What Henry's statement needs instead
+    is that the code which ran be the code anyone can read.
+
+    Every piece was already in place and nobody had been asked to put them together: the recipe is published at
+    inferroute.ai/build/, and the policy pins the `layers` roots per container with sha256(policy) signed by the
+    chip. The brief mentioned none of it — 0 occurrences of rebuild, layers, Dockerfile or that URL — while the
+    verifier called image provenance a permanent gap and the plain statement told the CLIENT to go ask us for
+    something we had already published.
+
+    The instruction must not promise the outcome. If a rebuild does not reproduce those digests, that is the
+    most important finding available about this product.
+    """
+    from inferroute_cli import probant_export as E
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "https://inferroute.ai/build/" in b
+    assert "Dockerfile.m2" in b and "REBUILD.md" in b
+    assert "compare the layer roots you get against the `layers` arrays in the policy" in b
+    # Unasserted, in both directions.
+    assert "We are not telling you it will match" in b
+    assert "that is the most important finding available about this product" in b
+    # And bounded: a matching rebuild must not be reported as privacy.
+    assert "It says nothing about what that code does with text once it has it" in b
+    assert "nothing about the platform containers beside it" in b

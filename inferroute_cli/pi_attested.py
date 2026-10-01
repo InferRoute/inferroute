@@ -453,6 +453,35 @@ def _die_with_parent() -> None:
         pass
 
 
+VENDOR_DIR = Path(__file__).resolve().parent / "_vendor"
+
+
+def verifier_command(cfg: dict) -> tuple[str, dict, str | None]:
+    """(interpreter, env, cwd) for launching `-m sealedresearch.search_verifier`.
+
+    Two installations, one command. A DEVELOPMENT machine names `python` and `cwd` in search.json and gets
+    exactly what it named — the repo checkout, unchanged. A CLIENT machine names neither, and gets this
+    interpreter with the vendored copy on PYTHONPATH.
+
+    Measured 2026-10-01 on a clean venv on another machine: `pip install inferroute[confidential]` gave a
+    working client whose search lane could never start, because `sealedresearch` is not part of this
+    package and nothing else had put it there. A config naming a path on someone else's machine is not a
+    fix — it is the same failure with a longer setup.
+
+    PYTHONPATH rather than a top-level package, so a machine that HAS the real sealedresearch installed or
+    checked out keeps using it: the two copies never compete for one name on sys.path.
+    """
+    import sys as _sys
+    python = str(cfg.get("python") or "").strip()
+    cwd = cfg.get("cwd")
+    env = dict(os.environ)
+    if python and cwd:
+        return python, env, str(cwd)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(VENDOR_DIR) + (os.pathsep + existing if existing else "")
+    return (python or _sys.executable), env, (str(cwd) if cwd else None)
+
+
 def start_search_proxy(timeout: float = 30.0) -> str | None:
     """Start the verifier and return its loopback address, or None (the session then has no search tool)."""
     import select
@@ -462,7 +491,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         cfg = json.loads(search_config_path().read_text())
     except (OSError, ValueError):
         return None
-    argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
+    python, venv_env, venv_cwd = verifier_command(cfg)
+    argv = [python, "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg), "--port", "0"]
     # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir probant open` sets
     # them in the env from the host-held matter record, so the shared search.json is never mutated per
@@ -510,8 +540,8 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
     try:
-        proc = subprocess.Popen(argv, cwd=cfg.get("cwd"), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                                preexec_fn=_die_with_parent)
+        proc = subprocess.Popen(argv, cwd=venv_cwd, env=venv_env, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True, preexec_fn=_die_with_parent)
     except (OSError, KeyError):
         sys.stderr.write("\n  prior-art search is unavailable this session: the local search verifier did not start.\n\n")
         return None
@@ -553,10 +583,12 @@ def verify_search_once(timeout: float = 120.0) -> dict | None:
         cfg = json.loads(search_config_path().read_text())
     except (OSError, ValueError):
         return None
-    argv = [cfg["python"], "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
+    python, venv_env, venv_cwd = verifier_command(cfg)
+    argv = [python, "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg)]
     try:
-        out = subprocess.run(argv, cwd=cfg.get("cwd"), capture_output=True, text=True, timeout=timeout).stdout
+        out = subprocess.run(argv, cwd=venv_cwd, env=venv_env, capture_output=True, text=True,
+                             timeout=timeout).stdout
         res = json.loads(out)
         return res if isinstance(res, dict) else {"ok": False, "refusal": "the search verifier answered nonsense", "steps": []}
     except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):

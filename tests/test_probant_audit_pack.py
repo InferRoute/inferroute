@@ -792,7 +792,12 @@ def test_the_product_does_not_tell_the_user_what_their_profession_is():
     import subprocess
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    r = subprocess.run(["grep", "-rn", "attorney", "--include=*.py", "--include=*.ts", "--include=*.js",
+    # NOT the vendored dependency. inferroute_cli/_vendor holds sealed-research's open client set, carried
+    # as files only because there is no package index to depend on; if pip installed it, this scan would
+    # never have seen it, and vendoring must not change what the rule MEANS. The rule is about the words
+    # THIS product puts in front of its user, not about a dependency's own prose.
+    r = subprocess.run(["grep", "-rn", "--exclude-dir=_vendor", "attorney",
+                        "--include=*.py", "--include=*.ts", "--include=*.js",
                         "inferroute_cli/", "inferroute_local/"], cwd=root, capture_output=True, text=True)
     hits = [ln for ln in r.stdout.splitlines() if ln.strip()]
     assert len(hits) == 2, "unexpected uses of 'attorney':\n" + "\n".join(hits)

@@ -77,6 +77,10 @@ def test_no_route_beyond_what_the_page_needs(home):
                      "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase",
                      # reading a document and proposing matters from it (20 Sep)
                      "/api/intake", "/api/intakes", "/api/intake/create",
+                     # Folders (1 Oct): organising matters, and the unit a corpus is sealed from. The
+                     # folder's own context files are a FIXED set of four kinds, never a free file list.
+                     "/api/folders", "/api/folders/create", "/api/folders/rename", "/api/folders/delete",
+                     "/api/folders/assign", "/api/folders/document", "/api/folders/draft",
                      # sharing a corpus of matters with another Probant user (20 Sep)
                      "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open",
                      # telling a pasted key apart from a typo before anything is recorded (24 Sep)
@@ -748,3 +752,280 @@ def test_the_home_page_says_nothing_about_hours_when_search_runs_continuously():
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "scheduled keeps its timetable" in r.stdout
+
+
+def test_folders_group_matters_without_ever_owning_them(tmp_path, monkeypatch):
+    """Henry, 2026-10-01: "organise matters in clusters, just like file and folders".
+
+    A folder is LOCAL and MUTABLE; a sealed corpus is immutable. Keeping them two objects is the point —
+    if they were one, reorganising in April would silently change what you claim to have sent in March and
+    the signature would describe nothing stable. Sealing takes a snapshot; the folder stays free to change.
+
+    The properties that matter are the destructive ones: a matter is in at most one folder, a matter in no
+    folder is still VISIBLE, and deleting a folder never touches a matter.
+    """
+    from inferroute_cli import probant_folders as F
+    monkeypatch.setattr(F.S, "_irhome", lambda: tmp_path / "ir")
+    monkeypatch.setattr(F.S, "probant_root", lambda: tmp_path / "Probant")
+
+    ids = ["A/one", "A/two", "A/three"]
+    f = F.create("Portfolio")
+    g = F.create("Other")
+    with pytest.raises(F.S.ProbantError):
+        F.create("portfolio")                    # same name, different case — one folder, not two
+
+    F.assign("A/one", f["id"])
+    F.assign("A/two", f["id"])
+    L = F.listing(ids)
+    assert sorted(L["folders"][0]["matters"]) == ["A/one", "A/two"]
+    assert L["unfiled"] == ["A/three"], "a matter in no folder must still be listed, never hidden"
+
+    # AT MOST ONE FOLDER: moving it does not leave a copy behind.
+    F.assign("A/one", g["id"])
+    L = F.listing(ids)
+    counts = {x["name"]: x["matters"] for x in L["folders"]}
+    assert counts["Portfolio"] == ["A/two"] and counts["Other"] == ["A/one"]
+    assert F.folder_of("A/one")["name"] == "Other"
+
+    # Taking it out entirely.
+    F.assign("A/one", None)
+    assert F.folder_of("A/one") is None
+    assert "A/one" in F.listing(ids)["unfiled"]
+
+    # A matter that no longer exists on disk is dropped from the VIEW but kept in the store, so restoring
+    # it from the 30-day bin finds its folder again.
+    F.assign("A/two", f["id"])
+    assert F.listing(["A/three"])["folders"][0]["matters"] == []
+    assert "A/two" in F.get(f["id"])["matters"]
+
+    # DELETING A FOLDER IS NOT DELETING WORK.
+    F.delete(f["id"])
+    assert F.folder_of("A/two") is None
+    assert set(F.listing(ids)["unfiled"]) == {"A/one", "A/two", "A/three"}
+    assert F.get(g["id"])["name"] == "Other", "deleting one folder leaves the others alone"
+
+
+def test_a_folders_context_files_are_a_fixed_set_and_drafts_are_never_auto_saved(tmp_path, monkeypatch):
+    """Henry: "we should not have freeform extra files we should just have certain go to file types that
+    make sense for this spot ... prioritize compact formats".
+
+    Four kinds, always all four, present or empty — a fixed set is what lets a reader see the same slots
+    every time and know which are blank, which a free listing of a directory never tells them.
+    """
+    from inferroute_cli import probant_folders as F
+    monkeypatch.setattr(F.S, "_irhome", lambda: tmp_path / "ir")
+    monkeypatch.setattr(F.S, "probant_root", lambda: tmp_path / "Probant")
+    f = F.create("Portfolio")
+
+    kinds = [d["kind"] for d in F.documents(f["id"])]
+    assert kinds == ["brief", "known-art", "scope", "reading-guide"]
+    assert all(d["present"] is False for d in F.documents(f["id"])), "an empty folder states its empties"
+
+    with pytest.raises(F.S.ProbantError):
+        F.write_document(f["id"], "whatever-i-like", "freeform")      # the set is closed
+
+    F.write_document(f["id"], "brief", "Nine filings on sealed inference. Question: freedom to operate.")
+    docs = {d["kind"]: d for d in F.documents(f["id"])}
+    assert docs["brief"]["present"] and docs["brief"]["words"] == 9
+    assert docs["scope"]["present"] is False
+    assert F.read_document(f["id"], "brief").startswith("Nine filings")
+
+    # Compact by construction: these are read before a survey and travel to a recipient.
+    with pytest.raises(F.S.ProbantError):
+        F.write_document(f["id"], "brief", "x" * 20001)
+
+    # A draft with nothing to draft FROM is refused rather than invented.
+    with pytest.raises(F.S.ProbantError):
+        F.draft_prompt("brief", "Portfolio", "")
+    prompt = F.draft_prompt("brief", "Portfolio", "## A/one\n\nA wrist-worn sensor.")
+    assert "Portfolio" in prompt and "wrist-worn sensor" in prompt
+    assert "150 words" in prompt, "the prompt must carry the compactness the kind promises"
+
+
+def test_sealing_a_folder_prefills_the_send_form_and_never_sends_by_itself():
+    """"Seal and send this folder" has to cross from the folder page to the sharing form, which means a hash
+    that carries a query. Two things are asserted because both have bitten:
+
+    1. The query is split off BEFORE the path is parsed. Glued to the last segment, `#/sharing?folder=abc`
+       stops matching the sharing route and the button looks dead rather than broken.
+    2. Pre-filling is not pre-approving. The form is filled in; the SEND still happens only when a person
+       presses it, because a corpus sealed to the wrong contact cannot be unsent.
+    """
+    js = (STATIC / "home.js").read_text()
+    code = re.sub(r"//[^\n]*", "", js)
+
+    assert 'location.hash = `#/sharing?folder=${enc(f.id)}`' in code
+    assert "const q = h.indexOf" in code and "URLSearchParams" in code
+    # The path is taken from BEFORE the "?", and the route is handed the folder.
+    assert "(q < 0 ? h : h.slice(0, q))" in code
+    assert 'if (parts[0] === "sharing") return renderSharing(query.get("folder") || "");' in code
+
+    # Pre-filled: the folder's matters, the folder's own documents, the corpus name.
+    body = code[code.index("async function renderSharing"):code.index("function addContactDialog")]
+    assert "if (inFolder.has(m.id)) { box.checked = true; chosen.add(m.id); }" in body
+    assert "if (folder && f.folder === folder.id) { box.checked = true; docs.add(f.id); docBoxes.push" in body
+    assert "if (folder) corpusName.value = folder.name;" in body
+    # NOT pre-sent: the only call to the sealing route is still inside the button's own handler.
+    assert body.count('api("/api/sharing/share"') == 1
+    seal = body[body.index('const go = button("Seal and write the file"'):]
+    assert 'api("/api/sharing/share"' in seal
+
+
+def test_a_folders_own_documents_are_offered_to_travel_inside_the_seal(home):
+    """A reading guide quotes every filing in the folder. That is exactly why it must not go as an email
+    attachment, and why the sharing form has to be able to offer it — otherwise the one document that makes
+    nine matters legible to a recipient is the one document that leaks.
+
+    The page chooses by ID and never sends a path: a path from a browser is a path someone can edit, and
+    "seal this file to a stranger" is the last place to accept one.
+    """
+    h, c, tmp = home
+    from inferroute_cli import probant_folders as F
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    c.post("/api/matters", json={"client": "Acme", "matter": "sensor"})
+    f = c.post("/api/folders/create", json={"name": "Portfolio"}).json()["folder"]
+    c.post("/api/folders/assign", json={"matter": "Acme/cooling", "folder": f["id"]})
+    c.post("/api/folders/document", json={"id": f["id"], "kind": "reading-guide",
+                                          "text": "Read US-1-A1 first; it is the closest art."})
+
+    offered = c.get("/api/sharing").json()["documents"]
+    mine = [x for x in offered if x.get("folder") == f["id"]]
+    assert [x["kind"] for x in mine] == ["reading-guide"], "only documents that EXIST are offered"
+    assert all("path" not in x for x in offered), "a path must never reach the page"
+    assert mine[0]["id"] == f"folder:{f['id']}/reading-guide"
+
+    # An empty slot is not a document. Offering it would let someone seal a blank file believing they had
+    # explained the corpus to the recipient.
+    assert not [x for x in offered if x.get("kind") == "brief"]
+    c.post("/api/folders/document", json={"id": f["id"], "kind": "brief", "text": "Freedom to operate."})
+    assert [x["kind"] for x in c.get("/api/sharing").json()["documents"] if x.get("folder") == f["id"]] \
+        == ["brief", "reading-guide"]
+
+    # An id the page invents is not resolvable, so it cannot name a file to seal.
+    assert F.read_document(f["id"], "reading-guide").startswith("Read US-1-A1")
+
+
+def test_a_document_written_to_a_folder_nobody_has_is_refused_not_stranded(home, tmp_path):
+    """Writing to an id nobody has used to create ~/Probant/_folders/<whatever>/brief.md and answer ok.
+
+    Nothing lists it afterwards — the listing walks the STORE, not the directory — so the professional writes
+    a brief, is told it saved, and never sees it again. An accepted write that cannot be found is worse than a
+    refused one. The refusal lives in the store, not the route, so no second caller can forget it.
+    """
+    h, c, tmp = home
+    from inferroute_cli import probant_folders as F
+    root = tmp / "Probant"
+
+    r = c.post("/api/folders/document", json={"id": "20260101-deadbe", "kind": "brief", "text": "mine"})
+    assert r.status_code == 400 and "no such folder" in r.text
+    assert not (root / "_folders").exists(), "a refused write must leave nothing on disk"
+
+    for call in (lambda: F.write_document("nope", "brief", "x"),
+                 lambda: F.read_document("nope", "brief"),
+                 lambda: F.documents("nope")):
+        with pytest.raises(F.S.ProbantError, match="no such folder"):
+            call()
+
+    # And a folder that DOES exist still works, including after it is deleted.
+    f = c.post("/api/folders/create", json={"name": "Portfolio"}).json()["folder"]
+    assert c.post("/api/folders/document", json={"id": f["id"], "kind": "brief", "text": "mine"}).status_code == 200
+    assert (root / "_folders" / f["id"] / "brief.md").read_text() == "mine"
+    c.post("/api/folders/delete", json={"id": f["id"]})
+    assert c.post("/api/folders/document", json={"id": f["id"], "kind": "brief", "text": "again"}).status_code == 400
+
+
+def test_a_folder_document_cannot_be_sealed_without_the_matters_it_describes(home):
+    """The leak an adversarial review found in this feature on 1 Oct, before it shipped.
+
+    A folder's reading guide names every matter in the folder and its known-art list gives their publication
+    numbers. Tick the folder, un-tick one matter, send: the un-ticked matter's name and marked art travel to a
+    recipient who was never meant to receive them. Nothing is recallable once the sealed file leaves.
+
+    The refusal is on the SERVER. A page can be rewritten and a person can mis-click; both end in the same
+    disclosure, so the gate cannot live where either of them is.
+    """
+    h, c, tmp = home
+    me = c.get("/api/sharing").json()["card"]
+    c.post("/api/sharing/contact", json={"name": "counsel", "card": json.dumps(me)})
+
+    for mid in ("cooling", "sensor"):
+        c.post("/api/matters", json={"client": "Acme", "matter": mid})
+    f = c.post("/api/folders/create", json={"name": "Portfolio"}).json()["folder"]
+    for mid in ("Acme/cooling", "Acme/sensor"):
+        c.post("/api/folders/assign", json={"matter": mid, "folder": f["id"]})
+    c.post("/api/folders/document", json={"id": f["id"], "kind": "reading-guide",
+                                          "text": "Acme/cooling then Acme/sensor; US-1-A1 is closest."})
+    doc = f"folder:{f['id']}/reading-guide"
+
+    # One matter held back, the document still ticked: REFUSED, and the refusal names what would have leaked.
+    r = c.post("/api/sharing/share", json={"to": "counsel", "matters": ["Acme/cooling"], "documents": [doc]})
+    assert r.status_code == 400, r.text
+    assert "Acme/sensor" in r.text and "reading-guide.md" in r.text and "Portfolio" in r.text
+    assert not list((tmp / "Probant").glob("probant-corpus-*")), "nothing may be written on a refusal"
+
+    # Hold the matter back AND untick the document: fine — nothing describes what is missing.
+    r = c.post("/api/sharing/share", json={"to": "counsel", "matters": ["Acme/cooling"], "documents": []})
+    assert r.status_code == 200, r.text
+
+    # Send the whole folder with its document: fine.
+    r = c.post("/api/sharing/share", json={"to": "counsel", "matters": ["Acme/cooling", "Acme/sensor"],
+                                           "documents": [doc]})
+    assert r.status_code == 200, r.text
+    assert r.json()["documents"] == ["reading-guide.md"]
+
+
+def test_a_corpus_sealed_from_the_page_leaves_the_sender_a_record_of_it(home):
+    """Only the CLI wrote a sender-side record, so sealing from this page left no trace of an outbound
+    disclosure: what went, to whom, with which documents. The page's own Deliveries list stayed empty after
+    sealing a real corpus — the user's audit trail of their own disclosure, missing exactly where they made it.
+    """
+    h, c, tmp = home
+    me = c.get("/api/sharing").json()["card"]
+    c.post("/api/sharing/contact", json={"name": "counsel", "card": json.dumps(me)})
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+
+    assert c.get("/api/sharing").json()["corpora"] == []
+    r = c.post("/api/sharing/share", json={"to": "counsel", "matters": ["Acme/cooling"],
+                                           "corpus_name": "Portfolio", "note": "for review"})
+    assert r.status_code == 200, r.text
+
+    sent = [x for x in c.get("/api/sharing").json()["corpora"] if x["direction"] == "sent"]
+    assert len(sent) == 1, sent
+    assert sent[0]["to"] == "counsel" and sent[0]["matters"] == ["Acme/cooling"]
+    assert sent[0]["name"] == "Portfolio" and sent[0]["id"] == r.json()["corpus"]
+
+
+def test_deleting_a_folder_takes_its_documents_with_it_into_the_30_day_bin(home):
+    """The first version of delete() edited folders.json and nothing else. The folder's brief, known-art and
+    reading guide stayed readable at ~/Probant/_folders/<id>/ while appearing in no listing — client context
+    material surviving a delete the person had been told happened.
+
+    Destroying them outright is the other wrong answer: a hand-written brief is work. They are MOVED, dated,
+    and recoverable for as long as a deleted matter is. The matters themselves are never touched.
+    """
+    h, c, tmp = home
+    from inferroute_cli import probant_delete as D
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    f = c.post("/api/folders/create", json={"name": "Portfolio"}).json()["folder"]
+    c.post("/api/folders/assign", json={"matter": "Acme/cooling", "folder": f["id"]})
+    c.post("/api/folders/document", json={"id": f["id"], "kind": "brief", "text": "Freedom to operate, Acme."})
+    live = tmp / "Probant" / "_folders" / f["id"] / "brief.md"
+    assert live.is_file()
+
+    r = c.post("/api/folders/delete", json={"id": f["id"]})
+    assert r.status_code == 200
+    assert not live.exists() and not live.parent.exists(), "nothing of the folder may be left in place"
+    moved = Path(r.json()["documents_moved"])
+    assert moved.is_dir() and (moved / "brief.md").read_text() == "Freedom to operate, Acme."
+    assert stat.S_IMODE(moved.stat().st_mode) == 0o700
+    info = json.loads((moved / "deleted.json").read_text())
+    assert info["folder"] == f["id"] and info["erase_after"] > info["deleted_at"]
+    assert moved.parent == D.trash_root(), "the same bin a deleted matter goes to, not a second one"
+
+    # The matter is untouched and merely unfiled.
+    assert c.get("/api/overview").json()["matters"][0]["id"] == "Acme/cooling"
+    assert c.get("/api/folders").json()["unfiled"] == ["Acme/cooling"]
+
+    # A folder that never had a document deletes cleanly and says so rather than inventing a path.
+    g = c.post("/api/folders/create", json={"name": "Empty"}).json()["folder"]
+    assert c.post("/api/folders/delete", json={"id": g["id"]}).json()["documents_moved"] is None

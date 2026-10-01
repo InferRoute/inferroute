@@ -391,6 +391,24 @@ def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
     d = corpus_dir(client)
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
+
+    # RE-OPENING THE SAME DELIVERY REPLACES ITS OWN FILES, it does not accumulate them. The record for a
+    # corpus id is overwritten by this open, so the files the previous open of THIS delivery wrote would
+    # otherwise be left behind belonging to no record — and with the collision suffixing below they would be
+    # kept rather than overwritten, which turns a tidy overwrite into an unattributable copy of the quotes.
+    # Only this sender's own previous open is cleared: the id comes from the sender, so a different signer
+    # reusing someone's corpus id must not be able to delete their files.
+    prior = corpora_record(str(corpus.get("id") or "unnamed"))
+    try:
+        was = json.loads(prior.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        was = {}
+    if was.get("from") and was.get("from") == payload.get("from_fingerprint"):
+        for name in was.get("files") or []:
+            old_file = d / str(name)
+            if old_file.is_file() and old_file.parent.resolve() == d.resolve():
+                old_file.unlink()
+
     written = []
     for f in files:
         name = re.sub(r"[^A-Za-z0-9._ -]+", "-", str(f.get("name") or "document.txt"))[:80] or "document.txt"
@@ -399,7 +417,20 @@ def write_corpus(payload: Dict[str, Any], client: str) -> Dict[str, Any]:
         if said and hashlib.sha256(raw).hexdigest() != said:
             raise S.ProbantError(f"{name} did not arrive as it was sent (its hash does not match); "
                                   "ask for the share again rather than reading a truncated document")
+        # TWO DOCUMENTS MAY ARRIVE UNDER ONE NAME. Two folders each hold a reading-guide.md, two cluster runs
+        # each hold a MATTERS.txt — and the name travels from the SENDER, so it is also the easy way to make
+        # this record lie: send two files called the same thing and the second overwrites the first while the
+        # record still claims two arrived. Keep both, and let the record name what is actually on disk.
         out = d / name
+        if name in written or out.exists():
+            stem, dot, ext = name.rpartition(".")
+            n = 2
+            while True:
+                alt = f"{stem or name}-{n}{dot}{ext}" if dot else f"{name}-{n}"
+                if alt not in written and not (d / alt).exists():
+                    name, out = alt, d / alt
+                    break
+                n += 1
         out.write_bytes(raw)
         os.chmod(out, 0o600)
         written.append(name)

@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import datetime as dt
+import asyncio
 import json
 import os
 import re
@@ -224,7 +225,9 @@ def list_matters() -> List[Dict[str, Any]]:
             sessions = list_sessions(client, matter)
             marks = matter_marks(client, matter)
             ws = Path(str(rec.get("workspace") or ""))
+            from . import probant_folders as _F
             out.append({"id": f"{client}/{matter}", "client": client, "matter": matter,
+                        "folder": _F.folder_of(f"{client}/{matter}"),
                         "date_bound": rec.get("date_bound"), "created_at": rec.get("created_at"),
                         "sessions": len(sessions), "searches": sum(s["searches"] for s in sessions),
                         "marks": len(marks), "last_activity": sessions[0]["started_at"] if sessions else rec.get("created_at"),
@@ -256,6 +259,43 @@ def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any
             "unanswered": sum(1 for r in rows if r.get("kind") == "unanswered"),
             "conversation": _jsonl(conv_file) if conv_file.exists() else None,
             "searches": searches, "marks": matter_marks(client, matter)}
+
+
+def _sealed_once(prompt: str, *, timeout: float = 240.0) -> str:
+    """One sealed request for a drafting pass, over the SAME lane a session uses.
+
+    A context file is the client's material, so it must not travel any other way than their searches do:
+    the enclave is verified against the signed reference and the text sealed to it, exactly as in a matter
+    session. This borrows the confidential DAEMON — a detached process holding one verified session and
+    serving an authenticated local endpoint — rather than opening a session of its own, because a draft is
+    one short request and attestation is the expensive part.
+
+    If no daemon is running, that is what the caller is told, in those words: silently falling back to an
+    unsealed path would be the one failure this product cannot have.
+    """
+    import urllib.error
+    import urllib.request
+    from . import confidential_daemon as D
+
+    st = D.read_state() or {}
+    base, token = str(st.get("endpoint") or ""), str(st.get("token") or "")
+    if not base or not token:
+        raise RuntimeError("the sealed lane is not running on this computer. Start it with "
+                           "`ir confidential daemon start`, then try again — nothing is sent any other way.")
+    body = json.dumps({"model": st.get("model") or "", "max_tokens": 1200,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request(f"{base.rstrip('/')}/v1/chat/completions", data=body, method="POST",
+                                 headers={"authorization": f"Bearer {token}",
+                                          "content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as fh:
+            d = json.loads(fh.read().decode())
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"the sealed endpoint did not answer ({e})") from None
+    text = ((d.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    if not str(text).strip():
+        raise RuntimeError("the sealed machine returned nothing")
+    return str(text).strip()
 
 
 # ───────────────────────── starting sessions ─────────────────────────
@@ -726,7 +766,118 @@ class Home:
                                     "bytes": f.stat().st_size, "path": str(f)})
             return out
 
+        def folder_documents() -> List[Dict[str, Any]]:
+            """A folder's own context files, offered to travel inside the seal.
+
+            They are the reason a recipient can make sense of nine matters rather than nine unexplained
+            directories, and they quote the filings — which is exactly why they go inside the seal and not
+            attached to an email. Only the ones that EXIST are offered: a reading guide nobody has written
+            is not a document, and listing it as one would let someone seal an empty file believing they had
+            explained the corpus.
+            """
+            from . import probant_folders as F
+            out: List[Dict[str, Any]] = []
+            for f in F.listing([m["id"] for m in list_matters()])["folders"]:
+                for doc in F.documents(f["id"]):
+                    if not doc["present"]:
+                        continue
+                    path = F.folder_dir(f["id"]) / doc["file"]
+                    out.append({"id": f"folder:{f['id']}/{doc['kind']}", "name": doc["file"],
+                                "run": f["name"], "folder": f["id"], "kind": doc["kind"],
+                                "bytes": path.stat().st_size, "path": str(path)})
+            return out
+
+        def sendable_documents() -> List[Dict[str, Any]]:
+            """Everything the page may choose from, folders first — a folder is the unit people organise in,
+            so its documents are the ones most likely to be wanted."""
+            return folder_documents() + corpus_documents()
+
         # ── sharing a corpus of matters with another Probant user ──
+        # ── folders: organising matters, and the unit a corpus is sealed from ──
+        @app.get("/api/folders")
+        async def folders():
+            from . import probant_folders as F
+            return F.listing([m["id"] for m in list_matters()])
+
+        @app.post("/api/folders/create")
+        async def folder_create(request: Request):
+            from . import probant_folders as F
+            d = await body(request)
+            try:
+                return {"ok": True, "folder": F.create(str(d.get("name") or ""))}
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/folders/rename")
+        async def folder_rename(request: Request):
+            from . import probant_folders as F
+            d = await body(request)
+            try:
+                return {"ok": True, "folder": F.rename(str(d.get("id") or ""), str(d.get("name") or ""))}
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/folders/delete")
+        async def folder_delete(request: Request):
+            """The folder goes; its matters become unfiled. Never the matters — organisation is not
+            ownership, and a delete here must not be able to destroy work."""
+            from . import probant_folders as F
+            d = await body(request)
+            return {"ok": True, **F.delete(str(d.get("id") or ""))}
+
+        @app.post("/api/folders/assign")
+        async def folder_assign(request: Request):
+            from . import probant_folders as F
+            d = await body(request)
+            try:
+                F.assign(str(d.get("matter") or ""), str(d.get("folder") or "") or None)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            return {"ok": True}
+
+        @app.get("/api/folders/document")
+        async def folder_document(id: str = "", kind: str = ""):
+            from . import probant_folders as F
+            try:
+                return {"kind": kind, "text": F.read_document(id, kind),
+                        "spec": F.CONTEXT_KINDS.get(kind, {})}
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/folders/document")
+        async def folder_document_write(request: Request):
+            from . import probant_folders as F
+            d = await body(request)
+            try:
+                return {"ok": True, **F.write_document(str(d.get("id") or ""), str(d.get("kind") or ""),
+                                                       str(d.get("text") or ""))}
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/folders/draft")
+        async def folder_draft(request: Request):
+            """Draft one context file over the SEALED lane, and return it for the person to edit.
+
+            Nothing is written here. The draft goes back to the editor the professional writes in, so what
+            is saved is always what they read and accepted — the same rule marks and matters follow.
+            """
+            from . import probant_folders as F
+            d = await body(request)
+            fid, kind = str(d.get("id") or ""), str(d.get("kind") or "")
+            f = F.get(fid)
+            if not f:
+                return problem("no such folder", 404)
+            try:
+                material = F.draft_material(fid, f.get("matters") or [])
+                prompt = F.draft_prompt(kind, f.get("name") or "", material)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            try:
+                text = await asyncio.to_thread(_sealed_once, prompt)
+            except Exception as e:                           # noqa: BLE001
+                return problem(f"the sealed request did not complete: {e}", 502)
+            return {"ok": True, "kind": kind, "text": text}
+
         @app.get("/api/sharing")
         async def sharing():
             """This installation's identity and the people it can share with. Public material only."""
@@ -735,7 +886,7 @@ class Home:
             return {"fingerprint": me["fingerprint"], "card": SH.public_card(me),
                     "contacts": [{"name": n, **c} for n, c in SH.contacts().items()],
                     # Offered by id; the page never sends a path back (see corpus_documents).
-                    "documents": [{k: v for k, v in x.items() if k != "path"} for x in corpus_documents()],
+                    "documents": [{k: v for k, v in x.items() if k != "path"} for x in sendable_documents()],
                     # The deliveries themselves. The page could send one and open one and never show you
                     # that any existed — which is what "I don't see the corpus integration" was about.
                     "corpora": SH.corpora()}
@@ -815,8 +966,30 @@ class Home:
             if not ids:
                 return problem("choose at least one matter to share", 400)
             # Resolve the chosen documents against OUR list, by id — never against a path from the page.
-            offered = {x["id"]: x for x in corpus_documents()}
+            offered = {x["id"]: x for x in sendable_documents()}
             chosen = [offered[str(x)] for x in (d.get("documents") or []) if str(x) in offered]
+
+            # A FOLDER DOCUMENT DESCRIBES THE WHOLE FOLDER. Its reading guide names every matter in it and
+            # its known-art list gives their publication numbers — so sending one while leaving a matter out
+            # of the seal discloses that matter to someone who was not meant to receive it. Found by an
+            # adversarial review of this change, 1 Oct: tick the folder, un-tick one matter, send, and the
+            # un-ticked matter's name and marked art travel anyway.
+            #
+            # The gate is HERE and not on the page. The page can keep its ticks in step as a courtesy, but a
+            # page is what an attacker rewrites and a mis-click is what a person does, and the outcome of
+            # both is a disclosure that cannot be recalled once the file leaves.
+            from . import probant_folders as F
+            for x in chosen:
+                if not x.get("folder"):
+                    continue
+                f = F.get(str(x["folder"]))
+                missing = [m for m in (f or {}).get("matters", []) if m not in ids]
+                if missing:
+                    return problem(
+                        f"\u201c{x['name']}\u201d describes the whole folder \u201c{(f or {}).get('name')}\u201d, "
+                        f"including {', '.join(missing)} \u2014 which {'is' if len(missing) == 1 else 'are'} not in "
+                        "this corpus. Either send those matters too, or untick that document: as it stands the "
+                        "recipient would learn of them from it.", 400)
 
             def build() -> Dict[str, Any]:
                 me = SH.identity()
@@ -833,6 +1006,10 @@ class Home:
                 dest = S.probant_root() / f"probant-corpus-for-{to}-{stamp}{SH.SUFFIX}"
                 dest.write_bytes(blob)
                 os.chmod(dest, 0o600)
+                # The SENDER's own trace of an outbound disclosure: what went, to whom, when, with which
+                # documents. Only the CLI wrote one (probant.py), so a corpus sealed from this page left no
+                # record at all and the page's own Deliveries list stayed empty after sealing it.
+                SH.record_sent(payload, to, known[to]["fingerprint"], dest)
                 return {"path": str(dest), "matters": len(entries), "bytes": len(blob),
                         "documents": [x["name"] for x in chosen], "corpus": payload["corpus"]["id"],
                         "to_fingerprint": known[to]["fingerprint"], "from_fingerprint": me["fingerprint"]}

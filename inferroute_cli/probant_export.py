@@ -795,6 +795,31 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         # admits the evidence is gone, because it reads as an omission.
         raw, carried, missing = _carry_served_evidence(raw, Path(rp).parent, files)
         note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"}
+        # WHAT BINDS THIS RECEIPT TO THESE SEARCHES, said in the only terms that are worth anything. Two
+        # independent auditors reached the same finding on 1 Oct: "the receipt carries none of the search
+        # identifiers; the only links are unsigned labels and overlapping clocks" and "no cryptographic
+        # binding between the TDX receipt and the AMD searches — the link is the unsigned MANIFEST.json
+        # index". Both are correct and neither is fixable from here: the receipt is written by the AI lane,
+        # whose session id lives in a different namespace from the search enclave's, and nothing signs a
+        # value present in both.
+        #
+        # What CAN be done is stop making the auditor derive the attribution from a filename. These are the
+        # enclave's own SIGNED identifiers for the searches this row claims the receipt covers, so the
+        # attribution can be checked against signed material instead of taken on the index's word. It
+        # remains an unsigned INDEX over signed items — stated as exactly that, never as a binding.
+        ids = sorted({str(st.get("lifetime_id")) for st in _session_statements(b, sid) if st.get("lifetime_id")})
+        seqs = sorted({int(st["seq"]) for st in _session_statements(b, sid) if isinstance(st.get("seq"), int)})
+        if ids or seqs:
+            note["covers_signed_operations"] = {
+                "enclave_lifetime_ids": ids,
+                "enclave_seq": (f"{seqs[0]}..{seqs[-1]}" if seqs else ""),
+                "count": len(seqs),
+                "what_this_is": "the enclave-signed lifetime ids and sequence numbers of the searches this "
+                                "index attributes to this receipt. It lets you check the attribution against "
+                                "signed material rather than against a filename. It is NOT a binding: the "
+                                "receipt itself carries none of these values, nothing signs a value present "
+                                "in both, and this row is an unsigned index written by the exporter.",
+            }
         if carried:
             note["machines"] = carried
         if missing:
@@ -1065,6 +1090,17 @@ other order would have been marked down by a rule this brief had broken itself.
    twenty-eight-operation hole coexist without contradiction. A reader who saw only the exit code in your
    report's header would never learn the hole exists. If you find one, put it in the header too.
 
+   **A reference window opens AFTER the enclave it describes, always, and that is not evidence of anything.**
+   An auditor measured the gap on 1 Oct — "the entry matching this enclave opens 3 minutes 32 seconds after
+   the enclave came up. That ordering fits both an honest release and a minted one" — and both halves of that
+   are true. The ordering is unavoidable: a window names `sha256(policy)`, so the policy must exist before it
+   can be named, and a reference that preceded its enclave would be the suspicious one. A timestamp proof
+   does not cure it either; it dates the reference, which still postdates the enclave. What the ordering
+   leaves open is whether the window was written to fit a record already made, and nothing in this folder can
+   close that — only a copy of the reference obtained before the record was, which is why the brief keeps
+   telling you to get it out of band and to record when you did. Report the ordering as inherent, not as a
+   finding against this record.
+
    **`enclave_gaps` is the exporter answering the question the verifier tells you to ask it.** An enclave
    serves every matter on an installation, so a record of one matter is missing the others by
    construction, and only the exporting machine can say so. Each row gives how many operations are absent
@@ -1161,6 +1197,22 @@ other order would have been marked down by a rule this brief had broken itself.
    verifier refuses to let disclosure stand in for it. The FAIL is advisory (it does not invalidate the
    record) and is permanent on this platform; a different substrate is the only fix. Report it as what it is:
    not a defect in this record, not a thing that was fixed, and not a thing we are asking you to discount.
+
+   **THIS VERIFIER DOES NOT READ THE RECEIPT, AND EDITING IT CHANGES NO VERDICT.** An auditor demonstrated
+   exactly that on 1 Oct — edited a receipt heavily and `verify_record.py` still exited 0 — and was right to.
+   The verifier's scope is archived SEARCH operations; it says so in its own output. So treat every value in
+   a receipt as unverified data this machine wrote about itself, audit it yourself, and do not report a
+   passing exit code as covering any of it. We would rather you knew that than discovered it.
+
+   **What binds a receipt to the searches it is offered as covering, and what does not.** Nothing
+   cryptographic. The receipt is written by the AI lane, whose `session_id` is in a different namespace from
+   the search enclave's, and no signature covers a value present in both. The pack's
+   `MANIFEST.json` → `sessions[]` row for each receipt now carries `covers_signed_operations`: the enclave's
+   own signed lifetime ids and sequence numbers for the searches that row attributes to it, so you can check
+   the attribution against signed material instead of a filename. That is an unsigned INDEX over signed
+   items, written by the exporter — it is not a binding and must not be reported as one. Two auditors found
+   this independently on 1 Oct; both were correct, and it is a property of the design rather than an
+   oversight.
 
    **The `attestation` block holds EVIDENCE and carries no verdict of its own.** There is no
    `attestation.ok`; an auditor looked for one on 1 Oct, did not find it, and reported its absence as a
@@ -1576,7 +1628,7 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
 ## False alarms to avoid
 
-- The AMD root certificate is self-signed. All roots are. What matters is that it's AMD's.
+- The AMD ROOT certificate (ARK) is self-signed. That is correct for a root and is not a finding. It says nothing about any OTHER certificate in this folder: an auditor applied it to the session receipt's certificate on 1 Oct and reported our brief as wrong, when the receipt's issuer is simply a different CA and was never claimed to be self-signed. All roots are. What matters is that it's AMD's.
 - The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The container is
   identified by HOST_DATA, checked against the reference.
 - A SKIP for "configured firmware TCB floor" means no floor was in force AT THE SEARCH'S TIME —
@@ -1839,11 +1891,26 @@ def report_template() -> str:
            "it. Where your sample DISAGREED with the tool, that is NOT VERIFIED and the most important",
            "sentence in your report.",
            "",
-           "On 1 Oct an auditor returned VERIFIED IN PART on all eight claims. Eight identical verdicts are",
-           "the shape of this page, not of the evidence: it had re-derived two searches by hand, run both",
-           "corruption attacks, and watched the tool pass 31 — and then scored the 29 it had not hand-checked",
-           "as unreached. Do not repeat that. If every verdict you write is the same, re-read this paragraph",
-           "before you write the closing.",
+           "Each claim asks you for a **Covered by:** line before its prose: `tool: N of N operations`, `my own",
+           "recomputation: M of N`, `neither: <what>`. Fill the numbers in first. With N of N read by the tool,",
+           "M of them re-derived by you, agreement between the two, and nothing in the claim left without",
+           "evidence, the verdict is VERIFIED. With a part of the claim having no evidence here at all, it is",
+           "VERIFIED IN PART and that part is what you name. The numbers decide it; the prose explains it.",
+           "",
+           "This happened twice on 1 Oct, to two different auditors reading the SAME pack. One returned three",
+           "plain VERIFIED and four in part. The other returned VERIFIED IN PART on all eight — from stronger",
+           "evidence: it had recomputed the AMD bindings, run three tamper tests, matched all four RTMRs,",
+           "verified the Sigstore attestation, and compared the published wheel byte for byte. By its own",
+           "numbers several of those were VERIFIED. Eight identical verdicts are the shape of this page, not",
+           "of the evidence, and a professional reads them as nothing having fully checked out.",
+           "",
+           "**Count your verdicts before you submit.** If they are all the same value, either say in the",
+           "closing why the evidence really is uniform, or go back and read your own Covered by lines again.",
+           "",
+           "**Do not retitle or renumber a claim.** One auditor rewrote all eight headings on 1 Oct — including",
+           "turning claim 8 into a different question than the one asked. A report whose headings are not these",
+           "headings cannot be compared with any other report of the same record, and comparison between",
+           "independent audits is most of what makes them worth having. Paste the titles exactly.",
            "",
            "## About this audit",
            "",
@@ -1862,6 +1929,15 @@ def report_template() -> str:
                 "plain VERIFIED if part of this claim has no evidence in this folder to test it against. "
                 "Reading the folder in full with the tool, and re-deriving a sample of it yourself, IS "
                 "reaching it — see the sampling rule above.)_",
+                "",
+                # A COUNT, BEFORE THE PROSE. On 1 Oct two auditors read the same pack. One returned three
+                # plain VERIFIED and four in part; the other returned VERIFIED IN PART on all eight — from
+                # STRONGER evidence: it had recomputed the AMD bindings, run three tamper tests, matched all
+                # four RTMRs, verified the Sigstore attestation and compared the published wheel byte for
+                # byte. The paragraph above telling it what a sample proves did not bind, because prose does
+                # not force arithmetic. This line does: fill in the numbers and the verdict mostly follows.
+                "**Covered by:** _(tool: N of N operations · my own recomputation: M of N · neither: "
+                "<what, and why>)_",
                 "",
                 "**What I computed myself:** ",
                 "",
@@ -1924,6 +2000,18 @@ def anchor_block(ots_path: Path) -> Dict[str, Any]:
             "read_with": "ots --no-bitcoin verify trust-anchors/reference.json.ots"}
 
 
+def _session_statements(bundle: dict, sid: str) -> list:
+    """The signed statements of the searches a bundle attributes to one session."""
+    out = []
+    for row in (bundle.get("searches") or []):
+        if not isinstance(row, dict) or str(row.get("session_id") or "") != str(sid):
+            continue
+        st = row.get("statement")
+        if isinstance(st, dict):
+            out.append(st)
+    return out
+
+
 def enclave_gaps(S, client: str, matter: str, searches: list) -> list:
     """Account for operations that ran on the enclave and are not in THIS record.
 
@@ -1969,21 +2057,37 @@ def enclave_gaps(S, client: str, matter: str, searches: list) -> list:
     out = []
     for lid, seen in sorted(mine.items()):
         lo, hi = min(seen), max(seen)
-        missing = [n for n in range(lo, hi + 1) if n not in seen]
-        if not missing:
-            continue
         others = elsewhere.get(lid, set())
-        accounted = [n for n in missing if n in others]
+        # BETWEEN the first and last operation this record holds.
+        interior = [n for n in range(lo, hi + 1) if n not in seen]
+        # AND BEFORE THE FIRST. This was the whole gap for a year: `missing` scanned only lo..hi, so a
+        # record whose operations are contiguous reported `enclave_gaps: []` — while its counter started at
+        # 65, meaning 64 operations had run on that enclave lifetime before it. An auditor found exactly
+        # that on 1 Oct ("the enclave counter starts at 65, so operations 1-64 are not in the record. The
+        # exporter's enclave_gaps is empty and says nothing about them") and it was right: the one field
+        # whose job is to turn a silence into a claim was answering "none" when the answer was "sixty-four".
+        before = [n for n in range(1, lo) if n not in seen]
+        if not interior and not before:
+            continue
+        acc_i = [n for n in interior if n in others]
+        acc_b = [n for n in before if n in others]
         out.append({
             "lifetime_id": lid,
             "this_record_carries": f"{lo}..{hi}, {len(seen)} operations",
-            "absent_from_this_record": len(missing),
-            "explained_other_matters_same_installation": len(accounted),
-            "unaccounted": len(missing) - len(accounted),
-            "note": "operations that ran on this enclave and are not in this record. This machine has "
-                    "looked at its OWN other matters and reports how many of the absent numbers they "
-                    "hold — a count, never which matter or what it searched. Self-reported and unsigned: "
-                    "it converts an unexplained gap into a stated one, and any remainder is still open.",
+            "absent_from_this_record": len(interior) + len(before),
+            "before_the_first_in_this_record": len(before),
+            "between_the_first_and_last": len(interior),
+            "explained_other_matters_same_installation": len(acc_i) + len(acc_b),
+            "unaccounted": len(interior) + len(before) - len(acc_i) - len(acc_b),
+            "after_the_last_in_this_record": "not bounded by this record: the enclave keeps serving, so "
+                                             "nothing here says how many operations followed, and removing "
+                                             "the final operation of a record leaves no gap behind",
+            "note": "operations that ran on this enclave lifetime and are not in this record, counted in "
+                    "two places: before the first one this record holds, and between its first and last. "
+                    "This machine has looked at its OWN other matters and reports how many of those "
+                    "numbers they hold — a count, never which matter or what it searched. Self-reported "
+                    "and unsigned: it converts an unexplained gap into a stated one, and any remainder is "
+                    "still open.",
         })
     return out
 

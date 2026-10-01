@@ -1924,7 +1924,7 @@ def test_the_brief_says_what_a_hand_sample_proves_and_where_the_receipt_verdict_
     # 1. The sampling rule, and the warning about a uniform answer.
     assert "A sample you re-derive by hand tests the TOOL. It is not the coverage." in tmpl
     assert "how many the tool read, and how many you re-derived yourself" in tmpl
-    assert "If every verdict you write is the same, re-read this paragraph" in tmpl
+    assert "Count your verdicts before you submit." in tmpl
     # It must not become an invitation to inflate: disagreement and tool-only reliance are both named.
     assert "re-derived NOTHING of a claim yourself, say that" in tmpl
     assert "sample DISAGREED with the tool, that is NOT VERIFIED" in tmpl
@@ -2062,3 +2062,172 @@ def test_the_brief_explains_the_one_fail_that_is_permanent():
     assert "does not invalidate the record" in b
     # ...and NOT as something to wave away, which is the other way to mislead.
     assert "not a thing we are asking you to discount" in b
+
+
+def test_operations_before_the_first_one_in_a_record_are_counted_too(tmp_path, monkeypatch):
+    """Kimi and Sonnet audited the same pack on 1 Oct. Sonnet found this and it was right:
+
+        "the enclave counter starts at 65, so operations 1-64 are not in the record. The exporter's
+         enclave_gaps is empty and says nothing about them."
+
+    `missing` scanned only lo..hi, so a record whose own operations are contiguous reported `[]` — and the
+    one field whose job is to turn a silence into a claim answered "none" when the answer was "sixty-four".
+    That is the same failure the field was built to prevent, arriving through the other door: a count of zero
+    and an inability to count must not look alike.
+    """
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant as S
+
+    root = tmp_path / "attested-records"
+    here = root / "C" / "M"
+    here.mkdir(parents=True)
+    (root / "C" / "Other").mkdir(parents=True)
+    monkeypatch.setattr(S, "records_dir", lambda c, m: root / c / m)
+    rows = lambda lid, seqs: [{"statement": {"lifetime_id": lid, "seq": n}} for n in seqs]  # noqa: E731
+
+    # THE REAL SHAPE, from the 1 Oct pack: six contiguous operations whose counter starts at 65.
+    out = E.enclave_gaps(S, "C", "M", rows("aa" * 16, [65, 66, 67, 68, 69, 70]))
+    assert len(out) == 1, "contiguous is not the same as nothing to declare"
+    g = out[0]
+    assert g["this_record_carries"] == "65..70, 6 operations"
+    assert g["before_the_first_in_this_record"] == 64
+    assert g["between_the_first_and_last"] == 0
+    assert g["absent_from_this_record"] == 64
+    assert g["unaccounted"] == 64, "nothing on this machine explains them, so none may be called explained"
+    # The third direction, which no count can bound — and which is also why removing a record's LAST
+    # operation leaves no trace. Stated rather than left for an auditor to demonstrate.
+    assert "not bounded by this record" in g["after_the_last_in_this_record"]
+    assert "removing the final operation" in g["after_the_last_in_this_record"]
+
+    # Another matter on this installation holding some of them explains those and only those.
+    (root / "C" / "Other" / "s.searches.jsonl").write_text(
+        "\n".join(json.dumps(r) for r in rows("aa" * 16, list(range(1, 61)))) + "\n")
+    g = E.enclave_gaps(S, "C", "M", rows("aa" * 16, [65, 66, 67, 68, 69, 70]))[0]
+    assert g["explained_other_matters_same_installation"] == 60 and g["unaccounted"] == 4
+    assert "Other" not in json.dumps(g), "a count, never a matter name"
+
+    # Starting at operation 1 with no interior gap genuinely has nothing to declare, and still says nothing.
+    assert E.enclave_gaps(S, "C", "M", rows("bb" * 16, [1, 2, 3])) == []
+
+
+def test_the_pack_says_what_joins_a_receipt_to_its_searches_and_calls_it_an_index(tmp_path, monkeypatch):
+    """The one finding Kimi and Sonnet reached independently, auditing the same pack on 1 Oct:
+
+        "the receipt carries none of the search identifiers; the only links are unsigned labels and
+         overlapping clocks"
+        "no cryptographic binding between the TDX receipt and the AMD searches — the link is the unsigned
+         MANIFEST.json index"
+
+    Both correct, and not fixable from here: the receipt's session id is in the AI lane's namespace, the
+    searches' in the search enclave's, and nothing signs a value present in both. Agreement between two
+    instruments that fail independently is worth more than either, so this is treated as settled.
+
+    What is fixed is that the auditor no longer has to derive the attribution from a FILENAME. The row
+    carries the enclave's signed lifetime ids and sequence numbers — and calls itself an unsigned index over
+    signed items, never a binding, because the difference is the whole finding.
+    """
+    from inferroute_cli import probant_export as E
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    assert S.cmd_new("Acme", "cooling", "2026-01-15") == 0
+    receipts = tmp_path / "ir" / "confidential" / "receipts"
+    receipts.mkdir(parents=True)
+    rp = receipts / "r1.json"
+    rp.write_text(json.dumps({"verdict": "confidential", "session_id": "a-uuid-in-another-namespace"}))
+    rdir = S.records_dir("Acme", "cooling")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "sess1.json").write_text(json.dumps({
+        "session_id": "sess1", "surface": "browser", "confinement": "require",
+        "model_lane": {"verified": True, "checks": "15/15", "receipt": str(rp)}}))
+    # Six searches whose SIGNED statements carry the enclave's own lifetime id and sequence numbers — the
+    # real shape, counter starting high because the enclave served others first.
+    (rdir / "sess1.searches.jsonl").write_text("\n".join(json.dumps({
+        "at": f"2026-10-01T22:0{i}:00Z", "session_id": "sess1",
+        "statement": {"lifetime_id": "be767359c751", "seq": 64 + i, "session_seq": i, "sig": "x"},
+        "result": {"hits": []}}) for i in range(1, 7)) + "\n")
+
+    rec = E.write_bundle("Acme", "cooling", str(tmp_path / "out"))
+    man = json.loads((E.write_audit_pack(rec, tmp_path / "pack") / "MANIFEST.json").read_text())
+
+    sessions = man.get("sessions") or []
+    assert sessions, "a pack with a sealed session must carry its row"
+    covered = [s for s in sessions if s.get("covers_signed_operations")]
+    assert covered, "the row must say which signed operations it attributes to the receipt"
+    c = covered[0]["covers_signed_operations"]
+    assert c["enclave_lifetime_ids"] and c["count"] >= 1
+    assert ".." in c["enclave_seq"] or c["count"] == 1
+    # Named as what it is, in both directions.
+    assert "check the attribution against signed material" in c["what_this_is"]
+    assert "is NOT a binding" in c["what_this_is"]
+    assert "unsigned index written by the exporter" in c["what_this_is"]
+
+    # And the brief tells the auditor, before they find out the hard way, that the verifier never reads it.
+    brief = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "DOES NOT READ THE RECEIPT, AND EDITING IT CHANGES NO VERDICT" in brief
+    assert "do not report a passing exit code as covering any of it" in brief
+    assert "it is not a binding and must not be reported as one" in brief
+
+
+def test_every_claim_asks_for_its_coverage_as_numbers_before_prose():
+    """Two auditors, the same pack, 1 Oct. Sonnet: three plain VERIFIED, four in part. Kimi: VERIFIED IN PART
+    on all eight — from STRONGER evidence (AMD bindings recomputed, three tamper tests, all four RTMRs
+    matched, Sigstore verified, the published wheel compared byte for byte). By its own numbers several of
+    those were VERIFIED.
+
+    The paragraph explaining what a sample proves did not bind it, because prose does not force arithmetic.
+    A `Covered by:` line does: N read by the tool, M re-derived by you, and what neither reached. Fill the
+    numbers in and the verdict mostly follows.
+
+    Also pinned: the instruction not to retitle. Kimi rewrote all eight headings, turning claim 8 into a
+    different question — and two reports of one record that do not share headings cannot be compared, which
+    is most of what two reports are for.
+    """
+    from inferroute_cli import probant_export as E
+    tmpl = E.report_template()
+    n = len(E.audit_claims())
+
+    # Counted inside the CLAIMS, not the whole file: the preamble names the line once to explain it.
+    claims = tmpl[tmpl.index("## Claim 1"):]
+    assert claims.count("**Covered by:**") == n, "a claim without the line will be answered in prose alone"
+    assert claims.count("tool: N of N operations") == n
+    assert tmpl[:tmpl.index("## Claim 1")].count("**Covered by:**") == 1
+    assert "my own recomputation: M of N" in tmpl
+    # The arithmetic spelled out once, where the vocabulary is defined.
+    assert "The numbers decide it; the prose explains it." in tmpl
+    assert "Count your verdicts before you submit." in tmpl
+    # Both halves: the uniform-column warning AND the reason it is not licence to inflate.
+    assert "nothing having fully checked out" in tmpl
+    assert "sample DISAGREED with the tool, that is NOT VERIFIED" in tmpl
+    # Retitling, with the reason rather than the rule alone.
+    assert "Do not retitle or renumber a claim." in tmpl
+    assert "comparison between" in tmpl and "independent audits" in tmpl
+
+    # The line sits above the prose fields, so it is filled before the story is written.
+    assert claims.index("**Covered by:**") < claims.index("**What I computed myself:**")
+
+
+def test_the_brief_disarms_the_two_misreadings_the_1_oct_audits_produced():
+    """Both were reported as findings against us; neither is one.
+
+    1. "the receipt's certificate is not self-signed, as the brief says it is." Our line says the AMD ROOT is
+       self-signed, under false alarms to avoid. The auditor applied it to the receipt's certificate, whose
+       issuer is a different CA. Our sentence was true and its placement invited the slip, so it now says
+       which certificate and that it says nothing about any other.
+    2. "the entry matching this enclave opens 3 minutes 32 seconds after the enclave came up." True, and
+       unavoidable: a window names sha256(policy), so the policy must exist before it can be named. A
+       reference that PRECEDED its enclave would be the suspicious one. Stated as inherent, with the part
+       that genuinely stays open named rather than smoothed over.
+    """
+    from inferroute_cli import probant_export as E
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+
+    assert "The AMD ROOT certificate (ARK) is self-signed" in b
+    assert "says nothing about any OTHER certificate in this folder" in b
+    assert "was never claimed to be self-signed" in b
+
+    assert "A reference window opens AFTER the enclave it describes, always" in b
+    assert "the policy must exist before it can be named" in b
+    assert "A timestamp proof does not cure it" in b
+    # The open part is still named: this must not read as "nothing to see here".
+    assert "whether the window was written to fit a record already made" in b
+    assert "Report the ordering as inherent, not as a finding against this record." in b

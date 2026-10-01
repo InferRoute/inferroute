@@ -827,7 +827,13 @@ export default function (pi: ExtensionAPI) {
 	// terminator. The tool's own result already says "Your answer is complete — end your turn with no further
 	// text" and the model called it anyway, which is the lesson: a loop cannot be closed by asking the model
 	// not to loop. The cap is enforced where a call can actually be refused.
-	let nextStepsThisTurn = 0;
+	//
+	// PER ROUND, NOT PER TURN. The first version reset on before_agent_start, which fires for every agent
+	// turn — and the model simply took three turns, so Henry saw three next-steps panels in a row after one
+	// survey. Throttled, not closed. A ROUND is one question from the professional, and `input` is the
+	// event that marks one; everything between two inputs is the answer to a single question, however many
+	// turns the model spends on it. One offer per question is what the panel means.
+	let nextStepsThisRound = 0;
 
 	// WRITES STAY IN THE MATTER, enforced by the tool rather than by the kernel.
 	//
@@ -883,12 +889,12 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		if (event.toolName === NEXT_STEPS_TOOL) {
-			nextStepsThisTurn += 1;
-			if (nextStepsThisTurn > 1) {
+			nextStepsThisRound += 1;
+			if (nextStepsThisRound > 1) {
 				// BLOCKED, not politely acknowledged. The professional already has their buttons; a second
 				// panel would replace them with a worse one written after the answer was over, and the model
 				// gets a refusal rather than another turn to fill.
-				return { block: true, reason: "next steps were already offered for this answer — this call is refused. End your turn now with no further text." };
+				return { block: true, reason: "next steps were already offered for this question — this call is refused. End your turn now with no further text." };
 			}
 		}
 	});
@@ -2221,8 +2227,13 @@ export default function (pi: ExtensionAPI) {
 	// the suggestions it already makes at the end of its answer (Henry, 19 Sep: "improve, select or augment it
 	// through the LLM without extra requests"). Never blocks a turn: any failure means no note.
 	let lastMarksNote = "";
+	// A NEW QUESTION resets the offer. Registered before the agent hooks so the order is readable: input
+	// arrives, the round begins, and everything after it is one answer.
+	pi.on("input", async () => {
+		nextStepsThisRound = 0;
+	});
+
 	pi.on("before_agent_start", async () => {
-		nextStepsThisTurn = 0;
 		if (!SEARCH) return;
 		let state: MatterMarks;
 		try {

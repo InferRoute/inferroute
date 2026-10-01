@@ -2042,3 +2042,23 @@ def test_the_printed_command_is_the_one_that_answers_the_question(tmp_path, V, k
     assert "--reference-key <its key>" in src
     assert "not that it was InferRoute's" in src
     assert 'python3 verify_record.py .   (in that folder' not in src, "the bare command is back"
+
+
+def test_the_brief_explains_the_one_fail_that_is_permanent():
+    """Wording agreed with sealed-research, 1 Oct, and landed verbatim because it is their check.
+
+    With the full invocation a sound pack is exit 0 with three advisory FAILs. A client reads three FAILs as
+    three things wrong. Two become PASS on records made under the current policy; the third never will, and
+    the honest move is to say so rather than soften the word: the platform's infrastructure fragment runs
+    inside the protected boundary, the permission rows cannot constrain it, and disclosure is not constraint.
+    """
+    from inferroute_cli import probant_export as E
+    # Normalised: this is wrapped prose, and an assertion that breaks on a line wrap tests the margin.
+    b = re.sub(r"\s+", " ", E.AUDIT_MD)
+    assert "identification is not constraint" in b
+    assert "refuses to let disclosure stand in for it" in b
+    assert "permanent on this platform" in b
+    # Named as advisory, so a reader does not take it for an invalidated record...
+    assert "does not invalidate the record" in b
+    # ...and NOT as something to wave away, which is the other way to mislead.
+    assert "not a thing we are asking you to discount" in b

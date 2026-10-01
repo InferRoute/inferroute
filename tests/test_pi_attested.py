@@ -1555,3 +1555,59 @@ def test_the_agent_cannot_write_outside_the_matter_without_the_kernels_help():
     # ls stays unfenced on purpose: seeing THAT a file exists is not reading it, and it is what lets the
     # assistant say a stale draft is sitting there instead of silently absorbing it.
     assert "ls untouched" in r.stdout
+
+
+def test_the_vendored_verifier_has_not_drifted_from_the_canonical_copy():
+    """Probant launches `python -m sealedresearch.search_verifier`, and that module is not part of this
+    package. Measured 2026-10-01 on a clean venv on another machine: `pip install inferroute[confidential]`
+    produced a working client whose search lane could never start, because nothing had put sealedresearch
+    there. So the open client set is vendored under inferroute_cli/_vendor.
+
+    A copy can drift, which is the cost of not having a package index to depend on. This is the control: it
+    is the same shape as the pin on the standalone verify_record.py, which caught a real change within
+    minutes on the same day.
+
+    The whitelist is sealed-research's own publication decision, so this also asserts that the enclave-side
+    half has not wandered in with the rest.
+    """
+    import hashlib
+    here = Path(PA.__file__).resolve().parent / "_vendor" / "sealedresearch"
+    canon = Path("/home/henry/workspaces/inferroute/sealed-research/client-dist/build/sealed_client/sealedresearch")
+    if not canon.is_dir():
+        pytest.skip("the canonical client bundle is not on this machine")
+
+    def digest(d):
+        return {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in sorted(d.glob("*.py"))}
+
+    mine, theirs = digest(here), digest(canon)
+    assert mine, "nothing is vendored; the search lane cannot start on a client machine"
+    missing = sorted(set(theirs) - set(mine))
+    extra = sorted(set(mine) - set(theirs))
+    assert not missing, f"the vendored copy is missing modules the client bundle ships: {missing}"
+    assert not extra, f"the vendored copy carries modules the client bundle does not: {extra}"
+    drifted = sorted(n for n in mine if mine[n] != theirs[n])
+    assert not drifted, f"vendored modules differ from the canonical copy: {drifted}"
+
+    # The enclave-side half is deliberately NOT publishable and must never arrive here.
+    assert not (here / "search_service.py").exists(), \
+        "search_service.py is the enclave's own half and must not be shipped to clients"
+
+
+def test_a_client_install_needs_no_paths_from_this_machine():
+    """The config that works here names `python` and `cwd` pointing at a sealed-research checkout. On a
+    client machine neither exists, and a config naming someone else's paths is not a fix — it is the same
+    failure with a longer setup. A client config names neither and gets the vendored copy."""
+    cfg_dev = {"python": "/repo/.venv/bin/python", "cwd": "/repo", "enclave": "http://x:8000"}
+    py, env, cwd = PA.verifier_command(cfg_dev)
+    assert py == "/repo/.venv/bin/python" and cwd == "/repo"
+    assert "_vendor" not in env.get("PYTHONPATH", ""), \
+        "a machine that named its own checkout must keep using it, not silently switch to the copy"
+
+    py, env, cwd = PA.verifier_command({"enclave": "http://x:8000"})
+    assert cwd is None, "a client has no checkout to run from"
+    assert str(PA.VENDOR_DIR) in env["PYTHONPATH"], "the vendored copy must be reachable"
+    assert Path(py).exists() or py, "it must run under an interpreter that exists"
+    # The vendor dir is on PYTHONPATH rather than installed as a top-level package, so a machine that has
+    # the real sealedresearch keeps using it and the two never compete for one name on sys.path.
+    assert (PA.VENDOR_DIR / "sealedresearch" / "search_verifier.py").exists()

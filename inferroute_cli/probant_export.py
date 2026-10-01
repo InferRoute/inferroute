@@ -1090,6 +1090,25 @@ other order would have been marked down by a rule this brief had broken itself.
    twenty-eight-operation hole coexist without contradiction. A reader who saw only the exit code in your
    report's header would never learn the hole exists. If you find one, put it in the header too.
 
+   **THE ONE STEP THAT WOULD TAKE INFERROUTE OUT OF THE TRUST SET, and which this brief did not ask for until
+   now.** The verifier reports `image_source is only a reference field` as a permanent gap, and the plain
+   statement tells the client to "ask your provider to show that the published source was built into the exact
+   program that ran". That reads as something not yet provided. It has been: the build recipe is published at
+   **https://inferroute.ai/build/** (`Dockerfile.m2`, `requirements.txt`, `REBUILD.md`), and the policy in
+   this folder pins, per container, the `layers` roots of the filesystem that ran — the chip signed
+   `sha256(policy)`, so those digests are committed, not asserted.
+
+   So the check exists and nobody has been asked to run it. Rebuild from the published recipe and compare the
+   layer roots you get against the `layers` arrays in the policy. **Report the outcome, whichever it is. We are
+   not telling you it will match** — if it does not, that is the most important finding available about this
+   product and it belongs in your header. And if it does, say what it buys and what it does not: that the code
+   which ran is the code anyone can read, so the operator's honesty is no longer what the program's behaviour
+   rests on. It says nothing about what that code does with text once it has it, which you can now read for
+   yourself, and nothing about the platform containers beside it.
+
+   A reproducible build is also what separates this from the question you cannot settle: whether a FUTURE
+   deployment behaves. This is about the one that ran.
+
    **A reference window opens AFTER the enclave it describes, always, and that is not evidence of anything.**
    An auditor measured the gap on 1 Oct — "the entry matching this enclave opens 3 minutes 32 seconds after
    the enclave came up. That ordering fits both an honest release and a minted one" — and both halves of that

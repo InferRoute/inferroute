@@ -2405,3 +2405,34 @@ def test_a_question_sent_while_the_assistant_is_busy_waits_outside_the_transcrip
     decls = re.sub(r"/\*.*?\*/", "", rule, flags=re.S)
     assert "dashed" in decls, "a waiting question must look unlike one in the transcript"
     assert "animation:" not in decls, "a queue must not be dressed up as activity"
+
+
+def test_the_same_question_is_not_sent_twice_while_it_is_still_waiting(client):
+    """Henry, 2026-10-01, with a screenshot of nine queued questions of which SEVEN were identical: clicking
+    a patent that has not been read queues "Open <key>…", nothing visibly happens until the assistant
+    reaches it, so the natural response is to click again. Every click was a real sealed request and a real
+    turn of the conversation.
+
+    The check has to be BEFORE the POST. Deduplicating the display would have been worse than the bug —
+    the agent would still be holding the copies and would answer each one in turn, so the page would show
+    one question and seven answers.
+
+    Drives the page's real send() (tests/ask_once_sim.js).
+    """
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "ask_once_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "seven clicks, one request" in r.stdout
+
+    # The waiting outline is drawn in --faint, not --line: --line is the hairline between rows, so a dash
+    # in it reads as furniture rather than as a state.
+    css = (root / "inferroute_cli" / "probant_web" / "app.css").read_text()
+    start = css.index(".msg-waiting {")
+    rule = re.sub(r"/\*.*?\*/", "", css[start:css.index("}", start)], flags=re.S)
+    assert "dashed var(--faint)" in rule, "the waiting outline must be distinguishable from a row rule"

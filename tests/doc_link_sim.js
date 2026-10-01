@@ -17,18 +17,18 @@ const mk = () => ({ listeners: {}, title: "", type: "",
 const el = () => mk();
 
 let sent = [], shown = [], have = new Set(), ended = false;
-const make = new Function("el", "ended_", "send", "showDocument", "haveDocument", "OPEN_DOC",
+const make = new Function("el", "ended_", "send", "showDocument", "haveDocument", "OPEN_DOC", "outstanding",
   `${src.slice(a, b)}\n return docLink;`
 )(el, null, (t) => sent.push(t), (k) => shown.push(k), (k) => have.has(k),
-  (k) => `Open ${k}: read that document and show me what it discloses`);
+  (k) => `Open ${k}: read that document and show me what it discloses`, new Set());
 
 // `ended` is a closure variable in the page; rebuild with it bound per case.
 function linkFor(key, isEnded) {
   ended = isEnded;
-  const f = new Function("el", "ended", "send", "showDocument", "haveDocument", "OPEN_DOC",
+  const f = new Function("el", "ended", "send", "showDocument", "haveDocument", "OPEN_DOC", "outstanding",
     `${src.slice(a, b)}\n return docLink;`
   )(el, isEnded, (t) => sent.push(t), (k) => shown.push(k), (k) => have.has(k),
-    (k) => `Open ${k}: read that document and show me what it discloses`);
+    (k) => `Open ${k}: read that document and show me what it discloses`, new Set());
   return f(key);
 }
 

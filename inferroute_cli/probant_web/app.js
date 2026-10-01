@@ -223,6 +223,7 @@
   }
 
   function anchorQuestion(text) {
+    outstanding.delete(text);
     const s = stick();
     const node = el("div", "msg msg-user", text);
     log.append(node);
@@ -260,6 +261,7 @@
     const next = waiting.shift();
     renderWaiting();
     if (!next) return;
+    outstanding.delete(next.text);           // it is being answered now; asking it again is legitimate
     next.node.remove();
     anchorQuestion(next.text);
   }
@@ -602,7 +604,9 @@
     a.addEventListener("pointerenter", () => {
       a.title = haveDocument(keyNo)
         ? `Show ${keyNo} — already read on this matter, nothing new is sent`
-        : `Ask the assistant to read ${keyNo}`;
+        : outstanding.has(OPEN_DOC(keyNo))
+          ? `${keyNo} is already waiting — the assistant reads it when it finishes`
+          : `Ask the assistant to read ${keyNo}`;
     });
     a.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2051,13 +2055,43 @@
   }
 
   // ── composer ──
+  // Questions sent but not yet taken up. Checked BEFORE the POST, because deduplicating only the display
+  // would leave the agent holding the copies and answering each one in turn.
+  const outstanding = new Set();
+
   async function send(text) {
     const t = String(text || "").trim();
     if (!t || ended) return;
+    // ASK ONCE. Henry, 2026-10-01, with nine queued questions of which seven were identical: clicking a
+    // patent that is not yet read queues "Open <key>…", and nothing visibly happens until the assistant
+    // gets to it — so the natural response is to click again. Each click was a real sealed request and a
+    // real turn. The repeat is not refused silently: the copy already waiting is pointed at.
+    if (outstanding.has(t)) {
+      flashWaiting(t);
+      toast("That one is already waiting — it is delivered when the assistant finishes.", "info");
+      $("input").value = "";
+      autosize();
+      return;
+    }
     clearNext();
     $("input").value = "";
     autosize();
-    try { await api("/api/prompt", { text: t }); } catch (e) { toast(`Not sent: ${e.message}`, "error"); $("input").value = t; }
+    outstanding.add(t);
+    try {
+      await api("/api/prompt", { text: t });
+    } catch (e) {
+      outstanding.delete(t);
+      toast(`Not sent: ${e.message}`, "error");
+      $("input").value = t;
+    }
+  }
+
+  function flashWaiting(text) {
+    const hit = waiting.find((w) => w.text === text);
+    if (!hit) return;
+    hit.node.classList.add("msg-waiting-flash");
+    setTimeout(() => hit.node.classList.remove("msg-waiting-flash"), 1200);
+    try { hit.node.scrollIntoView({ block: "nearest" }); } catch { /* not essential */ }
   }
   function autosize() {
     const i = $("input");

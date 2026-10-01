@@ -22,11 +22,11 @@ const origAppend = log.append.bind(log);
 log.append = (...c) => { for (const x of c) x.parent = log; origAppend(...c); };
 
 let busy = false;
-const api = new Function("el", "log", "stick", "hideWelcome", "clearNext", "outlineAdd", "$", "getBusy",
+const api = new Function("el", "log", "stick", "hideWelcome", "clearNext", "outlineAdd", "$", "getBusy", "outstanding",
   `${src.slice(a, b)}
    return { addUser: (t) => { busy = getBusy(); return addUser(t); }, takeUp: takeUpQuestion, waiting };`
 )(el, log, () => () => {}, () => {}, () => {},
-  () => {}, (id) => (id === "waiting" ? room : null), () => busy);
+  () => {}, (id) => (id === "waiting" ? room : null), () => busy, new Set());
 
 const transcript = () => log.children.filter((c) => (c.cls || "").includes("msg-user") && !(c.cls || "").includes("waiting")).map((c) => c.textContent);
 const held = () => api.waiting.map((w) => w.text);

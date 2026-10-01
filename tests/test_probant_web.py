@@ -1542,7 +1542,7 @@ def test_what_a_folded_leg_hides_is_its_documents_and_not_its_headline():
 
 def test_the_page_offers_to_continue_a_survey_only_once_one_is_on_screen():
     """Henry, 25 Sep: "now im seeing this while the session is still fully empty, thats not right:
-    Continue the survey, leaving out what I marked known or not relevant".
+    Continue the survey, leaving out what I marked not relevant".
 
     Marks belong to the MATTER and outlive a sitting, so a fresh session opens holding every mark ever
     made. The other mark steps survive that — "find documents like US-X" is a new search, not a
@@ -2341,3 +2341,30 @@ def test_a_reading_is_only_attached_to_the_document_it_is_actually_about(tmp_pat
     # And the real reading of that document, when it comes, is kept.
     turn(b, "US-6421548-B1", "Here is what the sealed index holds for US-6421548-B1 (published 2002-07-16): the abstract…")
     assert b.readings["US-6421548-B1"].startswith("Here is what the sealed index holds for US-6421548-B1")
+
+
+def test_this_version_offers_two_judgements_and_still_shows_a_retired_one(client):
+    """Henry, 2026-10-01: "either something is relevant or not, even if it was already known", and then
+    "shouldnt we remove it from this version to keep it simpler".
+
+    "Known" also bought a distinction the search could not act on: the enclave's MARK_CONFIRM is
+    ("relevant", "known") — both enter the teleport set, neither prunes — so marking something Known did
+    exactly what marking it Relevant did, for a third button and a third decision at every document.
+
+    What must NOT happen is a judgement disappearing: a matter that already carries a Known mark recorded
+    the professional's opinion, and a version that simply stopped listing the value would delete it from
+    view while leaving it in the record.
+    """
+    js = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    assert '["known", "Known"]' not in js, "Known must no longer be offered as a judgement"
+    assert 'MARK_GROUPS = [["relevant", "Relevant"], ["not-relevant", "Not relevant"]]' in js
+    # Still shown when a matter has one.
+    assert "RETIRED_MARKS" in js and "no longer offered" in js
+    assert "Array.from(marks.values()).includes(v)" in js, "a retired value appears only when one exists"
+    # The engine's own vocabulary is unchanged, so an existing mark still means what it meant.
+    import inferroute_cli.probant_web as W
+    assert "known" in W.MARKS, "the server must keep accepting a mark made before this version"
+
+    # And the step that acts on exclusions no longer claims to leave out something nothing can mark.
+    assert "leaving out what I marked not relevant" in js
+    assert "leaving out what I marked known" not in js

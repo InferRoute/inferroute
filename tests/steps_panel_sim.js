@@ -14,7 +14,7 @@ const log = { lastElementChild: null, append(n) { this.lastElementChild = n; } }
 const stick = () => () => {};
 let busy = false, ended = false; const cards = new Map(); const marks = new Map(); const markOrder = [];
 const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
-const LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+const LEAVE_OUT = "Continue the survey, leaving out what I marked not relevant";
 eval(cut("  const SUMMARISE_IDEA", "  function markButtons(").replace(/\bconst\b|\blet\b/g, "var"));
 const shown = () => { if (dom["mark-steps"].hidden) return "(panel hidden)";
   return dom["mark-steps-list"].kids.map((k) => k.cls === "steps-sub" ? `  [${k.text}]` : k.kids.map((b) => `    · ${b.text.slice(0, 70)}`).join("\n")).join("\n"); };

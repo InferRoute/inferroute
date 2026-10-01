@@ -431,7 +431,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 			line(`  ${String(i + 1).padStart(2)}. ${theme.bold(mark)}${d.year ? theme.fg("muted", ` (${d.year})`) : ""} ${String(d.title ?? "").slice(0, 96)}`);
 		}
 		if (!expanded && docs.length > shown.length) line(theme.fg("dim", `  … ${docs.length - shown.length} more (expand)`));
-		line(theme.fg("dim", "  mark one: /relevant <number> · /not-relevant · /known"));
+		line(theme.fg("dim", "  mark one: /relevant <number> · /not-relevant"));
 	}
 	return box;
 }
@@ -515,7 +515,7 @@ function abstractOf(h: { title?: string; text?: unknown }): string {
 // Next steps built from the professional's marks — worded EXACTLY as the page words them (probant_web/app.js),
 // so the page can tell which of them the assistant already offered. A test holds the two files together.
 const STEP_DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
-const STEP_LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+const STEP_LEAVE_OUT = "Continue the survey, leaving out what I marked not relevant";
 const STEP_SURVEY = "Run a prior-art survey of the disclosure";
 // The deep search. Worded as the professional would ask for it, like every other step: the button SENDS
 // this sentence, and the assistant answers it by calling deep_prior_art_search.
@@ -751,7 +751,7 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
-					"Mark results: /relevant <number> (also /not-relevant, /known, /marks). Send a suggested next step: /next <n>. Show the checks again: /proof.",
+					"Mark results: /relevant <number> (also /not-relevant, /marks). Send a suggested next step: /next <n>. Show the checks again: /proof.",
 					`Leave with /quit, then keep the record: ir probant export ${MATTER}`].join("\n"),
 				"info",
 			);
@@ -2124,7 +2124,6 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerCommand("relevant", { description: "Mark a patent (by publication number) as relevant prior art", handler: markCommand("relevant") });
 	pi.registerCommand("not-relevant", { description: "Mark a patent (by publication number) as not relevant", handler: markCommand("not-relevant") });
-	pi.registerCommand("known", { description: "Mark a patent (by publication number) as known art", handler: markCommand("known") });
 
 	pi.registerCommand("keep-warm", {
 		description: "Keep the search enclave running (reset its idle countdown) and show the budget",
@@ -2220,6 +2219,8 @@ export default function (pi: ExtensionAPI) {
 		const text = [
 			"[Probant note: the professional's relevance marks as of this message — their judgment, not yours. " +
 				"Context for you, not a request: do not reply to it or mention it. It replaces any earlier marks note.]",
+			// "known" is no longer offered (2026-10-01) but is still RENDERED: a matter that already carries
+			// one recorded a judgement, and dropping it from the summary would delete it from view.
 			...["relevant", "not-relevant", "known"].map((v) => (group(v) ? `Marked ${MARK_LABEL[v]}: ${group(v)}` : "")).filter(Boolean),
 			`Next-step candidates from these marks: ${candidates.map((c) => `"${c}"`).join(" · ")}`,
 			"When you call suggest_next_steps, treat these candidates as material: keep, reword (say what a document is " +
@@ -2336,7 +2337,7 @@ export default function (pi: ExtensionAPI) {
 			}
 			const entries = Object.entries(state.marks ?? {});
 			if (!entries.length) {
-				ctx.ui.notify("No relevance marks yet. Mark a document with /relevant, /not-relevant or /known.", "info");
+				ctx.ui.notify("No relevance marks yet. Mark a document with /relevant or /not-relevant.", "info");
 				return;
 			}
 			const lines = entries.map(([k, m]) => {

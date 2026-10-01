@@ -17,7 +17,9 @@ const body = `
 const run = (o) => new Function("o", body)(o);
 
 const out = {};
-const both = [["US-A1", "relevant"], ["US-C3", "known"]];
+// "known" was retired on 2026-10-01; what makes the leave-out offer appear is an EXCLUDED
+// document, and the only value that excludes one is now "not relevant".
+const both = [["US-A1", "relevant"], ["US-C3", "not-relevant"]];
 // A fresh sitting that has never searched: marks are the matter's, not this room's.
 out.emptySession = run({ marks: both, cards: 0 });
 // The same marks once a survey is on screen.

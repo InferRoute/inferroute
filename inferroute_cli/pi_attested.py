@@ -59,7 +59,7 @@ PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "692a18c49779702e8104dbeb0f5a34765ee8f87f2794706f5ce1781ceb084adc"
+PINNED_CONTRACT_SHA = "5806528eed3f3ca55e33ed00d58cc14d2fb4bd1aca2debb15c0f33308ed385c1"
 
 
 def _strip_comments(text: str) -> str:

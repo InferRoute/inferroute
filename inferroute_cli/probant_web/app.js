@@ -531,7 +531,7 @@
   const OPEN_DOC = (k) => `Open ${k}: read that document and show me what it discloses`;
 
   const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
-  const LEAVE_OUT = "Continue the survey, leaving out what I marked known or not relevant";
+  const LEAVE_OUT = "Continue the survey, leaving out what I marked not relevant";
   // ONE definition of "a publication number you can click", used by result rows, the results panel and the
   // assistant's prose alike. Two renderings of the same affordance would drift, and the professional would
   // learn that some numbers are clickable and others are not.
@@ -696,7 +696,7 @@
   function markCandidates(onlyNew) {
     const isNew = (k) => !onlyNew || !marksAtTurn || marksAtTurn.get(k) !== marks.get(k);
     const relevant = relevantOrdered().filter(isNew);
-    const excluded = Array.from(marks.keys()).some((k) => isNew(k) && (marks.get(k) === "known" || marks.get(k) === "not-relevant"));
+    const excluded = Array.from(marks.keys()).some((k) => isNew(k) && marks.get(k) === "not-relevant");
     const like = relevant.slice(0, 2).map((k) => `Find documents like ${k}`);
     // "CONTINUE the survey" presupposes one. Marks belong to the MATTER and outlive a sitting, so a fresh
     // session opens holding every mark the professional ever made and was offering to continue a survey
@@ -788,7 +788,12 @@
 
   function markButtons(keyNo, card, register = true) {
     const wrap = el("div", "marks");
-    const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"],
+    // TWO JUDGEMENTS, NOT THREE. Henry, 2026-10-01: "either something is relevant or not, even if it
+    // was already known". "Known" also did the same thing as Relevant in the engine — MARK_CONFIRM is
+    // ("relevant", "known"), both enter the teleport set, neither prunes — so it was a third button that
+    // bought a distinction the search could not act on. The value stays legal server-side, so a mark made
+    // before this still means what it meant.
+    const opts = [["relevant", "Relevant"], ["not-relevant", "Not relevant"],
                   // Taking the mark back off. Henry, 25 Sep: "there is no way to just remove the selection
                   // and not keep something selected". Whichever of the three you pressed first, the
                   // document stayed marked as SOMETHING, and "not relevant" is a judgement, not the
@@ -839,19 +844,24 @@
   // round. What a document is about comes from every search recorded on the matter (/api/marks titles).
   // A mark can be changed, not removed: the matter keeps each mark's history, and the store takes no "none".
   const markTitles = new Map();          // publication number → title
-  const MARK_GROUPS = [["relevant", "Relevant"], ["not-relevant", "Not relevant"], ["known", "Known"]];
+  const MARK_GROUPS = [["relevant", "Relevant"], ["not-relevant", "Not relevant"]];
+  // A value this version no longer offers must still be SHOWN if a matter already carries one —
+  // dropping it from the panel would make a judgement the professional recorded disappear.
+  const RETIRED_MARKS = { known: "Known (no longer offered)" };
   function renderMarksPanel() {
     const panel = $("marks-panel");
     const groups = $("marks-groups");
     clear(groups);
-    const byValue = new Map(MARK_GROUPS.map(([v]) => [v, []]));
+    const shownGroups = MARK_GROUPS.concat(
+      Object.entries(RETIRED_MARKS).filter(([v]) => Array.from(marks.values()).includes(v)));
+    const byValue = new Map(shownGroups.map(([v]) => [v, []]));
     for (const [k, v] of marks) if (byValue.has(v)) byValue.get(v).push(k);
     const total = Array.from(byValue.values()).reduce((t, l) => t + l.length, 0);
     panel.hidden = total === 0;
     if (!total) return;
-    $("marks-count").textContent = MARK_GROUPS.map(([v, label]) => `${byValue.get(v).length} ${label.toLowerCase()}`)
+    $("marks-count").textContent = shownGroups.map(([v, label]) => `${byValue.get(v).length} ${label.toLowerCase()}`)
       .filter((t) => !t.startsWith("0 ")).join(" · ");
-    for (const [v, label] of MARK_GROUPS) {
+    for (const [v, label] of shownGroups) {
       const keys = byValue.get(v).sort();
       if (!keys.length) continue;
       const list = el("ul", "marks-list");

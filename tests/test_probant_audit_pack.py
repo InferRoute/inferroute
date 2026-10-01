@@ -1105,9 +1105,15 @@ def test_the_pack_says_where_to_get_the_wheel_it_was_built_by(tmp_path, V, kms, 
     import re
 
     rec = _synthetic_bundle(tmp_path, V, kms)
-    # This tree is not installed, so it reports 0.0.0+dev and correctly emits no link — which is the other
-    # half of the behaviour, asserted below. Pin a release version to see the link a real pack carries.
+    # This tree really is the no-link case — asserted before anything is pinned, rather than assumed by the
+    # comment below it.
+    assert E._running_from_installed_wheel() is False
+    # Two things make a pack able to offer this link, and this tree has neither: it reports 0.0.0+dev, and it
+    # is a source checkout rather than the installed distribution. Both are pinned here to see the link a
+    # real client's pack carries; both are asserted in their absent form below and in
+    # test_a_pack_only_links_a_published_wheel_it_can_stand_behind.
     monkeypatch.setattr(E, "_client_version", lambda: "0.9.32")
+    monkeypatch.setattr(E, "_running_from_installed_wheel", lambda: True)
     pack = E.write_audit_pack(rec, tmp_path / "pack")
     m = json.loads((pack / "MANIFEST.json").read_text())
 
@@ -1401,12 +1407,18 @@ def test_the_verdict_line_carries_the_completeness_rule():
 
     tmpl = E.report_template()
     n = len(E.audit_claims())
-    assert tmpl.count("not plain VERIFIED if any part of this claim below is one you could not reach") == n, \
+    assert tmpl.count("not plain VERIFIED if part of this claim has no evidence in this folder") == n, \
         "the rule is missing from at least one claim's verdict line"
     # It sits on the Verdict line itself, not in a preamble the reader has already scrolled past.
+    #
+    # 1 Oct: the rule used to read "any part of this claim you could not reach", and an auditor applied it to
+    # the 29 of 31 searches it had not RE-DERIVED BY HAND — returning VERIFIED IN PART on all eight claims
+    # although the tool had read all 31 and its own sample agreed with it. Eight identical verdicts are the
+    # shape of the page, not of the evidence. The line now says what "reached" means and points at the rule.
     for line in tmpl.splitlines():
         if line.startswith("**Verdict:**"):
-            assert "could not reach" in line, line
+            assert "no evidence in this folder" in line, line
+            assert "re-deriving a sample of it yourself, IS" in line, line
 
 
 def test_the_brief_requires_every_stated_fact_to_have_been_read():
@@ -1889,3 +1901,76 @@ def test_publishing_a_version_twice_with_different_bytes_is_refused(tmp_path):
     assert r.returncode == 1, r.stdout
     assert "REFUSED" in r.stdout and "Bump the version" in r.stdout
     assert (dest / first.name).read_bytes() == first.read_bytes(), "the published wheel must be untouched"
+
+
+def test_the_brief_says_what_a_hand_sample_proves_and_where_the_receipt_verdict_lives():
+    """Three lines in the 1 Oct audit report that the pack caused rather than the evidence.
+
+    1. All eight claims came back VERIFIED IN PART. The auditor had re-derived two searches by hand, run
+       both corruption attacks, and watched the tool pass 31 — then scored the 29 it had not hand-checked as
+       unreached. Eight identical verdicts are the shape of the template, not of the evidence, and to a
+       client they read as "nothing fully checked out".
+    2. "attestation.ok missing from all receipts" — there is no such field anywhere, in the receipt or in
+       the brief. The verdict is the receipt's top-level `verdict`; the answers are `checks.<name>.ok`.
+    3. "104 refusals" on a session whose `refusal` is one sentence and whose `rejected_here` names ten
+       instances. A number with no field behind it.
+
+    None of the three is a defect in the record. All three are things the brief left the auditor to guess,
+    and a guess that reaches a client's report is our problem, not theirs.
+    """
+    from inferroute_cli import probant_export as E
+    tmpl, brief = E.report_template(), E.AUDIT_MD
+
+    # 1. The sampling rule, and the warning about a uniform answer.
+    assert "A sample you re-derive by hand tests the TOOL. It is not the coverage." in tmpl
+    assert "how many the tool read, and how many you re-derived yourself" in tmpl
+    assert "If every verdict you write is the same, re-read this paragraph" in tmpl
+    # It must not become an invitation to inflate: disagreement and tool-only reliance are both named.
+    assert "re-derived NOTHING of a claim yourself, say that" in tmpl
+    assert "sample DISAGREED with the tool, that is NOT VERIFIED" in tmpl
+
+    # 2. Where the receipt's verdict actually lives, named in the claim that sends them to the receipt.
+    assert "There is no\n   `attestation.ok`" in brief or "There is no `attestation.ok`" in brief
+    assert "`checks.<name>.ok`" in brief
+    assert "holds EVIDENCE and carries no verdict of its own" in brief
+
+    # 3. The shapes, so a count has a field behind it.
+    assert "`refusal` is ONE string, empty when there was none" in brief
+    assert "not of refusals" in brief
+    assert "If you give\n   a number, give the field it came from." in brief or \
+           "If you give a number, give the field it came from." in brief
+
+
+def test_a_pack_only_links_a_published_wheel_it_can_stand_behind(tmp_path, monkeypatch, V, kms, no_anchors):
+    """`__version__` comes from the INSTALLED distribution's metadata; the verifier a pack ships comes from
+    the code that is RUNNING. In an installed client those are one tree. In a checkout they are two, and the
+    metadata can name a version never built from this code.
+
+    That is the mechanism behind the 1 Oct audit's most notable finding: a pack claimed 0.9.68 while shipping
+    0.9.73's verifier, so the auditor downloaded the wheel MANIFEST named, found a different verifier inside
+    it, and reported that no published copy matches the verifier that made the record. It was right, and the
+    record was sound — the pack had asserted a version it could not stand behind.
+
+    So the link appears only when this code IS the installed distribution. Otherwise it is empty, with the
+    reason, and the brief turns that into COULD NOT CHECK rather than a mismatch that reads as tampering.
+    """
+    import inferroute_cli.probant_export as X
+
+    # From a source checkout: no link, and a reason that says why rather than leaving a blank.
+    monkeypatch.setattr(X, "_running_from_installed_wheel", lambda: False)
+    monkeypatch.setattr(X, "_client_version", lambda: "0.9.68")
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    m = json.loads((X.write_audit_pack(rec, tmp_path / "pack-dev") / "MANIFEST.json").read_text())
+    assert m["client_version"] == "0.9.68"                   # still recorded: it is a fact about this client
+    assert m["client_wheel_url"] == ""
+    assert "source checkout" in m["client_wheel_url_absent_because"]
+    assert "COULD NOT CHECK" in m["client_wheel_url_absent_because"]
+
+    # From an installed wheel: the link is there and the reason is empty.
+    monkeypatch.setattr(X, "_running_from_installed_wheel", lambda: True)
+    m = json.loads((X.write_audit_pack(rec, tmp_path / "pack-whl") / "MANIFEST.json").read_text())
+    assert m["client_wheel_url"] == "https://inferroute.ai/client/inferroute-0.9.68-py3-none-any.whl"
+    assert m["client_wheel_url_absent_because"] == ""
+
+    # And the brief tells the auditor what an empty link means, where they meet it.
+    assert "If `client_wheel_url` is empty, read `client_wheel_url_absent_because`" in X.AUDIT_MD

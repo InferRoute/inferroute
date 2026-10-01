@@ -1120,6 +1120,19 @@ other order would have been marked down by a rule this brief had broken itself.
    `sha256((challenge + e2e_pubkey).encode())` must equal the quote's `report_data[0:32]`. Do that
    arithmetic yourself and report the result as yours.
 
+   **The `attestation` block holds EVIDENCE and carries no verdict of its own.** There is no
+   `attestation.ok`; an auditor looked for one on 1 Oct, did not find it, and reported its absence as a
+   weakness in this claim. The verdict for the session is the receipt's top-level `verdict`
+   (`confidential` / `degraded`), and the individual answers are `checks.<name>.ok` with a `why` beside
+   each. Reach your own conclusion from the evidence rather than from either of those — but do not report a
+   field as missing without first looking where the answer actually lives.
+
+   **`refusal` is ONE string, empty when there was none. `fleet.rejected_here` is a different thing:** a
+   map of instance id to the reasons THIS device declined that instance, so its size is a count of
+   instances considered and turned down, not of refusals. The same auditor reported "104 refusals" on a
+   session whose `refusal` is a single sentence and whose `rejected_here` names ten instances. If you give
+   a number, give the field it came from.
+
    `checked_with` is separated from the rest of `attestation` for a reason you should preserve in the
    report: **everything beside it came from the machine under audit; those two values came from this
    device.** A receipt that predates the change has no `checked_with` — then those two steps are COULD NOT
@@ -1411,7 +1424,13 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
      **(b) The published client wheel.** `MANIFEST.json` gives you both halves: `client_version`, and
      `client_wheel_url` — a direct link to that exact version, with its SHA-256 published beside it as
-     `<same url>.sha256`. Every auditor before 25 Sep reported this step as unrunnable: the package is not
+     `<same url>.sha256`. **If `client_wheel_url` is empty, read `client_wheel_url_absent_because` and
+     report this step as COULD NOT CHECK.** It is empty when the pack was written by a source checkout
+     rather than an installed wheel: the version comes from the installed distribution's metadata and the
+     verifier beside it from the running tree, so no published wheel is guaranteed to hold this verifier.
+     On 1 Oct an auditor was handed a link in that situation, found a different verifier inside the wheel,
+     and reported it as its most notable finding. It was right to; the pack should not have offered the
+     link. A pack written by an installed client carries one, and then the comparison is meaningful. Every auditor before 25 Sep reported this step as unrunnable: the package is not
      on PyPI and nothing in the pack said where else to look. One of them put it exactly — "a URL in
      MANIFEST (unsigned, but findable) would make step (b) runnable" — so it is there now.
 
@@ -1668,6 +1687,28 @@ def _client_version() -> str:
         return ""
 
 
+def _running_from_installed_wheel() -> bool:
+    """Whether this code IS the installed distribution, or a source tree beside it.
+
+    `__version__` comes from the installed distribution's metadata; the verifier the pack ships comes from
+    the code that is RUNNING. In an installed client those are the same tree and the version describes both.
+    In a checkout they are two trees, and the metadata can name a version that was never built from this
+    code — which is how a pack came to claim 0.9.68 while shipping 0.9.73's verifier on 1 Oct. An auditor
+    downloaded the wheel that MANIFEST named, found a different verifier inside it, and made that its most
+    notable finding: "no independent published copy exists that matches the verifier used to create this
+    record". It was right, and the record was sound; the pack had simply asserted a version it could not
+    stand behind.
+    """
+    import sysconfig
+    import inferroute_cli
+    here = Path(inferroute_cli.__file__).resolve()
+    for key in ("purelib", "platlib"):
+        root = sysconfig.get_paths().get(key)
+        if root and here.is_relative_to(Path(root).resolve()):
+            return True
+    return False
+
+
 # The verifier decides what a row IS with `str(st.get("kind") or "search") == "document"`, in
 # verify_record.py's dispatch. That file is standalone by design — it has to run in a firm that has none of
 # this installed — so the rule cannot be imported and lives in two places. It is pinned from both sides by
@@ -1745,6 +1786,23 @@ def report_template() -> str:
            "professional reads it as \"there was no data\", which would be false. If you verified on a",
            "sample, give the size.",
            "",
+           "**A sample you re-derive by hand tests the TOOL. It is not the coverage.** `verify_record.py`",
+           "reads every operation in this folder; re-deriving two of them with your own code, and corrupting",
+           "a file to confirm the tool notices, tests whether the tool is telling the truth about the rest.",
+           "If it is, its pass over the rest is evidence you have reached them, and the verdict for that part",
+           "is VERIFIED — stating both numbers: how many the tool read, and how many you re-derived yourself.",
+           "Counting only the two you re-derived by hand says a claim was reached in part when the folder was",
+           "read in full, which misleads a client in the opposite direction from overstating it. Where you",
+           "relied on the tool and re-derived NOTHING of a claim yourself, say that, and let the verdict show",
+           "it. Where your sample DISAGREED with the tool, that is NOT VERIFIED and the most important",
+           "sentence in your report.",
+           "",
+           "On 1 Oct an auditor returned VERIFIED IN PART on all eight claims. Eight identical verdicts are",
+           "the shape of this page, not of the evidence: it had re-derived two searches by hand, run both",
+           "corruption attacks, and watched the tool pass 31 — and then scored the 29 it had not hand-checked",
+           "as unreached. Do not repeat that. If every verdict you write is the same, re-read this paragraph",
+           "before you write the closing.",
+           "",
            "## About this audit",
            "",
            "<who you are, what you had access to, and anything about where or how you ran that a reader",
@@ -1759,7 +1817,9 @@ def report_template() -> str:
                 # of it it could not reach — the two sentences sat four lines apart. The brief says this
                 # twice; saying it a third time in the brief would have changed nothing.
                 "**Verdict:** _(VERIFIED / VERIFIED IN PART / NOT VERIFIED / COULD NOT CHECK — and not "
-                "plain VERIFIED if any part of this claim below is one you could not reach)_",
+                "plain VERIFIED if part of this claim has no evidence in this folder to test it against. "
+                "Reading the folder in full with the tool, and re-deriving a sample of it yourself, IS "
+                "reaching it — see the sampling rule above.)_",
                 "",
                 "**What I computed myself:** ",
                 "",
@@ -2045,7 +2105,19 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # Unsigned and self-reported, like everything else this machine says about itself: it
                 # tells an auditor where to look, and proves nothing on its own. What makes the comparison
                 # worth anything is that the copy comes from somewhere this machine does not control.
-                "client_wheel_url": wheel_url_for(_client_version()),
+                # NO LINK WE CANNOT STAND BEHIND. From a source checkout the version above is the
+                # INSTALLED distribution's and the verifier beside it is this tree's, so the wheel at that
+                # URL need not contain this verifier. Sending an auditor to compare them manufactures a
+                # mismatch that reads as tampering. Empty, with the reason, is the honest answer.
+                "client_wheel_url": (wheel_url_for(_client_version())
+                                     if _running_from_installed_wheel() else ""),
+                "client_wheel_url_absent_because": (
+                    "" if _running_from_installed_wheel() else
+                    "this pack was written by a source checkout, not by an installed wheel: the version "
+                    "above comes from the installed distribution's metadata while verify_record.py beside "
+                    "it comes from the running tree, so no published wheel is guaranteed to contain this "
+                    "verifier. Step (b) of claim 4 is COULD NOT CHECK on this pack, not a failure. A pack "
+                    "written by an installed client carries the link."),
                 # The shipped verifier's own hash, stated so step (b) can begin with a string comparison
                 # rather than an extraction. It is also in `files` below; repeating it here is where an
                 # auditor is already looking when they read client_version and the wheel link.

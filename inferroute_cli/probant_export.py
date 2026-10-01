@@ -1155,6 +1155,13 @@ other order would have been marked down by a rule this brief had broken itself.
    `sha256((challenge + e2e_pubkey).encode())` must equal the quote's `report_data[0:32]`. Do that
    arithmetic yourself and report the result as yours.
 
+   **One check reads FAIL by design, and here is why.** The platform's infrastructure fragment runs inside
+   the protected boundary and the permission rows cannot constrain it. We identify it, pin its signer and
+   minimum version, and disclose its measured contents — but identification is not constraint, and this
+   verifier refuses to let disclosure stand in for it. The FAIL is advisory (it does not invalidate the
+   record) and is permanent on this platform; a different substrate is the only fix. Report it as what it is:
+   not a defect in this record, not a thing that was fixed, and not a thing we are asking you to discount.
+
    **The `attestation` block holds EVIDENCE and carries no verdict of its own.** There is no
    `attestation.ok`; an auditor looked for one on 1 Oct, did not find it, and reported its absence as a
    weakness in this claim. The verdict for the session is the receipt's top-level `verdict`

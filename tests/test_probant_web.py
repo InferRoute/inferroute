@@ -2266,10 +2266,10 @@ def test_what_the_assistant_wrote_about_a_document_outlives_the_session(tmp_path
 
     # A read, then the turn that reports it.
     b.publish({"kind": "busy", "value": True})
-    b.publish({"kind": "tool_start", "tool": "read_patent", "args": {"key": "US-1-A"}})
+    b.publish({"kind": "tool_start", "tool": "read_patent", "args": {"key": "US-1234567-A"}})
     b.publish({"kind": "tool_end", "tool": "read_patent"})
-    b.publish({"kind": "assistant_end", "text": "It is an optical sensor using two wavelengths."})
-    assert b.readings["US-1-A"].startswith("It is an optical sensor")
+    b.publish({"kind": "assistant_end", "text": "Opened US-1234567-A: an optical sensor using two wavelengths."})
+    assert b.readings["US-1234567-A"].startswith("Opened US-1234567-A")
 
     # ON CAPTURE, not at round end: most sessions are killed mid-work and would otherwise save nothing.
     saved = rd / "readings.json"
@@ -2280,14 +2280,14 @@ def test_what_the_assistant_wrote_about_a_document_outlives_the_session(tmp_path
     b2 = _bridge(tmp_path)
     b2.records_dir = rd
     b2._load_readings()
-    assert b2.readings.get("US-1-A", "").startswith("It is an optical sensor"), \
+    assert b2.readings.get("US-1234567-A", "").startswith("Opened US-1234567-A"), \
         "a new session must show what an earlier one wrote about this document"
-    assert (b2._readings_meta.get("US-1-A") or {}).get("at"), "when it was written is kept too"
+    assert (b2._readings_meta.get("US-1234567-A") or {}).get("at"), "when it was written is kept too"
 
     # A second turn about the same document does not overwrite the reading with unrelated words.
     b2.publish({"kind": "busy", "value": True})
     b2.publish({"kind": "assistant_end", "text": "Something else entirely."})
-    assert b2.readings["US-1-A"].startswith("It is an optical sensor")
+    assert b2.readings["US-1234567-A"].startswith("Opened US-1234567-A")
 
     # Robustness: a corrupt or unreadable file is "no readings", never a session that will not open.
     saved.write_text("{ this is not json")
@@ -2301,3 +2301,43 @@ def test_what_the_assistant_wrote_about_a_document_outlives_the_session(tmp_path
     b4._load_readings()
     b4.readings["X"] = "y"
     b4._save_readings()        # must not raise
+
+
+def test_a_reading_is_only_attached_to_the_document_it_is_actually_about(tmp_path):
+    """A wrong reading is worse than no reading: a confident paragraph under the wrong publication number,
+    in a tool whose output a patent professional acts on.
+
+    The turn in which a document was read is not always a turn ABOUT it — the assistant may finish an
+    earlier answer first, or (measured 2026-09-30) answer a read request by running a search. Two rules were
+    tried and both were too weak before this one: "the turn after the read" attached a survey summary to
+    US-12446781-B2, and "the text mentions the key" still did, because the survey LISTED that number among
+    its results. A reading opens with its subject, so the test is that the FIRST publication number the
+    reply names is this one.
+    """
+    rd = tmp_path / "records"
+    rd.mkdir()
+
+    def turn(b, key, text):
+        b.publish({"kind": "busy", "value": True})
+        b.publish({"kind": "tool_start", "tool": "read_patent", "args": {"key": key}})
+        b.publish({"kind": "tool_end", "tool": "read_patent"})
+        b.publish({"kind": "assistant_end", "text": text})
+
+    b = _bridge(tmp_path)
+    b.records_dir = rd
+
+    # A real reading: names its own document first.
+    turn(b, "US-5553613-A", 'Opened US-5553613-A (published 1996-09-10), "Non invasive blood analyte sensor."')
+    assert "US-5553613-A" in b.readings
+
+    # A survey report that merely LISTS the document is not a reading of it.
+    turn(b, "US-12446781-B2", "Survey complete. 3 of 3 sealed queries ran. Results include US-9999999-A1 and US-12446781-B2.")
+    assert "US-12446781-B2" not in b.readings, "a passage that lists the number is not a reading of it"
+
+    # An answer about a DIFFERENT document is never attached to this one.
+    turn(b, "US-6421548-B1", "Here is what the index holds for US-6445938-B1 … (US-6421548-B1 is also in the set)")
+    assert "US-6421548-B1" not in b.readings, "the first number named decides what the passage is about"
+
+    # And the real reading of that document, when it comes, is kept.
+    turn(b, "US-6421548-B1", "Here is what the sealed index holds for US-6421548-B1 (published 2002-07-16): the abstract…")
+    assert b.readings["US-6421548-B1"].startswith("Here is what the sealed index holds for US-6421548-B1")

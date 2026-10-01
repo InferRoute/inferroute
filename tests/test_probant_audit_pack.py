@@ -2255,10 +2255,19 @@ def test_the_brief_asks_the_auditor_to_rebuild_the_published_image():
 
     assert "https://inferroute.ai/build/" in b
     assert "Dockerfile.m2" in b and "REBUILD.md" in b
-    assert "compare the layer roots you get against the `layers` arrays in the policy" in b
-    # Unasserted, in both directions.
-    assert "We are not telling you it will match" in b
-    assert "that is the most important finding available about this product" in b
-    # And bounded: a matching rebuild must not be reported as privacy.
-    assert "It says nothing about what that code does with text once it has it" in b
-    assert "nothing about the platform containers beside it" in b
+    # CORRECTED 2 Oct, same night, by sealed-research: the first wording told auditors to compare a rebuild
+    # against the policy's `layers` arrays. Those are dm-verity roots over layer filesystems, not layer
+    # digests, and the path to them runs through acipolicygen with an unpublished template. An instruction
+    # that cannot be completed wastes the auditor's time and reads as our evidence failing.
+    assert "that comparison does not typecheck" in b
+    assert "dm-verity roots over layer filesystems, not layer digests" in b
+    assert "An earlier revision of this brief told you to make that comparison; it was wrong" in b
+
+    # The ladder, with each rung's real status rather than a single instruction.
+    assert "Its determinism is OUR dated claim, not one you have checked" in b
+    assert "03495ffa" in b and "37,441" in b and "2026-09-28" in b
+    assert "That measurement does not cover the image in this record, which is newer" in b
+    assert "The application's own source files are NOT published" in b
+    assert "The deployment template is NOT published" in b
+    # And the sentence an auditor should write while rungs 3 and 4 are missing.
+    assert "rests on the operator's honesty" in b

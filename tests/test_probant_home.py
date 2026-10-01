@@ -619,3 +619,42 @@ def test_every_class_the_home_page_uses_has_a_style():
     allowed = {"when", "how", "lock"}
     missing = sorted(used - styled - allowed)
     assert not missing, f"classes the home page uses with no rule in app.css: {missing}"
+
+
+def test_starting_home_inside_a_coding_assistant_says_so_before_handing_out_the_link(tmp_path, monkeypatch, capsys):
+    """1 Oct: I started Probant home from my own tool and gave Henry the link. The page came up, looked
+    healthy, listed his ten matters — and refused the one action it exists for, because every session it
+    launches inherits CLAUDECODE=1 and `ir` will not nest agent sessions.
+
+    The refusal was correct and its wording was right. What was wrong is WHERE it arrived: at the click,
+    after a browser round-trip, rather than at the launch that caused it. Warn, don't refuse — reading
+    records still works — but warn while the mistake is one Ctrl-C away.
+    """
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.delenv("IR_ALLOW_NESTED", raising=False)
+    # Stop at the point the banner is printed; serving forever is not what is under test.
+    import uvicorn
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+
+    assert H.run(open_browser=False) == 0
+    out = capsys.readouterr().out
+    assert "Probant home:" in out                                   # the link is still given
+    assert "CLAUDECODE=1" in out and "WILL BE REFUSED" in out
+    assert "ir probant home` in an ordinary terminal" in out
+    # The warning and the click-time refusal must agree, or the page tells two stories about one cause.
+    assert "nest" in out.lower()
+    assert "normal terminal" in H.failure_message(["ir: refusing to launch a nested agent session"])
+
+    # Outside an assistant, nothing is said — a warning that always prints is not a warning.
+    monkeypatch.delenv("CLAUDECODE")
+    assert H.run(open_browser=False) == 0
+    out = capsys.readouterr().out
+    assert "Probant home:" in out and "WILL BE REFUSED" not in out
+
+    # And the escape hatch the refusal itself documents silences it.
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("IR_ALLOW_NESTED", "1")
+    assert H.run(open_browser=False) == 0
+    assert "WILL BE REFUSED" not in capsys.readouterr().out

@@ -258,9 +258,30 @@ def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]
                          "through this computer's own checks.",
                          "It sees only this matter's folder. Your other files don't exist inside the box."] + browser,
                 "technical": technical}
+    # A PLATFORM WITHOUT OS CONFINEMENT IS NOT A DEVELOPER BYPASS. Those were one state, so a macOS
+    # session — where Landlock never existed to disable — was told "developer mode, don't use this with a
+    # client matter". That is wrong twice: the professional disabled nothing, and the sentence describes an
+    # exposure that is not theirs. What is still enforced there is the tool set, and it covers the two
+    # things that matter: the assistant cannot read files beyond this matter (no `read`, no `grep`, no
+    # shell) and has no way to reach the internet (no fetch tool), with writes fenced to the matter folder
+    # by the tool itself. What is missing is the kernel backstop UNDER those limits.
+    if label.startswith("tool-level only"):
+        return {"key": "computer", "state": WARN, "title": "This computer",
+                "summary": "Limited by the assistant's own tools, not by this operating system.",
+                "points": ["It has no way to reach the internet, and cannot read files beyond this matter.",
+                           "Its writes are confined to this matter's folder."] + browser,
+                "more": ["The assistant has no shell and no way to fetch anything: its only ways out are "
+                         "the two sealed machines above, through this computer's own checks.",
+                         "It cannot open your other files — the tool that reads is restricted to this "
+                         "matter, and the general-purpose read and search tools are not given to it.",
+                         "What is missing here, and present on Linux, is the operating system enforcing "
+                         "those limits underneath. On Linux the kernel refuses the access as well as the "
+                         "tool; here the tool refuses it alone. A fault in the assistant's own tools would "
+                         "therefore have no second barrier behind it."] + browser,
+                "technical": technical}
     if label.startswith("unconfined") or label == "not confined":
         return {"key": "computer", "state": FAIL, "title": "This computer",
-                "summary": "NOT boxed (developer mode). Don't use this with a client matter.",
+                "summary": "NOT boxed — confinement was deliberately turned off here. Don't use this with a client matter.",
                 "points": ["The assistant could reach the internet and read other files."],
                 "more": [], "technical": technical}
     return {"key": "computer", "state": WARN, "title": "This computer",

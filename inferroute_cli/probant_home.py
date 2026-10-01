@@ -40,28 +40,57 @@ from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install
 # told the opening and closing instants and never re-derives them, so a page and a server cannot come to
 # different views of when search is open (and the page never has to get Paris's daylight saving right).
 SEARCH_WINDOW_TZ = "Europe/Paris"
-SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily
+SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily — used ONLY in scheduled mode
+
+# WHICH OF THE TWO THIS INSTALLATION IS, and it is not a detail: on 2026-10-01 the search enclave was
+# deployed to run continuously, and this file still said 13:00-15:00 — so the home page would have told a
+# client "closed until 13:00" about a machine that was up. A timetable for a machine that does not keep one
+# is the failure where a confident answer is worse than none, because nobody questions a timetable.
+#
+# `always`    — the machine runs continuously; the page says nothing about openings at all.
+# `scheduled` — the machine opens for a window each day, and the page says when.
+#
+# Read from the host config (search.json) so it is set per installation rather than compiled in, and so a
+# future backend-served value has one place to land. ABSENT MEANS ALWAYS: a schedule is the special case,
+# and claiming one that does not exist is the error this constant was changed to prevent.
+def search_availability(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """{"mode": "always"} or {"mode": "scheduled", "from_hour", "to_hour", "tz"}."""
+    conf = (cfg or {}).get("availability")
+    if isinstance(conf, dict) and str(conf.get("mode")) == "scheduled":
+        w = conf.get("window") or SEARCH_WINDOW
+        try:
+            frm, to = int(w[0]), int(w[1])
+        except (TypeError, ValueError, IndexError):
+            frm, to = SEARCH_WINDOW
+        return {"mode": "scheduled", "from_hour": frm, "to_hour": to,
+                "tz": str(conf.get("tz") or SEARCH_WINDOW_TZ)}
+    return {"mode": "always"}
 SEARCH_PROBE_TIMEOUT = 2.5        # a page must not hang on a machine that is deliberately switched off
 SEARCH_PROBE_TTL = 30.0           # seconds a probe result stands for, so refreshing does not hammer it
 _search_probe: Dict[str, Any] = {"at": 0.0, "state": "unreachable"}
 _search_probe_lock = threading.Lock()
 
 
-def _search_window(now: Optional[dt.datetime] = None) -> Dict[str, Any]:
+def _search_window(now: Optional[dt.datetime] = None, avail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The current or next opening, as instants. Returns UTC ISO stamps: the page formats them in whatever
     timezone the reader is actually in, which is the only way a window named in Paris time is safe to show
     to someone who is not in Paris."""
     from zoneinfo import ZoneInfo
-    tz = ZoneInfo(SEARCH_WINDOW_TZ)
+    a = avail or {"mode": "always"}
+    # ALWAYS-ON HAS NO WINDOW TO DESCRIBE. open_now is true and there are no instants, so the page has
+    # nothing to format and says nothing — rather than being handed a timetable it is asked not to show.
+    if a.get("mode") != "scheduled":
+        return {"mode": "always", "open_now": True}
+    tz = ZoneInfo(a.get("tz") or SEARCH_WINDOW_TZ)
     now = (now or dt.datetime.now(dt.timezone.utc)).astimezone(tz)
-    opens = now.replace(hour=SEARCH_WINDOW[0], minute=0, second=0, microsecond=0)
-    closes = now.replace(hour=SEARCH_WINDOW[1], minute=0, second=0, microsecond=0)
+    opens = now.replace(hour=int(a["from_hour"]), minute=0, second=0, microsecond=0)
+    closes = now.replace(hour=int(a["to_hour"]), minute=0, second=0, microsecond=0)
     if now >= closes:                                   # today's window is over; the next one is tomorrow
         opens, closes = opens + dt.timedelta(days=1), closes + dt.timedelta(days=1)
     open_now = opens <= now < closes
     iso = lambda d: d.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {"open_now": open_now, "opens_at": iso(opens), "closes_at": iso(closes),
-            "tz": SEARCH_WINDOW_TZ, "from_hour": SEARCH_WINDOW[0], "to_hour": SEARCH_WINDOW[1]}
+    return {"mode": "scheduled", "open_now": open_now, "opens_at": iso(opens), "closes_at": iso(closes),
+            "tz": a.get("tz") or SEARCH_WINDOW_TZ, "from_hour": int(a["from_hour"]), "to_hour": int(a["to_hour"])}
 
 
 def _search_probe_state(enclave: str) -> str:
@@ -712,10 +741,14 @@ class Home:
             """Whether the search machine is up, and when it is meant to be. Never names the machine."""
             import asyncio
             from . import pi_attested
-            out: Dict[str, Any] = {"configured": False, **_search_window()}
+            # The config is read FIRST: the availability mode comes out of it, and building `out` before
+            # loading it used `cfg` a line before it existed.
             try:
                 cfg = json.loads(pi_attested.search_config_path().read_text())
             except (OSError, ValueError):
+                cfg = {}
+            out: Dict[str, Any] = {"configured": False, **_search_window(avail=search_availability(cfg))}
+            if not cfg:
                 return out
             enclave = str(cfg.get("enclave") or "")
             if not enclave:

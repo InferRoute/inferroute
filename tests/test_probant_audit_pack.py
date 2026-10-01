@@ -2264,9 +2264,14 @@ def test_the_brief_asks_the_auditor_to_rebuild_the_published_image():
     assert "An earlier revision of this brief told you to make that comparison; it was wrong" in b
 
     # The ladder, with each rung's real status rather than a single instruction.
-    assert "Its determinism is OUR dated claim, not one you have checked" in b
+    assert "measured twice, not once" in b
     assert "03495ffa" in b and "37,441" in b and "2026-09-28" in b
-    assert "That measurement does not cover the image in this record, which is newer" in b
+    assert "bacbf8e3" in b and "2026-10-02" in b
+    # The trap this must not set: a reader taking a reproducibility measurement for a statement about the
+    # image their own record was served by. The ids differ between measurements BY DESIGN, because the code
+    # moved, and saying so is what stops a true number being read as a contradiction.
+    assert "Neither says anything about the image THIS record was served by" in b
+    assert "expected, not a discrepancy" in b
     assert "The application's own source files are NOT published" in b
     assert "The deployment template is NOT published" in b
     # And the sentence an auditor should write while rungs 3 and 4 are missing.

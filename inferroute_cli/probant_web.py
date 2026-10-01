@@ -347,6 +347,22 @@ def audit_launch_script(pack: Path, command: str) -> Path:
     return sh
 
 
+_PUBNO_RE = re.compile(r"\b([A-Z]{2}-[0-9A-Z]{3,}-[A-Z0-9]{1,3})\b")
+
+
+def _first_pubno(text: str) -> str:
+    """The first publication number a passage names, upper-cased, or "".
+
+    Used to decide whether an assistant turn is a READING OF a document: the first publication number the reply names must BE this document. A reading opens with its
+                    # subject ("Opened US-5553613-A…", "Here is what the index holds for US-…"), so the first
+                    # number named is the one it is about. "Mentions the key somewhere" was too weak and let
+                    # through a survey report that listed US-12446781-B2 among its results, and a reading of
+                    # US-6445938-B1 that happened to cite US-6421548-B1 later on.
+    """
+    m = _PUBNO_RE.search(str(text or "").upper())
+    return m.group(1) if m else ""
+
+
 class Bridge:
     def __init__(self, *, matter: str, date_bound: str, workspace: Path, summary: Dict[str, Any],
                  search_endpoint: Optional[str], receipt: Callable[[], Any],
@@ -452,6 +468,14 @@ class Bridge:
                 # The FIRST words after a read are the reading; a later turn in the same round is talking
                 # about something else, so it does not overwrite one already captured.
                 for key in self._read_this_turn:
+                    # IT MUST BE ABOUT THAT DOCUMENT. The turn in which a document was read is not always a
+                    # turn ABOUT it — the assistant may finish an earlier answer first, or (measured
+                    # 2026-09-30) answer a read request by running a search. Attaching those words to the
+                    # document anyway puts a confident paragraph under the wrong publication number, which
+                    # in a prior-art tool is worse than showing nothing. Naming the document is a weak test,
+                    # but it is the difference between "possibly about it" and "demonstrably not".
+                    if _first_pubno(str(event.get("text") or "")) != key.upper():
+                        continue
                     if key not in self.readings:
                         self.readings[key] = str(event.get("text"))[:6000]
                         self._readings_meta[key] = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}

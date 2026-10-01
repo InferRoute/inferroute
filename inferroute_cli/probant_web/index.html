@@ -53,6 +53,9 @@
         your account, so you can come back to it from the Probant home page.</p>
     </div>
     <div id="log" class="log" aria-live="polite"></div>
+    <!-- Questions sent while the assistant is mid-answer: held here, visibly not yet part of the
+         conversation, and moved into the log when their turn begins. -->
+    <div id="waiting" class="waiting" hidden aria-label="Questions waiting to be delivered"></div>
     <div id="activity" class="activity" hidden><span class="dot"></span><span id="activity-text">Working…</span><span id="activity-time" class="activity-time"></span></div>
     <div id="stalled" class="stalled" hidden></div>
     <div id="ended" class="ended" hidden></div>

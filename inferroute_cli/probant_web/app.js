@@ -197,15 +197,71 @@
     renderMarkSteps();            // the welcome's offers are gone: the bar takes over, or the box is empty
   }
 
+  // ── a question waits OUTSIDE the transcript until it is taken up ───────────────────────────────
+  //
+  // Henry, 2026-10-01: "when many instructions are given in a short time all the questions display and
+  // then all the answers display in that order. it would be better if the unprocessed questions remain
+  // unanchored in the chat until they are processed so that it can look like actual conversation".
+  //
+  // The server publishes a `user` event the moment it RECEIVES the message, and while the agent is busy
+  // the message is only queued (streamingBehavior: followUp). So three quick questions anchored
+  // themselves above the first answer and the transcript read Q Q Q A A A — an order that never happened
+  // and that nobody could follow afterwards.
+  //
+  // A queued question is now held in a waiting area below the conversation and moved INTO the transcript
+  // when its turn begins, so the record reads Q A Q A. Nothing is hidden: the waiting area shows the
+  // questions, in order, and says they have not been taken up.
+  const waiting = [];                      // [{text, node}] oldest first
+
   function addUser(text) {
     hideWelcome();
     clearNext();
+    // Busy means the agent is mid-answer and this one is queued behind it. The FIRST message of a turn
+    // arrives before busy is set, which is right: it is the one about to be answered.
+    if (busy) { holdQuestion(text); return; }
+    anchorQuestion(text);
+  }
+
+  function anchorQuestion(text) {
     const s = stick();
     const node = el("div", "msg msg-user", text);
     log.append(node);
     const short = String(text).replace(/\s+/g, " ").trim();
     outlineAdd({ kind: "you", el: node, label: "You asked", detail: short.length > 110 ? `${short.slice(0, 110)}…` : short });
     s();
+    return node;
+  }
+
+  function holdQuestion(text) {
+    const node = el("div", "msg msg-user msg-waiting", text);
+    waiting.push({ text, node });
+    const s = stick();
+    waitRoom().append(node);
+    s();
+    renderWaiting();
+  }
+
+  function waitRoom() { return $("waiting"); }        // declared in the page, not conjured by it
+
+  function renderWaiting() {
+    const w = waitRoom();
+    let note = w.querySelector(".waiting-note");
+    if (!waiting.length) { if (note) note.remove(); w.hidden = true; return; }
+    w.hidden = false;
+    if (!note) { note = el("div", "waiting-note"); w.prepend(note); }
+    note.textContent = waiting.length === 1
+      ? "Waiting — this is delivered when the assistant finishes."
+      : `Waiting — ${waiting.length} questions, delivered in turn as the assistant finishes.`;
+  }
+
+  // The oldest waiting question is the one this turn is answering: move it into the transcript, where it
+  // now sits directly above its own answer.
+  function takeUpQuestion() {
+    const next = waiting.shift();
+    renderWaiting();
+    if (!next) return;
+    next.node.remove();
+    anchorQuestion(next.text);
   }
 
   // ── "still working", in the flow where the reader is actually looking ───────────────────────────
@@ -1901,6 +1957,7 @@
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
       case "busy":
+        if (ev.value && !busy) takeUpQuestion();   // a new turn begins: anchor the question it answers
         busy = ev.value;
         turnAt = busy ? (ev.at || serverNow()) : null;
         if (busy) stepText = "";          // a new turn is new work, even if the bar's words are the same

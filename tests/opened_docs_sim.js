@@ -14,16 +14,24 @@ if (a < 0 || b < 0) { console.error("HARNESS: the document popup moved"); proces
 const nodes = {};
 const mk = () => ({ textContent: "", hidden: true, children: [],
   append(...c) { this.children.push(...c); for (const x of c) if (x && x.textContent) this.textContent += x.textContent; } });
-for (const id of ["docview-title", "docview-scope", "docview-text", "docview-said", "docview-prov", "docview"]) nodes[id] = mk();
+for (const id of ["docview-title", "docview-scope", "docview-text", "docview-said", "docview-prov", "docview", "docview-marks"]) nodes[id] = mk();
 const $ = (id) => nodes[id];
 const el = (tag, cls, ...ch) => { const n = mk(); n.tag = tag; n.cls = cls;
   for (const c of ch) n.textContent += typeof c === "string" ? c : (c && c.textContent) || ""; return n; };
 const yearOf = (d) => { const p = String(d.published ?? ""); return /^\d{8}$/.test(p) ? p.slice(0, 4) : ""; };
 
 let docsCache = { documents: [], readings: {} };
+// The popup now leans on the page's own machinery: markdown() renders the assistant's prose (it used to be
+// printed raw, "**bold**" and all) and markButtons() supplies the SAME controls a search card carries.
+// Stubbed here so the sim can see that each was actually used, and with what.
+let mdCalls = [], markCalls = [];
+const markdown = (t) => { mdCalls.push(t); const n = mk(); n.textContent = "[rendered] " + t; return n; };
+const markButtons = (k) => { markCalls.push(k); const n = mk(); n.textContent = "Relevant Not relevant Known"; return n; };
+const clear = (n) => { n.textContent = ""; n.children = []; };
 const body = src.slice(a, b);
-const show = new Function("$", "el", "yearOf", "getCache", `${body}\n return (k) => { docsCache = getCache(); return showDocument(k); };`)(
-  $, el, yearOf, () => docsCache);
+const show = new Function("$", "el", "yearOf", "getCache", "markdown", "markButtons", "clear",
+  `${body}\n return (k) => { docsCache = getCache(); return showDocument(k); };`)(
+  $, el, yearOf, () => docsCache, markdown, markButtons, clear);
 
 let bad = 0;
 const fail = (m) => { console.error("FAIL: " + m); bad++; };
@@ -49,6 +57,9 @@ docsCache.readings["US-5553613-A"] = "It is an optical sensor using two waveleng
 show("US-5553613-A");
 if (!$("docview-said").textContent.includes("What the assistant said about it")) fail("the reading must be attributed, not presented as the document");
 if (!$("docview-said").textContent.includes("two wavelengths")) fail("the reading must be shown");
+// RENDERED, not printed. Henry, 2026-10-01: "the assistant side formatting could be made more readable".
+if (!mdCalls.length) fail("the assistant's prose must go through markdown(), or the reader sees ** and - as characters");
+if (!$("docview-said").textContent.includes("[rendered]")) fail("the rendered fragment must be what is appended");
 
 // Claim 1 held (after the staged enclave change) must not read as "the claims".
 docsCache.documents[0].coverage = { abstract: "held", claims: "claim_1", description: "not_held" };
@@ -59,5 +70,10 @@ if (!sc.includes("claims first claim only")) fail("claim_1 must be worded, not p
 if (sc.includes("claims and description was not read")) fail("one claim WAS read; the sentence must not deny it");
 if (!sc.includes("description was not read")) fail("the description is still absent and must be named");
 
+// JUDGE IT WHERE YOU READ IT: the same three controls a card carries, for this document.
+if (!markCalls.includes("US-5553613-A")) fail("the popup must carry the mark controls, for the document it is showing");
+if (!$("docview-marks").textContent.includes("Not relevant")) fail("the mark controls must be placed in the popup");
+if (markCalls.length !== 3) fail("the controls are rebuilt once per open, not accumulated: " + markCalls.length);
+
 if (bad) process.exit(1);
-console.log("document popup: scope before text, absences named, reading attributed — all held");
+console.log("document popup: scope before text, absences named, reading rendered and attributed, marks present — all held");

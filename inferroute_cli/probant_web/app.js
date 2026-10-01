@@ -918,6 +918,15 @@
     const d = docsCache.documents.find((x) => x.key === key);
     if (!d) return;
     $("docview-title").textContent = `${d.key}${yearOf(d) ? ` · published ${yearOf(d)}` : ""}`;
+    // JUDGE IT WHERE YOU READ IT. Reading a document is exactly when an opinion forms, and the controls were
+    // a panel away — Henry, 2026-10-01: "that popup view should include the relevant, non relevant selectors".
+    // markButtons() is the card's own builder, so a mark made here shows on every card, the folded heads, the
+    // marks panel and the next steps at once, and no second opinion about what this document is marked can
+    // exist. register=false: this row is rebuilt each time the popup opens, so it must not accumulate in the
+    // registry that refreshMarks() walks.
+    const marksBox = $("docview-marks");
+    clear(marksBox);
+    marksBox.append(markButtons(d.key, null, false));
     // WHAT WAS READ AND WHAT WAS NOT, before the text — the same order the assistant is given it in, and for
     // the same reason: a reader handed a short text without its scope takes it for the document.
     const cov = d.coverage || {};
@@ -935,7 +944,12 @@
     const reading = docsCache.readings[d.key];
     if (reading) {
       said.append(el("p", "sub", "What the assistant said about it in this session:"));
-      said.append(el("div", "", reading));
+      // markdown(), the same renderer the conversation uses. Printing the raw source put "**bold**",
+      // "> *quote*" and "- item" on screen as literal characters in a single unbroken wall — Henry,
+      // 2026-10-01: "the assistant side formatting could be made more readable". The assistant writes
+      // markdown because the log renders it; a second surface showing the same text must render it too,
+      // or the page is asking the reader to parse what it chose not to.
+      said.append(markdown(reading));
     } else {
       said.append(el("p", "sub",
         "The assistant has not written about this document yet. Ask it about this number and its answer appears here."));

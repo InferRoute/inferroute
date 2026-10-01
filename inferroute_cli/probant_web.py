@@ -417,6 +417,13 @@ class Bridge:
         # "the assistant has not written about this document yet" about one it had already read — Henry,
         # 2026-10-01. The whole point of keeping these is that reopening costs nothing, and a cache that
         # does not outlive the process is not a cache.
+        # QUESTIONS WE HOLD, not ones Pi holds. Sending with streamingBehavior "followUp" handed the queue
+        # to Pi, which delivered it at the START of the next turn — so a question sent while the assistant
+        # was working sat there after it went idle and only moved when the person sent ANOTHER message, at
+        # which point both arrived. Henry, 2026-10-01. Holding it here makes the page's "waiting" and the
+        # real queue the same thing, and the delivery a decision this process makes at a moment it can see.
+        self.pending_prompts: List[str] = []
+        self._draining = False
         self.readings: Dict[str, str] = {}
         self._readings_meta: Dict[str, Dict[str, Any]] = {}
         self._read_this_turn: List[str] = []
@@ -452,6 +459,10 @@ class Bridge:
             was, self.busy = self.busy, bool(event["value"])
             if not was and self.busy:
                 self._turn_began = event["at"]
+            # WENT IDLE: deliver the next question we are holding. This is the moment the old path missed —
+            # Pi had the message and was not going to act on it until something else woke it.
+            if was and not self.busy and self.pending_prompts:
+                asyncio.ensure_future(self._drain_pending())
             if self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
         if event["kind"] == "tool_start":
@@ -710,6 +721,31 @@ class Bridge:
         finally:
             self.closed.set()
 
+    async def _drain_pending(self) -> None:
+        """Send the oldest held question, once, now that the assistant is free.
+
+        One at a time and guarded: the next question is delivered when the turn it starts finishes, so two
+        can never be in flight at once and the transcript keeps its Q A Q A shape. A send that fails puts
+        the question back at the FRONT — losing it silently would be worse than the bug this replaced.
+        """
+        if self._draining:
+            return
+        self._draining = True
+        try:
+            while self.pending_prompts and not self.busy and not self.ended:
+                text = self.pending_prompts.pop(0)
+                try:
+                    await self.send({"type": "prompt", "message": text})
+                except RuntimeError:
+                    self.pending_prompts.insert(0, text)
+                    return
+                self.publish({"kind": "queue_update", "waiting": len(self.pending_prompts)})
+                # One per idle moment: the agent is about to go busy on this one, and the next goes when
+                # that turn ends. Waiting for that is the whole point.
+                return
+        finally:
+            self._draining = False
+
     async def open_with(self) -> None:
         """Send the opening instruction, once, when the agent is ready for one."""
         text, self.opening = self.opening, ""
@@ -967,11 +1003,17 @@ class Bridge:
                 # accepting one here is how "sending a new message doesn't work" looked from the page.
                 return JSONResponse({"error": "The assistant is not responding, so this would not be delivered. "
                                               "Stop the current attempt first."}, status_code=409)
-            cmd: Dict[str, Any] = {"type": "prompt", "message": text}
+            # BUSY: hold it here rather than handing it to Pi as a followUp. Pi delivered a followUp at the
+            # start of the NEXT turn, so a question sent while the assistant was working stayed undelivered
+            # after it went idle and only moved when another message arrived — then both ran. The page
+            # already shows these as waiting; now the thing it shows and the thing that is queued are the
+            # same object, and this process decides when to deliver.
             if bridge.busy:
-                cmd["streamingBehavior"] = "followUp"
+                bridge.pending_prompts.append(text)
+                bridge.publish({"kind": "user", "text": text})
+                return {"ok": True, "waiting": len(bridge.pending_prompts)}
             try:
-                await bridge.send(cmd)
+                await bridge.send({"type": "prompt", "message": text})
             except RuntimeError as e:
                 return JSONResponse({"error": str(e)}, status_code=409)
             bridge.publish({"kind": "user", "text": text})

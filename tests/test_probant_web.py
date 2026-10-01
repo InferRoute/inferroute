@@ -2436,3 +2436,58 @@ def test_the_same_question_is_not_sent_twice_while_it_is_still_waiting(client):
     start = css.index(".msg-waiting {")
     rule = re.sub(r"/\*.*?\*/", "", css[start:css.index("}", start)], flags=re.S)
     assert "dashed var(--faint)" in rule, "the waiting outline must be distinguishable from a row rule"
+
+
+def test_a_question_held_while_busy_is_delivered_the_moment_the_assistant_goes_idle(tmp_path):
+    """Henry, 2026-10-01: queued messages "dont get send automatically when the conversation has become
+    idle, we need to send a new message manually and then both that one and the queued one get sent".
+
+    The cause was handing the queue to Pi. A message sent while busy went out with
+    streamingBehavior "followUp", and Pi delivered a followUp at the START of the next turn — so after the
+    assistant went idle the question just sat there, and only moved when something else woke Pi, at which
+    point both arrived together.
+
+    So the page showed "waiting" about a thing Pi held and this process could not see. Now it is the same
+    object: held here, delivered here, at a moment this process can observe.
+    """
+    import asyncio
+
+    sent = []
+    b = _bridge(tmp_path)
+
+    async def go():
+        async def fake_send(obj):
+            sent.append(obj["message"])
+        b.send = fake_send
+
+        b.publish({"kind": "busy", "value": True})
+        b.pending_prompts.extend(["Q2", "Q3"])
+        assert sent == [], "nothing may be delivered while the assistant is working"
+
+        b.publish({"kind": "busy", "value": False})          # the moment that used to do nothing
+        await asyncio.sleep(0.05)
+        assert sent == ["Q2"], f"the oldest question must go on idle, got {sent}"
+        assert b.pending_prompts == ["Q3"], "one per idle moment, not the whole queue"
+
+        b.publish({"kind": "busy", "value": True})           # Q2's turn runs
+        b.publish({"kind": "busy", "value": False})          # and finishes
+        await asyncio.sleep(0.05)
+        assert sent == ["Q2", "Q3"], "the next goes when that turn ends — Q A Q A, not Q Q A A"
+
+        # An idle moment with nothing held sends nothing, and a FAILED send keeps the question rather
+        # than losing it silently, which would be worse than the bug this replaced.
+        b.publish({"kind": "busy", "value": True})
+        b.publish({"kind": "busy", "value": False})
+        await asyncio.sleep(0.05)
+        assert sent == ["Q2", "Q3"]
+
+        async def broken(obj):
+            raise RuntimeError("the agent is gone")
+        b.send = broken
+        b.pending_prompts.append("Q4")
+        b.publish({"kind": "busy", "value": True})
+        b.publish({"kind": "busy", "value": False})
+        await asyncio.sleep(0.05)
+        assert b.pending_prompts == ["Q4"], "a send that failed must put the question back, not drop it"
+
+    asyncio.run(go())

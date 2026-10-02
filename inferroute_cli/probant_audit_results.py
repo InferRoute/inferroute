@@ -49,7 +49,8 @@ def restore(records_dir: Path | None, matter: str) -> dict:
         source_rows = json.loads((bundle / "searches.json").read_text())
         if [r.get("statement") for r in rows] != [r.get("statement") for r in source_rows]:
             raise ValueError("saved audit statements do not match this matter's exported record")
-        return {"path": bundle, "pack": str(pack), "pack_identity": data["identity"]}
+        # Display the saved audit, but preparing another audit must export the current record.
+        return {"pack": str(pack), "pack_identity": data["identity"]}
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         return {"restore_error": str(error)[:300]}
 

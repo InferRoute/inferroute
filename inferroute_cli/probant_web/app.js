@@ -9,7 +9,7 @@
 (() => {
   const KEY_STORE = "probant-session-key";
   const $ = (id) => document.getElementById(id);
-  let auditResultsTarget = null, auditResultsSnapshot = "", auditResultsBusy = false, auditResultsPack = null;
+  let auditResultsTarget = null, auditResultsSnapshot = "", auditResultsBusy = false, auditResultsPack = null, auditResultsDisconnected = false;
 
   // ── the session key: from the URL fragment (never sent to a server), then out of the address bar ──
   let key = "";
@@ -2199,7 +2199,8 @@
   // generic `ir` agent when they have none.
   function renderAuditResults(box, data) {
     clear(box);
-    if (!data.prepared) return;
+    if (!data.prepared && !(data.rejected || []).length) return;
+    if (data.record) box.append(el("p", "sub", `Audit of saved record: ${data.record}`));
     const reports = data.results || [];
     const rejected = data.rejected || [];
     if (!reports.length) box.append(el("p", rejected.length ? "warn-text" : "sub",
@@ -2242,6 +2243,7 @@
     const target = auditResultsTarget;
     try {
       const data = await api("/api/audit-results");
+      if (auditResultsDisconnected) { auditResultsSnapshot = ""; auditResultsDisconnected = false; }
       if (target !== auditResultsTarget || (data.prepared && auditResultsPack &&
           JSON.stringify(data.pack) !== JSON.stringify(auditResultsPack))) return;
       const snapshot = JSON.stringify(data);
@@ -2249,7 +2251,12 @@
         renderAuditResults(auditResultsTarget, data);
         auditResultsSnapshot = snapshot;
       }
-    } catch (_) { /* Keep the last report visible if this session's bridge has stopped. */ }
+    } catch (_) {
+      if (target === auditResultsTarget && !auditResultsDisconnected) {
+        target.append(el("p", "warn-text", "Audit updates disconnected. Reopen this matter to load its saved audit."));
+        auditResultsDisconnected = true;
+      }
+    }
     finally { auditResultsBusy = false; }
   }
   // WHAT THIS RECORD LICENSES US TO SAY, computed by the same code the auditor will run, shown BEFORE they run
@@ -2288,6 +2295,7 @@
     auditResultsTarget = results;
     auditResultsSnapshot = "";
     auditResultsPack = null;
+    auditResultsDisconnected = false;
     box.append(results);
     go.addEventListener("click", async () => {
       go.disabled = true;

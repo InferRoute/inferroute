@@ -341,6 +341,13 @@ class Launches:
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
                 "elapsed": int(time.time() - it["started"]), "message": it["message"]}
 
+    def running_intake(self, ident: str) -> Optional[Dict[str, Any]]:
+        with self.lock:
+            for it in self.items.values():
+                if it.get("intake_id") == ident and it["state"] in ("starting", "ready") and it["proc"].poll() is None:
+                    return it
+        return None
+
     def running_for(self, matter_id: str) -> Optional[Dict[str, Any]]:
         with self.lock:
             for it in self.items.values():
@@ -385,7 +392,7 @@ class Launches:
         """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
         proposes matters from it. Both are the same child, the same page and the same sealed lane; only
         the command differs, so a reading session cannot drift into a second kind of session."""
-        existing = self.running_for(matter_id)
+        existing = self.running_intake(Path(intake_dir).name) if intake_dir else self.running_for(matter_id)
         if existing:
             return existing
         from . import pi_attested
@@ -397,7 +404,8 @@ class Launches:
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
         proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1, preexec_fn=pi_attested._die_with_parent)
-        it = {"id": secrets.token_hex(6), "matter": matter_id, "started": time.time(), "state": "starting",
+        it = {"id": secrets.token_hex(6), "matter": matter_id, "intake_id": Path(intake_dir).name if intake_dir else "",
+              "started": time.time(), "state": "starting",
               "url": None, "message": "", "tail": deque(maxlen=60), "proc": proc}
         with self.lock:
             self.items[it["id"]] = it
@@ -744,7 +752,7 @@ class Home:
                 proposals = I.read_proposals(id)
             except S.ProbantError as e:
                 return problem(str(e), 404)
-            running = home.launches.running_for(f"document · {meta['source_name']}")
+            running = home.launches.running_intake(meta["id"])
             return {"meta": meta, "proposals": proposals, "drafts": I.created_drafts(id), "dropped": I.dropped_count(id),
                     "running": home.launches.view(running) if running else None}
 

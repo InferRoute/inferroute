@@ -82,12 +82,13 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         return {"key": "ai", "state": FAIL, "title": "AI assistant",
                 "summary": "Could not be verified, so nothing was sent to it.",
                 "points": [f"Reason: {reason}."], "more": [], "technical": technical}
-    more = []
+    more = ["The assistant program runs on this computer; the AI model answers inside sealed hardware."]
     if _ok(receipt, "tdx_shape"):
         gpus = " Its GPUs were checked by NVIDIA." if _ok(receipt, "gpu_verified") else ""
         more.append("Genuine sealed hardware (Intel TDX), with debugging switched off." + gpus)
     if _ok(receipt, "build_recorded"):
-        more.append("It runs a software build InferRoute has on record, not only its operator's word.")
+        more.append("Its measured firmware and start-up match a build InferRoute has on record. "
+                    "This does not measure all the software that handles your text.")
     # "IS ANYTHING KEPT?" — asked by four of five naive readers and answered on no screen. One of them:
     # "It says opened, never says deleted. Does it sit there?" It is the question a person with an
     # unfiled invention actually has, and the card talked about encryption instead.
@@ -104,8 +105,7 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
                 "model. Each is checked before anything is sent to it, and the receipt names them all.")
     if _ok(receipt, "e2e_key_bound"):
         more.append("Your text is encrypted on this computer to a key the machine's own hardware report "
-                    "commits to, so only a machine this computer has verified can open it. InferRoute, "
-                    "the network and the cloud host see scrambled data.")
+                    "commits to. The network receives ciphertext; software inside the machine handles plaintext.")
     points = []
     if _ok(receipt, "tdx_shape") and _ok(receipt, "build_recorded"):
         # "SO WHICH IS IT — YOU CHECKED WHAT'S RUNNING, OR YOU CHECKED THE DOORFRAME AND NOT THE ROOM?"
@@ -212,22 +212,23 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
                 "points": [_plain_search_refusal(str(search.get("refusal") or ""))], "more": [], "technical": technical}
     enclave = search.get("enclave") or {}
     ref = {"ok": search_is_inferroutes(search)}
-    identity = ("running exactly the software InferRoute published (signed reference checked)" if ref.get("ok")
-                else f"running exactly the software this computer expects (fingerprint {str(enclave.get('host_data', ''))[:8]})")
+    identity = ("with a deployment fingerprint matching InferRoute's signed reference" if ref.get("ok")
+                else f"with the deployment fingerprint this computer expects ({str(enclave.get('host_data', ''))[:8]})")
     points = [f"Genuine sealed hardware, {identity}."]
     if date_bound:
         points.append(f"Only documents published before {date_bound}; the assistant can't change that.")
     more = ["Genuine sealed hardware (AMD SEV-SNP on Microsoft Azure), confirmed with AMD's and Microsoft's own keys.",
-            ("It runs exactly the software InferRoute published, checked against InferRoute's signed reference."
+            ("Its deployment fingerprint matches InferRoute's signed reference. This is not an independent "
+             "rebuild of the software that ran."
              if ref.get("ok") else
-             "It runs exactly the software this computer is set up to expect. Once the signed reference is checked "
-             "here, this line will say it is InferRoute's published software."),
+             "Its deployment fingerprint matches this computer's configuration. InferRoute's signed "
+             "reference has not been verified here."),
             "Your search text is encrypted here and only that machine can open it; each answer comes back "
             "encrypted to this computer alone.",
             # The strong half of the retention answer, and it is ENFORCED rather than promised: those
             # three denials are in the container policy that the signed HOST_DATA is the hash of.
-            "Nothing of your search is written on that machine: its policy — covered by the hardware "
-            "signature — denies logging, crash dumps and unencrypted scratch."]
+            "Hardware and fingerprint checks do not independently establish whether the software "
+            "retains or discloses plaintext."]
     if date_bound:
         more.append(f"Only documents published before {date_bound} are returned. The limit is kept on this "
                     "computer, out of the assistant's reach.")
@@ -300,19 +301,22 @@ def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]
 CONTROL_NOTE = "You approve the first search, your marks are yours alone, and the record is yours to export."
 
 
-EXPLAINER = ("A sealed machine encrypts its own memory with a key held by its chip, so even the people who run it "
-             "can't look inside. This computer checks each machine's hardware signature before sending it anything.")
+EXPLAINER = ("Sealed hardware protects its memory from the cloud host. This computer checks the hardware "
+             "evidence before sending text encrypted to its key. Software inside the machine can read that text; "
+             "these checks do not prove what it does with it.")
 
 
 def limits(search_state: str, search_is_ours: bool = False, surface: str = "terminal") -> List[str]:
-    search_sw = ("The search machine runs InferRoute's own published software; " if search_is_ours else
-                 "The search machine runs the software this computer expects; ")
-    out = ["The chips prove where your text can be read, not what the software there does with it. "
-           + (search_sw + "the AI machine runs its operator's published software, which InferRoute re-checks in part."
-              if search_state in (OK, WARN) else
-              "The AI machine runs its operator's published software, which InferRoute re-checks in part."),
-           "The services in between can see when you work and how much you send, never the words."]
+    out = ["These checks establish hardware and key bindings, not end-to-end confidentiality. "
+           "They do not prove that software inside a machine cannot retain or disclose plaintext. "
+           "Cloud platform components inside that boundary remain part of the trust set.",
+           "The AI check measures firmware and start-up, not its whole filesystem.",
+           "The network carries encrypted text, but timing and message sizes remain visible."]
     if search_state in (OK, WARN):
+        out.append("The search deployment fingerprint "
+                   + ("matches InferRoute's signed reference" if search_is_ours else
+                      "matches this computer's configuration")
+                   + "; an independent source-to-deployed-image proof is still missing.")
         out.append("A search finds related documents. It doesn't prove novelty, or that nothing else exists.")
     if surface == "browser":
         out.append("Browser extensions allowed to read every page can read this one too. For client matters, use "
@@ -339,13 +343,13 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
         # What changes is the COUNT of sealed machines, which must not claim two when one was checked.
         verdict = "private"
         if states["search"] == OK:
-            headline = ("Private: your client's invention can be read only on this computer and inside two "
-                        "sealed machines, both checked just now.")
+            headline = ("Sealed hardware checked for this session: the AI model and the patent search service. "
+                        "Text is encrypted before it leaves this computer.")
         else:
             missing = ("no patent search is set up on this computer" if states["search"] == OFF
                        else "no search tool is offered while reading a document")
-            headline = ("Private: your client's invention can be read only on this computer and inside one "
-                        f"sealed machine, checked just now — and {missing}, so nothing can leave this "
+            headline = ("Sealed hardware checked for this session: the AI model. Text is encrypted "
+                        f"before it leaves this computer; {missing}, so nothing can leave this "
                         "computer for a search machine at all.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items, "control_note": CONTROL_NOTE,

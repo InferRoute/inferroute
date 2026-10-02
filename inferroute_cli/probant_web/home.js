@@ -857,7 +857,15 @@
     }
     if (d.proposals.length) p.append(el("h2", "section", "Proposed matters"));
     if (!d.proposals.length && !(d.drafts || []).length) {
-      p.append(el("p", "sub", d.running ? "No findings yet." : "This reading has no saved findings."));
+      if (d.running) {
+        p.append(el("p", "sub", "No findings yet."));
+      } else if (d.last_launch?.state === "failed") {
+        p.append(el("p", "form-error", `The reading stopped before saving findings. ${d.last_launch.message || "No reason was recorded."}`));
+      } else if (d.last_launch?.state === "ended") {
+        p.append(el("p", "sub", "The reading session ended without saving findings."));
+      } else {
+        p.append(el("p", "sub", "No findings were saved for this reading."));
+      }
     }
     for (const [i, pr] of d.proposals.entries()) {
       const card = el("div", "card proposal",

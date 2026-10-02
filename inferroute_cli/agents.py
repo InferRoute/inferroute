@@ -128,6 +128,12 @@ def find_agent(agent: str) -> str | None:
     home = Path.home()
     roots = [home / ".local" / "bin", Path("/usr/local/bin"), Path("/opt/homebrew/bin"),
              home / ".bun" / "bin", home / ".npm-global" / "bin", home / "node_modules" / ".bin"]
+    if agent == "pi":
+        # The Probant installer keeps a pinned Pi release in an app-managed prefix so it
+        # does not depend on a system-wide npm install. A home server launched directly
+        # (rather than through the `ir` wrapper) must still find that binary.
+        managed_pi = home / ".local" / "share"
+        roots = sorted((d / "bin" for d in managed_pi.glob("pi-test-*") if d.is_dir()), reverse=True) + roots
     nvm = Path(os.environ.get("NVM_DIR") or (home / ".nvm")) / "versions" / "node"
     if nvm.is_dir():
         # Newest node first, so a stale old install does not win over the one the person uses.

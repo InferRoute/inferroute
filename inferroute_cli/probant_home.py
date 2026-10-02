@@ -348,6 +348,22 @@ class Launches:
                     return it
         return None
 
+    def latest_intake_result(self, ident: str) -> Optional[Dict[str, Any]]:
+        """Keep the outcome visible after a document-reading child exits.
+
+        The intake page used to expose only a currently running child. Once it exited, the
+        page could not distinguish a failed launch from a completed read with no proposals.
+        """
+        with self.lock:
+            matches = [it for it in self.items.values() if it.get("intake_id") == ident]
+            if not matches:
+                return None
+            it = max(matches, key=lambda row: row["started"])
+            if it["state"] not in ("ended", "failed"):
+                return None
+            return {"state": it["state"], "message": it["message"],
+                    "elapsed": int(time.time() - it["started"])}
+
     def running_for(self, matter_id: str) -> Optional[Dict[str, Any]]:
         with self.lock:
             for it in self.items.values():
@@ -754,7 +770,8 @@ class Home:
                 return problem(str(e), 404)
             running = home.launches.running_intake(meta["id"])
             return {"meta": meta, "proposals": proposals, "drafts": I.created_drafts(id), "dropped": I.dropped_count(id),
-                    "running": home.launches.view(running) if running else None}
+                    "running": home.launches.view(running) if running else None,
+                    "last_launch": home.launches.latest_intake_result(meta["id"]) if not running else None}
 
         @app.get("/api/intakes")
         async def intakes():

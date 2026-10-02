@@ -14,6 +14,8 @@ that supports the invention. The summary must include the important technical
 features; do not extrapolate, invent missing details or turn limitations into facts.
 Variations of the same invention belong together; separate inventions get separate
 drafts. A source-passage check does not prove the summary correct or patentable.
+The host already binds each call to the uploaded document. If you include the optional
+source label, use it only to name a section; it cannot select a different file.
 
 The host fixes the destination client, verifies the supporting passage against its
 protected source copy, preserves your complete summary, chooses an unused matter

@@ -129,10 +129,14 @@ def read_card(card: Dict[str, str]) -> str:
     voice must be one this machine derived. Adding a contact and merely previewing one both come through
     here: a preview that computed the fingerprint its own way could show a number the add step would not
     agree with, and the one being confirmed aloud would be the weaker of the two."""
+    if not isinstance(card, dict) or card.get("schema", "inferroute.probant-contact/1") != "inferroute.probant-contact/1":
+        raise S.ProbantError("that is not a supported Probant public key card")
     try:
         mlkem_pub, ed_pub = _unb64(card["mlkem_pub"]), _unb64(card["ed_pub"])
-    except (KeyError, ValueError, TypeError):
+    except (KeyError, ValueError, TypeError, AttributeError):
         raise S.ProbantError("that is not a Probant public key: it needs mlkem_pub and ed_pub")
+    if len(mlkem_pub) != 1184 or len(ed_pub) != 32:
+        raise S.ProbantError("the public keys have the wrong size: expected ML-KEM-768 and Ed25519 keys")
     got = fingerprint(mlkem_pub, ed_pub)
     if card.get("fingerprint") and card["fingerprint"] != got:
         raise S.ProbantError(f"the card's fingerprint {card['fingerprint']} is not the one its keys give "

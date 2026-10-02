@@ -81,7 +81,7 @@ def test_no_route_beyond_what_the_page_needs(home):
                      # sharing a corpus of matters with another Probant user (20 Sep)
                      "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open",
                      # telling a pasted key apart from a typo before anything is recorded (24 Sep)
-                     "/api/sharing/contact/preview",
+                     "/api/sharing/contact/preview", "/api/sharing/contact/remove",
                      # whether the scheduled search machine is up (24 Sep)
                      "/api/search-status"}
 

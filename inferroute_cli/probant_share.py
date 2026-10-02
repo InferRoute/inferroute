@@ -157,6 +157,19 @@ def add_contact(name: str, card: Dict[str, str]) -> Dict[str, str]:
     return known[name]
 
 
+def remove_contact(name: str, expected_fingerprint: str) -> None:
+    """Forget an address-book entry, leaving identity keys and deliveries intact."""
+    name = S.sanitize(name, "contact name")
+    known = contacts()
+    if name not in known:
+        return
+    if known[name].get("fingerprint") != expected_fingerprint:
+        raise S.ProbantError("this person's key changed: refresh the list before removing them")
+    del known[name]
+    contacts_path().write_text(json.dumps(known, indent=1))
+    os.chmod(contacts_path(), 0o600)
+
+
 def _canonical(payload: Dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 

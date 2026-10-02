@@ -827,9 +827,24 @@
     p.append(el("h2", "section", "People you can share with"));
     if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone using the public key they sent you."));
     for (const c of d.contacts) {
+      const remove = button("Remove", "ghost", async () => {
+        remove.disabled = true;
+        try {
+          await api("/api/sharing/contact/remove", { name: c.name, fingerprint: c.fingerprint });
+          toast(`${c.name} removed. You can add their public key again.`);
+          await renderSharing();
+        } catch (e) {
+          toast(e.message, "error");
+          remove.disabled = false;
+        }
+      });
+      remove.setAttribute("aria-label", `Remove ${c.name}`);
+      remove.title = "Remove this saved contact; existing deliveries are kept";
       p.append(el("div", "record-row", el("span", "", c.name), el("span", "mono sub", c.fingerprint),
         el("span", "sub", `added ${localTime(c.added_at)}`),
-        el("span", c.key_valid ? "sub" : "warn-text", c.key_valid ? "✓ Key format checked" : "Key needs attention")));
+        el("div", "row",
+          el("span", c.key_valid ? "sub" : "warn-text", c.key_valid ? "✓ Key format checked" : "Key needs attention"),
+          remove)));
     }
     p.append(el("div", "row", button("Add someone", "ghost", () => addContactDialog(() => renderSharing())),
       button("Open a delivery sent to you", "ghost", () => openShareDialog())));

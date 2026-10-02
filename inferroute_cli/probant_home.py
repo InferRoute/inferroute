@@ -802,6 +802,16 @@ class Home:
                 return problem(str(e), 400)
             return {"ok": True, "name": d.get("name"), "fingerprint": got["fingerprint"]}
 
+        @app.post("/api/sharing/contact/remove")
+        async def remove_contact(request: Request):
+            from . import probant_share as SH
+            d = await body(request)
+            try:
+                SH.remove_contact(str(d.get("name") or ""), str(d.get("fingerprint") or ""))
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            return {"ok": True}
+
         @app.post("/api/sharing/contact/preview")
         async def preview_contact(request: Request):
             """The fingerprint a pasted card gives, without recording anything. This exists so the box a

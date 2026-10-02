@@ -58,7 +58,13 @@ class Receipt:
     counters: dict = field(default_factory=lambda: {
         "requests": 0, "plaintext_bytes_sealed_here": 0, "ciphertext_bytes_sent": 0,
         "ciphertext_frames_received": 0, "response_bytes_opened_here": 0, "errors": 0,
-        "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0})
+        "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "estimated_cost_usd": 0.0,
+        # DECLARED AT ZERO, NOT CREATED ON FIRST USE. session.py increments this with .get(…, 0) + 1, so a
+        # session that never switched instance produced a receipt with no such key — and the audit brief tells
+        # an auditor to "read counters.instance_switches against the attestation block". On 2 Oct one did,
+        # found nothing, and reported the field absent; it was right to. A counter that vanishes at zero makes
+        # "none happened" and "we did not record this" look identical, which is the reading that costs us.
+        "instance_switches": 0})
     # WHAT THE COUNTERS ABOVE MEASURE. An auditor on 25 Sep found ciphertext_bytes_sent was only 26-42% of
     # plaintext_bytes_sealed_here in every session with traffic, could not tell from the receipt whether
     # that meant compression or two different layers, and reported it as unexplained. The answer is benign

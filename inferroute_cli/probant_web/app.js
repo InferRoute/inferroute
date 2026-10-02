@@ -71,7 +71,7 @@
       for (const draft of data.drafts || []) {
         const open = el("button", "primary small", draft.needs_review ? "Review draft" : "Open matter");
         open.type = "button";
-        open.addEventListener("click", () => goHome(`/matter/${draft.id}`));
+        open.addEventListener("click", () => goHome(matterRoute(draft.id)));
         list.append(el("div", "record-row", el("span", "", draft.title),
           el("span", "mono sub", draft.id),
           el("span", "sub", draft.needs_review ? "Needs review" : "Reviewed"), open));
@@ -84,6 +84,7 @@
     }
   }
   // `route`: open the home page straight at a page of it (its own address, with its own key).
+  function matterRoute(id) { return `/matter/${encodeURIComponent(id)}`; }
   function goHome(route) {
     const url = route ? `${homeUrl}&r=${encodeURIComponent(route)}` : homeUrl;
     if (!HOME_LINK.test(url)) { toast("This session was started from a terminal, so it has no home page to go back to. To see all your matters, run: ir probant home", "info"); return; }
@@ -97,7 +98,7 @@
       const again = el("button", "primary", readingSession ? "Review created matters" : "Start another session on this matter");
       const home = el("button", "ghost", "Probant home");
       again.type = home.type = "button";
-      again.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : `/matter/${matterId}`));
+      again.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : matterRoute(matterId)));
       home.addEventListener("click", () => goHome(""));
       row.append(again, home);
     } else {
@@ -590,7 +591,7 @@
       if (HOME_LINK.test(homeUrl)) {
         const fresh = el("button", "primary small", "Start a fresh session on this matter");
         fresh.type = "button";
-        fresh.addEventListener("click", () => goHome(`/matter/${matterId}`));
+        fresh.addEventListener("click", () => goHome(matterRoute(matterId)));
         actions.prepend(fresh);
       }
     }
@@ -2163,7 +2164,7 @@
     if (HOME_LINK.test(homeUrl)) {
       const back = $("back");
       back.hidden = false;
-      back.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : `/matter/${matterId}`));
+      back.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : matterRoute(matterId)));
     }
     const d = s.disclosure || {};
     $("welcome-title").textContent = `Ready to work on ${String(s.matter || "").replace("/", " / ")}`;

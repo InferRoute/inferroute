@@ -2261,11 +2261,12 @@
   function statementBlock(plain) {
     if (!plain || !plain.length) return null;
     const box = el("div", "licensed");
-    box.append(el("div", "licensed-title", "What this record lets us say — and what we expect an audit to find"),
-      el("p", "sub", "Computed by the same code an auditor runs, not written beside it. This is our own "
-        + "machine's account of itself; the button below lets someone else recompute it. If their answer "
-        + "differs from this, that difference is the finding and we want to hear it."));
-    for (const para of plain) box.append(el("p", "licensed-para", para));
+    box.append(el("div", "licensed-title", "Record check"),
+      el("p", "licensed-para", plain[0]),
+      el("p", "sub", "Computed locally. Independent audit below."));
+    const details = el("details", "fold", el("summary", "", "Full verifier statement"));
+    for (const para of plain) details.append(el("p", "licensed-para", para));
+    box.append(details);
     return box;
   }
 

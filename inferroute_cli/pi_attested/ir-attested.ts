@@ -904,6 +904,40 @@ export default function (pi: ExtensionAPI) {
 	// matter from the page. Each proposal must quote the document, and the host drops any quote it cannot
 	// find there — the one error a reader of a summary cannot catch is an invented passage.
 	const intakeOut = process.env.IR_INTAKE_OUT ?? "";
+	if (intakeOut && process.env.IR_INTAKE_CREATE_DRAFTS === "1") {
+		pi.registerTool({
+			name: "create_draft_matter",
+			label: "Create a draft matter",
+			description: "Create one draft matter from this uploaded document, under the client selected by the professional. " +
+				"Give a title, complete technical summary and exact supporting source passage (20–8000 characters). " +
+				"The host checks the passage, preserves the summary and avoids overwriting or duplicating existing drafts. " +
+				"A priority date is only a suggestion when explicitly stated in the source. Nothing is searched automatically.",
+			promptSnippet: "Create a draft matter for each distinct invention, with its supporting passage",
+			parameters: Type.Object({ title: Type.String(), summary: Type.String(), quote: Type.String(),
+				priority_date: Type.Optional(Type.String()), source: Type.Optional(Type.String()) }),
+			async execute(_toolCallId, params, signal) {
+				const response = await fetch(`${ENDPOINT}/probant/intake/create-draft`, {
+					method: "POST", signal,
+					headers: { "content-type": "application/json", authorization: `Bearer ${ENDPOINT_KEY}` },
+					body: JSON.stringify(params),
+				});
+				const result = await response.json() as { error?: string; draft?: { id: string; title: string; already_created: boolean } };
+				if (!response.ok || !result.draft) throw new Error(result.error ?? "The draft could not be created; nothing was confirmed.");
+				const draft = result.draft;
+				return {
+					content: [{ type: "text", text: `${draft.already_created ? "Already created" : "Created"}: ${draft.id}. ` +
+						"This draft needs the professional's disclosure and date review before searching. Keep reading the document." }],
+					details: { id: draft.id, title: draft.title, already_created: draft.already_created },
+				};
+			},
+			renderResult(result, _options, theme) {
+				const draft = result.details as { id?: string } | undefined;
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.bold("Draft matter") + `  ${draft?.id ?? ""} · needs review`, 0, 0));
+				return box;
+			},
+		});
+	}
 	if (intakeOut) {
 		pi.registerTool({
 			name: "propose_matter",

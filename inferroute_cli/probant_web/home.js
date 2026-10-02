@@ -215,6 +215,36 @@
     ], [button("Cancel", "ghost", closeDialog), save]);
   }
 
+  async function reviewDraftDialog(m, onSaved) {
+    const text = input("textarea");
+    text.rows = 16;
+    const date = input("date");
+    const origin = m.intake_origin || {};
+    date.value = origin.suggested_priority_date || (m.pre_filing_default ? "" : m.date_bound);
+    try { text.value = (await api(`/api/disclosure?id=${enc(m.id)}`)).text; }
+    catch (e) { toast(e.message, "error"); return; }
+    const err = el("p", "form-error");
+    const save = button("Save reviewed draft", "primary", async () => {
+      err.textContent = "";
+      if (!text.value.trim()) { err.textContent = "Enter the disclosure before saving your review."; text.focus(); return; }
+      if (!date.validity.valid) { err.textContent = "Choose a valid priority date or leave it blank to use today."; date.focus(); return; }
+      save.disabled = true;
+      try {
+        await api("/api/intake/review", { id: m.id, text: text.value, priority_date: date.value });
+        closeDialog(); toast("Draft reviewed. You can now start a session."); onSaved();
+      } catch (e) { err.textContent = e.message; save.disabled = false; }
+    });
+    dialog("Review draft matter", [
+      el("p", "", "Check the AI's description against its supporting passage. Correct missing or overstated features before searching."),
+      el("p", "sub", `Source: ${origin.source_name || "uploaded document"}`),
+      field("Disclosure", text),
+      field("Priority date", date, origin.suggested_priority_date
+        ? "Suggested by the AI from the source. Confirm it; leave blank to use today."
+        : "No priority date was supplied. Leave blank to use today, or enter the date you have confirmed."),
+      err,
+    ], [button("Cancel", "ghost", closeDialog), save]);
+  }
+
   // ── starting a session ──
   const watching = new Map();       // launch id → timer
   function launchBox(matterId, launch, onChange) {
@@ -382,13 +412,14 @@
   // ONE definition of a matter card.
   function matterCard(m) {
     const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
-    const start = button("Start a session", "primary start-session", (ev) => {
+    const start = button(m.needs_review ? "Review draft" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
-      startSession(m.id, open);
+      if (m.needs_review) open(); else startSession(m.id, open);
     });
     const body = el("div", "matter-body",
       el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
       el("div", "sub", `date bound ${m.date_bound || "—"}`),
+      m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
       el("div", "stats",
         el("span", "", plural(m.sessions, "session", "sessions")),
         el("span", "", plural(m.searches, "search", "searches")),
@@ -431,6 +462,20 @@
           try { await api("/api/sessions/end", { id: l.matter }); toast("Session ended.", "info"); refresh(); }
           catch (e) { toast(`Could not end it: ${e.message}`, "error"); }
         }) : null));
+    }
+    try {
+      const readings = (await api("/api/intakes")).documents || [];
+      if (readings.length) {
+        const history = el("details", "fold", el("summary", "", "Recent document readings"));
+        for (const reading of readings) {
+          history.append(el("div", "row", button(reading.source_name, "link", () => {
+            location.hash = `#/document/${enc(reading.id)}`;
+          }), el("span", "sub", `${reading.drafts || 0} drafts · ${localTime(reading.staged_at)}`)));
+        }
+        p.append(history);
+      }
+    } catch (e) {
+      p.append(el("p", "form-error", `Document reading history could not be loaded. ${e.message}`));
     }
     if (!data.matters.length) {
       p.append(el("div", "empty-card",
@@ -480,7 +525,8 @@
       el("h1", "", `${m.client} / ${m.matter}`),
       el("p", "sub", `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
     p.append(el("div", "row actions",
-      button("Start a session", "primary", () => startSession(m.id, refresh)),
+      m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
+        : button("Start a session", "primary", () => startSession(m.id, refresh)),
       button(words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;
@@ -493,6 +539,7 @@
         } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
       })));
     if (!words) p.append(el("p", "warn-text", "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
+    if (m.needs_review) p.append(el("p", "warn-text", "Created from your document. Review the disclosure and date before starting a search."));
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
 
     p.append(el("h2", "section", "Sessions"));
@@ -711,6 +758,8 @@
   // The browser reads the file and posts text to the local home server. The reading session then sends
   // that text encrypted to the checked AI model; it has no patent-search tool.
   function readDocumentDialog() {
+    const client = input("text", "e.g. Personal or Acme");
+    client.value = "Personal";
     const file = input("file");
     file.accept = ".txt,.md,.text,text/plain,text/markdown";
     const text = input("textarea", "…or paste the document here.");
@@ -742,6 +791,10 @@
     const go = button("Read it", "primary", async () => {
       err.textContent = "";
       const body = text.value.trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(client.value.trim())) {
+        err.textContent = "Enter a client name, for example Personal. Use letters, numbers, spaces, dots, dashes or underscores (up to 64 characters).";
+        client.focus(); return;
+      }
       if (!body) { err.textContent = "Choose a text file, or paste the document below."; text.setAttribute("aria-invalid", "true"); text.focus(); return; }
       if (text.value.length > 4000000) {
         err.textContent = "This document is too long (maximum 4 million characters). Split it or paste the relevant section.";
@@ -750,14 +803,15 @@
       go.disabled = true;
       go.textContent = "Staging…";
       try {
-        const r = await api("/api/intake", { text: text.value, name: picked || "pasted document" });
+        const r = await api("/api/intake", { text: text.value, name: picked || "pasted document", client: client.value.trim() });
         closeDialog();
         location.hash = `#/document/${enc(r.id)}`;
       } catch (e) { err.textContent = `Could not start reading the document. ${e.message}`; go.disabled = false; go.textContent = "Read it"; }
     });
     dialog("Read a document", [
-      el("p", "", "The AI reads your text and proposes inventions with draft summaries and source passages. "
-        + "You review the proposals before creating matters. This does not establish patentability."),
+      el("p", "", "The AI reads your document and creates one draft matter per invention, with a complete summary and supporting passage. "
+        + "You review each disclosure and date before searching. No searches start automatically."),
+      field("Create drafts under this client", client, "Use Personal for your own work. Existing matters are kept."),
       field("Document", file, "A .txt or .md file. Read locally, then sent encrypted to the checked AI model. No patent search runs during reading."),
       chosen,
       field("Or paste it", text),
@@ -786,12 +840,24 @@
       el("p", "sub", `${d.meta.chars.toLocaleString()} characters · staged ${localTime(d.meta.staged_at)}`)));
     if (d.running) {
       p.append(launchBox(`document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
-      p.append(el("p", "sub", "It proposes matters as it reads; they appear here. A long document takes a few minutes."));
+      p.append(el("p", "sub", "Findings appear here as the document is read. A long document takes a few minutes."));
       watchDocument(id);
     }
-    p.append(el("h2", "section", "Proposed matters"));
-    if (!d.proposals.length) {
-      p.append(el("p", "sub", d.running ? "Nothing proposed yet." : "This reading proposed no matters."));
+    if ((d.drafts || []).length) {
+      p.append(el("h2", "section", "Draft matters created"));
+      for (const draft of d.drafts) {
+        const details = el("details", "fold", el("summary", "", "AI description and supporting passage"),
+          el("p", "", draft.summary), el("blockquote", "quote", draft.quote));
+        p.append(el("div", "card proposal", el("h3", "", draft.title),
+          el("p", "sub", draft.needs_review ? "Needs disclosure and date review" : "Reviewed"),
+          details, button(draft.needs_review ? "Review draft" : "Open matter", "primary small", () => {
+            location.hash = `#/matter/${enc(draft.id)}`;
+          })));
+      }
+    }
+    if (d.proposals.length) p.append(el("h2", "section", "Proposed matters"));
+    if (!d.proposals.length && !(d.drafts || []).length) {
+      p.append(el("p", "sub", d.running ? "No findings yet." : "This reading has no saved findings."));
     }
     for (const [i, pr] of d.proposals.entries()) {
       const card = el("div", "card proposal",

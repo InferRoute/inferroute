@@ -367,9 +367,11 @@ class Bridge:
     def __init__(self, *, matter: str, date_bound: str, workspace: Path, summary: Dict[str, Any],
                  search_endpoint: Optional[str], receipt: Callable[[], Any],
                  rebuild_summary: Callable[[], Dict[str, Any]], export: Callable[[], Path],
-                 conversation_file: Optional[Path] = None, records_dir: Optional[Path] = None):
+                 conversation_file: Optional[Path] = None, records_dir: Optional[Path] = None,
+                 mode: str = "matter", intake_id: str = ""):
         self.matter, self.date_bound, self.workspace = matter, date_bound, workspace
         self.summary = summary
+        self.mode, self.intake_id = mode, intake_id
         self.search_endpoint = search_endpoint
         self._receipt, self._rebuild, self._export = receipt, rebuild_summary, export
         self.token = secrets.token_urlsafe(32)
@@ -899,12 +901,23 @@ class Bridge:
         @app.get("/api/session")
         async def session():
             return {"matter": bridge.matter, "date_bound": bridge.date_bound, "trust": bridge.summary,
+                    "mode": bridge.mode, "intake_id": bridge.intake_id,
                     "disclosure": disclosure_info(bridge.workspace), "busy": bridge.busy, "ended": bridge.ended,
                     "stalled": bridge.stalled, "search": bool(bridge.search_endpoint),
                     "search_timing": bridge.search_stats(), "now": round(time.time() * 1000),
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
                     "home": os.environ.get("IR_PROBANT_HOME_URL", "")}
+
+        @app.get("/api/intake/drafts")
+        async def intake_drafts():
+            if bridge.mode != "intake" or not bridge.intake_id:
+                return JSONResponse({"error": "this is not a document reading"}, status_code=404)
+            from . import probant_intake as I
+            try:
+                return {"drafts": await asyncio.to_thread(I.created_drafts, bridge.intake_id)}
+            except (OSError, ValueError):
+                return JSONResponse({"error": "the saved draft list could not be loaded; reopen this reading from home"}, status_code=500)
 
         @app.get("/api/documents")
         async def documents():
@@ -1230,6 +1243,10 @@ class Bridge:
 
 OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it, and propose each invention you find "
                        "with propose_matter. Then write your short answer for the professional.")
+DRAFT_OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it. Create a draft matter for each distinct "
+                             "invention with create_draft_matter, preserving its full technical description and "
+                             "supporting it with a passage from the source. Then give the professional a short summary "
+                             "of the drafts actually created and anything that needs review.")
 
 
 class Page:
@@ -1297,7 +1314,8 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
                     export=(no_export if mode == "intake" else lambda: probant_export.write_bundle(client, name, None)),
                     conversation_file=kept,
-                    records_dir=records_dir(client, name) if client else None)
+                    records_dir=records_dir(client, name) if client else None,
+                    mode=mode, intake_id=str(probant.get("intake") or ""))
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:
@@ -1313,7 +1331,8 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     # A reading session opens itself: the professional handed over a document, not a conversation, and an
     # agent sitting at an empty prompt waiting to be told to read it is a page that looks broken.
     if mode == "intake":
-        bridge.opening = str(probant.get("instruction") or OPENING_INSTRUCTION)
+        bridge.opening = str(probant.get("instruction") or
+                             (DRAFT_OPENING_INSTRUCTION if probant.get("draft_client") else OPENING_INSTRUCTION))
         # A round of a cluster run has nobody at the keyboard: when its turn ends, the round is over, and
         # a session left open would hold the next round behind it.
         bridge.oneshot = bool(probant.get("oneshot"))

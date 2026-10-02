@@ -284,6 +284,8 @@ def matter_payload(client: str, matter: str, *, include_marks: bool = False) -> 
     anything the moment two people work the same claims.
     """
     rec = S.load_record(client, matter)
+    if rec.get("needs_review"):
+        raise S.ProbantError(f"review draft {client}/{matter} in Probant home before sharing its disclosure and date")
     doc = S.workspace_path(client, matter) / "disclosure.md"
     marks: Dict[str, str] = {}
     if include_marks:

@@ -55,6 +55,34 @@
   const HOME_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}(&r=[A-Za-z0-9_%./-]*)?$/;
   let homeUrl = "";
   let matterId = "";
+  let readingSession = false;
+  let intakeId = "";
+  let draftRefreshTimer = null;
+
+  async function refreshIntakeDrafts() {
+    if (!readingSession || !intakeId) return;
+    const panel = $("intake-drafts");
+    const list = $("intake-drafts-list");
+    const error = $("intake-drafts-error");
+    try {
+      const data = await api("/api/intake/drafts");
+      clear(list);
+      error.hidden = true;
+      for (const draft of data.drafts || []) {
+        const open = el("button", "primary small", draft.needs_review ? "Review draft" : "Open matter");
+        open.type = "button";
+        open.addEventListener("click", () => goHome(`/matter/${draft.id}`));
+        list.append(el("div", "record-row", el("span", "", draft.title),
+          el("span", "mono sub", draft.id),
+          el("span", "sub", draft.needs_review ? "Needs review" : "Reviewed"), open));
+      }
+      panel.hidden = !(data.drafts || []).length;
+    } catch (_) {
+      panel.hidden = false;
+      error.hidden = false;
+      error.textContent = "Could not refresh the draft list. Reopen this document reading from Probant home.";
+    }
+  }
   // `route`: open the home page straight at a page of it (its own address, with its own key).
   function goHome(route) {
     const url = route ? `${homeUrl}&r=${encodeURIComponent(route)}` : homeUrl;
@@ -66,18 +94,18 @@
   function wayOut(parent) {
     const row = el("div", "row ended-actions");
     if (HOME_LINK.test(homeUrl)) {
-      const again = el("button", "primary", "Start another session on this matter");
+      const again = el("button", "primary", readingSession ? "Review created matters" : "Start another session on this matter");
       const home = el("button", "ghost", "Probant home");
       again.type = home.type = "button";
-      again.addEventListener("click", () => goHome(`/matter/${matterId}`));
+      again.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : `/matter/${matterId}`));
       home.addEventListener("click", () => goHome(""));
       row.append(again, home);
     } else {
-      const cmd = `ir probant open ${matterId} --web`;
+      const cmd = readingSession ? "ir probant home" : `ir probant open ${matterId} --web`;
       const copy = el("button", "ghost small", "Copy the command");
       copy.type = "button";
       copy.addEventListener("click", () => navigator.clipboard.writeText(cmd).then(() => toast("Copied.", "info")).catch(() => {}));
-      row.append(el("span", "sub", "Start another session with: "), el("span", "mono", cmd), copy);
+      row.append(el("span", "sub", readingSession ? "Review the drafts with: " : "Start another session with: "), el("span", "mono", cmd), copy);
     }
     parent.append(row);
   }
@@ -572,6 +600,7 @@
   }
 
   const STEP_TEXT = {
+    create_draft_matter: (a) => `Create draft: ${a.title || "invention"}`,
     read: (a) => `Read ${String(a.path || "").split("/").pop() || "a file"}`,
     ls: () => "Looked at the matter folder",
     find: () => "Searched the matter folder for files",
@@ -786,6 +815,7 @@
     const bar = $("mark-steps");
     const list = $("mark-steps-list");
     clear(list);
+    if (readingSession) { bar.hidden = true; return; }
     const started = $("empty").hidden;
     // NOTHING BEFORE THE FIRST MESSAGE. The welcome panel is on screen with its own recommendation buttons,
     // so a second panel of suggestions below it offers the same decision twice in two voices.
@@ -2000,6 +2030,7 @@
 
         // A read just landed: the archive has it now, so the list can show it.
         if (ev.tool === "read_patent") refreshDocuments();
+        if (ev.tool === "create_draft_matter") refreshIntakeDrafts();
         break;
       case "tool_progress": {
         const e = cards.get(ev.call);
@@ -2117,6 +2148,8 @@
     clockSkew = (Number(s.now) || Date.now()) - Date.now();
     searchTiming = s.search_timing || null;
     searchOffered = Boolean(s.search);
+    readingSession = s.mode === "intake";
+    intakeId = String(s.intake_id || "");
     $("layout").hidden = false;
     document.title = `Probant · ${s.matter}`;
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
@@ -2130,12 +2163,21 @@
     if (HOME_LINK.test(homeUrl)) {
       const back = $("back");
       back.hidden = false;
-      back.addEventListener("click", () => goHome(`/matter/${matterId}`));
+      back.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : `/matter/${matterId}`));
     }
     const d = s.disclosure || {};
     $("welcome-title").textContent = `Ready to work on ${String(s.matter || "").replace("/", " / ")}`;
     const line = $("disclosure-line");
-    if (d.disclosure_words > 0) {
+    if (readingSession) {
+      $("welcome-title").textContent = "Reading your document";
+      line.textContent = "Draft matters appear below as they are created. Review them before starting searches.";
+      $("empty").querySelector(".hint").textContent = "The AI receives text encrypted to its checked machine. This reading session has no patent-search tool.";
+      $("input").placeholder = "Ask about the document or draft matters…";
+      $("trust").querySelector(".prove").hidden = true;
+      refreshIntakeDrafts();
+      draftRefreshTimer = setInterval(refreshIntakeDrafts, 5000);
+      window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
+    } else if (d.disclosure_words > 0) {
       line.textContent = `The disclosure is in the matter folder: disclosure.md, ${d.disclosure_words} words.`;
     } else {
       line.classList.add("warn");
@@ -2146,7 +2188,7 @@
       $("empty").insertBefore(el("div", "row disclosure-actions", write), $("suggestions"));
     }
     const sugg = $("suggestions");
-    const ideas = s.search
+    const ideas = readingSession ? [] : s.search
       ? ["Run a prior-art survey of the disclosure", "Summarise the disclosure's key technical features", "Which features are most likely to have prior art?"]
       : ["Summarise the disclosure's key technical features", "What would a prior-art search need to cover?"];
     for (const idea of ideas) {

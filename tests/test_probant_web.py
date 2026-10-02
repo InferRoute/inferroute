@@ -112,7 +112,7 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack",
                      # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
                      # it takes a choice from three agents — never a command. See the launcher's own test.
-                     "/api/audit-launch", "/api/audit-results",
+                     "/api/audit-launch", "/api/audit-results", "/api/intake/drafts",
                      # Read-only: the failures of the running session. Reports no words of the matter, only
                      # error strings and how long it had been quiet. Added 2026-09-30 because a session
                      # failing on every turn could not be diagnosed from outside it.

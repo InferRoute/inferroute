@@ -35,7 +35,7 @@ const result = {prepared: true, pack, results: [report], rejected: []};
 
 function harness(api) {
   return new Function("el", "clear", "api", "toast", "navigator",
-    `let key = "key", auditResultsTarget = null, auditResultsSnapshot = "", auditResultsBusy = false, auditResultsPack = null;
+    `let key = "key", auditResultsTarget = null, auditResultsSnapshot = "", auditResultsBusy = false, auditResultsPack = null, auditResultsDisconnected = false;
      ${source.slice(start, end)}
      return { renderAuditResults, refreshAuditResults, auditOffer,
        target: (box, pack) => { auditResultsTarget = box; auditResultsPack = pack; } };`

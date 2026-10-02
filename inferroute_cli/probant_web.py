@@ -1107,7 +1107,8 @@ class Bridge:
                     "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
                                       "--reference-key <its key>")}
 
-        proved: dict = {}                                   # the record this page last exported and checked
+        from . import probant_audit_results
+        proved: dict = probant_audit_results.restore(bridge.records_dir, bridge.matter)
 
         @app.post("/api/prove")
         async def prove():
@@ -1128,6 +1129,8 @@ class Bridge:
             proved["path"] = path
             proved.pop("pack", None)
             proved.pop("pack_identity", None)
+            proved.pop("restore_error", None)
+            probant_audit_results.remember(bridge.records_dir, None)
             return {"ok": True, "path": str(path), "check": result, "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
                                       "--reference-key <its key>")}
 
@@ -1153,6 +1156,8 @@ class Bridge:
             prompt = probant_export.AUDIT_PROMPT
             proved["pack"] = str(pack)              # the folder a launch opens, so it never prepares a second
             proved["pack_identity"] = pack_identity
+            proved.pop("restore_error", None)
+            probant_audit_results.remember(bridge.records_dir, pack, Path(proved["path"]))
             return {"ok": True, "path": str(pack), "prompt": prompt, "pack_identity": pack_identity,
                     "can_launch": can_open_terminal(),
                     "claude": probant_export.audit_command("claude"),
@@ -1163,14 +1168,16 @@ class Bridge:
         async def audit_results():
             from . import probant_audit_results
             if not proved.get("pack"):
-                return {"results": [], "rejected": [], "prepared": False}
+                rejected = ([{"file": "Saved audit", "reason": proved["restore_error"]}]
+                            if proved.get("restore_error") else [])
+                return {"results": [], "rejected": rejected, "prepared": False}
             # A new export may be prepared while the file reader is running. Return the identity
             # we actually read, so the page cannot attach yesterday's conclusions to the new pack.
             pack = Path(proved["pack"])
             expected = dict(proved["pack_identity"])
             got = await asyncio.to_thread(probant_audit_results.collect, pack, expected)
             return {**got, "prepared": True,
-                    "pack": expected,
+                    "pack": expected, "record": pack.name,
                     "attribution": "The auditor's report, not a new hardware verification."}
 
         @app.post("/api/audit-launch")

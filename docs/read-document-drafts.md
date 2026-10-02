@@ -1,4 +1,4 @@
-# Document readings in 0.9.96
+# Document readings in 0.9.97
 
 Read document creates draft matters under the client selected before starting. The agent reads the complete source and calls `create_draft_matter` for each distinct invention. It has read-only file tools and no search tool.
 
@@ -9,3 +9,5 @@ Draft matters appear in the session and home. Review the disclosure and date bef
 Recent readings remain accessible from home. Sessions are matched by unique upload ID, so simultaneous uploads with the same filename cannot reuse another document’s session or destination client. Legacy proposals retain complete summaries and can still be imported manually. CLI document readings accept `--client`; `--proposals-only` retains the earlier workflow.
 
 Validation for this change: Python and JavaScript syntax checks, TypeScript transpilation, wheel build and package-content inspection. No automated test suite or live AI reading was run for this change.
+
+The session page encodes `client/matter` as one route segment when opening a draft in home, so clients and matter names both survive the link.

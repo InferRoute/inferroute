@@ -1122,6 +1122,14 @@ other order would have been marked down by a rule this brief had broken itself.
    behaviour rests on the operator's honesty — and say that plainly, because it is the difference between this
    record and the one it could be.
 
+   **A timestamp proof is only probative for records made AFTER it.** If `trust-anchors/reference.json.ots` is
+   present, check what it commits to and when — and check the direction. An auditor noted on 2 Oct that the
+   Bitcoin blocks its calendars point to are dated after every search in that record, which is correct and
+   worth saying: a proof stamped later than the operations it is offered as dating cannot rule out that the
+   reference was written to fit them. It bounds the reference from that day FORWARD. Report which side of the
+   stamp this record's operations fall on; it is the difference between an anchor that answers the question and
+   one that only promises to answer it for the next record.
+
    **A reference window opens AFTER the enclave it describes, always, and that is not evidence of anything.**
    An auditor measured the gap on 1 Oct — "the entry matching this enclave opens 3 minutes 32 seconds after
    the enclave came up. That ordering fits both an honest release and a minted one" — and both halves of that
@@ -1229,6 +1237,7 @@ other order would have been marked down by a rule this brief had broken itself.
    verifier refuses to let disclosure stand in for it. The FAIL is advisory (it does not invalidate the
    record) and is permanent on this platform; a different substrate is the only fix. Report it as what it is:
    not a defect in this record, not a thing that was fixed, and not a thing we are asking you to discount.
+
 
    **THIS VERIFIER DOES NOT READ THE RECEIPT, AND EDITING IT CHANGES NO VERDICT.** An auditor demonstrated
    exactly that on 1 Oct — edited a receipt heavily and `verify_record.py` still exited 0 — and was right to.
@@ -1511,7 +1520,15 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
 ## How to do it
 
-1. **Treat `verify_record.py` as untrusted code, because that is what it is.** It came from the
+1. **Treat `verify_record.py` as untrusted code, because that is what it is.** Read it before you run it, and
+   if you reuse its parsers for your own recomputation, **`import` it with `python3 -B`** (or
+   `PYTHONDONTWRITEBYTECODE=1`), or copy it out of this folder first. Running it leaves this folder untouched;
+   importing it makes CPython write `__pycache__/` HERE — where the integrity check cannot see it, because that
+   check does not descend into subdirectories. This warning used to sit at the end of the brief, and two
+   auditors reached the end having already done it: one on 25 Sep, who caught it on a later pass, and one on
+   2 Oct, who found a file it could not attribute and deleted it. It is here now because this is the sentence
+   that causes it. If a `__pycache__` has already appeared, it is not a finding and not evidence of tampering:
+   delete it, the top-level listing matches again, and say in your report that you did. It came from the
    professional's computer with everything else in this folder. Every claim below is a claim this program
    makes; if it were altered, the alterations would pass every check it performs, including the one over
    its own hash — the manifest that lists it is in the same folder. So:
@@ -1641,10 +1658,6 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
    seen is no longer one you reached; if you have already seen one, say so in your report, because a
    reader weighing two agreeing audits needs to know whether they are two.
 
-   **If you `import` the verifier rather than running it, set `PYTHONDONTWRITEBYTECODE=1` first** — or
-   copy it out before importing. Reusing its parsers is the natural thing to do and CPython then writes
-   `__pycache__/` into this folder, where the integrity check cannot see it because that check does not
-   descend into subdirectories. An auditor did exactly this on 25 Sep and caught it only on a later pass.
 
    **Write nothing inside this folder.** Its integrity check lists every file AT THE TOP LEVEL, so a scratch
    file you leave there is reported as `present-but-unlisted` — a FAIL about your own scratch file, not about
@@ -1659,8 +1672,7 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
    claim 3 rests on a file nobody independent has vouched for.
 
 ## False alarms to avoid
-
-- The AMD ROOT certificate (ARK) is self-signed. That is correct for a root and is not a finding. It says nothing about any OTHER certificate in this folder: an auditor applied it to the session receipt's certificate on 1 Oct and reported our brief as wrong, when the receipt's issuer is simply a different CA and was never claimed to be self-signed. All roots are. What matters is that it's AMD's.
+   - **Certificates in this folder differ, and "self-signed" is a per-certificate fact.** The AMD ROOT (ARK) is self-signed; that is correct for a root and is not a finding. A session receipt's attestation certificate may be self-signed or may chain to a CA, AND TWO RECEIPTS IN ONE RECORD CAN DIFFER — measured 2 Oct on a two-session record: one had subject and issuer both `CN=attestation-service`, the other chained to `CN=sek8s-vm-root-ca,O=chutes`. Check each certificate you look at and report what you find; neither answer is a finding on its own. An earlier revision of this line said the receipt's certificate "is simply a different CA", which generalised across receipts exactly as the sentence it was correcting generalised across certificates. All roots are. What matters is that it's AMD's.
 - The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The container is
   identified by HOST_DATA, checked against the reference.
 - A SKIP for "configured firmware TCB floor" means no floor was in force AT THE SEARCH'S TIME —

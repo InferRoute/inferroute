@@ -2201,7 +2201,9 @@
     clear(box);
     if (!data.prepared) return;
     const reports = data.results || [];
-    if (!reports.length) box.append(el("p", "sub", "Awaiting a completed audit result."));
+    const rejected = data.rejected || [];
+    if (!reports.length) box.append(el("p", rejected.length ? "warn-text" : "sub",
+      rejected.length ? "Audit result received — its file needs correction." : "Awaiting a completed audit result."));
     for (const [index, report] of reports.entries()) {
       const counts = {};
       for (const claim of report.claims) counts[claim.verdict] = (counts[claim.verdict] || 0) + 1;
@@ -2228,7 +2230,10 @@
         ...report.limitations.map(limit => el("p", "sub", limit))));
       box.append(group);
     }
-    for (const rejected of data.rejected || []) box.append(el("p", "sub", `Result not loaded: ${rejected.reason}.`));
+    for (const item of rejected) box.append(el("details", "fold",
+      el("summary", "", "Why this result could not be loaded"),
+      el("p", "sub", item.reason), el("p", "sub", item.file),
+      el("p", "sub", "Ask the audit agent to correct this file. The panel checks again automatically.")));
   }
 
   async function refreshAuditResults() {

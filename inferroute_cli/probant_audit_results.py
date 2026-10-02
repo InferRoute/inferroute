@@ -96,7 +96,7 @@ def validate(data, pack: Path, expected: dict) -> dict:
     except ValueError:
         raise ValueError("completion time must be an ISO timestamp") from None
     if date.tzinfo is None:
-        raise ValueError("completion time needs a timezone")
+        raise ValueError("completion time needs a time and timezone, e.g. 2026-10-02T12:09:00Z")
     return {"schema": SCHEMA, "pack": expected, "auditor": auditor, "completed_at": completed,
             "verified_statement": _text(data.get("verified_statement"), "exact supported conclusion"),
             "limitations": _limits(data.get("limitations"), "overall limitations", required=True),

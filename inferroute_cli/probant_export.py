@@ -1083,6 +1083,8 @@ other order would have been marked down by a rule this brief had broken itself.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
    This claim concerns the signed statement, not the withheld query or result text. You may verify the
    signatures fully while reporting separately that the text-to-hash bindings cannot be checked here.
+   `reply_to_sha256` commits to the recipient public key, not to the previous statement. Do not describe
+   it as a hash chain between operations.
 5. **No gaps in the recorded sequence.** Check whether the signed sequence numbers are contiguous within
    each recorded session and enclave lifetime. State the observed range and any gaps explicitly. This
    establishes contiguity of the supplied statements, not completeness of the activity. There are TWO
@@ -1378,11 +1380,21 @@ The client loads only complete results matching this exact pack and attributes t
 the form and the file association, not your reasoning. Use your actual model name, not the application's
 name, and write this file LAST so unfinished work is not presented as a completed audit.
 
+Use a full timezone-aware completion timestamp, for example `2026-10-02T12:09:00Z`;
+a date such as `2026-10-02` is not accepted. Coverage counts are operations, not sessions:
+claim 5's total is the number of signed statements; claim 7's total is session receipts.
+Do not substitute session counts for statement coverage.
+Write the report as Markdown with actual newlines, not a JSON-quoted string or tool-call transcript.
+Read both saved files back before declaring completion. The final tally must count all eight claims.
+
 End both outputs with the exact statement you established, in your own plain words, followed by the
 limitations. Do not paraphrase a narrower claim into the original claim's verdict. For document reads,
 report each signed coverage value. For reference timing, give the independently checked block time and
 compare it with EVERY operation's time: `--no-bitcoin` alone does not verify the block or its date.
 Do not turn an old receipt's missing field into a claim that the current client still omits it.
+For claim 7, use the challenge-and-encryption-key formula supplied above before declaring that binding
+unknown; trying unrelated hashes does not test that formula. Distinguish a checked binding from the
+Intel signature chain and online revocation checks you have not finished.
 
 (the `chmod` is needed because the template ships read-only — that is what stops it being filled in where
 it lies, and `cp` carries the mode to your copy. Fill in THAT copy.)
@@ -1581,6 +1593,10 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
      be checked by the reader; "an exact match" cannot, and on 25 Sep an auditor reported exactly that —
      a positive independent match against this index — for a release that does not contain the file at
      all. It was the strongest corroboration in the report and it had not happened.
+
+     **Hash each archive member separately.** A wheel may contain the verifier at more than one path.
+     Print each exact path, byte size and hash; do not concatenate members and call the combined bytes
+     a corrupted or doubled file. Such a packaging finding requires one specific member whose bytes differ.
 
      This brief deliberately no longer tells you what your fetch will say. An expected answer printed here
      is an anchor, and the failure above was an auditor agreeing with one. NOT IN THIS RELEASE is a real

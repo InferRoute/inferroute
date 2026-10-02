@@ -305,6 +305,22 @@ button.brand:hover { background: var(--user); }
 .audit-offer p { margin: 8px 0 4px; }
 .audit-offer .mono { margin: 4px 0; }
 .audit-offer button.small { margin-bottom: 4px; }
+.audit-controls { margin-top: 10px; }
+.audit-agent { font: inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--ink); }
+.audit-details { margin-top: 8px; }
+.audit-details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.audit-details .mono { display: block; overflow-wrap: anywhere; font-size: 12px; }
+.audit-report { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.audit-report > summary { cursor: pointer; font-size: 12px; font-weight: 650; }
+.audit-conclusion { font-size: 13px; }
+.audit-claim { font-size: 12px; margin: 6px 0; }
+.audit-claim > summary { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 6px; align-items: baseline; cursor: pointer; }
+.audit-dot { color: var(--faint); }
+.audit-claim.verified .audit-dot { color: var(--accent); }
+.audit-claim.partial .audit-dot { color: var(--warn); }
+.audit-claim.failed .audit-dot { color: var(--bad); }
+.audit-verdict { color: var(--muted); white-space: nowrap; }
+.audit-limits { margin-top: 10px; font-size: 12px; }
 .export-result .mono { display: block; word-break: break-all; margin: 4px 0 8px; color: var(--ink); font-size: 12px; }
 
 /* statusbar, dialog, toasts */
@@ -675,3 +691,4 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 }
 /* Asked again while it was already waiting: point at the copy that exists rather than making a second. */
 .msg-waiting-flash { border-color: var(--accent); opacity: 1; transition: border-color .15s, opacity .15s; }
+.audit-results { margin-top: .75rem; }

@@ -963,7 +963,13 @@ def audit_command(agent: str) -> str:
     import shlex
     if agent == "claude":
         return f"claude {shlex.quote(AUDIT_PROMPT)}"
-    return f"ir --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
+    if agent == "codex":
+        # The brief writes its report one directory up. Keep approvals enabled and grant that
+        # directory explicitly rather than bypassing the sandbox. Use the user's chosen model.
+        return f"codex --sandbox workspace-write --ask-for-approval on-request --add-dir .. --search {shlex.quote(AUDIT_PROMPT)}"
+    if agent == "ir":
+        return f"ir --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
+    raise ValueError(f"unknown audit agent: {agent}")
 
 AUDIT_MD = """# Audit brief: an independent check of a sealed prior-art search record
 
@@ -1075,9 +1081,13 @@ other order would have been marked down by a rule this brief had broken itself.
    servers rather than on Bitcoin — say which you saw. It remains silent on the other half: whether the
    reference's contents are true. VERIFY.md §4a has the commands.
 4. **Untampered statements.** Each statement's Ed25519 signature is valid over its canonical form.
-5. **Nothing removed.** The signed sequence numbers run without gaps, so no search was taken out of the
-   record — with TWO exceptions no counter can reveal, and a verdict that names only the first is
-   overstating what was checked. One: a search removed from the very END of a lifetime or a session,
+   This claim concerns the signed statement, not the withheld query or result text. You may verify the
+   signatures fully while reporting separately that the text-to-hash bindings cannot be checked here.
+5. **No gaps in the recorded sequence.** Check whether the signed sequence numbers are contiguous within
+   each recorded session and enclave lifetime. State the observed range and any gaps explicitly. This
+   establishes contiguity of the supplied statements, not completeness of the activity. There are TWO
+   omissions no counter can reveal; a verdict that names only the first is overstating what was checked.
+   One: a search removed from the very END of a lifetime or a session,
    because nothing follows it to leave a hole. Two: **an entire session, or an entire enclave lifetime,
    dropped from the record wholesale** — per-session numbering is contiguous within each session that IS
    shown, so removing a whole one leaves every remaining sequence intact. An auditor on 25 Sep raised
@@ -1360,6 +1370,19 @@ other order would have been marked down by a rule this brief had broken itself.
 **That file is in this folder and its headings are already the eight claims.** Do this, exactly:
 
     cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md  &&  chmod u+w ../REPORT-<this folder's name>.md
+
+The template ends with a JSON results form. Complete it too and save it as
+`../AUDIT-RESULT-<this folder's name>.json`, outside this folder. Preserve its pack hashes, claim IDs,
+titles and totals exactly; fill every verdict, coverage count, evidence field and supported statement.
+The client loads only complete results matching this exact pack and attributes them to you. It checks
+the form and the file association, not your reasoning. Use your actual model name, not the application's
+name, and write this file LAST so unfinished work is not presented as a completed audit.
+
+End both outputs with the exact statement you established, in your own plain words, followed by the
+limitations. Do not paraphrase a narrower claim into the original claim's verdict. For document reads,
+report each signed coverage value. For reference timing, give the independently checked block time and
+compare it with EVERY operation's time: `--no-bitcoin` alone does not verify the block or its date.
+Do not turn an old receipt's missing field into a claim that the current client still omits it.
 
 (the `chmod` is needed because the template ships read-only — that is what stops it being filled in where
 it lies, and `cp` carries the mode to your copy. Fill in THAT copy.)
@@ -1880,7 +1903,7 @@ def audit_claims() -> "list[tuple[int, str]]":
     return claims
 
 
-def report_template() -> str:
+def report_template(pack: Optional[Path] = None) -> str:
     """A report SKELETON, shipped in the pack, with the eight headings already written.
 
     The brief has asked auditors to quote each claim's title since 24 Sep, in increasingly explicit prose —
@@ -1958,15 +1981,11 @@ def report_template() -> str:
            "It is only VERIFIED IN PART when a part of the claim has NO evidence here, and then that part is what",
            "you name — not the arithmetic of your own sample.",
            "",
-           "**A withheld text IS such a part, and it decides a claim the two 2 Oct audits split on.** An audit",
-           "pack carries no query text, no result and no document text, so `query_sha256` and `result_sha256`",
-           "cannot be checked against anything in it and the verifier SKIPs them. One auditor called the",
-           "untampered-statements claim VERIFIED; the other called it VERIFIED IN PART naming exactly that. The",
-           "second is right, and this brief should have said so rather than leaving you to decide: the",
-           "signatures over the statements verify completely, and the binding from a statement to the text that",
-           "was searched is not testable here. That is VERIFIED IN PART, and the part you name is the withheld",
-           "text. The professional's own machine ran that check on the full record; you cannot, and saying you",
-           "could would be the overclaim.",
+           "**Claim 4 is about statement signatures, not the withheld texts.** A previous version of this",
+           "template required VERIFIED IN PART merely because the query and result texts are withheld,",
+           "while the actual claim asked only whether each statement's signature verifies. That imposed",
+           "a different claim from the one printed above. Verify the signatures as written; report the",
+           "uncheckable text-to-hash bindings separately as a limit, never as something you checked.",
            "",
            "**Count your verdicts before you submit.** If they are all the same value, either say in the",
            "closing why the evidence really is uniform, or go back and read your own Covered by lines again.",
@@ -2016,7 +2035,23 @@ def report_template() -> str:
             "",
             "<two or three plain sentences, written LAST, from the verdicts above and nothing else; report the",
             "recipient-match count and its limit, and do not claim it proves exclusivity>",
+            "",
+            "## Exact statement established, and its limits",
+            "",
+            "<Quote the exact positive statement your audit supports. Then name what it does not establish.",
+            "Do not turn counter contiguity into completeness, signed filter reports into observed behaviour,",
+            "or matching an operator's reference into a rebuild of its source. Give document coverage values.>",
             ""]
+    if pack is not None:
+        from . import probant_audit_results
+        out += ["## Results for the client", "",
+                "Complete the form below and save ONLY the JSON as", "",
+                "    ../AUDIT-RESULT-<this folder's name>.json", "",
+                "Write it last. Preserve IDs, titles, totals and pack hashes. Use zero for a check you did",
+                "not perform; `unchecked` is empty only when none of the claim remains unexamined.",
+                "A VERIFIED verdict needs full coverage. Other verdicts need explicit limitations.",
+                "The statements are YOUR conclusions, not new attestations. Use your actual model name.", "",
+                "```json", json.dumps(probant_audit_results.template(pack), indent=2), "```", ""]
     return "\n".join(out)
 
 
@@ -2306,6 +2341,7 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                 # knows WHICH wheel to fetch. Self-reported — this is the audited party naming itself — and
                 # the brief says so. It saves the auditor a guess, and proves nothing on its own.
                 "client_version": _client_version(),
+                "audit_claims": [{"id": n, "title": title} for n, title in audit_claims()],
                 # WHERE TO GET THAT WHEEL. VERIFY.md's step (b) — compare the shipped verifier against an
                 # independently published copy — was unrunnable for every auditor so far: the package is
                 # not on PyPI and nothing in the pack said where else to look. One of them named it
@@ -2463,7 +2499,7 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         os.chmod(dest / name, 0o600)
 
     tmpl = dest / "REPORT-TEMPLATE.md"
-    tmpl.write_bytes(report_template().encode("utf-8"))
+    tmpl.write_bytes(report_template(dest).encode("utf-8"))
     # READ-ONLY. Every other file here is 0600 and the template was too, so "fill it in" was a thing an
     # auditor could simply do in place. Belt and braces with the manifest: the brief names an output path,
     # this makes the wrong path fail at the first keystroke rather than at the integrity check.

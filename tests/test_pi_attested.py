@@ -1620,12 +1620,13 @@ def test_the_folder_is_mentioned_once_and_not_after_an_unrelated_answer():
 
     The observation was true and the capability is deliberate: `ls` and `find` are left available so the
     assistant can see THAT a stale draft exists and say so, since `read_matter_file` refuses to open it.
-    What was wrong is WHEN. A true remark attached to a question nobody asked is drift, it costs a turn
-    and tokens, and here it arrived in place of the answer that was due.
+    Folder inspection is reserved for a missing disclosure or an explicit request about other files.
+    A true remark attached to a question nobody asked is drift, it costs a turn and tokens, and here
+    it arrived in place of the answer that was due.
     """
     contract = (Path(PA.__file__).resolve().parent / "pi_attested" / "contract.md").read_text()
     flat = " ".join(contract.split())
-    assert "Say it ONCE, when you read the disclosure, and not again" in contract
+    assert "mention it once, and not again" in contract
     assert "not after an answer about something else" in flat
     assert "never in the middle of an unrelated answer" in flat
     # And the read tool's own rule: finish the question that was asked.

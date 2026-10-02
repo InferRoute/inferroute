@@ -37,6 +37,13 @@ def test_the_pack_verifies_like_the_record_except_the_texts_it_withholds(tmp_pat
     rec = _synthetic_bundle(tmp_path, V, kms)
     ref = str(tmp_path / "reference.json")
     pack = E.write_audit_pack(rec, tmp_path / "pack")
+    # The structured form is stationery inside the existing report template, so it adds no
+    # editable file to the verifier's evidence set and binds its results to this exact pack.
+    from inferroute_cli import probant_audit_results as R
+    form = json.loads(re.search(r"```json\n(.*?)\n```", (pack / "REPORT-TEMPLATE.md").read_text(), re.S)[1])
+    assert form["pack"] == R.identity(pack)
+    assert [c["id"] for c in form["claims"]] == list(range(1, 9))
+    assert all(c["verdict"] is None for c in form["claims"])
     code_r, out_r = _run(rec, "--reference", ref)
     code_p, out_p = _run(pack, "--reference", ref)
     before, after = _lines(out_r), _lines(out_p)
@@ -928,7 +935,7 @@ def test_the_pack_ships_a_report_skeleton_whose_headings_are_the_brief_s_claims(
     claims = E.audit_claims()
     assert [n for n, _ in claims] == list(range(1, 9)), claims
     assert claims[0][1] == "Sealed hardware"
-    assert claims[4][1] == "Nothing removed"
+    assert claims[4][1] == "No gaps in the recorded sequence"
 
     rec = _synthetic_bundle(tmp_path, V, kms)
     pack = E.write_audit_pack(rec, tmp_path / "pack")
@@ -1086,7 +1093,7 @@ def test_claim_five_names_both_ways_a_removal_hides():
     from inferroute_cli import probant_export as E
     import re
     b = re.sub(r"\s+", " ", E.AUDIT_MD)
-    assert "TWO exceptions no counter can reveal" in b
+    assert "TWO omissions no counter can reveal" in b
     assert "a verdict that names only the first is overstating what was checked" in b
     assert "an entire session, or an entire enclave lifetime, dropped from the record wholesale" in b
 
@@ -2341,9 +2348,7 @@ def test_the_template_settles_the_claim_the_two_2_oct_audits_split_on():
     assert "is **VERIFIED**. Not in part." in tmpl
     assert "not the arithmetic of your own sample" in tmpl
 
-    assert "A withheld text IS such a part" in tmpl
-    assert "`query_sha256` and `result_sha256`" in tmpl
-    assert "The second is right, and this brief should have said so" in tmpl
-    # The stricter reading, with the reason it is not a defect in the record.
-    assert "the binding from a statement to the text that was searched is not testable here" in tmpl
-    assert "saying you could would be the overclaim" in tmpl
+    assert "Claim 4 is about statement signatures, not the withheld texts" in tmpl
+    assert "Verify the signatures as written" in tmpl
+    assert "uncheckable text-to-hash bindings separately as a limit" in tmpl
+    assert "never as something you checked" in tmpl

@@ -2532,3 +2532,58 @@ def test_the_next_steps_bar_shows_nothing_before_the_first_message():
     assert "SUB:From your marks" in marked and "Find documents like US-1-A1" in marked
     # The assistant's own list comes first when it has one.
     assert out["startedWithAssistantSteps"][0] == "Read US-1-A1 against claim 1"
+
+
+def test_the_panel_shows_the_statement_the_verifier_computed_not_one_written_beside_it():
+    """Henry, 2 Oct: "should we clearly display the statement we think the audit will pass in the client near
+    where the button is".
+
+    Yes — and computed, never written. The plain statement comes from confidentiality_reach, which is gated on
+    the evidence, and five rounds of naive-reader testing went into its wording. A second copy maintained by
+    the page would be a claim about a record that no code checks, and the two would drift — the shape of every
+    bad hour of 1-2 Oct. So the page lifts the verifier's own block verbatim out of its output.
+
+    Showing it is a commitment rather than an advertisement: we state what we expect an independent reader to
+    conclude BEFORE they look, which makes a difference between the two a finding instead of a surprise. The
+    audit button sits directly under it, and the words say this is our own machine's account of itself.
+    """
+    from inferroute_cli import probant_check as C
+    out = (
+        "  PASS something: fine\n"
+        "\n"
+        "  In plain words, for a reader who will not read the table above\n"
+        "    This record cannot tell you whether your text stayed private.\n"
+        "\n"
+        "    What it does show is narrower than it may sound.\n"
+        "\n"
+        "  Gaps identified in this record:\n"
+        "    - a verification gap\n")
+    got = C.plain_block(out)
+    assert got == ["This record cannot tell you whether your text stayed private.",
+                   "What it does show is narrower than it may sound."], got
+    # It stops at the next section rather than swallowing the gap list under the heading.
+    assert not any("verification gap" in p for p in got)
+    # No heading at all: the verifier prints none for a reach level with no sentence written, deliberately,
+    # and the page must then say nothing rather than reach for the nearest sentence it has.
+    assert C.plain_block("  PASS something: fine\n") == []
+    assert "plain" in C.parse(out, 0) and C.parse(out, 0)["plain"] == got
+
+    js = (STATIC / "app.js").read_text()
+    code = re.sub(r"//[^\n]*", "", js)
+    assert "function statementBlock(plain)" in code
+    assert 'for (const para of plain) box.append(el("p", "licensed-para", para));' in code
+    # Falsification framing, not a badge.
+    assert "that difference is the finding and we want to hear it" in code
+    assert "our own \" + \"machine's account of itself" in code or "machine's account of itself" in code
+    # Shown above the audit button, and re-rendered per export so a stale record's sentence cannot linger.
+    assert 'auditOffer($("audit"), (r.check || {}).plain);' in code
+    body = code[code.index("function auditOffer"):]
+    assert body.index("statementBlock(plain)") < body.index('"Have your own AI audit it"')
+
+
+def test_the_panel_hands_out_the_verify_command_that_answers_the_question():
+    """Fixed in the export print path on 1 Oct and missed here: a bare `verify_record.py .` exits 1 with one
+    FAIL per search saying identity could not be established. The panel was still offering that one."""
+    py = (Path(W.__file__)).read_text()
+    assert '"python3 verify_record.py ."' not in py, "the bare command is back"
+    assert py.count("--reference-key <its key>") == 2

@@ -2202,9 +2202,33 @@
     b.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Copied.", "info")).catch(() => {}));
     return b;
   }
-  function auditOffer(box) {
+  // WHAT THIS RECORD LICENSES US TO SAY, computed by the same code the auditor will run, shown BEFORE they run
+  // it. Henry, 2 Oct: "should we clearly display the statement we think the audit will pass".
+  //
+  // Lifted verbatim from the verifier's own output rather than written beside it. A sentence maintained by this
+  // page would be a claim about a record that no code checks, and the two would drift — which is the shape of
+  // every bad hour of 1-2 Oct. The posture of a record changes this text because it is the same bytes.
+  //
+  // Displaying it is a commitment, not an advertisement: we say what we think an independent reader will
+  // conclude, before they look, so that a difference between the two is a finding rather than a surprise. That
+  // is why the audit button sits directly under it and why the words say this is our own machine's account of
+  // itself.
+  function statementBlock(plain) {
+    if (!plain || !plain.length) return null;
+    const box = el("div", "licensed");
+    box.append(el("div", "licensed-title", "What this record lets us say — and what we expect an audit to find"),
+      el("p", "sub", "Computed by the same code an auditor runs, not written beside it. This is our own "
+        + "machine's account of itself; the button below lets someone else recompute it. If their answer "
+        + "differs from this, that difference is the finding and we want to hear it."));
+    for (const para of plain) box.append(el("p", "licensed-para", para));
+    return box;
+  }
+
+  function auditOffer(box, plain) {
     clear(box);
     box.className = "audit-offer";        // its own block: the panel's container carries no styling of its own
+    const said = statementBlock(plain);
+    if (said) box.append(said);
     const go = el("button", "ghost", "Have your own AI audit it");
     go.type = "button";
     box.append(el("div", "audit-title", "A second opinion that isn't ours"),
@@ -2276,6 +2300,9 @@
       copy.addEventListener("click", () => navigator.clipboard.writeText(r.path).then(() => toast("Copied.", "info")).catch(() => {}));
       const verdict = el("div", "check-result");
       renderCheck(verdict, r.check || {}, true);
+      // The statement this record licenses, now that one has been computed for it. Re-rendered rather than
+      // appended so a second export cannot leave the previous record's sentence on screen beside the new one.
+      auditOffer($("audit"), (r.check || {}).plain);
       clear(out);
       out.append(verdict,
         el("div", "export-where", el("b", "", "The record"), " holds the disclosure in plain text: store it like the client file. Open record.html in:"),

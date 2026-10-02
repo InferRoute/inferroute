@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.9.82"
+version = "0.9.83"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"

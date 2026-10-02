@@ -370,6 +370,11 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .session-row:hover { background: var(--user); }
 .session-row .matter-of { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .session-row, .session-row:not(:has(.matter-of)), .record-row { grid-template-columns: 1fr 1fr; } }
+/* What a record licenses us to say, above the audit button. Quiet rather than promotional: it is a claim we
+   are inviting someone to falsify, and a box that looks like a badge would read as the opposite. */
+.licensed { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; margin: 0 0 16px; }
+.licensed-title { font-weight: 600; margin-bottom: 4px; }
+.licensed-para { color: var(--muted); font-size: 13.5px; margin: 8px 0 0; line-height: 1.5; }
 .mark-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .mark-chip { font-size: 12px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line); white-space: nowrap; }
 .mark-chip.m-relevant { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }

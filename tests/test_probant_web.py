@@ -111,8 +111,8 @@ def test_no_route_exposes_shell_model_or_session_commands(client):
     assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack",
                      # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
-                     # it takes a choice from two agents — never a command. See the launcher's own test.
-                     "/api/audit-launch",
+                     # it takes a choice from three agents — never a command. See the launcher's own test.
+                     "/api/audit-launch", "/api/audit-results",
                      # Read-only: the failures of the running session. Reports no words of the matter, only
                      # error strings and how long it had been quiet. Added 2026-09-30 because a session
                      # failing on every turn could not be diagnosed from outside it.
@@ -1097,6 +1097,8 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     monkeypatch.setattr(probant_check, "check", lambda d: {"verdict": "passed", "groups": [], "checks": 1})
     made = []
     monkeypatch.setattr(probant_export, "write_audit_pack", lambda d: made.append(str(d)) or Path("/tmp/audit-pack-x"))
+    from inferroute_cli import probant_audit_results
+    monkeypatch.setattr(probant_audit_results, "identity", lambda _: {"manifest_sha256": "m", "evidence_list_sha256": "e"})
     b, c = client
     # Offered from the start (Henry, 20 Sep: "integrate this audit thing in the chat page"), so with nothing
     # exported yet it writes the record first — one click, not a sequence the professional must know.
@@ -1116,8 +1118,10 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     from inferroute_cli import probant_export as _E
     assert r["ir"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
     assert r["claude"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
+    assert _shlex.split(r["codex"])[0] == "codex"
+    assert _shlex.split(r["codex"])[-1] == _E.AUDIT_PROMPT
     js = (STATIC / "app.js").read_text()
-    assert 'api("/api/audit-pack", {})' in js and "No Claude subscription?" in js
+    assert 'api("/api/audit-pack", {})' in js and '["codex", "Codex"]' in js
     assert 'auditOffer($("audit"))' in js                     # in the panel, not inside the export result
     assert "ten to fifteen minutes" in js                     # a tester who interrupts it gets nothing
 
@@ -1221,12 +1225,12 @@ def test_the_page_learns_about_the_search_machine_from_the_session_payload():
 
 def test_the_page_picks_an_agent_and_never_a_command():
     """This is the one endpoint on this page that starts a program, so what the page may say is the whole
-    security question. It sends a choice from two; the command is composed server-side from the same
+    security question. It sends a choice from three; the command is composed server-side from the same
     constants the copyable text uses. If a command string from the page could reach the launcher, anything
     that reached the page could run anything on this computer."""
     py = Path(W.__file__).resolve().read_text()
     launcher = py[py.index('@app.post("/api/audit-launch")'):py.index('@app.post("/api/close")')]
-    assert 'agent not in ("claude", "ir")' in launcher          # a closed set, rejected otherwise
+    assert 'agent not in ("claude", "codex", "ir")' in launcher  # a closed set, rejected otherwise
     # Nothing from the request body may become part of what runs: `agent` is compared, never interpolated.
     for forbidden in ('d.get("command"', 'd.get("cmd"', 'd.get("path"', "shell=True"):
         assert forbidden not in launcher, forbidden
@@ -1238,10 +1242,41 @@ def test_the_shown_command_and_the_run_command_are_the_same_string():
     must never lie about what it runs is the panel asking for a second opinion on our own proof."""
     from inferroute_cli import probant_export as E
     py = Path(W.__file__).resolve().read_text()
-    for agent in ("claude", "ir"):
+    for agent in ("claude", "codex", "ir"):
         assert f'probant_export.audit_command("{agent}")' in py or "audit_command(agent)" in py
     assert E.audit_command("claude").startswith("claude ")
     assert E.audit_command("ir").startswith("ir --plain --model ")
+
+
+def test_codex_launch_uses_the_server_command_and_refuses_injected_commands(client, tmp_path, monkeypatch):
+    import shlex
+    import shutil
+    import subprocess
+    from inferroute_cli import probant_export as E
+    pack = tmp_path / "pack with spaces"
+    pack.mkdir()
+    (pack / "MANIFEST.json").write_text("{}")
+    (pack / "SHA256SUMS").write_text("")
+    monkeypatch.setattr(E, "write_audit_pack", lambda _: pack)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(W, "terminal_argv", lambda script: ["terminal", str(script)])
+    scripts, opened = [], []
+    monkeypatch.setattr(W, "audit_launch_script", lambda p, command: scripts.append((p, command)) or tmp_path / "run.sh")
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: opened.append(argv))
+    _, c = client
+    assert c.post("/api/audit-pack", json={}).status_code == 200
+    r = c.post("/api/audit-launch", json={"agent": "codex", "command": "touch /tmp/injected", "path": "/etc"})
+    assert r.status_code == 200 and r.json()["agent"] == "codex"
+    assert scripts == [(pack, E.audit_command("codex"))]
+    args = shlex.split(scripts[0][1])
+    assert args[args.index("--sandbox") + 1] == "workspace-write"
+    assert args[args.index("--ask-for-approval") + 1] == "on-request"
+    assert args[args.index("--add-dir") + 1] == ".."
+    assert args[-1] == E.AUDIT_PROMPT
+    assert c.post("/api/audit-launch", json={"agent": "codex; touch /tmp/injected"}).status_code == 400
+    monkeypatch.setattr(shutil, "which", lambda _: None)
+    assert c.post("/api/audit-launch", json={"agent": "codex"}).status_code == 409
+    assert len(scripts) == len(opened) == 1
 
 
 def test_the_audit_runs_on_the_standard_lane_because_the_pack_holds_no_client_words():
@@ -1264,7 +1299,7 @@ def test_no_terminal_means_the_offer_falls_back_to_copying(monkeypatch):
     monkeypatch.setattr(W.sys, "platform", "linux")
     assert W.terminal_argv(Path("/tmp/x.sh")) is None
     js = (STATIC / "app.js").read_text()
-    assert "r.can_launch" in js and "Copy (goes to the folder too)" in js
+    assert "r.can_launch" in js and "Copy command" in js
 
 
 def test_each_terminal_gets_its_own_separator(monkeypatch):
@@ -1615,6 +1650,15 @@ def test_every_audit_runs_on_its_own_copy_of_the_pack(tmp_path):
     assert before == after, "the original pack changed"
     runs = sorted(pack.parent.glob("audit-run-*"))
     assert len(runs) == 1 and (runs[0] / "AUDIT.md").read_text() == "brief"
+    # Launching a second auditor from this same server must not erase the first auditor's work.
+    (runs[0] / "notes.txt").write_text("first auditor's notes")
+    second = W.audit_launch_script(pack, "true").read_text()
+    r = subprocess.run(["bash", "-c", second.replace("exec bash", "true")],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-400:]
+    assert (runs[0] / "notes.txt").read_text() == "first auditor's notes"
+    assert len(list(pack.parent.glob("audit-run-*"))) == 2
+    assert before == {p.name: p.read_bytes() for p in pack.iterdir()}
 
 
 def test_a_verification_refusal_is_never_retried_quietly():

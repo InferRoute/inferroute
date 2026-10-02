@@ -9,6 +9,7 @@
 (() => {
   const KEY_STORE = "probant-session-key";
   const $ = (id) => document.getElementById(id);
+  let auditResultsTarget = null, auditResultsSnapshot = "", auditResultsBusy = false, auditResultsPack = null;
 
   // ── the session key: from the URL fragment (never sent to a server), then out of the address bar ──
   let key = "";
@@ -2196,11 +2197,55 @@
   // A second opinion that is not ours: the professional's own AI audits an evidence-only copy — the machines,
   // the signatures and the identity, with none of the invention's words. Their Claude subscription, or the
   // generic `ir` agent when they have none.
-  function copyButton(text, label) {
-    const b = el("button", "small", label || "Copy");
-    b.type = "button";
-    b.addEventListener("click", () => navigator.clipboard.writeText(text).then(() => toast("Copied.", "info")).catch(() => {}));
-    return b;
+  function renderAuditResults(box, data) {
+    clear(box);
+    if (!data.prepared) return;
+    const reports = data.results || [];
+    if (!reports.length) box.append(el("p", "sub", "Awaiting a completed audit result."));
+    for (const [index, report] of reports.entries()) {
+      const counts = {};
+      for (const claim of report.claims) counts[claim.verdict] = (counts[claim.verdict] || 0) + 1;
+      const labels = { VERIFIED: "verified", "VERIFIED IN PART": "partial", "NOT VERIFIED": "not verified", "COULD NOT CHECK": "not checked" };
+      const tally = Object.entries(counts).map(([v, n]) => `${n} ${labels[v]}`).join(" · ");
+      const heading = `${report.auditor.model} · ${report.completed_at.slice(0, 10)} · ${tally}`;
+      const group = el("details", "audit-report", el("summary", "", heading),
+        el("p", "sub", `Reported by ${report.auditor.name}. These are the auditor's conclusions.`),
+        el("p", "audit-conclusion", report.verified_statement));
+      group.open = index === 0;
+      for (const claim of report.claims) {
+        const state = { VERIFIED: "verified", "VERIFIED IN PART": "partial", "NOT VERIFIED": "failed", "COULD NOT CHECK": "unchecked" }[claim.verdict];
+        const row = el("details", `audit-claim ${state}`,
+          el("summary", "", el("span", "audit-dot", "●"),
+            el("span", "", `${claim.id}. ${claim.title}`), el("span", "audit-verdict", labels[claim.verdict])));
+        if (claim.verified_statement) row.append(el("p", "", claim.verified_statement));
+        row.append(el("p", "sub", claim.evidence),
+          el("p", "sub", `Coverage: tool ${claim.coverage.tool}/${claim.coverage.total} · independently recomputed ${claim.coverage.independent}/${claim.coverage.total}.`));
+        if (claim.coverage.unchecked) row.append(el("p", "sub", `Unchecked: ${claim.coverage.unchecked}`));
+        for (const limit of claim.limitations) row.append(el("p", "sub", limit));
+        group.append(row);
+      }
+      group.append(el("div", "audit-limits", el("b", "", "Limits"),
+        ...report.limitations.map(limit => el("p", "sub", limit))));
+      box.append(group);
+    }
+    for (const rejected of data.rejected || []) box.append(el("p", "sub", `Result not loaded: ${rejected.reason}.`));
+  }
+
+  async function refreshAuditResults() {
+    if (!key || !auditResultsTarget || auditResultsBusy) return;
+    auditResultsBusy = true;
+    const target = auditResultsTarget;
+    try {
+      const data = await api("/api/audit-results");
+      if (target !== auditResultsTarget || (data.prepared && auditResultsPack &&
+          JSON.stringify(data.pack) !== JSON.stringify(auditResultsPack))) return;
+      const snapshot = JSON.stringify(data);
+      if (snapshot !== auditResultsSnapshot) {
+        renderAuditResults(auditResultsTarget, data);
+        auditResultsSnapshot = snapshot;
+      }
+    } catch (_) { /* Keep the last report visible if this session's bridge has stopped. */ }
+    finally { auditResultsBusy = false; }
   }
   // WHAT THIS RECORD LICENSES US TO SAY, computed by the same code the auditor will run, shown BEFORE they run
   // it. Henry, 2 Oct: "should we clearly display the statement we think the audit will pass".
@@ -2231,53 +2276,73 @@
     if (said) box.append(said);
     const go = el("button", "ghost", "Have your own AI audit it");
     go.type = "button";
-    box.append(el("div", "audit-title", "A second opinion that isn't ours"),
-      el("p", "sub", "Your own AI checks this proof against a brief, on an evidence-only copy: the hardware "
-        + "reports, signatures and identity, with none of your client's words (no queries, results or document "
-        + "text). It takes ten to fifteen minutes and needs no account with us."), go);
+    box.append(el("div", "audit-title", "Independent audit"),
+      el("p", "sub", "Check hardware, signatures and identity without sharing your disclosure, queries or patent text."), go);
+    const results = el("div", "audit-results");
+    auditResultsTarget = results;
+    auditResultsSnapshot = "";
+    auditResultsPack = null;
+    box.append(results);
     go.addEventListener("click", async () => {
       go.disabled = true;
       go.textContent = "Preparing the audit pack…";
       try {
         const r = await api("/api/audit-pack", {});
+        auditResultsPack = r.pack_identity;
         clear(box);
         box.className = "audit-offer ready";
-        // A launch button rather than a command to copy: the pack is ready, the folder is known, and asking
-        // someone to copy a line, find a terminal and paste it is three steps between them and the second
-        // opinion this whole panel exists to get. The command stays on screen — it is what they are being
-        // asked to trust — and copying stays available where there is no terminal to open.
-        const launch = (agent, label) => {
-          const b = el("button", "small primary", label);
+        const choice = el("select", "audit-agent");
+        choice.setAttribute("aria-label", "Audit with");
+        for (const [agent, label] of [["claude", "Claude"], ["codex", "Codex"], ["ir", "InferRoute"]]) {
+          const option = el("option", "", label);
+          option.value = agent;
+          choice.append(option);
+        }
+        const commands = { claude: r.claude, codex: r.codex, ir: r.ir };
+        const shellQuote = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
+        const fullCommand = () => `cd ${shellQuote(r.path)} && ${commands[choice.value]}`;
+        const shownCommand = el("code", "mono", fullCommand());
+        const copy = el("button", "small", "Copy command");
+        copy.type = "button";
+        copy.addEventListener("click", () => navigator.clipboard.writeText(fullCommand())
+          .then(() => toast("Copied.", "info")).catch(() => toast("Couldn't copy the command.", "error")));
+        let runButton = null;
+        choice.addEventListener("change", () => {
+          shownCommand.textContent = fullCommand();
+          if (runButton) { runButton.disabled = false; runButton.textContent = "Run audit"; }
+        });
+        const launch = () => {
+          const b = el("button", "small primary", "Run audit");
           b.type = "button";
           b.addEventListener("click", async () => {
             b.disabled = true;
+            choice.disabled = true;
             const was = b.textContent;
             b.textContent = "Opening a terminal…";
             try {
-              const got = await api("/api/audit-launch", { agent });
+              const got = await api("/api/audit-launch", { agent: choice.value });
               toast(`Opened in ${got.terminal}. The audit runs there and keeps going if you close this page.`, "info");
               b.textContent = "Opened";
             } catch (e) {
               b.disabled = false;
               b.textContent = was;
               toast(e.message, "error");
+            } finally {
+              choice.disabled = false;
             }
           });
           return b;
         };
-        const offer = (agent, cmd) => (r.can_launch
-          ? [el("span", "mono", cmd), el("div", "row", launch(agent, "Run it in a terminal"),
-                                          copyButton(`cd "${r.path}" && ${cmd}`, "Copy instead"))]
-          : [el("span", "mono", cmd), copyButton(`cd "${r.path}" && ${cmd}`, "Copy (goes to the folder too)")]);
+        if (r.can_launch) runButton = launch();
+        const details = el("details", "audit-details", el("summary", "", "Details"),
+          el("span", "mono", r.path), shownCommand,
+          el("p", "sub", "AUDIT.md asks the auditor to recompute the checks and report what could not be verified. "
+            + "Checks needing your client's words are left to this computer."));
         box.append(el("div", "audit-title", "Audit pack ready"),
-          el("span", "mono", r.path),
-          el("p", "", el("b", "", "With your Claude subscription"), r.can_launch ? ":" : ", in that folder run:"),
-          ...offer("claude", r.claude),
-          el("p", "", el("b", "", "No Claude subscription?"), " Use your InferRoute account instead:"),
-          ...offer("ir", r.ir),
-          el("p", "sub", "The brief (AUDIT.md) asks for a verdict on each claim and has it redo the key checks with "
-            + "its own tools, not only run ours. It takes ten to fifteen minutes — let it finish. Two checks need "
-            + "your client's words, so it will report those as not checked; the check on this computer covers them."));
+          el("div", "row audit-controls", choice, runButton, copy),
+          el("p", "sub", "Allow ten to fifteen minutes. Uses your selected agent's account."), details, results);
+        auditResultsSnapshot = "";
+        await refreshAuditResults();
       } catch (e) { go.disabled = false; go.textContent = "Have your own AI audit it"; toast(e.message, "error"); }
     });
     return box;
@@ -2315,5 +2380,6 @@
     endSession($("end"));
   });
 
+  setInterval(refreshAuditResults, 5000);
   init();
 })();

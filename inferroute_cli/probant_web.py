@@ -333,9 +333,9 @@ def audit_launch_script(pack: Path, command: str) -> Path:
     # The copy sits beside the original as `audit-run-<pack>-<pid>`, so a report written "one directory
     # up" lands in the exports folder where every other report already is, and the original is never
     # opened for writing by anyone.
-    run = pack.parent / f"audit-run-{pack.name}-{os.getpid()}"
+    # One server can launch several auditors: its pid alone is not a unique run id.
+    run = pack.parent / f"audit-run-{pack.name}-{os.getpid()}-{d.name}"
     sh.write_text("#!/bin/bash\n"
-                  f"rm -rf {shlex.quote(str(run))}\n"
                   f"cp -r {shlex.quote(str(pack))} {shlex.quote(str(run))} || exit 1\n"
                   f"chmod -R u+w {shlex.quote(str(run))}\n"
                   f"cd {shlex.quote(str(run))} || exit 1\n"
@@ -1126,6 +1126,8 @@ class Bridge:
                           "explainer": type(e).__name__, "groups": [], "checks": 0}
             result.pop("output", None)
             proved["path"] = path
+            proved.pop("pack", None)
+            proved.pop("pack_identity", None)
             return {"ok": True, "path": str(path), "check": result, "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
                                       "--reference-key <its key>")}
 
@@ -1134,6 +1136,7 @@ class Bridge:
             """An evidence-only copy of the record just proven, for the professional's OWN AI to audit: no query,
             result or document text. The record is the one this page exported, never a path the page sends."""
             from . import probant_export
+            from . import probant_audit_results
             # Offered in the panel from the start, so it exports and checks the record first when nothing has
             # been exported yet: a second opinion should be one click, not a sequence the professional has to
             # know. The record is always the one THIS page wrote — never a path the page sends.
@@ -1144,32 +1147,53 @@ class Bridge:
                     return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
             try:
                 pack = await asyncio.to_thread(probant_export.write_audit_pack, proved["path"])
+                pack_identity = probant_audit_results.identity(pack)
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"the audit pack could not be written: {e}"}, status_code=500)
             prompt = probant_export.AUDIT_PROMPT
             proved["pack"] = str(pack)              # the folder a launch opens, so it never prepares a second
-            return {"ok": True, "path": str(pack), "prompt": prompt,
+            proved["pack_identity"] = pack_identity
+            return {"ok": True, "path": str(pack), "prompt": prompt, "pack_identity": pack_identity,
                     "can_launch": can_open_terminal(),
                     "claude": probant_export.audit_command("claude"),
+                    "codex": probant_export.audit_command("codex"),
                     "ir": probant_export.audit_command("ir")}
+
+        @app.get("/api/audit-results")
+        async def audit_results():
+            from . import probant_audit_results
+            if not proved.get("pack"):
+                return {"results": [], "rejected": [], "prepared": False}
+            # A new export may be prepared while the file reader is running. Return the identity
+            # we actually read, so the page cannot attach yesterday's conclusions to the new pack.
+            pack = Path(proved["pack"])
+            expected = dict(proved["pack_identity"])
+            got = await asyncio.to_thread(probant_audit_results.collect, pack, expected)
+            return {**got, "prepared": True,
+                    "pack": expected,
+                    "attribution": "The auditor's report, not a new hardware verification."}
 
         @app.post("/api/audit-launch")
         async def audit_launch(request: Request):
             """Open a terminal on the prepared audit pack, running the chosen agent.
 
-            The page sends WHICH agent, from two, and never a command. The command is built here from the
+            The page sends WHICH agent, from three, and never a command. The command is built here from the
             same constants the copyable text uses, so the two can never say different things, and there is
             no string from the page anywhere in what gets run."""
             import subprocess
             from . import probant_export
             d = await body(request)
             agent = str(d.get("agent") or "")
-            if agent not in ("claude", "ir"):
+            if agent not in ("claude", "codex", "ir"):
                 return JSONResponse({"error": "unknown agent"}, status_code=400)
             pack = proved.get("pack")
             if not pack or not Path(pack).is_dir():
                 return JSONResponse({"error": "prepare the audit pack first"}, status_code=409)
-            prompt = probant_export.AUDIT_PROMPT
+            import shutil
+            if shutil.which(agent) is None:
+                label = {"claude": "Claude", "codex": "Codex", "ir": "InferRoute"}[agent]
+                return JSONResponse({"error": f"{label} isn't available on this computer. Install it, then try again."},
+                                    status_code=409)
             command = probant_export.audit_command(agent)
             argv = terminal_argv(audit_launch_script(Path(pack), command))
             if argv is None:

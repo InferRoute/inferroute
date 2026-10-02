@@ -1104,7 +1104,8 @@ class Bridge:
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
             return {"ok": True, "path": str(path), "verify_here": f"ir probant verify-export {path}",
-                    "verify_anyone": "python3 verify_record.py ."}
+                    "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
+                                      "--reference-key <its key>")}
 
         proved: dict = {}                                   # the record this page last exported and checked
 
@@ -1125,7 +1126,8 @@ class Bridge:
                           "explainer": type(e).__name__, "groups": [], "checks": 0}
             result.pop("output", None)
             proved["path"] = path
-            return {"ok": True, "path": str(path), "check": result, "verify_anyone": "python3 verify_record.py ."}
+            return {"ok": True, "path": str(path), "check": result, "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
+                                      "--reference-key <its key>")}
 
         @app.post("/api/audit-pack")
         async def audit_pack():

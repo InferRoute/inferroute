@@ -141,7 +141,39 @@ def parse(text: str, code: int) -> Dict[str, Any]:
         groups.append(entry)
     return {"code": code, "verdict": verdict, "headline": headline, "explainer": explainer,
             "result_line": result, "groups": groups, "checks": len(rows),
-            "failed": [r["name"] for r in rows if r["status"] == "FAIL"], "output": text}
+            "failed": [r["name"] for r in rows if r["status"] == "FAIL"], "output": text,
+            "plain": plain_block(text)}
+
+
+PLAIN_HEADING = "In plain words, for a reader who will not read the table above"
+
+
+def plain_block(text: str) -> List[str]:
+    """The verifier's OWN plain statement for this record, lifted verbatim from its output.
+
+    Not re-derived and not written beside it. The statement is computed from `confidentiality_reach`, which is
+    gated on the evidence, and five rounds of naive-reader testing went into its wording (a940a98). A second
+    copy maintained by the page would be a sentence about a record that no code checks — and this session has
+    already watched one artifact claim a version another artifact contradicted. One function, one answer, and
+    when the record's posture changes the page changes with it because it is reading the same bytes.
+
+    Returns the paragraphs, outdented, or [] when the verifier printed none (which it does deliberately for a
+    reach level that has no sentence written — the nearest available one would overclaim).
+    """
+    if PLAIN_HEADING not in text:
+        return []
+    body = text[text.index(PLAIN_HEADING) + len(PLAIN_HEADING):]
+    out: List[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # The block runs to the next thing that is not an indented paragraph of it. The verifier prints its
+        # rows with a PASS/FAIL/SKIP prefix and its sections at a shallower indent, so either ends it.
+        if ROW.match(raw) or not raw.startswith("    "):
+            break
+        out.append(line)
+    return out
 
 
 def published_reference() -> Tuple[Optional[str], Optional[str]]:

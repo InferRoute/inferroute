@@ -76,7 +76,7 @@ def test_no_route_beyond_what_the_page_needs(home):
                      # deleting a matter (19 Sep): restorable for 30 days, then erased
                      "/api/matter/delete", "/api/deleted", "/api/deleted/restore", "/api/deleted/erase",
                      # reading a document and proposing matters from it (20 Sep)
-                     "/api/intake", "/api/intakes", "/api/intake/create",
+                     "/api/intake", "/api/intakes", "/api/intake/create", "/api/intake/review",
                      # Folders (1 Oct): organising matters, and the unit a corpus is sealed from. The
                      # sharing a corpus of matters with another Probant user (20 Sep)
                      "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open",

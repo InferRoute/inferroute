@@ -256,6 +256,7 @@ def list_matters() -> List[Dict[str, Any]]:
             ws = Path(str(rec.get("workspace") or ""))
             out.append({"id": f"{client}/{matter}", "client": client, "matter": matter,
                         "date_bound": rec.get("date_bound"), "created_at": rec.get("created_at"),
+                        "needs_review": bool(rec.get("needs_review")),
                         "sessions": len(sessions), "searches": sum(s["searches"] for s in sessions),
                         "marks": len(marks), "last_activity": sessions[0]["started_at"] if sessions else rec.get("created_at"),
                         "disclosure_words": disclosure_info(ws)["disclosure_words"] if ws.is_dir() else 0})
@@ -380,7 +381,7 @@ class Launches:
             except subprocess.TimeoutExpired:
                 it["proc"].kill()
 
-    def start(self, matter_id: str, *, intake_dir: str = "") -> Dict[str, Any]:
+    def start(self, matter_id: str, *, intake_dir: str = "", draft_client: str = "Personal") -> Dict[str, Any]:
         """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
         proposes matters from it. Both are the same child, the same page and the same sealed lane; only
         the command differs, so a reading session cannot drift into a second kind of session."""
@@ -390,7 +391,7 @@ class Launches:
         from . import pi_attested
         # The child's page shows a way back here, so a finished session is not a dead end.
         env = dict(os.environ, IR_PROBANT_NO_BROWSER="1", IR_PROBANT_HOME_URL=self.home_url)
-        argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web"] if intake_dir
+        argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web", "--client", draft_client] if intake_dir
                 else [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
@@ -542,6 +543,7 @@ class Home:
                        for e in list_exports(client, matter)]
             running = home.launches.running_for(mid)
             return {"id": mid, "client": client, "matter": matter, "date_bound": rec.get("date_bound"),
+                    "needs_review": bool(rec.get("needs_review")), "intake_origin": rec.get("intake_origin"),
                     "pre_filing_default": bool(rec.get("pre_filing_default")), "created_at": rec.get("created_at"),
                     "disclosure": disclosure_info(ws) if ws.is_dir() else {"folder": str(ws), "files": [], "disclosure_words": 0},
                     "sessions": list_sessions(client, matter), "exports": exports, "marks": matter_marks(client, matter),
@@ -584,9 +586,11 @@ class Home:
         async def start_session(request: Request):
             d = await body(request)
             try:
-                client, matter, _ = matter_of(str(d.get("id") or ""))
+                client, matter, rec = matter_of(str(d.get("id") or ""))
             except S.ProbantError as e:
                 return problem(str(e), 404)
+            if rec.get("needs_review"):
+                return problem("Review this draft's disclosure and date before starting a session.", 409)
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
         @app.post("/api/sessions/end")
@@ -717,7 +721,7 @@ class Home:
                 return problem(str(e), 404)
             return {"ok": True}
 
-        # ── reading a document: staged here, read by a sealed session, proposals created by the professional ──
+        # ── reading a document: source-checked drafts created through the host, then reviewed by the professional ──
         @app.post("/api/intake")
         async def intake(request: Request):
             """Stage a document the person gave the page, and start a session that reads it."""
@@ -725,10 +729,11 @@ class Home:
             from . import probant_intake as I
             d = await body(request)
             try:
+                client = S.sanitize(str(d.get("client") or "Personal"), "client")
                 meta = await asyncio.to_thread(I.stage, str(d.get("text") or ""), str(d.get("name") or ""))
             except S.ProbantError as e:
                 return problem(str(e), 400)
-            it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])))
+            it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])), draft_client=client)
             return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
 
         @app.get("/api/intake")
@@ -740,7 +745,7 @@ class Home:
             except S.ProbantError as e:
                 return problem(str(e), 404)
             running = home.launches.running_for(f"document · {meta['source_name']}")
-            return {"meta": meta, "proposals": proposals, "dropped": I.dropped_count(id),
+            return {"meta": meta, "proposals": proposals, "drafts": I.created_drafts(id), "dropped": I.dropped_count(id),
                     "running": home.launches.view(running) if running else None}
 
         @app.get("/api/intakes")
@@ -751,11 +756,55 @@ class Home:
             root = I.intake_root()
             for d in (sorted(root.iterdir(), reverse=True) if root.is_dir() else [])[:20]:
                 try:
-                    meta = json.loads((d / "meta.json").read_text())
-                    out.append({**meta, "proposals": len(I.read_proposals(meta["id"]))})
+                    meta = I.meta_of(d.name)
+                    out.append({**meta, "proposals": len(I.read_proposals(meta["id"])),
+                                "drafts": len(I.created_drafts(meta["id"]))})
                 except (OSError, ValueError, S.ProbantError):
                     continue
             return {"documents": out}
+
+        @app.post("/api/intake/review")
+        async def review_draft(request: Request):
+            from . import probant_intake as I
+            d = await body(request)
+            text = str(d.get("text") or "").strip()
+            date = str(d.get("priority_date") or "").strip()
+            if not text or len(text) > MAX_DISCLOSURE:
+                return problem("Enter a disclosure of 1–200,000 characters before saving your review.", 400)
+            try:
+                if date:
+                    S._to_yyyymmdd(date)
+                client, matter, _ = matter_of(str(d.get("id") or ""))
+                with I.draft_lock():
+                    rec = S.load_record(client, matter)
+                    if not rec.get("needs_review"):
+                        return problem("This matter has already been reviewed. Refresh the page to edit it.", 409)
+                    workspace = Path(rec["workspace"])
+                    if not workspace.is_dir():
+                        return problem("This draft's folder is missing. Restore it before saving your review.", 409)
+                    # Write the human's disclosure before clearing the gate. A failed save leaves
+                    # needs_review set, so a partially saved review cannot launch a search.
+                    target = workspace / "disclosure.md"
+                    temporary = workspace / (".review-" + secrets.token_hex(6) + ".tmp")
+                    try:
+                        temporary.write_text(f"# Disclosure\n\n{text}\n", encoding="utf-8")
+                        os.chmod(temporary, 0o600)
+                        os.replace(temporary, target)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                    old = rec["date_bound"]
+                    rec["date_bound"] = date or S._today()
+                    rec["pre_filing_default"] = not bool(date)
+                    rec["needs_review"] = False
+                    rec["reviewed_at"] = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    rec.setdefault("changes", []).append({"at": rec["reviewed_at"], "field": "draft_review",
+                                                         "old_date": old, "new_date": rec["date_bound"]})
+                    I._atomic_json(S.record_path(client, matter), rec)
+            except S.ProbantError as error:
+                return problem(str(error), 400)
+            except OSError:
+                return problem("Your review could not be saved. Check free disk space and try again.", 500)
+            return {"ok": True, "id": f"{client}/{matter}"}
 
         @app.post("/api/intake/create")
         async def intake_create(request: Request):

@@ -855,7 +855,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             local_key = "ir-" + _secrets.token_urlsafe(32)
             # Loopback, one client, for the life of one session: uvicorn's 5s idle close buys nothing here
             # and costs a race — the server's FIN can cross the agent's next request on a pooled connection.
-            server = uvicorn.Server(uvicorn.Config(create_app(session, local_key), host="127.0.0.1",
+            local_app = create_app(session, local_key)
+            if probant and probant.get("mode") == "intake" and probant.get("draft_client"):
+                from . import probant_intake
+                creator = probant_intake.DraftCreator(str(probant["intake"]), str(probant["draft_client"]))
+                probant_intake.install_creation_route(local_app, creator)
+            server = uvicorn.Server(uvicorn.Config(local_app, host="127.0.0.1",
                                                    port=port, log_level="critical",
                                                    timeout_keep_alive=SEALED_KEEPALIVE_S))
             server_task = asyncio.create_task(server.serve())
@@ -864,6 +869,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                     server_task.result()
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
+            env.pop("IR_INTAKE_CREATE_DRAFTS", None)
             # Before anything else about this child: a competing provider route would send the session
             # somewhere the panel has not verified, while the panel renders all-green. See
             # strip_provider_route.
@@ -883,6 +889,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
             if probant is not None:
                 env["IR_PROBANT_SURFACE"] = "browser" if web else "terminal"
+                if probant.get("mode") == "intake" and probant.get("draft_client"):
+                    env["IR_INTAKE_CREATE_DRAFTS"] = "1"
             local = f"http://127.0.0.1:{port}"
             session.shown_model = shown_model if agent == "claude" else alias.short
             if agent == "claude":

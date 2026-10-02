@@ -79,10 +79,11 @@ def load_contract() -> dict:
             "modified": p_sha != PINNED_PREAMBLE_SHA or c_sha != PINNED_CONTRACT_SHA}
 
 
-def load_intake_prompt() -> dict:
+def load_intake_prompt(create_drafts: bool = False) -> dict:
     """The whole system prompt for document intake, in the shape load_contract() returns so the session
     record pins WHICH prompt ran (its sha), not merely that one did."""
-    text = _strip_comments(INTAKE_FILE.read_text())
+    source = INTAKE_FILE.with_name("intake-drafts.md") if create_drafts else INTAKE_FILE
+    text = _strip_comments(source.read_text())
     sha = hashlib.sha256(text.encode()).hexdigest()
     return {"text": text, "preamble_sha": "", "contract_sha": sha, "modified": False}
 
@@ -336,14 +337,14 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
     check_passthrough(passthrough)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
-    # Reading a document to propose matters is its own mode: the file tools and ONE tool that records a
-    # proposal, and no search tool at all — a whole document is in context, and nothing may leave for a
-    # search machine while it is. The proposals file sits in the session's working directory, the one place
-    # the sandbox lets it write.
+    # Document readings have no search tools. New readings get a host-bound draft
+    # capability and read-only file tools; legacy proposal/cluster flows keep their tools.
     intake = str(env.get("IR_INTAKE_DIR") or "")
     cluster_out = str(env.get("IR_CLUSTER_OUT") or "")
     if intake or cluster_out:
-        tools = TOOLS + ((PROPOSE_TOOL, BATCH_TOOL) if intake else ()) + ((CLUSTER_TOOL,) if cluster_out else ())
+        create_drafts = bool(intake and env.get("IR_INTAKE_CREATE_DRAFTS") == "1")
+        tools = (("read", "grep", "find", "ls", "create_draft_matter") if create_drafts else
+                 TOOLS + ((PROPOSE_TOOL, BATCH_TOOL) if intake else ()) + ((CLUSTER_TOOL,) if cluster_out else ()))
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
     else:
@@ -367,7 +368,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         env[name] = _with_loopback(env.get("no_proxy") if env.get("no_proxy") is not None else env.get("NO_PROXY"))
     # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
     # config dir; its stamps go to the extension for the panel and the session record.
-    contract = load_intake_prompt() if intake else load_contract()
+    contract = load_intake_prompt(env.get("IR_INTAKE_CREATE_DRAFTS") == "1") if intake else load_contract()
     # The documents this matter's searching has returned in EARLIER sessions, so "find documents like X" works for
     # them too. It searched only this session's results, while the marks note and the page offered "like" for
     # marks made in earlier sessions — ten refused requests in a row on 19 Sep. Written after config_dir's scrub,

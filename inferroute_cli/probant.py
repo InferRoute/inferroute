@@ -11,8 +11,8 @@ The split that keeps it safe (decision record S1/S2):
              launcher trusts NOTHING read from it.
   RECORD     ~/.inferroute/confidential/matters/<client>/<matter>.json — client, ref, date bound, created,
              workspace path. Under confidential/, where the filesystem confinement denies the agent writes.
-Creation and every change to the date bound happen OUTSIDE any session, by the human, through this
-unconfined launcher — never by an in-session command. The per-matter cutoff, state and record are passed
+Creation happens through this host launcher, including the narrow draft-creation capability for
+document readings. Drafts need human review before searching. Only the human can change date bounds. The per-matter cutoff, state and record are passed
 to that matter's verifier as arguments, never through the shared search.json (S2).
 """
 from __future__ import annotations
@@ -22,6 +22,8 @@ import datetime as dt
 import json
 import os
 import re
+import threading
+from contextlib import contextmanager
 from typing import List, Optional
 import sys
 from pathlib import Path
@@ -147,7 +149,32 @@ def make_private(client: str, matter: str) -> None:
             pass
 
 
+_MATTER_CREATION_LOCK = threading.RLock()
+
+
+@contextmanager
+def matter_creation_lock():
+    """Coordinate human and reading-session creation without allowing record overwrites."""
+    import fcntl
+    with _MATTER_CREATION_LOCK:
+        root = _irhome() / "confidential"
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        lock = root / "matter-creation.lock"
+        with lock.open("a") as stream:
+            os.chmod(lock, 0o600)
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream, fcntl.LOCK_UN)
+
+
 def cmd_new(client: str, matter: str, priority_date: str | None, from_corpus: str = "") -> int:
+    with matter_creation_lock():
+        return _create_matter(client, matter, priority_date, from_corpus)
+
+
+def _create_matter(client: str, matter: str, priority_date: str | None, from_corpus: str) -> int:
     client, matter = sanitize(client, "client"), sanitize(matter, "matter")
     if record_path(client, matter).exists():
         raise ProbantError(f"matter {client}/{matter} already exists")
@@ -307,6 +334,8 @@ def cmd_verify_export(bundle_dir: str) -> int:
 def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     client, matter = _split_matter(spec)
     rec = load_record(client, matter)
+    if rec.get("needs_review"):
+        raise ProbantError("this draft needs your review: open it in Probant home and check its disclosure and date before starting a session")
     ws = Path(rec["workspace"])
     if not ws.is_dir():
         raise ProbantError(f"the matter workspace is missing: {ws}")
@@ -349,19 +378,15 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     return confidential_mod.launch([], agent="pi", probant=probant)
 
 
-def cmd_intake(path: str, web: bool = False) -> int:
-    """Read a long document in a sealed session and collect the matters it proposes.
-
-    No matter is open, so nothing here has a date bound, a state file or a search tool: the session reads the
-    staged document and calls `propose_matter`. The professional creates matters afterwards, from what it
-    proposed, with `ir probant from-proposal`.
-    """
+def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals_only: bool = False) -> int:
+    """Read a document and create draft matters under the selected client, or record proposals only."""
     from . import probant_intake as I
+    client = sanitize(client, "client")
     # Either a document to stage, or one already staged (the home page stages what it was given, then
     # starts this): both name the same run, so the page and the terminal cannot drift apart.
     src = Path(path).expanduser()
     if src.is_dir() and (src / "meta.json").is_file():
-        meta = json.loads((src / "meta.json").read_text())
+        meta = I.meta_of(src.name)
     else:
         try:
             text = src.read_text(encoding="utf-8", errors="replace")
@@ -378,11 +403,21 @@ def cmd_intake(path: str, web: bool = False) -> int:
     os.chdir(d)
     from . import confidential as confidential_mod
     probant = {"matter": f"document · {meta['source_name']}", "mode": "intake", "intake": meta["id"]}
+    if not proposals_only:
+        probant["draft_client"] = client
     if web:
         probant["web"] = True
     rc = confidential_mod.launch([], agent="pi", probant=probant)
     print()
-    return cmd_proposals(meta["id"]) if rc == 0 else rc
+    if rc != 0:
+        return rc
+    if not proposals_only:
+        drafts = I.created_drafts(meta["id"])
+        print(f"  {len(drafts)} draft matter(s) created; review disclosures and dates in Probant home.")
+        for draft in drafts:
+            print(f"      {draft['id']}")
+        return 0
+    return cmd_proposals(meta["id"])
 
 
 def cmd_proposals(ident: str) -> int:
@@ -527,9 +562,11 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--note", default=""); sh.add_argument("-o", "--out", default="")
     osh = sub.add_parser("open-share", help="open a share sealed to you: every matter in it, as your own")
     osh.add_argument("file"); osh.add_argument("client")
-    ik = sub.add_parser("intake", help="read a long document in a sealed session and propose matters from it")
+    ik = sub.add_parser("intake", help="read a document and create draft matters for review")
     ik.add_argument("document")
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
+    ik.add_argument("--client", default="Personal", help="client to create draft matters under (default Personal)")
+    ik.add_argument("--proposals-only", action="store_true", help="record proposals without creating draft matters")
     pf = sub.add_parser("cluster", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
@@ -591,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
-            return cmd_intake(a.document, web=a.web)
+            return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only)
         if a.cmd == "cluster":
             return cmd_cluster(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
                                  reader=a.reader, thinker=a.thinker, resume=a.resume,

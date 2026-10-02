@@ -2290,3 +2290,60 @@ def test_the_brief_asks_the_auditor_to_rebuild_the_published_image():
     assert "The deployment template is NOT published" in b
     # And the sentence an auditor should write while rungs 3 and 4 are missing.
     assert "rests on the operator's honesty" in b
+
+
+def test_a_counter_the_brief_sends_an_auditor_to_is_always_present():
+    """Kimi, 2 Oct, on claim 7: "counters.instance_switches absent". Measured on both receipts in that pack —
+    absent from each.
+
+    The brief's own conditions tell an auditor to "read `counters.instance_switches` and `events` against the
+    `attestation` block". session.py created the key on first increment, so a session that never switched
+    instance produced a receipt without it: "none happened" and "we did not record this" became the same
+    observation, and an auditor correctly reported the field missing rather than the count being zero.
+
+    Declared at zero in the dataclass now. The field the brief names must exist whenever the brief names it.
+    """
+    from inferroute_local.confidential import receipt as R
+    import re as _re
+
+    # Read the field's DEFAULT rather than constructing one: the receipt needs real session identity, and
+    # what is under test is what a fresh receipt starts with.
+    counters = R.Receipt.__dataclass_fields__["counters"].default_factory()
+    assert counters["instance_switches"] == 0, "the brief sends an auditor to this field; it must be there"
+
+    # Every counter the brief names by `counters.<name>` must be present on a fresh receipt.
+    from inferroute_cli import probant_export as E
+    named = set(_re.findall(r"counters\.([a-z_]+)", E.AUDIT_MD))
+    missing = sorted(n for n in named if n not in counters)
+    assert not missing, f"the brief names counters that a fresh receipt does not carry: {missing}"
+
+
+def test_the_template_settles_the_claim_the_two_2_oct_audits_split_on():
+    """Sonnet and Kimi audited the same pack on 2 Oct and returned DIFFERENT verdicts for untampered
+    statements: VERIFIED and VERIFIED IN PART. Kimi named the reason — "query/result are WITHHELD so
+    query_sha256/result_sha256 unverifiable" — and is right. An audit pack carries no texts by design, so that
+    binding cannot be tested in it, which is a part of the claim with no evidence here.
+
+    Two auditors disagreeing from identical evidence is a brief that under-specified, not two bad readings. It
+    now says which verdict a withheld text licenses, and says the stricter one, because the alternative is a
+    report that claims more than the folder can support.
+
+    Also worked, because the sampling rule in prose has now failed twice: the exact Covered by line and the
+    verdict it implies. On 2 Oct an auditor wrote `tool: 12 of 12 · my own recomputation: 2 of 12` for two
+    claims and returned VERIFIED IN PART on both.
+    """
+    from inferroute_cli import probant_export as E
+    # Fully normalised: this is wrapped prose and an assertion that breaks on a line wrap tests the margin.
+    raw = E.report_template()
+    tmpl = re.sub(r"\s+", " ", raw)
+    # The worked line must survive as its own indented block, so it is checked against the raw text.
+    assert "tool: 12 of 12 operations · my own recomputation: 2 of 12 · neither: none" in raw
+    assert "is **VERIFIED**. Not in part." in tmpl
+    assert "not the arithmetic of your own sample" in tmpl
+
+    assert "A withheld text IS such a part" in tmpl
+    assert "`query_sha256` and `result_sha256`" in tmpl
+    assert "The second is right, and this brief should have said so" in tmpl
+    # The stricter reading, with the reason it is not a defect in the record.
+    assert "the binding from a statement to the text that was searched is not testable here" in tmpl
+    assert "saying you could would be the overclaim" in tmpl

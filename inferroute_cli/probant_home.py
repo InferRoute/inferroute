@@ -967,10 +967,17 @@ def run(open_browser: bool = True) -> int:
         print("  ⚠ Started from inside a coding assistant (CLAUDECODE=1). You can read matters and records,", flush=True)
         print("    but STARTING A SESSION FROM THIS PAGE WILL BE REFUSED: sessions must not nest. Stop this", flush=True)
         print("    and run `ir probant home` in an ordinary terminal window instead.\n", flush=True)
-    if open_browser:
-        launch_browser(url)
+    class HomeServer(uvicorn.Server):
+        async def startup(self, sockets=None):
+            await super().startup(sockets=sockets)
+            # Uvicorn sets started only after binding the listening socket. Opening the browser
+            # before this point gives Firefox a connection refusal on its first request.
+            if self.started and open_browser:
+                await asyncio.to_thread(launch_browser, url)
+
     # timeout_graceful_shutdown: Ctrl-C and `kill` must end this, not wait on whatever request a
     # browser tab happens to be holding open.
-    uvicorn.run(home.app(), host="127.0.0.1", port=home.port, log_level="warning",
-                timeout_graceful_shutdown=5)
+    server = HomeServer(uvicorn.Config(home.app(), host="127.0.0.1", port=home.port,
+                                      log_level="warning", timeout_graceful_shutdown=5))
+    server.run()
     return 0

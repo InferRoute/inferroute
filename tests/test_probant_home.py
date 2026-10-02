@@ -636,7 +636,7 @@ def test_starting_home_inside_a_coding_assistant_says_so_before_handing_out_the_
     monkeypatch.delenv("IR_ALLOW_NESTED", raising=False)
     # Stop at the point the banner is printed; serving forever is not what is under test.
     import uvicorn
-    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setattr(uvicorn.Server, "run", lambda *a, **k: None)
 
     assert H.run(open_browser=False) == 0
     out = capsys.readouterr().out

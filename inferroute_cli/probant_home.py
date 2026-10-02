@@ -879,7 +879,7 @@ class Home:
                 entries = []
                 for mid in ids:
                     client, matter, _ = matter_of(mid)
-                    entries.append(SH.matter_payload(client, matter))
+                    entries.append(SH.matter_payload(client, matter, include_marks=d.get("include_marks") is True))
                 files = SH.corpus_files([Path(x["path"]) for x in chosen])
                 payload = SH.build_share(entries, note=str(d.get("note") or ""), files=files,
                                          corpus_name=str(d.get("corpus_name") or ""))
@@ -895,6 +895,7 @@ class Home:
                 SH.record_sent(payload, to, known[to]["fingerprint"], dest)
                 return {"path": str(dest), "matters": len(entries), "bytes": len(blob),
                         "documents": [x["name"] for x in chosen], "corpus": payload["corpus"]["id"],
+                        "marks_shared": sum(len(e.get("marks") or {}) for e in entries),
                         "to_fingerprint": known[to]["fingerprint"], "from_fingerprint": me["fingerprint"]}
 
             try:

@@ -518,6 +518,7 @@ def main(argv: list[str] | None = None) -> int:
     sh.add_argument("--matter", action="append", default=[], help="a matter to include (repeatable)")
     sh.add_argument("--cluster", action="append", default=[], help="a cluster run's claims (repeatable)")
     sh.add_argument("--all", dest="every", action="store_true", help="every matter on this installation")
+    sh.add_argument("--include-marks", action="store_true", help="include your marks as your judgments (excluded by default)")
     sh.add_argument("--no-copy", dest="keep_copy", action="store_false",
                     help="do not seal a copy to yourself (you then cannot reopen what you sent)")
     sh.add_argument("--file", action="append", default=[],
@@ -585,7 +586,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_identity(add=a.add, card_file=a.card_file, show=a.show)
         if a.cmd == "share":
             return cmd_share(a.to, out=a.out, matters=a.matter, clusters=a.cluster,
-                             every=a.every, note=a.note, keep_copy=a.keep_copy, files=a.file, corpus_name=a.corpus_name)
+                             every=a.every, note=a.note, keep_copy=a.keep_copy, files=a.file,
+                             corpus_name=a.corpus_name, include_marks=a.include_marks)
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
@@ -679,7 +681,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
 
 def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clusters: Optional[List[str]] = None,
               every: bool = False, note: str = "", keep_copy: bool = True,
-              files: Optional[List[str]] = None, corpus_name: str = "") -> int:
+              files: Optional[List[str]] = None, corpus_name: str = "", include_marks: bool = False) -> int:
     """Seal a corpus of matters to another Probant user, signed so they know it is yours."""
     from . import probant_share as SH
     known = SH.contacts()
@@ -689,7 +691,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clust
     entries = []
     for spec in (matters or []):
         client, m = _split_matter(spec)
-        entries.append(SH.matter_payload(client, m))
+        entries.append(SH.matter_payload(client, m, include_marks=include_marks))
     for ident in (clusters or []):
         entries.append(SH.cluster_payload(ident))
     if every:
@@ -697,7 +699,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clust
         for row in _every_matter():
             if row not in seen:
                 client, m = _split_matter(row)
-                entries.append(SH.matter_payload(client, m))
+                entries.append(SH.matter_payload(client, m, include_marks=include_marks))
     if not entries:
         raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --cluster <id>, or --all")
     # Side documents travel INSIDE the seal. A matter list and a reading guide quote every filing and the

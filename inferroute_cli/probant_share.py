@@ -276,8 +276,8 @@ def claims_from_cluster(ident: str, limit: int = 2000) -> List[Dict[str, Any]]:
     return out
 
 
-def matter_payload(client: str, matter: str) -> Dict[str, Any]:
-    """One matter as it travels: its disclosure, its date bound, and what the sender marked.
+def matter_payload(client: str, matter: str, *, include_marks: bool = False) -> Dict[str, Any]:
+    """One matter as it travels: its disclosure, date bound, and optionally the sender's marks.
 
     The sender's marks travel as the SENDER'S view, recorded as theirs. They do not become the recipient's
     marks — "your marks are yours alone" has to survive a matter changing hands, or the words stop meaning
@@ -286,11 +286,12 @@ def matter_payload(client: str, matter: str) -> Dict[str, Any]:
     rec = S.load_record(client, matter)
     doc = S.workspace_path(client, matter) / "disclosure.md"
     marks: Dict[str, str] = {}
-    try:
-        state = json.loads(S.state_path(client, matter).read_text())
-        marks = {k: str((v.get("latest") or {}).get("value", "")) for k, v in (state.get("marks") or {}).items()}
-    except (OSError, ValueError, AttributeError):
-        marks = {}
+    if include_marks:
+        try:
+            state = json.loads(S.state_path(client, matter).read_text())
+            marks = {k: str((v.get("latest") or {}).get("value", "")) for k, v in (state.get("marks") or {}).items()}
+        except (OSError, ValueError, AttributeError):
+            marks = {}
     return {"matter": f"{client}/{matter}", "date_bound": rec.get("date_bound", ""),
             "disclosure": doc.read_text(encoding="utf-8")[:200_000] if doc.is_file() else "",
             "marks": marks, "claims": [], "origin": f"matter:{client}/{matter}"}

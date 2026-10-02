@@ -885,6 +885,7 @@
     }
     const note = input("textarea", "A line for them: what this is, and what you want back.");
     note.rows = 2;
+    const includeMarks = input("checkbox");
     const result = el("div", "share-result");
     result.hidden = true;
     const go = button("Seal and write the file", "primary", async () => {
@@ -892,13 +893,15 @@
       go.disabled = true;
       try {
         const r = await api("/api/sharing/share", { to: to.value, matters: [...chosen], note: note.value,
-                                                    documents: [...docs], corpus_name: corpusName.value });
+                                                    documents: [...docs], corpus_name: corpusName.value,
+                                                    include_marks: includeMarks.checked });
         clear(result);
         result.hidden = false;
         result.append(el("div", "", el("b", "", `${r.matters} matter(s)`
           + (r.documents && r.documents.length ? ` and ${r.documents.length} document(s)` : "")
           + ` sealed to ${to.value}`),
           ` (${r.to_fingerprint}), signed as ${r.from_fingerprint}.`),
+          el("p", "sub", r.marks_shared ? `${plural(r.marks_shared, "mark", "marks")} included as your judgments.` : "No marks included."),
           el("span", "mono", r.path),
           el("p", "sub", "Send that file however you like — email, a share, a USB stick. Only their "
             + "fingerprint can open it, and a copy is sealed to you so you can reopen what you sent."),
@@ -915,6 +918,7 @@
         docBox);
     }
     p.append(field("Send to", to), field("Name this corpus", corpusName), field("A note for them", note),
+             el("label", "row", includeMarks, el("span", "", "Include my marks")),
              el("div", "row", go), result);
   }
 

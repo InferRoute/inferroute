@@ -136,6 +136,35 @@ MAX_DISCLOSURE = 200_000
 BOX_LINE = re.compile(r"[│╭╮╰╯─━┃┏┓┗┛]+")
 
 
+def matter_form_errors(data: Dict[str, Any]) -> Dict[str, str]:
+    """Explain form inputs before creating any files; retain the host's name rules."""
+    errors = {}
+    for key, label, example in (("client", "client", "Personal"), ("matter", "matter", "bread-and-butter")):
+        value = str(data.get(key) or "").strip()
+        if not value:
+            errors[key] = f"Enter a {label} name, for example {example}."
+        elif len(value) > 64:
+            errors[key] = f"Use a shorter {label} name (64 characters or fewer)."
+        else:
+            try:
+                S.sanitize(value, key)
+            except S.ProbantError:
+                errors[key] = "Start with a letter or number. Use letters, numbers, spaces, dots, dashes or underscores."
+    date = str(data.get("priority_date") or "").strip()
+    if date:
+        try:
+            if not DATE_RE.fullmatch(date):
+                raise ValueError
+            dt.date.fromisoformat(date)
+        except ValueError:
+            errors["priority_date"] = "Choose a valid priority date, or leave it blank to use today."
+    if len(str(data.get("disclosure") or "")) > MAX_DISCLOSURE:
+        errors["disclosure"] = "Keep the disclosure under 200,000 characters. Use Read document for a longer text."
+    if not errors and S.record_path(str(data.get("client") or "").strip(), str(data.get("matter") or "").strip()).exists():
+        errors["matter"] = "This client already has a matter with that name. Choose another name or open the existing matter."
+    return errors
+
+
 # ───────────────────────── reading what Probant keeps ─────────────────────────
 
 def _json(p: Path) -> Optional[dict]:
@@ -484,9 +513,10 @@ class Home:
         @app.post("/api/matters")
         async def create(request: Request):
             d = await body(request)
+            errors = matter_form_errors(d)
+            if errors:
+                return problem("Check the highlighted fields.", extra={"fields": errors})
             date = str(d.get("priority_date") or "").strip()
-            if date and not DATE_RE.match(date):
-                return problem("the priority date must be a date (YYYY-MM-DD)")
             try:
                 client, matter = S.sanitize(str(d.get("client") or ""), "client"), S.sanitize(str(d.get("matter") or ""), "matter")
                 import contextlib
@@ -497,8 +527,6 @@ class Home:
                 return problem(str(e))
             text = str(d.get("disclosure") or "")
             if text.strip():
-                if len(text) > MAX_DISCLOSURE:
-                    return problem("the disclosure is too long for one matter")
                 (S.workspace_path(client, matter) / "disclosure.md").write_text(f"# Disclosure\n\n{text.strip()}\n", encoding="utf-8")
             return {"ok": True, "id": f"{client}/{matter}"}
 
@@ -734,6 +762,9 @@ class Home:
             import asyncio
             from . import probant_intake as I
             d = await body(request)
+            errors = matter_form_errors(d)
+            if errors:
+                return problem("Check the highlighted fields.", extra={"fields": errors})
             try:
                 made = await asyncio.to_thread(I.create_matter, str(d.get("id") or ""), str(d.get("client") or ""),
                                                str(d.get("matter") or ""), int(d.get("index") or 0),

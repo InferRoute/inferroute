@@ -24,16 +24,25 @@
   }
 
   async function api(path, body) {
-    const res = await fetch(path, {
+    let res;
+    try { res = await fetch(path, {
       method: body === undefined ? "GET" : "POST",
       headers: Object.assign({ authorization: `Bearer ${key}` }, body === undefined ? {} : { "content-type": "application/json" }),
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer",
-    });
+    }); } catch (_) {
+      throw new Error("Could not reach Probant. Check that its Terminal is still running, then try again.");
+    }
     let data = {};
     try { data = await res.json(); } catch (_) { data = {}; }
     if (res.status === 401) { showNoKey(); throw new Error("no key"); }
-    if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+    if (!res.ok) {
+      const error = new Error(data.error || (res.status >= 500
+        ? "Probant could not finish this action. Try again; if it repeats, check the Terminal for details."
+        : "This action could not be completed. Refresh the page and try again."));
+      error.fields = data.fields || {};
+      throw error;
+    }
     return data;
   }
 
@@ -101,29 +110,85 @@
     return i;
   }
 
+  let formFieldId = 0;
+  function formErrors(inputs) {
+    const messages = {};
+    for (const [name, control] of Object.entries(inputs)) {
+      const message = el("span", "form-error");
+      message.id = `form-error-${++formFieldId}`;
+      message.hidden = true;
+      control.setAttribute("aria-describedby", message.id);
+      message.setAttribute("aria-live", "polite");
+      messages[name] = message;
+      control.addEventListener("input", () => {
+        message.hidden = true;
+        message.textContent = "";
+        control.removeAttribute("aria-invalid");
+      });
+    }
+    function show(errors) {
+      let first;
+      for (const [name, control] of Object.entries(inputs)) {
+        const text = errors[name] || "";
+        messages[name].textContent = text;
+        messages[name].hidden = !text;
+        if (text) { control.setAttribute("aria-invalid", "true"); first ||= control; }
+        else control.removeAttribute("aria-invalid");
+      }
+      if (first) first.focus();
+      return !first;
+    }
+    function validate() {
+      const errors = {};
+      for (const name of ["client", "matter"]) {
+        const value = inputs[name].value.trim();
+        if (!value) errors[name] = `Enter a ${name} name, for example ${name === "client" ? "Personal" : "bread-and-butter"}.`;
+        else if (value.length > 64) errors[name] = `Use a shorter ${name} name (64 characters or fewer).`;
+        else if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]*$/.test(value)) errors[name] = "Start with a letter or number. Use letters, numbers, spaces, dots, dashes or underscores.";
+      }
+      if (inputs.priority_date.validity && !inputs.priority_date.validity.valid) {
+        errors.priority_date = "Choose a valid priority date, or leave it blank to use today.";
+      }
+      if (inputs.disclosure && inputs.disclosure.value.length > 200000) {
+        errors.disclosure = "Keep the disclosure under 200,000 characters. Use Read document for a longer text.";
+      }
+      return show(errors);
+    }
+    return { show, validate, field: (name, label, hint) => {
+      const node = field(label, inputs[name], hint);
+      node.append(messages[name]);
+      return node;
+    } };
+  }
+
   function newMatterDialog() {
     const client = input("text", "e.g. Acme");
     const matter = input("text", "e.g. cooling-system");
     const date = input("date");
     const text = input("textarea", "Describe the invention in plain technical terms. You can also add it later.");
     text.rows = 9;
+    const validation = formErrors({ client, matter, priority_date: date, disclosure: text });
     const err = el("p", "form-error");
     const create = button("Create matter", "primary", async () => {
       err.textContent = "";
+      if (!validation.validate()) return;
       create.disabled = true;
       try {
         const r = await api("/api/matters", { client: client.value, matter: matter.value, priority_date: date.value, disclosure: text.value });
         closeDialog();
         toast(`Matter ${r.id} created.`, "info");
         location.hash = `#/matter/${enc(r.id)}`;
-      } catch (e) { err.textContent = e.message; } finally { create.disabled = false; }
+      } catch (e) {
+        if (Object.keys(e.fields || {}).length) validation.show(e.fields);
+        else err.textContent = `Could not create the matter. ${e.message}`;
+      } finally { create.disabled = false; }
     });
     dialog("New matter", [
       el("p", "", "A matter is one invention you research: its folder, its date bound, its sessions and its records."),
-      field("Client", client, "Letters, digits, spaces, dots, dashes."),
-      field("Matter", matter),
-      field("Priority date", date, "Only documents published before this date are searched. Leave empty to use today until you know it."),
-      field("Disclosure", text, "Stays on this computer. Only its sealed searches leave it, encrypted."),
+      validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
+      validation.field("matter", "Matter", "Required. A short name for this invention."),
+      validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
+      validation.field("disclosure", "Disclosure", "Saved as written. The AI reads it when you start a session."),
       err,
     ], [button("Cancel", "ghost", closeDialog), create]);
     setTimeout(() => client.focus(), 0);
@@ -643,9 +708,8 @@
 
   // ── reading a document: the professional gives it, a sealed session reads it, they open what it proposes ──
   //
-  // The file is read HERE, by the browser, and posted as text: the page is served by this computer, so the
-  // document never leaves it either way — but reading it locally means no upload of a file we then have to
-  // say we deleted.
+  // The browser reads the file and posts text to the local home server. The reading session then sends
+  // that text encrypted to the checked AI model; it has no patent-search tool.
   function readDocumentDialog() {
     const file = input("file");
     file.accept = ".txt,.md,.text,text/plain,text/markdown";
@@ -657,28 +721,44 @@
     file.addEventListener("change", async () => {
       const f = file.files && file.files[0];
       if (!f) return;
-      picked = f.name;
+      err.textContent = "";
+      if (!/\.(txt|md|text)$/i.test(f.name)) {
+        err.textContent = "Choose a .txt or .md file. For a PDF or Word document, copy its text and paste it below.";
+        file.value = "";
+        return;
+      }
+      if (f.size > 16000000) {
+        err.textContent = "This file is too large. Choose a smaller text file or paste the relevant section below.";
+        file.value = "";
+        return;
+      }
       try {
         text.value = await f.text();
+        picked = f.name;
         chosen.textContent = `${f.name} · ${text.value.length.toLocaleString()} characters`;
-      } catch (e) { err.textContent = `That file could not be read here: ${e.message}`; }
+      } catch (e) { err.textContent = "Could not open that file. Try choosing it again, or paste its text below."; }
     });
+    text.addEventListener("input", () => { err.textContent = ""; text.removeAttribute("aria-invalid"); });
     const go = button("Read it", "primary", async () => {
       err.textContent = "";
       const body = text.value.trim();
-      if (!body) { err.textContent = "Choose a text file, or paste the document."; return; }
+      if (!body) { err.textContent = "Choose a text file, or paste the document below."; text.setAttribute("aria-invalid", "true"); text.focus(); return; }
+      if (text.value.length > 4000000) {
+        err.textContent = "This document is too long (maximum 4 million characters). Split it or paste the relevant section.";
+        text.setAttribute("aria-invalid", "true"); text.focus(); return;
+      }
       go.disabled = true;
       go.textContent = "Staging…";
       try {
         const r = await api("/api/intake", { text: text.value, name: picked || "pasted document" });
         closeDialog();
         location.hash = `#/document/${enc(r.id)}`;
-      } catch (e) { err.textContent = e.message; go.disabled = false; go.textContent = "Read it"; }
+      } catch (e) { err.textContent = `Could not start reading the document. ${e.message}`; go.disabled = false; go.textContent = "Read it"; }
     });
     dialog("Read a document", [
-      el("p", "", "A sealed session reads the whole document and proposes the inventions it finds as matters "
-        + "you can open. It has no search tool while it reads, so nothing about the document goes to a search machine."),
-      field("Document", file, "A text file (.txt or .md). It is read on this computer and never uploaded anywhere."),
+      el("p", "", "The AI reads your text and proposes inventions with draft summaries and source passages. "
+        + "You review the proposals before creating matters. This does not establish patentability."),
+      field("Document", file, "A .txt or .md file. Read locally, then sent encrypted to the checked AI model. No patent search runs during reading."),
       chosen,
       field("Or paste it", text),
       err,
@@ -719,8 +799,7 @@
           pr.priority_date ? el("span", "sub", `priority date ${pr.priority_date}`) : el("span", "sub", "")),
         el("div", "card-body", el("p", "", pr.summary),
           el("blockquote", "quote", pr.quote),
-          el("p", "sub", "The passage above is quoted from the document; a proposal whose quote is not in the "
-            + "document is discarded before it reaches this page.")),
+          el("p", "sub", "The supporting passage was matched to the document. Review the AI's summary against it before creating a matter.")),
         el("div", "card-actions", button("Open this as a matter", "primary small", () => openProposalDialog(id, i, pr))));
       p.append(card);
     }
@@ -735,9 +814,11 @@
     matter.value = proposal.suggested_matter;
     const date = input("date");
     if (proposal.priority_date) date.value = proposal.priority_date;
+    const validation = formErrors({ client, matter, priority_date: date });
     const err = el("p", "form-error");
     const go = button("Open the matter", "primary", async () => {
       err.textContent = "";
+      if (!validation.validate()) return;
       go.disabled = true;
       try {
         const r = await api("/api/intake/create", { id, index, client: client.value, matter: matter.value,
@@ -745,13 +826,17 @@
         closeDialog();
         toast(`Matter ${r.id} opened.`, "info");
         location.hash = `#/matter/${enc(r.id)}`;
-      } catch (e) { err.textContent = e.message; go.disabled = false; }
+      } catch (e) {
+        if (Object.keys(e.fields || {}).length) validation.show(e.fields);
+        else err.textContent = `Could not create the matter from this proposal. ${e.message}`;
+        go.disabled = false;
+      }
     });
     dialog(`Open "${proposal.title}" as a matter`, [
-      el("p", "", "The proposal becomes the matter's disclosure, with the passage it came from and the document it was read from."),
-      field("Client", client),
-      field("Matter", matter, "You name it; the suggestion comes from the title."),
-      field("Priority date", date, "Only documents published before this date are searched. Empty means today, until you know it."),
+      el("p", "", "The AI's draft summary becomes the disclosure, with its source passage. Review it before starting a search."),
+      validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
+      validation.field("matter", "Matter", "Required. You can change the suggested name."),
+      validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Check any date suggested by the AI."),
       err,
     ], [button("Cancel", "ghost", closeDialog), go]);
     setTimeout(() => client.focus(), 0);
@@ -899,12 +984,13 @@
         result.hidden = false;
         result.append(el("div", "", el("b", "", `${r.matters} matter(s)`
           + (r.documents && r.documents.length ? ` and ${r.documents.length} document(s)` : "")
-          + ` sealed to ${to.value}`),
+          + ` ready to send to ${to.value}`),
           ` (${r.to_fingerprint}), signed as ${r.from_fingerprint}.`),
           el("p", "sub", r.marks_shared ? `${plural(r.marks_shared, "mark", "marks")} included as your judgments.` : "No marks included."),
           el("span", "mono", r.path),
-          el("p", "sub", "Send that file however you like — email, a share, a USB stick. Only their "
-            + "fingerprint can open it, and a copy is sealed to you so you can reopen what you sent."),
+          el("p", "", "Saved on this computer; it has not been sent. Send this file by email, a shared folder or USB. "
+            + "They save it, then choose Sharing → Open a delivery sent to you in Probant."),
+          el("p", "sub", "Encrypted to their key, with a copy sealed to you so you can reopen what you sent."),
           button("Copy the path", "ghost small", () => navigator.clipboard.writeText(r.path)
             .then(() => toast("Copied.", "info")).catch(() => {})));
       } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }

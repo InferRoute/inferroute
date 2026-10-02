@@ -910,7 +910,8 @@ export default function (pi: ExtensionAPI) {
 			label: "Create a draft matter",
 			description: "Create one draft matter from this uploaded document, under the client selected by the professional. " +
 				"Give a title, complete technical summary and exact supporting source passage (20–8000 characters). " +
-				"The host checks the passage, preserves the summary and avoids overwriting or duplicating existing drafts. " +
+				"An optional source label may name a section; it cannot select another file. The host checks the passage, " +
+				"preserves the summary and avoids overwriting or duplicating existing drafts. " +
 				"A priority date is only a suggestion when explicitly stated in the source. Nothing is searched automatically.",
 			promptSnippet: "Create a draft matter for each distinct invention, with its supporting passage",
 			parameters: Type.Object({ title: Type.String(), summary: Type.String(), quote: Type.String(),

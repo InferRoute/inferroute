@@ -259,8 +259,9 @@ class DraftCreator:
             raise S.ProbantError(f"give a complete summary of {MAX_SUMMARY:,} characters or fewer; it will not be truncated")
         if not 20 <= len(quote) <= MAX_QUOTE:
             raise S.ProbantError(f"copy a supporting passage of 20–{MAX_QUOTE:,} characters from the document")
-        if finding.get("source", "") not in ("", DOCUMENT, self.meta["source_name"]):
-            raise S.ProbantError("this tool can create drafts only from the document uploaded for this session")
+        # Some models include a section locator (for example, "document.txt — Concept A").
+        # `source` is descriptive only: it never selects a file. This creator is already bound
+        # to the uploaded document, and the supporting quote is checked against that exact source.
         # Allow line-wrap whitespace only. Save the actual source slice, not a rewritten quote.
         match = re.search(r"\s+".join(re.escape(part) for part in quote.split()), self.body)
         if match is None:

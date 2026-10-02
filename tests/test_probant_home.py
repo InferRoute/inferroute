@@ -394,6 +394,20 @@ def test_a_session_starts_from_a_page_whose_PATH_never_saw_node(monkeypatch, tmp
     assert agents.find_agent("pi") == str(other)
 
 
+def test_pi_is_found_in_probant_managed_install_prefix(monkeypatch, tmp_path):
+    from inferroute_cli import agents
+    managed = tmp_path / ".local" / "share" / "pi-test-0.84.1" / "bin"
+    managed.mkdir(parents=True)
+    binary = managed / "pi"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.delenv("NVM_DIR", raising=False)
+    monkeypatch.delenv("IR_PI_BIN", raising=False)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    assert agents.find_agent("pi") == str(binary)
+
+
 def test_when_pi_really_is_absent_the_page_says_install_it_not_use_a_terminal():
     msg = H.failure_message(["`pi` is not installed on this computer (PATH and the usual install directories were checked)."])
     assert "npm install -g @earendil-works/pi-coding-agent" in msg

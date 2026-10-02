@@ -92,6 +92,21 @@ def test_only_the_professional_creates_a_matter_and_the_disclosure_names_its_sou
         I.create_matter(ident, "Acme", "other", 7)
 
 
+def test_draft_creator_accepts_a_section_label_without_changing_the_bound_source(home):
+    meta = I.stage(DOC, "report.txt")
+    result = I.DraftCreator(meta["id"], "Acme").create({
+        "title": "Cooling jacket",
+        "summary": "A jacket routes coolant through moulded channels between cylindrical cells.",
+        "quote": "COOLANT-MARKER channels moulded between the",
+        "source": "report.txt — Concept A section",
+    })
+    assert result["id"].startswith("Acme/")
+    _, matter = S._split_matter(result["id"])
+    rec = S.load_record("Acme", matter)
+    assert rec["intake_origin"]["source_name"] == "report.txt"
+    assert rec["intake_origin"]["quote"] == "COOLANT-MARKER channels moulded between the"
+
+
 def test_a_priority_date_the_agent_offers_is_used_only_when_it_is_a_date(home):
     ident = I.stage(DOC, "report")["id"]
     _propose(ident, title="Cooling jacket", summary="channels between cells", priority_date="sometime in 2021",
@@ -101,18 +116,18 @@ def test_a_priority_date_the_agent_offers_is_used_only_when_it_is_a_date(home):
     assert S.load_record("Acme", "battery-cooling")["pre_filing_default"] is True   # today, flagged as a default
 
 
-def test_a_document_edited_after_staging_invalidates_its_proposals(home):
-    """The session works in this directory, so it can write here. If it could also rewrite the document, an
-    invented quote would check out against the rewrite."""
+def test_an_edited_staging_copy_cannot_authorize_a_fabricated_quote(home):
+    """The host archive, not the agent-writable staging copy, is authoritative for quote checks."""
     ident = I.stage(DOC, "report")["id"]
-    _propose(ident, title="Cooling jacket", summary="channels between cells",
-             quote="COOLANT-MARKER channels moulded between the")
-    assert len(I.read_proposals(ident)) == 1
     doc = I.path_of(ident) / I.DOCUMENT
     doc.chmod(0o600)
     doc.write_text(DOC + "\nA superconducting flywheel bonded to the chassis.\n")
-    with pytest.raises(S.ProbantError, match="changed after it was staged"):
-        I.read_proposals(ident)
+    _propose(ident, title="Cooling jacket", summary="channels between cells",
+             quote="COOLANT-MARKER channels moulded between the")
+    _propose(ident, title="Invented", summary="The appended text describes a flywheel.",
+             quote="A superconducting flywheel bonded to the chassis.")
+    assert [p["title"] for p in I.read_proposals(ident)] == ["Cooling jacket"]
+    assert I.dropped_count(ident) == 1
 
 
 def test_a_reading_session_gets_the_proposal_tool_and_no_search_tool(home, monkeypatch, tmp_path):

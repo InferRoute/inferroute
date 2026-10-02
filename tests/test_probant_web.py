@@ -1030,7 +1030,7 @@ def test_the_protection_panel_is_compact_but_hides_nothing_it_cannot_name():
     body = js[js.index("function renderTrust"):js.index("// ── conversation ──")]
     assert "What this can't prove" not in body       # Henry, 19 Sep: not relevant in the panel
     assert 'if (points.length) more.append(el("ul", "item-points"' in body     # points moved behind "More"
-    assert '"How a sealed machine keeps this private"' in body
+    assert '"What these checks establish"' in body
     assert 'head.append(el("ul", "item-points"' not in body                     # no longer shown by default
     # Henry, 19 Sep: "maybe it can be made to look more impressive and good looking". The verdict is a seal
     # (badge, one word, the headline without repeating it, when it was checked) and the protections one chain;

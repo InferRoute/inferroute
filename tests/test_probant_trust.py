@@ -62,10 +62,10 @@ def test_search_is_never_called_inferroutes_without_the_signed_reference():
     search = _item(s, "search")
     assert search["state"] == T.OK
     assert "InferRoute" not in search["summary"] and "InferRoute" not in " ".join(search["points"])
-    assert "InferRoute's own" not in " ".join(s["limits"])
+    assert "matches InferRoute's signed reference" not in " ".join(s["limits"])
     signed = T.build(_receipt(), _search(reference={"ok": True}), ADDRESS, date_bound="2020-01-01")
     assert "run by InferRoute" in _item(signed, "search")["summary"]
-    assert "InferRoute's own" in " ".join(signed["limits"])
+    assert "matches InferRoute's signed reference" in " ".join(signed["limits"])
 
 
 def test_an_authentic_reference_alone_does_not_earn_the_identity_line():
@@ -124,7 +124,7 @@ def test_no_search_at_all_is_MORE_private_and_must_not_read_as_degraded():
     assert s["verdict"] == "private"
     assert "Partly protected" not in _text(s)
     head = s["headline"]
-    assert "one sealed machine" in head and "two sealed machines" not in head   # never claim a machine we did not check
+    assert "the AI model" in head and "the patent search service" not in head   # never claim a machine we did not check
     assert "nothing can leave this computer for a search machine" in head
     # The item itself leads with what it protects, not with what is absent.
     assert "nothing can leave" in _item(s, "search")["summary"]
@@ -136,13 +136,13 @@ def test_reading_a_document_offers_no_search_and_says_so_without_alarm():
     s = T.build(_receipt(), None, ADDRESS, mode="intake")
     assert _item(s, "search")["state"] == T.INFO
     assert s["verdict"] == "private"
-    assert "one sealed machine" in s["headline"]
+    assert "the AI model" in s["headline"]
     assert "while reading a document" in s["headline"]
 
 
 def test_a_verified_search_machine_is_the_only_thing_that_earns_two_machines():
     s = T.build(_receipt(), _search(), ADDRESS)
-    assert s["verdict"] == "private" and "two sealed machines" in s["headline"]
+    assert s["verdict"] == "private" and "the patent search service" in s["headline"]
 
 
 def test_an_unreachable_search_machine_is_said_plainly():

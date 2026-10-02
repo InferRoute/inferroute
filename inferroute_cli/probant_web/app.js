@@ -84,13 +84,13 @@
 
   // ── trust panel ──
   const SYM = { ok: "✓", warn: "◐", fail: "✗", off: "○", info: "●" };
-  const VERDICT_PILL = { private: "🔒 Private", limited: "◐ Partly protected", blocked: "⛔ Not opened" };
+  const VERDICT_PILL = { private: "🔒 Connections checked", limited: "◐ Partly protected", blocked: "⛔ Not opened" };
 
   // Compact by default (Henry, 19 Sep: "make the private certifications section more compact so that the
   // beginning of your marks is visible without scrolling"). The verdict and one line per protection stay in
   // view; each protection's points and detail sit behind its own "More", and the explanation behind a
   // labelled toggle.
-  const VERDICT_WORD = { private: "Private", limited: "Partly protected", blocked: "Not opened" };
+  const VERDICT_WORD = { private: "Connections checked", limited: "Partly protected", blocked: "Not opened" };
   const VERDICT_SEAL = { private: "✓", limited: "!", blocked: "✗" };
   const DOT = { ok: "✓", warn: "!", fail: "✗", off: "", info: "" };   // inside a filled dot, a plain mark reads best
   function renderTrust(t) {
@@ -113,8 +113,8 @@
       el("div", "verdict-text",
         el("div", "verdict-word", word || t.verdict),
         line ? el("div", "verdict-line", line) : null,
-        when ? el("div", "checked", `${t.verdict === "private" ? "Hardware checked" : "Checked"} ${when}`) : null)));
-    if (t.explainer) body.append(el("details", "fold", el("summary", "", "How a sealed machine keeps this private"), el("p", "explainer", t.explainer)));
+        when ? el("div", "checked", `Panel updated ${when}`) : null)));
+    if (t.explainer) body.append(el("details", "fold", el("summary", "", "What these checks establish"), el("p", "explainer", t.explainer)));
     body.append(el("h2", "", "What protects this matter"));
     const chain = el("div", "chain");
     for (const it of t.items || []) {

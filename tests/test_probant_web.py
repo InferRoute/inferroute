@@ -2615,10 +2615,11 @@ def test_the_panel_shows_the_statement_the_verifier_computed_not_one_written_bes
     js = (STATIC / "app.js").read_text()
     code = re.sub(r"//[^\n]*", "", js)
     assert "function statementBlock(plain)" in code
-    assert 'for (const para of plain) box.append(el("p", "licensed-para", para));' in code
-    # Falsification framing, not a badge.
-    assert "that difference is the finding and we want to hear it" in code
-    assert "our own \" + \"machine's account of itself" in code or "machine's account of itself" in code
+    assert 'for (const para of plain) details.append(el("p", "licensed-para", para));' in code
+    # The compact conclusion remains the verifier's text; its full statement is expandable.
+    assert 'el("p", "licensed-para", plain[0])' in code
+    assert "Full verifier statement" in code
+    assert "Computed locally. Independent audit below." in code
     # Shown above the audit button, and re-rendered per export so a stale record's sentence cannot linger.
     assert 'auditOffer($("audit"), (r.check || {}).plain);' in code
     body = code[code.index("function auditOffer"):]

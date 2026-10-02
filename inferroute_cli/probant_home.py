@@ -770,8 +770,16 @@ class Home:
             """This installation's identity and the people it can share with. Public material only."""
             from . import probant_share as SH
             me = SH.identity()
+            contacts = []
+            for name, contact in SH.contacts().items():
+                try:
+                    SH.read_card(contact)
+                    valid = True
+                except S.ProbantError:
+                    valid = False
+                contacts.append({"name": name, **contact, "key_valid": valid})
             return {"fingerprint": me["fingerprint"], "card": SH.public_card(me),
-                    "contacts": [{"name": n, **c} for n, c in SH.contacts().items()],
+                    "contacts": contacts,
                     # Offered by id; the page never sends a path back (see corpus_documents).
                     "documents": [{k: v for k, v in x.items() if k != "path"} for x in corpus_documents()],
                     # The deliveries themselves. The page could send one and open one and never show you

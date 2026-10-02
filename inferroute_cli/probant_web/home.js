@@ -828,7 +828,8 @@
     if (!d.contacts.length) p.append(el("p", "sub", "Nobody yet. Add someone using the public key they sent you."));
     for (const c of d.contacts) {
       p.append(el("div", "record-row", el("span", "", c.name), el("span", "mono sub", c.fingerprint),
-        el("span", "sub", `added ${localTime(c.added_at)}`), el("span", "")));
+        el("span", "sub", `added ${localTime(c.added_at)}`),
+        el("span", c.key_valid ? "sub" : "warn-text", c.key_valid ? "✓ Key format checked" : "Key needs attention")));
     }
     p.append(el("div", "row", button("Add someone", "ghost", () => addContactDialog(() => renderSharing())),
       button("Open a delivery sent to you", "ghost", () => openShareDialog())));
@@ -920,7 +921,7 @@
       try {
         const r = await api("/api/sharing/contact", { name: name.value, card: card.value });
         closeDialog();
-        toast(`${r.name} added — fingerprint ${r.fingerprint}`, "info");
+        toast(`Key format checked. ${r.name} saved — fingerprint ${r.fingerprint}`, "info");
         onAdded();
       } catch (e) { err.textContent = e.message; }
     });
@@ -940,9 +941,8 @@
       if (mine !== token) return;
       if (r.ok) {
         verdict.className = "card-verdict good";
-        verdict.append(el("b", "", `Fingerprint ${r.fingerprint}`),
-          " — confirm those four groups with them by voice before you send anything. A key that reached "
-          + "you the way an impostor's would is worth what that channel is worth.");
+        verdict.append(el("b", "", `✓ Key format valid · fingerprint ${r.fingerprint}`),
+          " — confirm this fingerprint with them before sending. This checks the key card, not the person's identity.");
         go.disabled = false;
       } else if (r.reason) {
         verdict.className = "card-verdict hint";

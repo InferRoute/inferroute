@@ -1692,7 +1692,16 @@ def test_the_brief_warns_about_the_bytecode_it_causes_you_to_write():
     # into the middle of a pinned phrase would otherwise fail a sentence that is perfectly correct.
     flat = re.sub(r"\s+", " ", E.AUDIT_MD)
     assert "PYTHONDONTWRITEBYTECODE=1" in flat
-    assert "does not descend into subdirectories" in flat[flat.index("PYTHONDONTWRITEBYTECODE=1"):][:400]
+    assert "does not descend into subdirectories" in flat[flat.index("PYTHONDONTWRITEBYTECODE=1"):][:500]
+
+    # SAID ONCE, AND BESIDE THE INSTRUCTION THAT CAUSES IT. This warning was correct and sat at the END of the
+    # brief, and two auditors reached the end having already done it — 25 Sep, who caught it on a later pass,
+    # and 2 Oct, who found a file it could not attribute and deleted it. Right guidance, unreachable position.
+    # Two copies would be worse than one, so this pins both the count and the adjacency.
+    assert flat.count("PYTHONDONTWRITEBYTECODE") == 1, "two warnings about one hazard is worse than one"
+    cause = flat.index("Treat `verify_record.py` as untrusted code")
+    warn = flat.index("PYTHONDONTWRITEBYTECODE")
+    assert 0 < warn - cause < 700, "the warning has drifted away from the instruction that causes it"
 
 
 def test_the_hard_parse_warns_that_a_wrong_read_looks_like_our_failure():
@@ -2221,9 +2230,14 @@ def test_the_brief_disarms_the_two_misreadings_the_1_oct_audits_produced():
     from inferroute_cli import probant_export as E
     b = re.sub(r"\s+", " ", E.AUDIT_MD)
 
-    assert "The AMD ROOT certificate (ARK) is self-signed" in b
-    assert "says nothing about any OTHER certificate in this folder" in b
-    assert "was never claimed to be self-signed" in b
+    assert "\"self-signed\" is a per-certificate fact" in b
+    assert "The AMD ROOT (ARK) is self-signed" in b
+    # And per-RECEIPT, which my own correction got wrong: measured 2 Oct on a two-session record, one receipt
+    # was subject==issuer CN=attestation-service and the other chained to CN=guest-vm-root-ca,O=operator.
+    assert "TWO RECEIPTS IN ONE RECORD CAN DIFFER" in b
+    assert "guest-vm-root-ca" in b
+    assert "neither answer is a finding on its own" in b
+    assert "generalised across receipts exactly as the sentence it was correcting" in b
 
     assert "A reference window opens AFTER the enclave it describes, always" in b
     assert "the policy must exist before it can be named" in b

@@ -1,0 +1,74 @@
+FICTIONAL ENGINEERING NOTES — PROBANT READING DEMO
+
+This document is invented for trying document reading. It describes two separate
+product concepts. It contains no confidential invention and makes no claim that
+either concept is new, patentable, built or experimentally validated. No filing
+date or priority date is supplied.
+
+CONCEPT A: REMOVABLE LEAK SENSOR FOR A WATER FILTER
+
+An under-sink water filter has a replaceable cartridge connected to a fixed head.
+Changing the cartridge can leave a few drops around the joint even when the joint
+is correctly sealed. A conventional leak alarm near the filter may then sound
+during routine maintenance. Conversely, a slow leak at the joint can follow the
+outside of the cartridge and miss a sensor resting on the cupboard floor.
+
+The proposed accessory is a split collar fitted immediately below the cartridge
+joint. Its two halves close around the cartridge without disconnecting the water
+line. A shallow collecting channel runs around the inside of the collar. Small
+openings guide water from the cartridge surface into this channel. A removable
+absorbent strip sits in the channel between two conductive contacts. When the
+strip becomes wet, its electrical resistance changes and a battery-powered unit
+attached to the collar records a wet event.
+
+The collar has a maintenance latch coupled to a small switch. Opening the latch
+places the unit in maintenance mode. Closing it starts a settling interval rather
+than immediately enabling the alarm. During that interval, the unit samples the
+strip repeatedly. If the readings return to the dry range, monitoring resumes.
+If they remain in the wet range beyond the interval, the unit signals that the
+strip needs replacing or that the joint still needs inspection.
+
+During normal monitoring, a wet reading must persist across several samples before
+the audible alarm sounds. A separate indicator distinguishes a persistent wet
+strip from a low battery. The absorbent strip can be removed through a side slot
+without taking the collar off the cartridge. The collar itself can be removed and
+reused when a cartridge is replaced.
+
+The feature combination to investigate is the collecting collar, replaceable
+resistive strip and latch-triggered maintenance interval. The design does not
+automatically shut off water. The collecting channel may overflow during a major
+leak, and detergent residue may change the strip's resistance. These are design
+limitations, not measured results.
+
+CONCEPT B: BICYCLE REAR LIGHT WITH A REMOVABLE ALIGNMENT TARGET
+
+A bicycle rear light can be mounted on a seat post at the wrong angle. The rider
+may be unable to see its beam while adjusting it, especially when the bicycle is
+leaning against a wall. This concept is a mounting aid intended to make alignment
+repeatable after the light has been removed for charging.
+
+The light housing attaches to a seat-post bracket through a toothed hinge. A
+thumb screw clamps the hinge at one of its indexed positions. A small removable
+target clips into a recess on the back of the housing. The target includes a
+folding arm that places a translucent screen at a fixed distance from a low-power
+alignment emitter inside the housing. The screen carries a horizontal reference
+line and two marks defining an acceptable beam position.
+
+With the bicycle upright on level ground, the user unfolds the target and selects
+alignment mode. The alignment emitter projects a spot onto the screen. The user
+adjusts the toothed hinge until the spot lies between the two marks, then tightens
+the thumb screw. Removing the target disables alignment mode through a mechanical
+switch in the recess and restores the normal rear-light output.
+
+The removable light housing mates with the bracket through an asymmetric locating
+surface. This surface is intended to return the housing to the same orientation
+after charging without moving the clamped hinge. The target is stored separately
+and is not intended to stay attached during riding.
+
+The feature combination to investigate is the indexed mounting hinge, detachable
+fixed-distance alignment target, target-presence switch and repeatable locating
+surface. The target provides a setup reference only. It does not certify road
+visibility or compliance with bicycle-light requirements. Beam spread, bracket
+wear and installation on uneven ground remain open engineering questions.
+
+END OF FICTIONAL NOTES

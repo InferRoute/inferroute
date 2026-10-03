@@ -26,6 +26,7 @@ const node = (tag) => ({
     }
   },
   addEventListener(name, f) { this[`on:${name}`] = f; },
+  setAttribute(k, v) { this[k] = v; },   // the contact-removal button sets aria/title attributes (0.9.92)
   remove() {},
 });
 global.document = { createElement: node, getElementById: () => node("div"), querySelectorAll: () => [] };
@@ -99,7 +100,7 @@ const textOf = (n) => walk(n).map((x) => `${x.textContent} ${x.value} ${x.placeh
     showsPublicCard: shown.includes("PUB-MLKEM"),
     listsBothMatters: shown.includes("Acme/battery-0") && shown.includes("Acme/battery-1"),
     sent,
-    confirmed: after.includes("1 matter(s) sealed to betrancourt"),
+    confirmed: after.includes("1 matter(s) ready to send to betrancourt"),   // wording changed in 0.9.94
     pathShown: after.includes("probant-corpus-for-betrancourt"),
     unknownWarned: textOf(el("div", "", ...open.body)).includes("not one of your contacts"),
   }));

@@ -14,7 +14,7 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync, readdirSync } from "node:fs";
 import { basename, dirname, join, resolve, relative, sep } from "node:path";
 
 const ENDPOINT = (process.env.IR_ATTESTED_ENDPOINT ?? "").replace(/\/+$/, "");
@@ -1386,11 +1386,40 @@ export default function (pi: ExtensionAPI) {
 					`there and ask whether to include it — do not read it on your own judgement.`,
 				);
 			}
+			// THE OTHER FILES, BY NAME, WITH THE DISCLOSURE. `ls` and `find` are no longer given to the matter
+			// flow (pi_attested.MATTER_TOOLS): kept so a stale draft could be noticed, what they produced was a
+			// folder listing at the start of every session before the disclosure was read, and once a session
+			// that listed the folder and then said it could not read disclosure.md. The inventory arrives here
+			// instead, in the one call every session makes anyway — names only, nothing read — so a competing
+			// draft is still seen, at the moment it matters, without a capability to exercise.
+			const others = (): string[] => {
+				try {
+					return readdirSync(root, { withFileTypes: true })
+						.filter((d) => d.isFile() && !d.name.startsWith(".") && d.name !== DISCLOSURE)
+						.map((d) => d.name).sort();
+				} catch { return []; }
+			};
+			let text: string;
 			try {
-				return { content: [{ type: "text", text: readFileSync(want, "utf8") }] };
+				text = readFileSync(want, "utf8");
 			} catch (e) {
+				if (rel === DISCLOSURE && (e as NodeJS.ErrnoException).code === "ENOENT") {
+					const there = others();
+					throw new Error(
+						`disclosure.md is not in the matter folder, so there is no disclosure to read. ` +
+						(there.length ? `The folder holds: ${there.join(", ")}. ` : `The folder holds no other files. `) +
+						`Ask the professional which file is the disclosure; do not choose one yourself.`,
+					);
+				}
 				throw new Error(`could not read ${rel}: ${(e as Error).message}`);
 			}
+			if (rel !== DISCLOSURE) return { content: [{ type: "text", text }] };
+			const there = others();
+			const footer = there.length
+				? `Other files in the matter folder (not read; the professional's own working files): ${there.join(", ")}. ` +
+				  `If one bears on the matter, name it and ask — once.`
+				: `No other files in the matter folder.`;
+			return { content: [{ type: "text", text: `${text}\n\n---\n${footer}` }] };
 		},
 	});
 

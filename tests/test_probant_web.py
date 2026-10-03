@@ -688,7 +688,7 @@ def test_the_back_arrow_replaces_the_home_button():
     js = (STATIC / "app.js").read_text()
     assert 'id="back"' in html and 'id="top-home"' not in html
     assert '$("top-home")' not in js, "the labelled top-bar home button must be gone"
-    assert 'back.addEventListener("click", () => goHome(`/matter/${matterId}`))' in js
+    assert 'back.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : matterRoute(matterId)))' in js
 
 
 # ── statistics for the progress view ──
@@ -970,7 +970,7 @@ def test_when_continuing_fails_too_the_page_offers_a_fresh_session():
     # button certain to fail is not a way on. Pinned here so the widening cannot be quietly reverted.
     assert "failedTries >= 2 || terminal" in body, "a terminal failure still waits for a second failure"
     assert "isTerminal(detail) ? null : again" in body, "a terminal failure still offers a doomed retry"
-    assert "Start a fresh session on this matter" in body and "goHome(`/matter/${matterId}`)" in body
+    assert "Start a fresh session on this matter" in body and "goHome(matterRoute(matterId))" in body
     # Counted per failed ANSWER (repeats inside one answer collapse into "(4 times)"), reset by one that gets
     # through. Bound to the PROPERTY, not to one line: the reset grew a block on 30 Sep when a transient
     # failure started retrying quietly, and an assertion on the old one-liner failed for a reason unrelated
@@ -1935,7 +1935,13 @@ def test_the_matter_flow_reads_through_our_own_tool_and_intake_keeps_the_built_i
 
     assert "read" not in P.MATTER_TOOLS and "grep" not in P.MATTER_TOOLS
     assert P.READ_TOOL in P.MATTER_TOOLS
-    assert "ls" in P.MATTER_TOOLS and "find" in P.MATTER_TOOLS, "the assistant can no longer see a stale draft to report it"
+    # REVERSED 3 Oct. `ls` and `find` were kept so a stale draft could be noticed; what they produced was a
+    # folder listing before the disclosure at the start of every session, a contract paragraph telling the
+    # model not to use a tool it had been given, and on ADE a session that listed the folder and then said
+    # it could not read disclosure.md. The stale draft is now reported by read_matter_file itself, as a
+    # footer on the disclosure — a fact handed over, not a capability to exercise.
+    assert "ls" not in P.MATTER_TOOLS and "find" not in P.MATTER_TOOLS, "a listing tool present is a listing tool used"
+    assert P.MATTER_TOOLS == ("edit", "write", P.READ_TOOL)
     # intake untouched
     assert "read" in P.TOOLS and "grep" in P.TOOLS
 

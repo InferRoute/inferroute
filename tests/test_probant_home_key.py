@@ -90,3 +90,23 @@ def test_the_page_shows_the_key_card_first_and_leaves_sharing_and_help_alone():
         seg = js[js.index(other):js.index(other) + 6000]
         assert "keyCard" not in seg and "/api/key" not in seg
     assert 'input("password"' in js and "autocomplete = \"off\"" in js        # masked, not remembered by the browser
+
+
+def test_reading_a_document_without_a_key_is_refused_before_anything_is_staged(home):
+    h, c, tmp = home
+    r = c.post("/api/intake", json={"text": "A synthetic document.", "name": "d.txt", "client": "Personal"})
+    assert r.status_code == 409 and r.json()["needs_key"] is True and "InferRoute key" in r.json()["error"]
+    assert not h.launches.items
+    assert not list((tmp / "Probant").glob(".intake/*")) and not list((tmp / "ir").rglob("intakes/*"))
+
+
+def test_a_launcher_that_stopped_for_want_of_a_key_is_reported_in_plain_words():
+    said = H.failure_message(["/tmp/x/.intake/2026",
+                              "no InferRoute key (run `ir login`) and no IR_OPERATOR_API_KEY for direct mode"])
+    assert "Matters page" in said and "ir login" not in said and "Nothing was sent" in said
+
+
+def test_the_reading_dialog_sends_a_person_without_a_key_to_the_card():
+    js = (Path(H.__file__).parent / "probant_web/home.js").read_text()
+    seg = js[js.index("function readDocumentDialog"):][:4500]
+    assert "InferRoute key" in seg and 'location.hash = "#/"' in seg

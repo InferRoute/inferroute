@@ -450,6 +450,9 @@ class Launches:
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
 
 
+NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the Matters page."
+
+
 def key_status() -> Dict[str, Any]:
     """Whether this computer holds an InferRoute key, and nothing more: never the key, never a fragment."""
     from . import config
@@ -483,6 +486,8 @@ def session_stop_wait() -> float:
 def failure_message(tail: List[str]) -> str:
     text = " ".join(tail)
     low = text.lower()
+    if "no inferroute key" in low or "run `ir login`" in low:
+        return "No InferRoute key is saved on this computer. Add it in the box at the top of the Matters page, then try again. Nothing was sent."
     if "nested agent session" in low:
         return "This was started from inside another assistant session. Start Probant home from a normal terminal."
     # BEFORE the general "refused" below. On a Mac the agent runs in a virtual machine, and every way that
@@ -694,7 +699,7 @@ class Home:
             if rec.get("needs_review"):
                 return problem("Review this draft's disclosure and date before starting a session.", 409)
             if not key_status()["present"]:
-                return problem("Add your InferRoute key first — the box at the top of the Matters page.", 409, extra={"needs_key": True})
+                return problem(NEEDS_KEY_WORDS, 409, extra={"needs_key": True})
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
         @app.post("/api/sessions/end")
@@ -832,6 +837,11 @@ class Home:
             import asyncio
             from . import probant_intake as I
             d = await body(request)
+            if not key_status()["present"]:
+                # Before the text is staged: a document nobody can read yet should not be sitting in a
+                # staging folder, and the person should be told where to add the key, not shown a launcher's
+                # last words.
+                return problem(NEEDS_KEY_WORDS, 409, extra={"needs_key": True})
             try:
                 client = S.sanitize(str(d.get("client") or "Personal"), "client")
                 meta = await asyncio.to_thread(I.stage, str(d.get("text") or ""), str(d.get("name") or ""))

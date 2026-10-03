@@ -5,6 +5,8 @@ export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
+exec >/dev/console 2>&1
+echo "PROBANT_GUEST_INIT stage2 kernel=$(uname -r) arch=$(uname -m)"
 mkdir -p /dev/pts /dev/shm
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /dev/shm
@@ -18,8 +20,9 @@ ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up
 hostname probant-guest
 export HOME=/root PYTHONPATH=/opt/probant/client PYTHONDONTWRITEBYTECODE=1 LANG=C.UTF-8
 cd /
+echo "PROBANT_GUEST_INIT modules=$(grep -c . /proc/modules) nets=$(ls /sys/class/net | tr '\n' ' ')"
 python3 -m inferroute_local.macos_vm.guest
-echo "PROBANT_GUEST_SUPERVISOR_EXIT $?" > /dev/console 2>/dev/null
+echo "PROBANT_GUEST_SUPERVISOR_EXIT $?"
 # THE HOST STOPS THIS MACHINE; it never stops itself. The runner treats a guest that halts before the
 # host's own teardown as a failure ("guest stopped before host teardown proof") and the session's outputs
 # are then discarded — so a clean finish must WAIT here to be force-stopped. PID 1 exiting would also panic.

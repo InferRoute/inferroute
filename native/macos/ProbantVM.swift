@@ -256,7 +256,16 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
         config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
         let console = VZVirtioConsoleDeviceSerialPortConfiguration()
+        // The guest's console is discarded: stdout is Pi's RPC stream and nothing else, and a console that
+        // went anywhere would be a place for matter text to end up. A DEVELOPMENT build compiled with
+        // -D PROBANT_DEV_CONSOLE sends it to stderr instead, because a guest that fails to boot says so only
+        // there. It is a compile-time switch on purpose: no flag, file or environment variable can turn it on
+        // in a binary that was built without it, and the release build's hash is the one the manifest pins.
+        #if PROBANT_DEV_CONSOLE
+        let consoleOutput: FileHandle? = FileHandle.standardError
+        #else
         let consoleOutput = FileHandle(forWritingAtPath: "/dev/null")
+        #endif
         console.attachment = VZFileHandleSerialPortAttachment(
             fileHandleForReading: FileHandle(forReadingAtPath: "/dev/null"),
             fileHandleForWriting: consoleOutput)

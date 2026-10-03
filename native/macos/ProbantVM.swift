@@ -270,6 +270,9 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
         // there. It is a compile-time switch on purpose: no flag, file or environment variable can turn it on
         // in a binary that was built without it, and the release build's hash is the one the manifest pins.
         #if PROBANT_DEV_CONSOLE
+        // This line is also the marker scripts/sign_macos_runtime.py looks for in the binary: a development
+        // runner carries the string and is refused for signing, so one cannot be shipped by mistake.
+        fputs("PROBANT_VM_DEVELOPMENT_BUILD guest console is copied to stderr\n", stderr)
         let consoleOutput: FileHandle? = FileHandle.standardError
         #else
         let consoleOutput = FileHandle(forWritingAtPath: "/dev/null")

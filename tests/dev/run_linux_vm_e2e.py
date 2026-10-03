@@ -72,9 +72,26 @@ class Model(BaseHTTPRequestHandler):
             self.wfile.write(b"data: " + json.dumps(obj).encode() + b"\n\n")
             self.wfile.flush()
 
-        chunk({"role": "assistant", "content": "SYNTHETIC "})
-        chunk({"content": "ANSWER FROM THE HOST SIDE"})
-        chunk({}, "stop", {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3})
+        # A scripted model: read the disclosure, write a note beside it, then answer. Three turns, so the
+        # run covers a tool that READS the matter (the snapshot really arrived in the guest), a tool that
+        # WRITES it (the output really comes back, and only after the machine is stopped), and plain text.
+        posts = sum(1 for m, pth, *_ in SEEN if m == "POST" and pth == "/v1/chat/completions")
+        usage = {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3}
+
+        def call(name, arguments):
+            chunk({"role": "assistant", "content": None, "tool_calls": [
+                {"index": 0, "id": f"call_{posts}", "type": "function",
+                 "function": {"name": name, "arguments": json.dumps(arguments)}}]})
+            chunk({}, "tool_calls", usage)
+
+        if posts == 1:
+            call("read_matter_file", {})
+        elif posts == 2:
+            call("write", {"path": "notes.md", "content": "SYNTHETIC NOTE written inside the guest\n"})
+        else:
+            chunk({"role": "assistant", "content": "SYNTHETIC "})
+            chunk({"content": "ANSWER FROM THE HOST SIDE"})
+            chunk({}, "stop", usage)
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
         self.close_connection = True
@@ -135,9 +152,28 @@ async def main() -> int:
         print(f"[3] Pi events: {sorted(set(result['events']))}")
         print(f"    answer through the VM path: {result['answer']!r}  (agent_end: {ended})")
         proc.stdin.close()
+        note = workspace / "notes.md"
+        print(f"    before the machine is stopped, the host workspace has notes.md: {note.exists()}")
+        early = note.exists()
         code = await asyncio.wait_for(backend.finish(), 120)
         print(f"[4] finish(): agent exit {code}; exported {backend.exported}")
-        result["ok"] = ended and code == 0
+        text = note.read_text() if note.exists() else None
+        print(f"    after the stop is proved, notes.md on the host: {text!r}")
+
+        posts = [json.loads(b) for m, pth, _a, b in SEEN if m == "POST" and pth == "/v1/chat/completions"]
+        tools = sorted(t["function"]["name"] for t in posts[0].get("tools", []))
+        print(f"[5] tools the model was offered: {tools}")
+        read_result = next((m.get("content") for m in posts[1]["messages"] if m.get("role") == "tool"), "")
+        if isinstance(read_result, list):
+            read_result = " ".join(str(x.get("text", "")) for x in read_result)
+        print(f"    read_matter_file returned the disclosure: {'synthetic wrist device' in read_result}; "
+              f"footer: {read_result.strip().splitlines()[-1] if read_result else None!r}")
+        result["ok"] = (ended and code == 0 and not early and backend.exported == ("notes.md",)
+                        and text == "SYNTHETIC NOTE written inside the guest\n"
+                        and "ls" not in tools and "find" not in tools and "read_matter_file" in tools
+                        and "synthetic wrist device" in read_result
+                        and "No other files in the matter folder." in read_result)
+        print(f"[6] every check held: {result['ok']}")
     finally:
         err = b""
         if backend.proc is not None and backend.proc.stderr is not None:

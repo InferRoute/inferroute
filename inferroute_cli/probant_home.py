@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
+from . import probant_trust
 from . import probant as S
 from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
@@ -220,7 +221,7 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
         kept = (rdir / f"{sid}.conversation.jsonl").exists()
         out.append({"id": sid, "started_at": _stamp_of(sid), "surface": rec.get("surface") or ("browser" if kept else ""),
                     "searches": len(searches), "documents": len(keys), "ai_verified": bool(model.get("verified")),
-                    "boxed": str(rec.get("confinement") or "").startswith("require, address-level"),
+                    "boxed": probant_trust.closed_box(rec.get("confinement")),
                     "conversation": kept})
     out.sort(key=lambda s: s["id"], reverse=True)
     return out

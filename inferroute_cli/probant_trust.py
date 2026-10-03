@@ -251,7 +251,7 @@ def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]
     label = confinement or ""
     technical = [{"label": "confinement", "ok": True, "value": label}]
     browser = [BROWSER_POINT] if surface == "browser" else []
-    if label.startswith("require, address-level"):
+    if label.startswith(("require, address-level", "require, Linux VM")):
         return {"key": "computer", "state": OK, "title": "This computer",
                 "summary": "The assistant works in a closed box.",
                 "points": ["No internet, and no files beyond this matter's folder."] + browser,

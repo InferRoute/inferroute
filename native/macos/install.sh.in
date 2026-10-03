@@ -1,0 +1,30 @@
+#!/bin/sh
+# Render vendor pins into this template as part of the signed distribution.
+# End users need only macOS system tools, never Python/Node/Pi/Homebrew/Xcode.
+set -eu
+TEAM='@VENDOR_TEAM_ID@'
+IDENTIFIER='@VENDOR_APP_IDENTIFIER@'
+VERSION='@VENDOR_APP_VERSION@'
+case "$TEAM:$IDENTIFIER:$VERSION" in *'@'*)
+  printf '%s\n' 'Refusing: installer vendor policy has not been provisioned.' >&2
+  exit 78;;
+esac
+[ "$#" -eq 1 ] || { printf '%s\n' 'Usage: install.sh /path/to/Probant.app' >&2; exit 64; }
+[ -d "$1" ] && [ ! -L "$1" ] || exit 78
+verify() {
+  /usr/bin/codesign --verify --deep --strict -R "anchor apple generic and identifier \"$IDENTIFIER\" and certificate leaf[subject.OU] = \"$TEAM\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$1" >/dev/null 2>&1
+  /usr/sbin/spctl --assess --type execute "$1" >/dev/null 2>&1
+}
+verify "$1" || { printf '%s\n' 'Refusing: vendor signature or notarization failed.' >&2; exit 78; }
+# Keep old versions for active sessions. Never replace the current client/state.
+umask 077
+DEST="$HOME/Applications"
+mkdir -p "$DEST"
+FINAL="$DEST/Probant-$VERSION.app"
+[ ! -e "$FINAL" ] && [ ! -L "$FINAL" ] || { printf '%s\n' 'This version already exists; nothing changed.' >&2; exit 78; }
+STAGE=$(/usr/bin/mktemp -d "$DEST/.probant-install.XXXXXXXX")
+trap '/bin/rm -rf "$STAGE"' EXIT HUP INT TERM
+/usr/bin/ditto "$1" "$STAGE/Probant.app"
+verify "$STAGE/Probant.app" || exit 78
+/bin/mv -n "$STAGE/Probant.app" "$FINAL"
+printf '%s\n' "Installed $FINAL. Open it to start Probant."

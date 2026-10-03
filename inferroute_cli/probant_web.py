@@ -778,6 +778,12 @@ class Bridge:
                 if not chunk:
                     break
                 buf += chunk
+                # The guest is untrusted. Bound complete events and unfinished JSONL
+                # before parsing; continuous newline-free output must not grow RAM.
+                if len(buf) > 8 * 1024 * 1024 and any(
+                        len(part) > 8 * 1024 * 1024 for part in buf.split(b"\n")):
+                    await self.stop_agent()
+                    raise ValueError("agent RPC event exceeded the session limit")
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     line = line.rstrip(b"\r")

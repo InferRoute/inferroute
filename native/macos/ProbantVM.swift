@@ -217,7 +217,10 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
                     reason = "frame quota"
                 } catch Refusal.eof { reason = "broker EOF" }
                   catch { }
-                DispatchQueue.main.async { self.finish(reason) }
+                // A constant for the closure: a captured `var` read on another queue is a warning today
+                // and an error in the Swift 6 language mode.
+                let outcome = reason
+                DispatchQueue.main.async { self.finish(outcome) }
             }
         }
         return true

@@ -1,0 +1,29 @@
+#!/bin/sh
+# Stage 1, PID 1 on the initial rootfs. bubblewrap confines with pivot_root, and the kernel refuses to
+# pivot the initial rootfs — so the whole userland moves to a tmpfs and control passes there.
+#
+# /bin, /sbin and /lib are copied and LEFT WHERE THEY ARE: this script, every command it runs and the C
+# library they load all come from those three, so removing any of them here removes the tool doing the
+# removing. (The first version removed each directory as it went, starting with /bin. `cp` was gone after one
+# iteration and the machine panicked — found on the first real boot, 3 Oct.) switch_root deletes whatever
+# is left of this root. The large trees ARE removed as they go, so peak memory stays near the tree plus its
+# largest directory rather than twice the tree.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+stop() {
+  echo "PROBANT_GUEST_INIT stage1 failed: $1"
+  # Never exit: PID 1 exiting is a kernel panic, which the host reads as "guest stopped" with no reason.
+  while :; do sleep 3600; done
+}
+mkdir -p /newroot
+mount -t tmpfs -o mode=0755 tmpfs /newroot || stop "tmpfs"
+for d in bin sbin lib; do
+  cp -a "/$d" /newroot/ || stop "copy /$d"
+done
+for d in etc opt usr var; do
+  [ -e "/$d" ] || continue
+  cp -a "/$d" /newroot/ || stop "copy /$d"
+  rm -rf "/$d"
+done
+cp -a /init2 /newroot/init2 || stop "copy init2"
+for d in proc sys dev tmp run root matter config; do mkdir -p "/newroot/$d" || stop "mkdir /$d"; done
+exec switch_root /newroot /init2

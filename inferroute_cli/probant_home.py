@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
+from . import probant_trust
 from . import probant as S
 from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
@@ -220,7 +221,7 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
         kept = (rdir / f"{sid}.conversation.jsonl").exists()
         out.append({"id": sid, "started_at": _stamp_of(sid), "surface": rec.get("surface") or ("browser" if kept else ""),
                     "searches": len(searches), "documents": len(keys), "ai_verified": bool(model.get("verified")),
-                    "boxed": str(rec.get("confinement") or "").startswith("require, address-level"),
+                    "boxed": probant_trust.closed_box(rec.get("confinement")),
                     "conversation": kept})
     out.sort(key=lambda s: s["id"], reverse=True)
     return out
@@ -385,7 +386,7 @@ class Launches:
         for it in live:
             it["proc"].terminate()
             try:
-                it["proc"].wait(timeout=10)
+                it["proc"].wait(timeout=session_stop_wait())
             except subprocess.TimeoutExpired:
                 it["proc"].kill()
             it["state"] = "ended"
@@ -449,11 +450,65 @@ class Launches:
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
 
 
+def key_status() -> Dict[str, Any]:
+    """Whether this computer holds an InferRoute key, and nothing more: never the key, never a fragment."""
+    from . import config
+    try:
+        return {"present": bool(config.load().api_key.strip())}
+    except OSError:
+        return {"present": False}
+
+
+def key_problem(key: str) -> str:
+    """Plain words for a pasted key that cannot be one, before anything touches the network."""
+    from . import login
+    if not key:
+        return "Paste the key you were given."
+    if len(key) > 200 or any(c.isspace() for c in key):
+        return "That does not look like a key: it should be one line with no spaces."
+    if not login._looks_like_key(key):
+        return "That does not look like an InferRoute key. It starts with inf_."
+    return ""
+
+
+def session_stop_wait() -> float:
+    """How long a session is given to end after being asked, before it is killed. Where the agent runs in a
+    virtual machine the session needs its own grace (probant_web.VM_END_GRACE) to bring the agent's files
+    back; killing the launcher inside that window is what discards them, so this must outlast it."""
+    from inferroute_local import macos_vm
+    from . import probant_web
+    return probant_web.VM_END_GRACE + 15 if macos_vm.required_for("pi", {}) else 10
+
+
 def failure_message(tail: List[str]) -> str:
     text = " ".join(tail)
     low = text.lower()
     if "nested agent session" in low:
         return "This was started from inside another assistant session. Start Probant home from a normal terminal."
+    # BEFORE the general "refused" below. On a Mac the agent runs in a virtual machine, and every way that
+    # machine can fail to start says "refused" or "Refusing" — which the next branch would report as the AI
+    # machine failing its check, with "try again in a minute". Neither is true, and waiting fixes none of them.
+    if "vm runtime" in low or "vm confinement" in low or "macos vm" in low or "vm executable" in low or "runtime artifact" in low:
+        if "is not installed" in low:
+            return ("This Mac is missing the part of Probant that runs the assistant in a protected virtual machine, "
+                    "so no session can start. Install it with the Mac instructions you were sent (the package "
+                    "inferroute-macos-vm-runtime), then try again. Nothing was sent.")
+        if "not provisioned" in low:
+            return ("This version of Probant cannot run sessions on a Mac yet. Nothing was sent. "
+                    "Ask InferRoute for the Mac version.")
+        if "architecture" in low:
+            return ("Probant on a Mac needs Apple silicon (an M1 or later). This Mac has an Intel processor, "
+                    "so no session can start. Nothing was sent.")
+        if "older than" in low:
+            return ("This version of macOS is too old for the protected virtual machine Probant runs the assistant in, "
+                    "so no session can start. Nothing was sent.")
+        if "signature" in low or "integrity" in low or "signing requirement" in low:
+            return ("The protected virtual machine's files did not pass their check, so it was not started and nothing "
+                    "was sent. Reinstall Probant with the Mac instructions; if it happens again, tell InferRoute — "
+                    "these files should never differ from the ones we signed.")
+        return ("The protected virtual machine the assistant runs in could not be started, so the session was not "
+                "opened and nothing was sent. Try once more; if it fails again, send InferRoute this line: "
+                + next((ln.strip() for ln in reversed(tail) if "vm" in ln.lower()), "").strip())
     if "not opened" in low or "refused" in low or "could not open the confidential session" in low:
         return "The AI machine could not be verified, so the session was not opened and nothing was sent. Try again in a minute."
     if "cannot reach the carrier" in low or "key was refused" in low:
@@ -533,7 +588,30 @@ class Home:
                     recent.append({**s, "matter": m["id"]})
             recent.sort(key=lambda s: s["id"], reverse=True)
             running = [home.launches.view(it) for it in home.launches.items.values() if it["state"] in ("starting", "ready")]
-            return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale()}
+            return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale(),
+                    "key": key_status()}
+
+        @app.get("/api/key")
+        async def key_view():
+            return key_status()
+
+        @app.post("/api/key")
+        async def key_save(request: Request):
+            """Take the InferRoute key from the page, check it, keep it. The key is never echoed back, never
+            logged, and is written with mode 600 to the same file `ir login` writes."""
+            d = await body(request)
+            given = str(d.get("key") or "").strip()
+            problem_text = key_problem(given)
+            if problem_text:
+                return problem(problem_text, 400)
+            from . import config, login
+            status, n_models = await asyncio.to_thread(login._verify, config.load().api_url, given)
+            if status == "reject":
+                return problem("InferRoute did not accept this key. Check that it was copied whole, or ask for a new one.", 400)
+            if status != "ok":
+                return problem("Could not reach InferRoute to check the key, so it was not saved. Check the connection and try again.", 502)
+            await asyncio.to_thread(config.save, given, config.load().api_url)
+            return {"ok": True, **key_status()}
 
         @app.post("/api/matters")
         async def create(request: Request):
@@ -615,6 +693,8 @@ class Home:
                 return problem(str(e), 404)
             if rec.get("needs_review"):
                 return problem("Review this draft's disclosure and date before starting a session.", 409)
+            if not key_status()["present"]:
+                return problem("Add your InferRoute key first — the box at the top of the Matters page.", 409, extra={"needs_key": True})
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
         @app.post("/api/sessions/end")

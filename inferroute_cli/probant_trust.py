@@ -247,11 +247,28 @@ BROWSER_POINT = ("This page is served by this computer alone. It loads nothing f
                  "what the assistant writes into a link.")
 
 
+# WHETHER A RECORDED CONFINEMENT LINE MEANS "CLOSED BOX" — decided HERE and nowhere else.
+#
+# Three places asked this of the same string, each with its own copy of the test: this panel, the home page's
+# session list, and the exported record's "At a glance". When the macOS VM label was added, one copy learned
+# it and two did not, so a VM session would have read "closed box" on the page that ran it, "not fully boxed"
+# on the home page, and "only partly boxed" in the record its user keeps. Two instruments that share one
+# belief are one instrument; three copies of one belief are three chances to disagree with yourself.
+#
+# Both lines are stamped host-side and only where the mechanism actually applied: the Linux one by the netns
+# sandbox, the VM one only while the guest has reported its own confinement preflight and is still running.
+CLOSED_BOX_LABELS = ("require, address-level", "require, Linux VM")
+
+
+def closed_box(label: str) -> bool:
+    return str(label or "").startswith(CLOSED_BOX_LABELS)
+
+
 def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]:
     label = confinement or ""
     technical = [{"label": "confinement", "ok": True, "value": label}]
     browser = [BROWSER_POINT] if surface == "browser" else []
-    if label.startswith("require, address-level"):
+    if closed_box(label):
         return {"key": "computer", "state": OK, "title": "This computer",
                 "summary": "The assistant works in a closed box.",
                 "points": ["No internet, and no files beyond this matter's folder."] + browser,

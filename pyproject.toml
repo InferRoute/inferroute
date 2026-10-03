@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.9.99"
+version = "0.9.101"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"
@@ -88,3 +88,6 @@ packages = ["inferroute_cli", "inferroute_local"]
 "inferroute_cli/catalog_bundled.json" = "inferroute_cli/catalog_bundled.json"
 "docs/trust/publication-key-attestation.json" = "inferroute_cli/trust/publication-key-attestation.json"
 "docs/trust/publication-key-attestation.bundle" = "inferroute_cli/trust/publication-key-attestation.bundle"
+# What a Mac client trusts to start its VM: the key that signs the runtime manifest, and how the runner
+# executable must be vouched for. Without this file every Mac Probant session refuses before anything starts.
+"docs/trust/macos-vm-policy.json" = "inferroute_cli/trust/macos-vm-policy.json"

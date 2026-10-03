@@ -340,6 +340,8 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     if not ws.is_dir():
         raise ProbantError(f"the matter workspace is missing: {ws}")
     make_private(client, matter)
+    from . import probant_search_setup
+    probant_search_setup.ensure_quietly()                    # a long-running home page must not hold a stale reference
     try:
         os.chmod(ws, 0o700)                                  # the recorded workspace, wherever it lives
     except OSError:
@@ -595,6 +597,8 @@ def main(argv: list[str] | None = None) -> int:
     dl.add_argument("matter"); dl.add_argument("--yes", action="store_true", help="do not ask to type the matter name")
     hm = sub.add_parser("home", help="the home page in your browser: every matter, past sessions, new matters and sessions, help")
     hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
+    ss = sub.add_parser("setup-search", help="set up patent search on this computer from InferRoute's published files")
+    ss.add_argument("--force", action="store_true", help="replace a search configuration Probant did not write")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
     pf.add_argument("matter")
     ca = sub.add_parser("audit-client", help="a brief your OWN AI can use to audit this software itself, "
@@ -656,8 +660,14 @@ def main(argv: list[str] | None = None) -> int:
             print("  them — starting with whether anything can leave this computer unencrypted.")
             print("  Give it the folder and say: read CLIENT-AUDIT.md and do what it asks.\n")
             return 0
+        if a.cmd == "setup-search":
+            from . import probant_search_setup
+            return probant_search_setup.main_setup(force=a.force)
         if a.cmd == "home":
-            from . import probant_home
+            from . import probant_home, probant_search_setup
+            # Keep the search configuration current: a superseded reference or a moved search machine would
+            # otherwise show up as a session that cannot start. Quiet, bounded, and never blocks the page.
+            probant_search_setup.ensure_quietly()
             return probant_home.run(open_browser=not a.no_browser)
     except ProbantError as e:
         sys.stderr.write(f"\n  {e}\n\n")

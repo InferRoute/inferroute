@@ -14,7 +14,8 @@ a file you choose, mode 600, never in a repo, a wheel, the guest or a report.
     sign_macos_runtime.py keygen --key KEYFILE
         Make the keypair. Prints the PUBLIC half and the policy file to commit. Refuses to overwrite.
 
-    sign_macos_runtime.py build --key KEYFILE --runner ProbantVM --guest DIR --version V --out DIR
+    sign_macos_runtime.py build --key KEYFILE [--passphrase-prompt] --runner ProbantVM --guest DIR --version V --out DIR
+        KEYFILE is either the bare key `keygen` writes or the offline publication key's encrypted PEM.
         Check the three artifacts, write the signed runtime.json, and build
         inferroute_macos_vm_runtime-V-py3-none-macosx_11_0_arm64.whl. Deterministic: the same inputs
         and key give the same wheel.
@@ -59,12 +60,36 @@ ARTIFACTS = ("ProbantVM", "kernel", "initrd")
 POLICY_SOURCE = REPO / "docs/trust/macos-vm-policy.json"
 
 
-def _private(path: Path):
+def _private(path: Path, passphrase_env: str | None = None, prompt: bool = False):
+    """The key, from either file format this project uses: a bare hex seed (what `keygen` here writes) or
+    the passphrase-protected PEM of the offline publication key (`ir probant reference new-key`). The
+    passphrase comes from a prompt or from $VAR — never from argv."""
+    from cryptography.hazmat.primitives import serialization as ser
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     mode = path.stat().st_mode
     if mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise SystemExit(f"{path} is readable by others (mode {oct(mode & 0o777)}); chmod 600 it first")
-    return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(path.read_text().strip()))
+    data = path.read_bytes()
+    if data.lstrip().startswith(b"-----BEGIN"):
+        password = None
+        if passphrase_env:
+            value = os.environ.get(passphrase_env, "")
+            if not value:
+                raise SystemExit(f"--passphrase-env {passphrase_env} is set but ${passphrase_env} is empty")
+            password = value.encode()
+        elif prompt:
+            import getpass
+            password = getpass.getpass("passphrase for the signing key: ").encode()
+        try:
+            key = ser.load_pem_private_key(data, password=password)
+        except TypeError:
+            raise SystemExit(f"{path} is encrypted; use --passphrase-prompt (or --passphrase-env VAR)")
+        except ValueError:
+            raise SystemExit("could not unlock the key: wrong passphrase, or not an Ed25519 key")
+        if not isinstance(key, Ed25519PrivateKey):
+            raise SystemExit(f"{path} is not an Ed25519 key")
+        return key
+    return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(data.decode().strip()))
 
 
 def _public_hex(key) -> str:
@@ -134,7 +159,7 @@ def write_wheel(out: Path, version: str, members: dict) -> Path:
 
 
 def build(a) -> int:
-    key = _private(Path(a.key))
+    key = _private(Path(a.key), a.passphrase_env, a.passphrase_prompt)
     guest = Path(a.guest)
     files = {"ProbantVM": Path(a.runner).read_bytes(), "kernel": (guest / "kernel").read_bytes(),
              "initrd": (guest / "initrd").read_bytes()}
@@ -201,6 +226,8 @@ def main() -> int:
     for flag in ("--key", "--runner", "--guest", "--version", "--out"):
         b.add_argument(flag, required=True)
     b.add_argument("--minimum-macos", default="12.0")
+    b.add_argument("--passphrase-prompt", action="store_true", help="type the key's passphrase at a prompt")
+    b.add_argument("--passphrase-env", default=None, metavar="VAR", help="read the key's passphrase from $VAR")
     b.set_defaults(fn=build)
     v = sub.add_parser("verify"); v.add_argument("wheel"); v.add_argument("--policy", default=str(POLICY_SOURCE))
     v.set_defaults(fn=verify)

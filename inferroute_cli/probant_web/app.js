@@ -266,11 +266,43 @@
   }
 
   function holdQuestion(text) {
-    const node = el("div", "msg msg-user msg-waiting", text);
-    waiting.push({ text, node });
+    const entry = { text, node: null };
+    const cancel = el("button", "ghost small cancel-queued", "Cancel");
+    cancel.type = "button";
+    cancel.title = "Take this question back before it is sent";
+    cancel.addEventListener("click", () => cancelQueued(entry, cancel));
+    const node = el("div", "msg msg-user msg-waiting", el("span", "queued-text", text), cancel);
+    entry.node = node;
+    waiting.push(entry);
     const s = stick();
     waitRoom().append(node);
     s();
+    renderWaiting();
+  }
+
+  // Take a waiting question back. The server decides: it cancels only a question still held, and says so if
+  // the assistant has already taken it up (the queue can shift between the click and the request).
+  async function cancelQueued(entry, button) {
+    const index = waiting.indexOf(entry);
+    if (index < 0) return;
+    button.disabled = true;
+    try {
+      await api("/api/prompt/cancel", { index, text: entry.text });
+      dropWaiting(entry.text, index);
+    } catch (e) {
+      button.disabled = false;
+      toast(e.message, "error");
+    }
+  }
+
+  // Remove one waiting question from the page. Idempotent, because the same cancel arrives twice: as the
+  // answer to the click, and as an event (to other tabs on this session, and when a reload replays history).
+  function dropWaiting(text, index) {
+    let i = waiting[index] && waiting[index].text === text ? index : waiting.findIndex((w) => w.text === text);
+    if (i < 0) return;
+    const [gone] = waiting.splice(i, 1);
+    gone.node.remove();
+    outstanding.delete(text);
     renderWaiting();
   }
 
@@ -2004,6 +2036,7 @@
     if (ev.at) lastEventAt = ev.at;
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
+      case "queue_cancel": dropWaiting(ev.text, ev.index); break;
       case "busy":
         if (ev.value && !busy) takeUpQuestion();   // a new turn begins: anchor the question it answers
         busy = ev.value;

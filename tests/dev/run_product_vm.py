@@ -135,13 +135,16 @@ def main() -> int:
                     text.append(str(e.get("text") or e.get("delta") or ""))
                 if k == "ping":
                     state = api("/api/session")
-                    if not state.get("busy") and kinds.get("user"):
+                    # "Not busy" only means finished once the assistant has been seen to START: an
+                    # emulated guest takes a minute to bring Pi up, and the prompt waits in its input
+                    # until then with the page quite truthfully reporting an idle agent.
+                    if not state.get("busy") and kinds.get("assistant_end"):
                         idle_since = idle_since or time.time()
                         if time.time() - idle_since > 10:
                             break
                     else:
                         idle_since = None
-                if k in ("idle", "turn_end", "done") and kinds.get("user"):
+                if k in ("idle", "turn_end", "done") and kinds.get("assistant_end"):
                     state = api("/api/session")
                     if not state.get("busy"):
                         break

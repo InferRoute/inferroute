@@ -269,3 +269,14 @@ def test_the_client_says_what_is_wrong_with_a_malformed_result_not_that_the_pack
             c["verdict"] = "COULD NOT CHECK"                          # nothing in this pack to verify
     with pytest.raises(ValueError, match='"name": ..., "model": ...'):
         R.validate(copy.deepcopy(data), pack, R.identity(pack))
+
+
+def test_the_brief_tells_the_auditor_to_start_the_report_early_and_to_budget_its_effort():
+    """3 Oct, the second audit run on ADE: 50 minutes, about $12, 183 turns, no report. Its last message was a
+    tool call written out as text, which ended the session; nothing had been written because the report was
+    planned for the end. The first run took 22 minutes and $3.25 and finished."""
+    brief = E.AUDIT_MD
+    head = brief[:brief.index("## What this folder is")]
+    assert "## How to work" in head and "Start the report in your first minutes" in head
+    assert "About eight tool calls a claim" in head and "Intel quote chain" in head and "Finish with the checker" in head
+    assert head.index("## How to work") < brief.index("## Write your report")          # said before the work, not after

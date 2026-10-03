@@ -534,3 +534,49 @@ def test_malformed_readiness_json_never_releases_capabilities(payload):
         client.close()
         broker.close()
         thread.join(timeout=3)
+
+
+def test_a_proxy_that_does_not_answer_fails_one_call_not_the_session():
+    """Found by the first real session through the broker (3 Oct): the upstream wait was 10 seconds, a
+    sealed search takes longer than that to produce its first byte, and the exception ended serve() — the
+    whole session — instead of that one call."""
+    import socket as _socket
+    from inferroute_local.macos_vm import broker as broker_module
+
+    assert broker_module.HEADER_SECONDS >= 300
+    listener = _socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    listener.close()                                   # nothing listens here: connection refused
+    broker = Broker(Snapshot())
+    broker.configure({}, f"http://127.0.0.1:{port}", "synthetic", search_url=f"http://127.0.0.1:{port}")
+    chunks = list(broker._http("search.query", {"q": "synthetic"}))
+    assert json.loads(chunks[0])["status"] == 502
+    assert json.loads(chunks[1])["error"]["type"] == "proxy_unavailable"
+    # and the broker is still usable for the next call
+    assert json.loads(list(broker._http("model.chat", {"messages": []}))[0])["status"] == 502
+
+
+def test_a_stream_dropped_part_way_ends_early_instead_of_raising(proxy_server, monkeypatch):
+    broker = configured_broker(proxy_server)
+    import http.client
+
+    real = http.client.HTTPResponse.read1
+    calls = {"n": 0}
+
+    def flaky(self, *a, **k):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise ConnectionResetError("synthetic reset")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(http.client.HTTPResponse, "read1", flaky)
+    chunks = list(broker._http("model.chat", {"messages": [{"content": "synthetic"}]}))
+    assert json.loads(chunks[0])["status"] == 200
+    assert len(chunks) == 2                              # the header, one chunk, then an early end
+
+
+def test_a_request_the_size_of_a_long_conversation_is_within_the_wire_limit():
+    from inferroute_local.macos_vm import wire
+
+    assert wire.MAX_REQUEST_BYTES >= 4 * 1024 * 1024

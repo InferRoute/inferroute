@@ -16,7 +16,10 @@ from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 
 VERSION = 1
-MAX_REQUEST_BYTES = 1024 * 1024
+# One request is the WHOLE conversation so far (the model API is stateless), so this bounds how long a
+# session can get before every further turn is refused. A 256k-token context is on the order of a megabyte
+# of JSON, which is where this limit used to sit; a matter with a few patents read into it would reach it.
+MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_FRAME_BYTES = 65536
 CHUNK_BYTES = 3072
 # Kept as a short alias for the broker/relay implementation.

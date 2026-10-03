@@ -2668,7 +2668,10 @@ def test_an_install_whose_ir_is_not_on_path_still_launches_the_audit_by_its_abso
     ir.unlink()
     assert W.audit_ir_path() is None                       # genuinely absent: the refusal is still honest
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ir")
-    assert W.audit_ir_path() == "ir"                       # on PATH: the shown command stays the familiar one
+    assert W.audit_ir_path() == "ir"                       # no install of its own beside this python: the shell's
+    ir.write_text("#!/bin/sh\n")
+    ir.chmod(0o755)
+    assert W.audit_ir_path() == str(ir)                    # the running install wins over a different `ir` on PATH
 
 
 # ── taking back a question that is still waiting ────────────────────────────────────────────────────────────

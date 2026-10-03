@@ -1,0 +1,86 @@
+#!/bin/sh
+# Probant installer — @VERSION@
+#
+#   curl -LsSf https://inferroute.ai/install-probant.sh | sh
+#
+# What it does, and all it does:
+#   1. installs `uv` if there is none (it brings its own Python; your system Python is not touched);
+#   2. makes a private environment in ~/probant;
+#   3. downloads Probant @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — checks each
+#      file against the fingerprint written into this script, and installs them there;
+#   4. prints the next command.
+# It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv) and
+# uv's own Python folder. To remove it all:  rm -rf ~/probant ~/Probant ~/.inferroute
+#
+# The fingerprints below are what make this script fetch exactly the files we released. What makes the
+# virtual machine trustworthy is separate: Probant itself refuses to start it unless its files carry
+# InferRoute's signature.
+set -eu
+
+VERSION="@VERSION@"
+BASE="${IR_INSTALL_BASE:-https://inferroute.ai/client}"
+CLIENT_FILE="inferroute-@VERSION@-py3-none-any.whl"
+CLIENT_SHA256="@CLIENT_SHA256@"
+RUNTIME_FILE="inferroute_macos_vm_runtime-@VERSION@-py3-none-macosx_11_0_arm64.whl"
+RUNTIME_SHA256="@RUNTIME_SHA256@"
+TARGET="${PROBANT_HOME:-$HOME/probant}"
+
+say()  { printf '%s\n' "$*"; }
+stop() { printf '\n  Probant was not installed: %s\n\n' "$*" >&2; exit 1; }
+
+OS=$(uname -s); ARCH=$(uname -m)
+NEEDS_VM=no
+case "$OS" in
+  Darwin)
+    [ "$ARCH" = "arm64" ] || stop "this Mac has an Intel processor. Probant on a Mac needs Apple silicon (M1 or later)."
+    NEEDS_VM=yes ;;
+  Linux) ;;
+  *) stop "this installer supports macOS (Apple silicon) and Linux. For Windows, ask InferRoute." ;;
+esac
+command -v curl >/dev/null 2>&1 || stop "curl was not found."
+
+# ── uv ──────────────────────────────────────────────────────────────────────────────────────────────────────
+UV=""
+for c in "$(command -v uv 2>/dev/null || true)" "$HOME/.local/bin/uv"; do
+  [ -n "$c" ] && [ -x "$c" ] && { UV="$c"; break; }
+done
+if [ -z "$UV" ]; then
+  say "Installing uv (a Python installer; it keeps its own Python, apart from the system's) ..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || stop "could not install uv. Check the connection and run this again."
+  UV="$HOME/.local/bin/uv"
+  [ -x "$UV" ] || stop "uv did not install where expected ($UV)."
+fi
+
+# ── the files, checked before they are used ──────────────────────────────────────────────────────────────────
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/probant-install.XXXXXX")
+trap 'rm -rf "$WORK"' EXIT INT TERM
+sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
+fetch() {   # name expected-sha256
+  say "Downloading $1 ..."
+  curl -fL --retry 3 --progress-bar -o "$WORK/$1" "$BASE/$1" || stop "could not download $BASE/$1"
+  [ "$(sha "$WORK/$1")" = "$2" ] || stop "$1 does not match the fingerprint in this installer. Nothing was installed. Please tell InferRoute."
+}
+fetch "$CLIENT_FILE" "$CLIENT_SHA256"
+[ "$NEEDS_VM" = "yes" ] && fetch "$RUNTIME_FILE" "$RUNTIME_SHA256"
+
+# ── the environment ──────────────────────────────────────────────────────────────────────────────────────────
+if [ -e "$TARGET" ] && [ ! -x "$TARGET/bin/python" ]; then
+  stop "$TARGET exists and is not a Probant environment. Move it aside, or set PROBANT_HOME to another folder."
+fi
+say "Setting up $TARGET ..."
+"$UV" venv --quiet --allow-existing --python 3.12 "$TARGET" || stop "could not create the environment."
+if [ "$NEEDS_VM" = "yes" ]; then
+  "$UV" pip install --quiet --python "$TARGET/bin/python" "$WORK/$CLIENT_FILE[confidential]" "$WORK/$RUNTIME_FILE" \
+    || stop "the install failed. The messages above say why."
+else
+  "$UV" pip install --quiet --python "$TARGET/bin/python" "$WORK/$CLIENT_FILE[confidential]" \
+    || stop "the install failed. The messages above say why."
+fi
+"$TARGET/bin/ir" --version >/dev/null 2>&1 || stop "the installed program does not start."
+
+say ""
+say "Probant $VERSION is installed."
+say ""
+say "  Start it:            $TARGET/bin/ir probant home"
+say "  Your public key:     $TARGET/bin/ir probant identity"
+say ""

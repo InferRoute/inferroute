@@ -38,9 +38,11 @@ def inputs(tmp_path, capsys):
     return SimpleNamespace(key=key, guest=guest, runner=runner, policy=policy, tmp=tmp_path)
 
 
-def build(inputs, out="out"):
+def build(inputs, out="out", **over):
     a = SimpleNamespace(key=str(inputs.key), runner=str(inputs.runner), guest=str(inputs.guest), version="0.0.1",
-                        out=str(inputs.tmp / out), minimum_macos="12.0")
+                        out=str(inputs.tmp / out), minimum_macos="12.0", passphrase_env=None, passphrase_prompt=False)
+    for k, v in over.items():
+        setattr(a, k, v)
     signer.build(a)
     return next((inputs.tmp / out).glob("*.whl"))
 
@@ -121,3 +123,25 @@ def test_verify_needs_no_private_key_and_catches_a_swapped_file(inputs, capsys):
     capsys.readouterr()
     assert signer.verify(SimpleNamespace(wheel=str(tampered), policy=str(policy))) == 1
     assert "FAIL  kernel" in capsys.readouterr().out
+
+
+def test_the_offline_publication_keys_encrypted_pem_signs_what_the_client_accepts(inputs, monkeypatch):
+    """The key on the stick is a passphrase-protected PEM written by `ir probant reference new-key`. Signing
+    with it must give a runtime the client accepts under that key's public half — and refuse to guess."""
+    from inferroute_cli import reference
+    pem = inputs.tmp / "publication.key"
+    public = reference.new_key(str(pem), passphrase=b"correct horse")
+    pem.chmod(0o600)
+    with pytest.raises(SystemExit, match="is encrypted"):
+        build(inputs, key=str(pem))
+    monkeypatch.setenv("SYNTHETIC_PASSPHRASE", "wrong")
+    with pytest.raises(SystemExit, match="wrong passphrase"):
+        build(inputs, key=str(pem), passphrase_env="SYNTHETIC_PASSPHRASE")
+    monkeypatch.setenv("SYNTHETIC_PASSPHRASE", "correct horse")
+    wheel = build(inputs, key=str(pem), passphrase_env="SYNTHETIC_PASSPHRASE")
+    policy = inputs.tmp / "pub-policy.json"
+    policy.write_text(json.dumps({"schema": 2, "public_key": public, "runner_signing": "adhoc-pinned"}))
+    assert signer.verify(SimpleNamespace(wheel=str(wheel), policy=str(policy))) == 0
+    # a reference signature and a runtime manifest signature are over different bytes: neither can stand in
+    # for the other under one key
+    assert signer.runtime.DOMAIN.startswith(b"InferRoute") and not signer.runtime.DOMAIN.startswith(b"{")

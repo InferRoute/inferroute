@@ -275,7 +275,7 @@
             })));
       } else if (l.state === "failed") {
         box.className = "launch failed";
-        box.append(el("div", "", el("b", "", "The session didn't start. "), l.message));
+        box.append(failureNote("The session didn't start.", l.message, l.detail));
         // It stays until you act on it. It used to refresh the page the moment it failed, and the refreshed
         // page only knows about sessions that are starting or running — so the reason flashed for a second
         // and vanished, leaving "nothing happened" as the only feedback.
@@ -301,6 +301,18 @@
         } catch (_) { /* keep trying */ }
       }, 1500);
       watching.set(launch.id, timer);
+    }
+    return box;
+  }
+
+  // A failure, as a person should meet it: what happened and what to do in words, and what the program
+  // actually printed folded away for whoever has to fix it.
+  function failureNote(headline, message, detail) {
+    const box = el("div", "failure-note", el("div", "failure-head", headline),
+      el("div", "failure-body", message || "No reason was recorded."));
+    if (detail) {
+      const d = el("details", "failure-detail", el("summary", "", "Technical details"), el("pre", "", detail));
+      box.append(d);
     }
     return box;
   }
@@ -897,7 +909,7 @@
       if (d.running) {
         p.append(el("p", "sub", "No findings yet."));
       } else if (d.last_launch?.state === "failed") {
-        p.append(el("p", "form-error", `The reading stopped before saving findings. ${d.last_launch.message || "No reason was recorded."}`));
+        p.append(failureNote("The reading stopped before saving findings.", d.last_launch.message, d.last_launch.detail));
       } else if (d.last_launch?.state === "ended") {
         p.append(el("p", "sub", "The reading session ended without saving findings."));
       } else {

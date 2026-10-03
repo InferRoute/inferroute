@@ -28,6 +28,11 @@ class Backend:
             and self.proc.returncode is None
         )
 
+    # From starting the runner to the guest reporting its confinement preflight passed. A real VM on a
+    # Mac boots in a couple of seconds; the development harness that EMULATES an arm64 machine raises
+    # this on its own instance. Nothing reads it from a file or the environment.
+    READY_SECONDS = 30
+
     @property
     def label(self):
         return (
@@ -92,7 +97,7 @@ class Backend:
             )
             child.close()
             status_child.close()
-            deadline = asyncio.get_running_loop().time() + 30
+            deadline = asyncio.get_running_loop().time() + self.READY_SECONDS
             while not self.ready:
                 if (
                     self.errors

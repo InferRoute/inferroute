@@ -33,6 +33,7 @@ from pathlib import Path
 
 BROKER, RPC, STATUS = 40501, 40504, 40505
 IMAGE = "probant-guest-dev:x86"
+QEMU_IMAGE = "probant-qemu-dev:arm64"       # alpine + qemu-system-aarch64; see run_linux_vm_e2e.py
 
 
 def exact(sock: socket.socket, size: int) -> bytes:
@@ -63,13 +64,32 @@ def main() -> int:
 
     name = "probant-vm-dev-" + session[:8]
     log = open(here / "guest.log", "wb")
-    guest = subprocess.Popen(
-        ["docker", "run", "--rm", "--name", name, "--network", "none", "--privileged",
-         "-e", "PYTHONPATH=/opt/probant/client", "-e", "PYTHONDONTWRITEBYTECODE=1",
-         "-e", "HOME=/root", "-e", "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
-         "-v", f"{here / 'guest_shim.py'}:/opt/dev/guest_shim.py:ro",
-         IMAGE, "python3", "/opt/dev/guest_shim.py", session],
-        stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+    if (here / "kernel").exists() and (here / "initrd").exists():
+        # QEMU mode: the REAL arm64 kernel and initrd, emulated. Nothing is shimmed — the guest's own
+        # /init runs as PID 1, reads the session from the real kernel command line and reaches the host
+        # at VMADDR_CID_HOST over a real virtio-vsock device, exactly as under Virtualization.framework.
+        # The machine mirrors ProbantVM.swift: 2 CPUs, 1 GiB, no network device, no disk, no shared
+        # folder, one virtio console (hvc0), one vsock device, one entropy device.
+        cid = 3 + int(uuid.UUID(session)) % 60000
+        guest = subprocess.Popen(
+            ["docker", "run", "--rm", "--name", name, "--network", "none", "--device", "/dev/vhost-vsock",
+             "-v", f"{here}:/rt:ro", QEMU_IMAGE,
+             "qemu-system-aarch64", "-M", "virt", "-cpu", "max", "-smp", "2", "-m", "1024",
+             "-display", "none", "-serial", "none", "-monitor", "none", "-no-reboot", "-nic", "none",
+             "-kernel", "/rt/kernel", "-initrd", "/rt/initrd",
+             "-append", f"console=hvc0 rdinit=/init panic=0 probant.session={session}",
+             "-device", "virtio-serial-pci", "-chardev", "stdio,id=con,signal=off",
+             "-device", "virtconsole,chardev=con",
+             "-device", f"vhost-vsock-pci,guest-cid={cid}", "-device", "virtio-rng-pci"],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
+    else:
+        guest = subprocess.Popen(
+            ["docker", "run", "--rm", "--name", name, "--network", "none", "--privileged",
+             "-e", "PYTHONPATH=/opt/probant/client", "-e", "PYTHONDONTWRITEBYTECODE=1",
+             "-e", "HOME=/root", "-e", "PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+             "-v", f"{here / 'guest_shim.py'}:/opt/dev/guest_shim.py:ro",
+             IMAGE, "python3", "/opt/dev/guest_shim.py", session],
+            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT)
     print("PROBANT_VM_STARTED nic=none host_share=none (linux development stand-in)", file=sys.stderr, flush=True)
 
     done = threading.Event()

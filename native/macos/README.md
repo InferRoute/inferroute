@@ -27,8 +27,9 @@ marker string and the signing script refuses it.
 
 Checked without a Mac (see `tests/dev/`): the guest image boots and runs a whole session under QEMU
 emulation, the confinement probe gives the expected refusals on arm64, and the product itself has run a
-real session through its Mac branch with a stand-in runner. NOT yet checked anywhere: that the Swift runner
-compiles and that Virtualization.framework boots the image.
+real session through its Mac branch with a stand-in runner. Checked on a Mac (ADE, 3 Oct): the runner
+compiles, Virtualization.framework boots the image, and an installed client ran a real session — see
+`RELEASE.md`.
 
 `ProbantVM.swift` is the Virtualization.framework runner. Its guest has no NIC,
 shares or persistent disks. Python verifies the signed manifest and privately

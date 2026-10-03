@@ -4,6 +4,8 @@
     python3 tests/dev/run_product_vm.py                      # container guest
     python3 tests/dev/run_product_vm.py --qemu-guest DIR     # the real arm64 kernel + initrd, emulated
     python3 tests/dev/run_product_vm.py --home               # just start `ir probant home` that way, for a person
+    python3 tests/dev/run_product_vm.py --installed ~/probant/bin/python [--search-config FILE]
+                                                             # an INSTALLED client, nothing substituted (a Mac)
 
 Unlike run_linux_vm_e2e.py nothing here is synthetic except the invention: the model is the sealed lane, the
 search machine is the configured enclave, the page is the product's own, and it is driven over the same HTTP
@@ -42,11 +44,21 @@ def main() -> int:
     if "--qemu-guest" in argv:
         standin = str(Path(argv[argv.index("--qemu-guest") + 1]).resolve())
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join([str(HERE / "vm_product"), str(REPO)])
-    env["PROBANT_DEV_VM_STANDIN"] = standin
     env["IR_ALLOW_NESTED"] = "1"
     env["IR_PROBANT_NO_BROWSER"] = "1"
     py = sys.executable
+    # --installed PYTHON: nothing is substituted. The INSTALLED client behind that interpreter is run as a
+    # user would run it — on a Mac, that is the real runner, the signed runtime wheel and a real VM. This
+    # file is then only the hand on the page. --search-config FILE gives the throwaway home a search.json
+    # (a client machine has none until it is given one).
+    installed = "--installed" in argv
+    if installed:
+        py = argv[argv.index("--installed") + 1]
+        env.pop("PYTHONPATH", None)
+        standin = "container"                                  # only sets the short timeouts below
+    else:
+        env["PYTHONPATH"] = os.pathsep.join([str(HERE / "vm_product"), str(REPO)])
+        env["PROBANT_DEV_VM_STANDIN"] = standin
     if "--home" in argv:
         env.pop("IR_PROBANT_NO_BROWSER")
         return subprocess.call([py, "-m", "inferroute_cli", "probant", "home"], env=env)
@@ -58,6 +70,8 @@ def main() -> int:
     irhome = root / "inferroute-home"
     (irhome / "confidential").mkdir(parents=True)
     real = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "search.json"
+    if "--search-config" in argv:
+        real = Path(argv[argv.index("--search-config") + 1])
     if real.exists():
         shutil.copy2(real, irhome / "confidential" / "search.json")
     env["INFERROUTE_HOME"] = str(irhome)
@@ -76,7 +90,7 @@ def main() -> int:
     print("[list]", listed.stdout.strip()[-300:])
 
     proc = subprocess.Popen([py, "-m", "inferroute_cli", "probant", "open", "devclient/pedal", "--web"], env=env,
-                            cwd=str(REPO), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            cwd=str(root if installed else REPO), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True)
     lines, url = [], [None]
 

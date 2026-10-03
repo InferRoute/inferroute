@@ -1,8 +1,19 @@
 # Releasing Probant for a Mac — the runbook
 
-State on 2026-10-03: steps 2–5 are tooled and tested on Linux. Step 1 has never been done: the runner has
-not been compiled and no guest has booted under Virtualization.framework. Do not publish a Mac-enabled
-client until step 1 has passed on a real Mac.
+State on 2026-10-03, evening. Steps 1, 2, 3 and 5 have been done once, on ADE (Apple M1, macOS 26.5,
+Swift 6.3.2), with nothing published:
+
+* the runner compiled at the first attempt and both builds booted the guest under Virtualization.framework
+  — kernel to guest supervisor in about 2.4 s, a whole synthetic session in about 10 s;
+* release runner sha256 `e2021618fc7f3eff0c8c407538d7bd0bf78559c115737266fc9051412960d80e`;
+* client 0.9.100 and the signed runtime wheel, installed with the uv lines in step 5 into a fresh venv on a
+  Mac with no Pi and no Node: `runtime.locate()` authenticated and staged the runtime in 1.1 s, and a real
+  session ran — sealed model, approval dialog, sealed search, a file written in the guest and exported at
+  the end, 7 turns, 0 faults; the record exported, `verify-export` exit 0, "closed box" and the VM
+  sentence in it.
+
+Not done: step 4 (nothing is published), a person using the page in a browser on a Mac, a second Mac, and
+any Intel Mac (refused by design).
 
 ## 1. On an Apple-silicon Mac: compile the runner and prove the image boots
 

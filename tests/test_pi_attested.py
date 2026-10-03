@@ -1675,3 +1675,23 @@ def test_the_matter_flow_has_no_listing_tool_and_the_disclosure_carries_the_inve
     assert "You have no tool that lists the folder, and you do not need one" in text
     assert "List the folder only if" not in text
     assert "If the footer names a competing file, mention it once, and not again." in text
+
+
+def test_the_disclosure_can_be_read_in_a_session_with_no_search_machine():
+    """`read_matter_file` was registered BELOW the extension's top-level `if (!SEARCH) return;`. A matter
+    session with no search machine configured therefore never got it — while Pi's own `read` and `grep`
+    were already withheld in its favour — and could not read its own disclosure at all.
+
+    Seen twice before it was understood: on ADE on 2 Oct ("listed the matter folder, then said it could not
+    read disclosure.md"), and on 3 Oct in the first tool-using run through the VM harness, where the model
+    was offered `edit` and `write` and nothing that reads. Reading the disclosure has nothing to do with
+    whether a search machine exists.
+    """
+    from inferroute_cli import pi_attested as PA
+    ts = PA.EXTENSION.read_text()
+    cut = ts.index("\tif (!SEARCH) return;\n\n\t// ── one sealed search")
+    assert ts.index('name: "read_matter_file"') < cut, "the read tool is back in the search-only half"
+    assert ts.count('name: "read_matter_file"') == 1
+    # The search tools stay where they were: they need the search machine and must not exist without one.
+    for name in ('name: "prior_art_search"', 'name: "read_patent"', 'name: "deep_prior_art_search"'):
+        assert ts.index(name) > cut, name

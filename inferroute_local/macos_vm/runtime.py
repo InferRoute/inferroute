@@ -46,25 +46,48 @@ def canonical(body):
     ).encode()
 
 
+# Where the runtime is installed: its own distribution (`inferroute-macos-vm-runtime`, a wheel built for
+# arm64 Macs only), beside this package. A hundred megabytes of kernel and guest image do not belong in
+# the wheel every Linux user downloads. Authenticity never comes from where the files were found — it comes
+# from the signature checked below — so this is a location, not a trust decision.
+RUNTIME_DIR = Path(__file__).resolve().parents[2] / "inferroute_macos_vm_runtime"
+
+# How the runner executable is vouched for. Both tiers require the vendor's Ed25519 signature over a
+# manifest that pins the runner, the kernel and the guest image by sha256, so in both the bytes that run are
+# exactly the bytes that were signed.
+#   developer-id   ALSO requires Apple's notarised Developer ID chain for a named team and identifier: a
+#                  second, independent factor, so a stolen vendor key alone cannot bless a runner.
+#   adhoc-pinned   the runner carries an ad-hoc signature (which is what grants it the virtualization
+#                  entitlement and says nothing about who built it). The vendor key is the only factor.
+# The tier is fixed by the policy file shipped inside the client, never by the bundle or the environment.
+SIGNING_TIERS = ("developer-id", "adhoc-pinned")
+
+
 def trusted_policy():
     try:
         value = load_json(POLICY_PATH)
-        if (
-            set(value) != {"schema", "public_key", "team_id", "runner_identifier"}
-            or value["schema"] != 1
-        ):
+        if value.get("schema") == 1:
+            # The original shape: Developer ID, with its team and identifier.
+            if set(value) != {"schema", "public_key", "team_id", "runner_identifier"}:
+                raise ValueError()
+            if not value["team_id"] or not value["runner_identifier"]:
+                raise ValueError()
+        elif value.get("schema") == 2:
+            if set(value) != {"schema", "public_key", "runner_signing"} or value["runner_signing"] != "adhoc-pinned":
+                raise ValueError()
+        else:
             raise ValueError()
-        if (
-            len(bytes.fromhex(value["public_key"])) != 32
-            or not value["team_id"]
-            or not value["runner_identifier"]
-        ):
+        if type(value["schema"]) is not int or len(bytes.fromhex(value["public_key"])) != 32:
             raise ValueError()
         return value
-    except (OSError, ValueError, TypeError, KeyError) as e:
+    except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
         raise VMUnavailable(
             "the signed macOS VM runtime policy is not provisioned in this client"
         ) from e
+
+
+def signing_tier(policy):
+    return "adhoc-pinned" if policy.get("runner_signing") == "adhoc-pinned" else "developer-id"
 
 
 @dataclass
@@ -94,23 +117,35 @@ def verify_signature(manifest, policy):
 
 
 def check_codesign(path, policy):
-    # Explicit requirement pins both the independent vendor Team ID and executable ID.
-    # Do not interpolate package fields into code-signing requirements.
-    team = policy["team_id"]
-    identifier = policy["runner_identifier"]
     import re
 
-    if not re.fullmatch(r"[A-Z0-9]{10}", team) or not re.fullmatch(
-        r"[A-Za-z0-9.-]+", identifier
-    ):
-        raise VMUnavailable("invalid trusted signing policy")
-    requirement = f'anchor apple generic and identifier "{identifier}" and certificate leaf[subject.OU] = "{team}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
-    result = subprocess.run(
-        ["/usr/bin/codesign", "--verify", "--strict", "-R", requirement, str(path)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=30,
-    )
+    if signing_tier(policy) == "adhoc-pinned":
+        # The bytes were already matched to the vendor-signed manifest by stage(). What is left to ask is
+        # whether macOS will accept the signature at all — an unsigned or damaged executable is refused
+        # here, with a reason, rather than by the kernel at launch with none.
+        requirement = None
+    else:
+        # Explicit requirement pins both the independent vendor Team ID and executable ID.
+        # Do not interpolate package fields into code-signing requirements.
+        team = policy["team_id"]
+        identifier = policy["runner_identifier"]
+        if not re.fullmatch(r"[A-Z0-9]{10}", team) or not re.fullmatch(
+            r"[A-Za-z0-9.-]+", identifier
+        ):
+            raise VMUnavailable("invalid trusted signing policy")
+        requirement = f'anchor apple generic and identifier "{identifier}" and certificate leaf[subject.OU] = "{team}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+    argv = ["/usr/bin/codesign", "--verify", "--strict"]
+    if requirement is not None:
+        argv += ["-R", requirement]
+    try:
+        result = subprocess.run(
+            argv + [str(path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise VMUnavailable("macOS VM executable signature could not be checked") from e
     if result.returncode:
         raise VMUnavailable("macOS VM executable signing requirement refused")
 
@@ -246,6 +281,9 @@ def locate():
     if sys.platform != "darwin":
         raise VMUnavailable("macOS VM backend requires macOS")
     policy = trusted_policy()
-    # No PATH/environment lookup; the delivered app owns its complete runtime.
-    root = Path(__file__).resolve().parents[2] / "inferroute_cli/macos_runtime"
-    return stage(root, policy)
+    # No PATH/environment lookup; one fixed place, beside this package.
+    if not RUNTIME_DIR.is_dir():
+        raise VMUnavailable(
+            "the macOS VM runtime is not installed (the `inferroute-macos-vm-runtime` package)"
+        )
+    return stage(RUNTIME_DIR, policy)

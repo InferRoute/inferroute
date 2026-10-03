@@ -80,7 +80,7 @@ def main():
     trust = packaged_client / "inferroute_cli/trust"
     trust.mkdir(exist_ok=True)
     (trust / "macos-vm-policy.json").write_bytes(runtime.canonical(policy))
-    shutil.copytree(args.vm_runtime, packaged_client / "inferroute_cli/macos_runtime")
+    shutil.copytree(args.vm_runtime, packaged_client / "inferroute_macos_vm_runtime")
     shutil.copy2(Path(__file__).with_name("app_entry.py"), resources / "app_entry.py")
     info = {
         "CFBundleExecutable": "Probant",

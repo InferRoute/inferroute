@@ -1028,6 +1028,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 from . import probant_web
                 page = await probant_web.start(probant=probant, session=session, search_endpoint=search_endpoint,
                                                 workspace=Path(os.getcwd()), console=console)
+                if mac_backend is not None:
+                    page.bridge.end_grace = probant_web.VM_END_GRACE
                 proc = mac_backend.proc if mac_backend is not None else await asyncio.create_subprocess_exec(
                     *argv, env=env, preexec_fn=preexec, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
                 # A browser session outlives its terminal, so `kill` from a shell is a real way to end one —

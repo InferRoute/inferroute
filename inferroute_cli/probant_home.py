@@ -386,7 +386,7 @@ class Launches:
         for it in live:
             it["proc"].terminate()
             try:
-                it["proc"].wait(timeout=10)
+                it["proc"].wait(timeout=session_stop_wait())
             except subprocess.TimeoutExpired:
                 it["proc"].kill()
             it["state"] = "ended"
@@ -448,6 +448,15 @@ class Launches:
             it["state"], it["message"] = "ended", "The session has ended."
         else:
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
+
+
+def session_stop_wait() -> float:
+    """How long a session is given to end after being asked, before it is killed. Where the agent runs in a
+    virtual machine the session needs its own grace (probant_web.VM_END_GRACE) to bring the agent's files
+    back; killing the launcher inside that window is what discards them, so this must outlast it."""
+    from inferroute_local import macos_vm
+    from . import probant_web
+    return probant_web.VM_END_GRACE + 15 if macos_vm.required_for("pi", {}) else 10
 
 
 def failure_message(tail: List[str]) -> str:

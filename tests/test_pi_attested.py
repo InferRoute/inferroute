@@ -1633,3 +1633,45 @@ def test_the_folder_is_mentioned_once_and_not_after_an_unrelated_answer():
     assert "Answer about that document, then stop" in contract
     assert "is not an invitation to" in flat and "audit the matter folder" in flat
     assert PA.load_contract()["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"
+
+
+
+def test_the_matter_flow_has_no_listing_tool_and_the_disclosure_carries_the_inventory():
+    """Henry, 3 Oct, watching a session open: "I'll start by reading the disclosure and looking at the matter
+    folder" — "why doesnt it always just go to disclosure.md or maybe a list of official filenames here?"
+
+    Because `ls` and `find` were given to it. They were kept on purpose so the assistant could SEE a stale
+    draft and say so, and the contract then told it not to list the folder when opening a matter — prose
+    against an affordance, and the affordance won: a listing before the disclosure at the start of every
+    session, and on ADE a session that listed the folder and then claimed it could not read disclosure.md.
+
+    The one purpose of `ls` is served by the one call every session makes anyway: read_matter_file returns
+    the disclosure with a footer naming the other files (names only, nothing read), and when disclosure.md
+    is missing its error names what IS there so the model can ask. The list is a fact handed over.
+    """
+    from inferroute_cli import pi_attested as PA
+    ts = PA.EXTENSION.read_text()
+    code = re.sub(r"//[^\n]*", "", ts)
+
+    assert "ls" not in PA.MATTER_TOOLS and "find" not in PA.MATTER_TOOLS
+    # Intake untouched: reading arbitrary documents is the task there and it has no search tool.
+    assert "ls" in PA.TOOLS and "find" in PA.TOOLS
+
+    body = code[code.index('name: "read_matter_file"'):code.index('name: "prior_art_search"')]
+    assert "readdirSync(root, { withFileTypes: true })" in body
+    assert 'd.isFile() && !d.name.startsWith(".") && d.name !== DISCLOSURE' in body, "names only, no hidden files, never the disclosure itself"
+    assert "Other files in the matter folder (not read; the professional's own working files)" in body
+    assert "No other files in the matter folder." in body
+    # Only the disclosure carries the footer; a named extra file comes back as itself.
+    assert "if (rel !== DISCLOSURE) return { content: [{ type: \"text\", text }] };" in body
+    # The missing case names what is there and sends the model to ask, never to choose.
+    assert "disclosure.md is not in the matter folder, so there is no disclosure to read." in body
+    assert "Ask the professional which file is the disclosure; do not choose one yourself." in body
+
+    # The contract no longer tells the model to list — there is nothing to list with — and is repinned.
+    contract = PA.load_contract()
+    assert contract["modified"] is False, "contract changed without repinning PINNED_CONTRACT_SHA"
+    text = PA._strip_comments(PA.CONTRACT_FILE.read_text())
+    assert "You have no tool that lists the folder, and you do not need one" in text
+    assert "List the folder only if" not in text
+    assert "If the footer names a competing file, mention it once, and not again." in text

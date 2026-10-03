@@ -37,9 +37,17 @@ TOOLS = ("read", "edit", "write", "grep", "find", "ls")
 # THE MATTER FLOW READS THROUGH OUR OWN TOOL, not Pi's. `read` and `grep` are withheld and replaced by
 # `read_matter_file`, which refuses anything but disclosure.md unless the professional named it for this
 # session — so "only the disclosure" is ENFORCED rather than asked for in the prompt. `grep` goes with
-# `read` because it returns matching lines, which is reading by another name. `find` and `ls` stay: the
-# assistant may still SEE that a file exists, which is what lets it tell the professional a stale draft
-# is sitting there instead of silently absorbing it.
+# `read` because it returns matching lines, which is reading by another name.
+#
+# `find` and `ls` GO TOO, since 3 Oct. They were kept so the assistant could SEE that a stale draft exists
+# and say so. What they produced in practice was a listing at the start of every session before the
+# disclosure was read ("I'll start by reading the disclosure and looking at the matter folder" — Henry,
+# 3 Oct: "why doesnt it always just go to disclosure.md"), a contract paragraph telling the model not to
+# use a tool it had been given, and on ADE a session that listed the folder and then claimed it could not
+# read disclosure.md. A tool present is a tool used. The one thing `ls` was for is now a footer on the
+# disclosure itself: read_matter_file reports the other files in the folder, by name, in the same call —
+# so the stale draft is still seen, at the moment it matters, and the list is a fact handed over rather
+# than a capability to be exercised. The missing-disclosure case names what is there instead.
 #
 # A real boundary here, unusually for a tool restriction: the attested session has NO shell tool, so
 # there is no second route to a file.
@@ -47,7 +55,7 @@ TOOLS = ("read", "edit", "write", "grep", "find", "ls")
 # INTAKE KEEPS THE BUILT-INS: reading an arbitrary document is the task there, and that flow has no
 # search tool, so nothing can leave while a whole document is in context.
 READ_TOOL = "read_matter_file"
-MATTER_TOOLS = tuple(t for t in TOOLS if t not in ("read", "grep")) + (READ_TOOL,)
+MATTER_TOOLS = tuple(t for t in TOOLS if t not in ("read", "grep", "find", "ls")) + (READ_TOOL,)
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 
 # ── the mission contract (see pi_attested/{preamble,contract}.md and the decision record) ──
@@ -60,7 +68,7 @@ PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
 INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
-PINNED_CONTRACT_SHA = "30bb0465bd2efaec498bbd5bdf7d1875ae9a9d2389b385dd0f58a05f249a2b49"
+PINNED_CONTRACT_SHA = "1dae68054a5d0deba1ddcd4dc8aae90950c266e3acb0f7c78a1f62138ecd747e"
 
 
 def _strip_comments(text: str) -> str:

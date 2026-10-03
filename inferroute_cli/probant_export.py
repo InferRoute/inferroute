@@ -958,7 +958,7 @@ AUDIT_PROMPT = "Read AUDIT.md in this folder and do what it says."
 AUDIT_IR_MODEL = "kimi-k2.6"
 
 
-def audit_command(agent: str) -> str:
+def audit_command(agent: str, ir_path: str = "ir") -> str:
     """The exact command for the audit, composed in ONE place: the panel shows it and the launcher runs it,
     and two constructions of it would let the shown text and the run text drift apart.
 
@@ -976,7 +976,9 @@ def audit_command(agent: str) -> str:
         # directory explicitly rather than bypassing the sandbox. Use the user's chosen model.
         return f"codex --sandbox workspace-write --ask-for-approval on-request --add-dir .. --search {shlex.quote(AUDIT_PROMPT)}"
     if agent == "ir":
-        return f"ir --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
+        # `ir_path` is "ir" when the shell finds it, and otherwise the absolute path of the install that is
+        # running this — a Mac install lives in ~/probant/bin, which no new Terminal window has on its PATH.
+        return f"{shlex.quote(ir_path)} --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
     raise ValueError(f"unknown audit agent: {agent}")
 
 AUDIT_MD = """# Audit brief: an independent check of a sealed prior-art search record

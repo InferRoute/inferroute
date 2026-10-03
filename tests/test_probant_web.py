@@ -9,6 +9,8 @@ import json
 import os
 import stat
 import re
+import shlex
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -108,7 +110,7 @@ def test_only_prompt_abort_and_dialog_answers_ever_reach_the_agent(client):
 def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
-    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/abort",
+    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/prompt/cancel", "/api/abort",
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack",
                      # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
                      # it takes a choice from three agents — never a command. See the launcher's own test.
@@ -1111,7 +1113,7 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     # `ir` reads a bare first word as a subcommand, so its command starts with a flag; an enclave-backed model.
     # --plain since 24 Sep: the pack carries no client words, so there is nothing to seal and
     # the sealed lane would only put a proof card and a keypress before the auditor's work.
-    assert r["ir"].startswith("ir --plain --model kimi-k2.6 ") and r["claude"].startswith("claude ")
+    assert " --plain --model kimi-k2.6 " in r["ir"] and shlex.split(r["ir"])[0].endswith("ir") and r["claude"].startswith("claude ")
     # Quoted with shlex, not wrapped in double quotes by hand: the prompt is a literal argument, and a
     # hand-rolled quote breaks the day it contains a " or a $.
     import shlex as _shlex
@@ -1234,7 +1236,7 @@ def test_the_page_picks_an_agent_and_never_a_command():
     # Nothing from the request body may become part of what runs: `agent` is compared, never interpolated.
     for forbidden in ('d.get("command"', 'd.get("cmd"', 'd.get("path"', "shell=True"):
         assert forbidden not in launcher, forbidden
-    assert "probant_export.audit_command(agent)" in launcher     # composed there, not assembled here
+    assert "probant_export.audit_command(agent, ir_path=" in launcher     # composed there, not assembled here
 
 
 def test_the_shown_command_and_the_run_command_are_the_same_string():
@@ -1243,7 +1245,7 @@ def test_the_shown_command_and_the_run_command_are_the_same_string():
     from inferroute_cli import probant_export as E
     py = Path(W.__file__).resolve().read_text()
     for agent in ("claude", "codex", "ir"):
-        assert f'probant_export.audit_command("{agent}")' in py or "audit_command(agent)" in py
+        assert f'probant_export.audit_command("{agent}"' in py or "audit_command(agent" in py
     assert E.audit_command("claude").startswith("claude ")
     assert E.audit_command("ir").startswith("ir --plain --model ")
 
@@ -2445,7 +2447,7 @@ def test_a_question_sent_while_the_assistant_is_busy_waits_outside_the_transcrip
     r = subprocess.run([node, str(root / "tests" / "waiting_questions_sim.js")], cwd=root,
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "anchored one per turn, in order" in r.stdout
+    assert "anchored one per turn, in order" in r.stdout and "cancel removes only what was asked" in r.stdout
 
     # Waiting is SHOWN, not hidden: the professional must see what they have already asked, and the
     # queue must not be dressed up as activity — the dots below the last answer are what says "working".
@@ -2638,3 +2640,84 @@ def test_the_panel_hands_out_the_verify_command_that_answers_the_question():
     py = (Path(W.__file__)).read_text()
     assert '"python3 verify_record.py ."' not in py, "the bare command is back"
     assert py.count("--reference-key <its key>") == 2
+
+
+def test_an_install_whose_ir_is_not_on_path_still_launches_the_audit_by_its_absolute_path(tmp_path, monkeypatch):
+    """ADE, 3 Oct: "InferRoute isn't available on this computer. Install it, then try again." — said to a
+    person who had just installed it. A venv install keeps `ir` in ~/probant/bin; the page asked only whether
+    `ir` was on its own PATH. A new Terminal window has the same problem, so the COMMAND must carry the path."""
+    import shutil
+    import stat
+    import subprocess
+    fake_bin = tmp_path / "venv" / "bin"
+    fake_bin.mkdir(parents=True)
+    ir = fake_bin / "ir"
+    ir.write_text("#!/bin/sh\n")
+    ir.chmod(ir.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(sys, "executable", str(fake_bin / "python"))
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert W.audit_ir_path() == str(ir)
+    from inferroute_cli import probant_export as E
+    cmd = E.audit_command("ir", ir_path=str(ir))
+    assert shlex.split(cmd)[0] == str(ir) and "--plain" in cmd
+    spaced = tmp_path / "a folder" / "bin"
+    spaced.mkdir(parents=True)
+    (spaced / "ir").write_text("#!/bin/sh\n")
+    (spaced / "ir").chmod(0o755)
+    assert shlex.split(E.audit_command("ir", ir_path=str(spaced / "ir")))[0] == str(spaced / "ir")   # quoted
+    ir.unlink()
+    assert W.audit_ir_path() is None                       # genuinely absent: the refusal is still honest
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ir")
+    assert W.audit_ir_path() == "ir"                       # on PATH: the shown command stays the familiar one
+
+
+# ── taking back a question that is still waiting ────────────────────────────────────────────────────────────
+# Henry, 3 Oct: "on the agent chat page there should be a way to cancel queued messages in Waiting".
+
+def _queued_bridge(client, *texts):
+    b, c = client
+    b.busy = True
+    for t in texts:
+        assert c.post("/api/prompt", json={"text": t}).json()["ok"] is True
+    return b, c
+
+
+def test_a_waiting_question_can_be_taken_back_and_is_then_never_delivered(client):
+    b, c = _queued_bridge(client, "first thing", "second thing", "third thing")
+    assert b.pending_prompts == ["first thing", "second thing", "third thing"]
+    r = c.post("/api/prompt/cancel", json={"index": 1, "text": "second thing"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "waiting": 2}
+    assert b.pending_prompts == ["first thing", "third thing"]
+    kinds = [e["kind"] for e in b.history if e["kind"] in ("queue_cancel", "queue_update")]
+    assert kinds[-2:] == ["queue_cancel", "queue_update"]
+    assert [e for e in b.history if e["kind"] == "queue_cancel"][-1]["text"] == "second thing"
+
+
+def test_cancelling_what_was_already_delivered_is_refused_honestly_and_touches_nothing(client):
+    b, c = _queued_bridge(client, "alpha", "beta")
+    b.pending_prompts.pop(0)                                      # alpha was delivered between the click and the request
+    r = c.post("/api/prompt/cancel", json={"index": 0, "text": "alpha"})
+    assert r.status_code == 409 and "already sent" in r.json()["error"]
+    assert b.pending_prompts == ["beta"]                          # beta, which took alpha's place, is NOT cancelled
+    # a text that does not match the position is refused too
+    assert c.post("/api/prompt/cancel", json={"index": 0, "text": "alpha"}).status_code == 409
+    for bad in ({}, {"index": "0", "text": "beta"}, {"index": 0}, {"index": True, "text": "beta"}, {"index": -1, "text": "beta"}):
+        assert c.post("/api/prompt/cancel", json=bad).status_code in (400, 409), bad
+    assert b.pending_prompts == ["beta"]
+
+
+def test_a_cancelled_question_is_kept_in_the_conversation_as_withdrawn(client, tmp_path):
+    b, c = _queued_bridge(client, "ask this", "or that")
+    b.conversation_file = tmp_path / "conv.jsonl"
+    c.post("/api/prompt/cancel", json={"index": 0, "text": "ask this"})
+    rows = [json.loads(l) for l in b.conversation_file.read_text().splitlines()]
+    assert {"kind": "withdrawn", "text": "ask this"} == {k: v for k, v in rows[0].items() if k in ("kind", "text")}
+
+
+def test_the_waiting_row_has_a_cancel_button_and_the_page_removes_it_on_the_event_too():
+    js = (STATIC / "app.js").read_text()
+    hold = js[js.index("function holdQuestion"):js.index("function waitRoom")]
+    assert 'el("button", "ghost small cancel-queued", "Cancel")' in hold and "cancelQueued(entry" in hold
+    assert "/api/prompt/cancel" in js and 'case "queue_cancel": dropWaiting' in js
+    css = (STATIC / "app.css").read_text()
+    assert ".cancel-queued" in css and ".msg-withdrawn" in css

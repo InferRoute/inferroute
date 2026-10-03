@@ -722,6 +722,7 @@
       const conv = el("div", "conversation");
       for (const row of s.conversation) {
         if (row.kind === "user") conv.append(el("div", "msg msg-user", row.text));
+        else if (row.kind === "withdrawn") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "You took this question back before it was sent: "), el("span", "msg-withdrawn", row.text)));
         else if (row.kind === "assistant") { const n = el("div", "msg msg-assistant"); n.append(markdown(row.text)); conv.append(n); }
         else if (row.kind === "search") {
           const what = row.feature ? ` · ${row.feature}` : row.like ? ` · documents like ${row.like}` : "";

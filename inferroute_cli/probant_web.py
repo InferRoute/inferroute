@@ -380,6 +380,10 @@ def audit_launch_script(pack: Path, command: str) -> Path:
                   f"chmod -R u+w {shlex.quote(str(run))}\n"
                   f"cd {shlex.quote(str(run))} || exit 1\n"
                   f"printf 'Working on a copy: %s\\n(the original pack is untouched; write your report one directory up)\\n\\n' {shlex.quote(str(run))}\n"
+                  # The model behind the default audit sometimes ends a turn having only SAID what it will do next
+                  # ("Let me read the key files…") — a tool-less turn, so the session simply waits. It is not stuck
+                  # and nothing is wrong with the evidence; one word restarts it. Said before it can happen.
+                  "printf 'If the assistant stops after saying what it will do next, type:  continue\\n\\n'\n"
                   f"{command}\n"
                   'printf "\\n[the audit session has ended — this window can be closed]\\n"\n'
                   "exec bash\n")

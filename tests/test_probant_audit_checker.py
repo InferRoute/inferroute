@@ -280,3 +280,10 @@ def test_the_brief_tells_the_auditor_to_start_the_report_early_and_to_budget_its
     assert "## How to work" in head and "Start the report in your first minutes" in head
     assert "About eight tool calls a claim" in head and "Intel quote chain" in head and "Finish with the checker" in head
     assert head.index("## How to work") < brief.index("## Write your report")          # said before the work, not after
+
+
+def test_the_brief_warns_against_reading_an_exit_code_from_the_end_of_a_pipe():
+    """3 Oct: `verifier | grep | head | echo "EXIT:$?"` printed EXIT:0 on a tampered pack, and the auditor reported
+    that about the verifier. The verifier had caught both tampers; the shell had hidden its exit code."""
+    head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
+    assert "never from the end of a pipe" in head and 'echo "exit $?"' in head

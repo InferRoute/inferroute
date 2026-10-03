@@ -710,3 +710,18 @@ def test_the_page_shows_failures_as_a_sentence_with_the_details_folded_away():
     assert "function failureNote" in js and 'el("details", "failure-detail"' in js and "Technical details" in js
     assert js.count("failureNote(") >= 3                             # defined once, used for a session and for a reading
     assert "It stopped with:" not in js
+
+
+def test_going_somewhere_never_opens_another_tab_per_click():
+    """Henry, 3 Oct: "the client should not open a new tab everytime we click somewhere to another page".
+    A session replaces the tab it was opened from; every record reuses ONE named tab. Checked in a browser:
+    three record clicks left one extra tab, and 'Open the session' left the count unchanged."""
+    home_js = (STATIC / "home.js").read_text()
+    app_js = (STATIC / "app.js").read_text()
+    for name, js in (("home.js", home_js), ("app.js", app_js)):
+        assert "_blank" not in re.sub(r"//[^\n]*", "", js), name
+    opener = home_js[home_js.index("function openLocal"):home_js.index("function toast")]
+    assert 'SESSION_LINK.test(url) ? "_self" : "probant-record"' in opener
+    assert "noopener" not in re.sub(r"//[^\n]*", "", opener)            # it would force a new tab each time
+    back = app_js[app_js.index("function goHome"):app_js.index("function renderTrust")]
+    assert 'window.open(url, "_self")' in back

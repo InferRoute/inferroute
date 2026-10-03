@@ -717,7 +717,10 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
     # `ir probant open --web`: the same session, with Pi in RPC mode behind a local page (probant_web).
-    web = bool(probant and probant.get("web"))
+    from inferroute_local import macos_vm
+    use_mac_vm = macos_vm.required_for(agent, probant)
+    # macOS uses the existing browser UI; no host Pi or terminal runtime is needed.
+    web = bool(probant and (probant.get("web") or use_mac_vm))
     if web:
         passthrough = [*passthrough, "--mode", "rpc"]
     # Probant never asks the user to pick a model from a price list: it runs the default, the model its
@@ -743,7 +746,25 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
         sys.stderr.write("\n  ir: refusing to launch a nested agent session (CLAUDECODE=1). Set IR_ALLOW_NESTED=1 to force.\n\n")
         return 2
-    binary = agents_mod.binary_for(agent)
+    mac_backend = None
+    if use_mac_vm:
+        from inferroute_local.macos_vm import runtime as vm_runtime
+        from inferroute_local.macos_vm.backend import Backend
+        if not pi_attested.confine_required() or pi_attested.confine_disabled():
+            sys.stderr.write("\n  ir: macOS Probant sessions require VM confinement.\n\n")
+            return 2
+        if os.environ.get("IR_CLUSTER_OUT") or (probant or {}).get("oneshot"):
+            sys.stderr.write("\n  ir: this macOS VM backend does not support cluster sessions yet.\n\n")
+            return 2
+        try:
+            pi_attested.check_workspace(os.getcwd())
+            mac_backend = Backend(vm_runtime.locate(), os.getcwd())
+        except (macos_vm.VMUnavailable, pi_attested.UnsafeWorkspace) as e:
+            sys.stderr.write(f"\n  ir: {e}. Refusing before Pi startup.\n\n")
+            return 2
+        binary = ""                         # the guest owns its pinned Pi/Node
+    else:
+        binary = agents_mod.binary_for(agent)
     console = _console()
     # Resume (Claude Code only — the other agents manage their own sessions): `--resume <id>` or
     # `-c`. The resumed turns are sealed like fresh ones; a confidential session never silently
@@ -760,7 +781,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     # of the lane. The local endpoint answers to this id; the enclave sees `alias.ref_key`.
     shown_model = f"{alias.short} [confidential]"
 
-    async def _run() -> int:
+    async def _run_session() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
             # CONTINUITY IS OFF UNTIL A CLAIM IS RULED ON, and the reason is not an engineering one.
             #
@@ -826,11 +847,13 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 # this launch, not one promised for later.
                 # Reading a document offers no search tool, so no search verifier is started for it: nothing
                 # about a whole document in context can leave for a search machine.
-                search_endpoint = None if os.environ.get("IR_INTAKE_DIR") else pi_attested.start_search_proxy()
+                search_endpoint = None if os.environ.get("IR_INTAKE_DIR") else (
+                    pi_attested.start_search_proxy(confinement=mac_backend.label, trusted_vm=mac_backend.ready)
+                    if mac_backend is not None else pi_attested.start_search_proxy())
             if probant is not None and receipt.is_confidential:
                 from . import pi_attested, probant_trust
                 search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)
-                summary = probant_trust.build(receipt, search_result, pi_attested.confinement_label(),
+                summary = probant_trust.build(receipt, search_result, (mac_backend.label if mac_backend is not None else pi_attested.confinement_label()),
                                                matter=probant.get("matter", ""), date_bound=probant.get("date_bound", ""),
                                                surface="browser" if web else "terminal",
                                                mode=probant.get("mode", "matter"))
@@ -886,7 +909,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 env[_pv] = _no_proxy_loopback(env.get("no_proxy") if env.get("no_proxy") is not None
                                               else env.get("NO_PROXY"))
             env["IR_CONFIDENTIAL"] = "1"
-            agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
+            if mac_backend is None:
+                agents_mod.put_agent_on_path(binary, env)      # the node it was installed with sits beside it
             if probant is not None:
                 env["IR_PROBANT_SURFACE"] = "browser" if web else "terminal"
                 if probant.get("mode") == "intake" and probant.get("draft_client"):
@@ -922,9 +946,24 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                     argv = [binary, "--model", shown_model, "--session-id", session_id, *passthrough, *status_args]
             elif agent == "pi":
                 from . import pi_attested
-                argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
-                                            alias=alias, upstream_name=f"{alias.model_id} [confidential]",
-                                            search_endpoint=search_endpoint)
+                if mac_backend is not None:
+                    from inferroute_local.macos_vm.plan import build_plan
+                    labels = {k: env[k] for k in ("IR_REPORT_FIRM", "IR_REPORT_MATTER") if env.get(k)}
+                    if probant.get("mode") == "intake": labels = {}
+                    plan = build_plan(alias=alias, passthrough=passthrough,
+                                      mode=probant.get("mode", "matter"),
+                                      create_drafts=bool(probant.get("draft_client")),
+                                      surface_browser_only=web, host_env=labels,
+                                      documents={} if probant.get("mode") == "intake" else pi_attested.matter_titles(env.get("IR_MATTER_RECORD_DIR")))
+                    request = plan.request
+                    if not search_endpoint: request["env"].pop("IR_SEARCH_ENDPOINT", None)
+                    mac_backend.configure(request, model_url=local, model_key=local_key,
+                                          search_url=search_endpoint, create_drafts=bool(probant.get("draft_client")))
+                    argv = []                 # already-started VM owns its Pi RPC process
+                else:
+                    argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
+                                                alias=alias, upstream_name=f"{alias.model_id} [confidential]",
+                                                search_endpoint=search_endpoint)
                 pi_confine_ports = [port] + ([int(search_endpoint.rsplit(":", 1)[1])] if search_endpoint else [])
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
@@ -947,7 +986,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             reset_sigint = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)  # noqa: E731
             preexec = reset_sigint
             sandbox = None
-            if agent == "pi":
+            if agent == "pi" and mac_backend is None:
                 from . import pi_attested
                 ok_confine, notice = pi_attested.confine_precheck()
                 if notice:
@@ -989,8 +1028,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 from . import probant_web
                 page = await probant_web.start(probant=probant, session=session, search_endpoint=search_endpoint,
                                                 workspace=Path(os.getcwd()), console=console)
-                proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec,
-                                                            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                proc = mac_backend.proc if mac_backend is not None else await asyncio.create_subprocess_exec(
+                    *argv, env=env, preexec_fn=preexec, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
                 # A browser session outlives its terminal, so `kill` from a shell is a real way to end one —
                 # and on 17 Sep a wedged session took SIGKILL, which runs none of this program's cleanup and
                 # leaves the matter's search verifier and its port behind. Handle it explicitly: end the
@@ -1009,6 +1048,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             else:
                 proc = await asyncio.create_subprocess_exec(*argv, env=env, preexec_fn=preexec)
                 rc = await proc.wait()
+            if mac_backend is not None:
+                try:
+                    rc = await mac_backend.finish()
+                except macos_vm.VMUnavailable as e:
+                    console.print(f"[red]{e}; session outputs were not accepted.[/]")
+                    rc = 2
             if agent == "pi":
                 from . import pi_attested
                 if sandbox is not None:
@@ -1030,6 +1075,21 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             if page is not None:
                 await page.linger(console)                     # the page stays up so the record can be exported
             return rc
+
+    async def _run() -> int:
+        try:
+            if mac_backend is not None:
+                await mac_backend.prepare()
+            return await _run_session()
+        except (macos_vm.VMUnavailable, ValueError) as e:
+            if mac_backend is None:
+                raise
+            console.print(f"[red]{e}; refusing to launch outside confinement.[/]")
+            return 2
+        finally:
+            if mac_backend is not None:
+                pi_attested.stop_search_proxy()
+                await mac_backend.close()
 
     try:
         return asyncio.run(_run())

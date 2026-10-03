@@ -491,11 +491,13 @@ def verifier_command(cfg: dict) -> tuple[str, dict, str | None]:
     return (python or _sys.executable), env, (str(cwd) if cwd else None)
 
 
-def start_search_proxy(timeout: float = 30.0) -> str | None:
+def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None, trusted_vm: bool = False) -> str | None:
     """Start the verifier and return its loopback address, or None (the session then has no search tool)."""
     import select
     import subprocess
     import sys
+    if confinement is not None and not trusted_vm:
+        raise Refused("VM confinement label requires a ready host-owned backend")
     try:
         cfg = json.loads(search_config_path().read_text())
     except (OSError, ValueError):
@@ -545,7 +547,7 @@ def start_search_proxy(timeout: float = 30.0) -> str | None:
         argv += ["--report-firm", os.environ["IR_REPORT_FIRM"]]
     # The confinement line is stamped host-side by the verifier from this label (F1 / d3): a dev-unconfined
     # session cannot ship looking confined, because the extension never gets to assert this field.
-    argv += ["--confinement", confinement_label()]
+    argv += ["--confinement", confinement or confinement_label()]
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
     try:
@@ -674,12 +676,14 @@ def run_in_netns_bind(argv, *, ports, cfg_dir: str, rw, ro=(), env=None, binary:
                                    binary=binary, timeout=timeout)
 
 
-def confinement_label() -> str:
+def confinement_label(*, backend=None) -> str:
     """The confinement line the verifier stamps into every disclosure record — asserted host-side from the
     launch env, not from anything the sandbox composes. In require mode the launch refuses unless the
     sandbox actually applies, so by the time any search runs the line is accurate."""
     if os.environ.get("IR_PROBANT_DEV_UNCONFINED") == "1":
         return "unconfined (developer override)"
+    if backend is not None:
+        return backend.label
     if confine_disabled():
         return "not confined"
     # A PLATFORM THAT CANNOT FENCE AT THE OS LEVEL SAYS SO, rather than reporting the fence it would have

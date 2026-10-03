@@ -30,7 +30,13 @@ def load_json(path, limit=65536):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
+        # No link-count test, here or on the artifacts below. Installers link rather than copy: uv
+        # hard-links every file from its cache by default on Linux and can on a Mac, so "exactly one
+        # link" refused a correctly installed client (found by installing one, 3 Oct). A second name for
+        # the same inode grants nobody anything — access is decided by the inode's owner and mode, and
+        # whoever can write this file can write the Python beside it. What is checked is what matters:
+        # a regular file, opened without following a link, and for artifacts the bytes themselves.
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
             raise VMUnavailable("unsafe runtime metadata")
         body = os.read(fd, limit + 1)
         if len(body) > limit:
@@ -221,7 +227,6 @@ def stage(root, policy, *, architecture=None, os_version=None):
                     info = os.fstat(source)
                     if (
                         not stat.S_ISREG(info.st_mode)
-                        or info.st_nlink != 1
                         or info.st_size != record["bytes"]
                     ):
                         raise VMUnavailable("unsafe runtime artifact")

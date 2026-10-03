@@ -99,7 +99,26 @@ def test_tampered_manifest_refuses(candidate):
         runtime.stage(root, policy, architecture="arm64", os_version="15.7.7")
 
 
-@pytest.mark.parametrize("kind", ["symlink", "hardlink", "wrong-bytes", "fifo"])
+def test_an_installer_that_hard_links_its_files_is_not_refused(candidate, tmp_path, monkeypatch):
+    """uv links every installed file from its cache. The first real install of this client refused its own
+    policy file as "unsafe runtime metadata" for having two names."""
+    root, policy, body, _ = candidate
+    for name in ("kernel", "initrd", "ProbantVM", "runtime.json"):
+        os.link(root / name, tmp_path / ("cache-" + name))
+    staged = runtime.stage(root, policy, architecture="arm64", os_version="15.7.7")
+    try:
+        assert (staged.directory / "kernel").read_bytes() == b"SYNTHETIC KERNEL"
+        assert (staged.directory / "kernel").stat().st_nlink == 1          # the staged copy is its own file
+    finally:
+        staged.close()
+    linked_policy = tmp_path / "policy.json"
+    linked_policy.write_text(json.dumps({"schema": 2, "public_key": "ab" * 32, "runner_signing": "adhoc-pinned"}))
+    os.link(linked_policy, tmp_path / "cache-policy.json")
+    monkeypatch.setattr(runtime, "POLICY_PATH", linked_policy)
+    assert runtime.trusted_policy()["schema"] == 2
+
+
+@pytest.mark.parametrize("kind", ["symlink", "hardlink-to-other-bytes", "wrong-bytes", "fifo"])
 def test_unsafe_artifact_refuses(candidate, kind, tmp_path):
     root, policy, body, _ = candidate
     p = root / "kernel"
@@ -108,7 +127,8 @@ def test_unsafe_artifact_refuses(candidate, kind, tmp_path):
     p.unlink()
     if kind == "symlink":
         p.symlink_to(outside)
-    elif kind == "hardlink":
+    elif kind == "hardlink-to-other-bytes":
+        outside.write_bytes(b"X" * body["artifacts"]["kernel"]["bytes"])
         os.link(outside, p)
     elif kind == "wrong-bytes":
         p.write_bytes(b"X" * body["artifacts"]["kernel"]["bytes"])

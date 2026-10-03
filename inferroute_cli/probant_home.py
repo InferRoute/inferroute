@@ -340,7 +340,8 @@ class Launches:
 
     def view(self, it: Dict[str, Any]) -> Dict[str, Any]:
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
-                "elapsed": int(time.time() - it["started"]), "message": it["message"]}
+                "elapsed": int(time.time() - it["started"]), "message": it["message"],
+                "detail": it.get("detail", "") if it["state"] == "failed" else ""}
 
     def running_intake(self, ident: str) -> Optional[Dict[str, Any]]:
         with self.lock:
@@ -362,7 +363,7 @@ class Launches:
             it = max(matches, key=lambda row: row["started"])
             if it["state"] not in ("ended", "failed"):
                 return None
-            return {"state": it["state"], "message": it["message"],
+            return {"state": it["state"], "message": it["message"], "detail": it.get("detail", ""),
                     "elapsed": int(time.time() - it["started"])}
 
     def running_for(self, matter_id: str) -> Optional[Dict[str, Any]]:
@@ -448,6 +449,7 @@ class Launches:
             it["state"], it["message"] = "ended", "The session has ended."
         else:
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
+            it["detail"] = failure_detail(list(it["tail"]))
 
 
 NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the Matters page."
@@ -527,13 +529,36 @@ def failure_message(tail: List[str]) -> str:
         return ("The assistant program (Pi) is not installed on this computer, so no session can start. "
                 "Install it with: npm install -g @earendil-works/pi-coding-agent — then try again. "
                 "Nothing was sent.")
-    reasons = [ln for ln in tail if re.search(r"refus|error|could not|cannot|missing|invalid|not found", ln, re.I)]
-    if reasons:
-        return reasons[-1]
-    # No recognisable reason: show what it DID say. "See the terminal where Probant home runs" pointed at a
-    # terminal that often does not exist (a service, a shortcut) — a message that sends you nowhere.
-    last = [ln for ln in tail if not ln.lower().startswith(("opening ", "traceback"))][-2:]
-    return ("It stopped with: " + " / ".join(last)) if last else "It stopped before printing anything. Nothing was sent."
+    # Nothing recognised. What the launcher printed is for the person who has to fix it, not for the
+    # professional: it carries file paths, environment-variable names and half-sentences. It goes beside the
+    # message (failure_detail), tucked away, and the message itself says what is true and what to do.
+    if not [ln for ln in tail if ln.strip() and not ln.lower().startswith(("opening ", "traceback"))]:
+        return "It stopped before printing anything. Nothing was sent."
+    return GENERIC_FAILURE
+
+
+GENERIC_FAILURE = ("Something went wrong while starting it, and nothing was sent. Try once more. If it happens "
+                   "again, open “Technical details” below and send InferRoute what it says.")
+
+_PATH = re.compile(r"(?:/[^\s/'\"`:]+){2,}")
+_SECRETS = ((re.compile(r"inf_[A-Za-z0-9_-]{6,}"), "inf_…"), (re.compile(r"cdt_[A-Za-z0-9_-]{6,}"), "cdt_…"),
+            (re.compile(r"#k=[A-Za-z0-9_-]+"), "#k=…"), (re.compile(r"(?i)bearer\s+\S+"), "Bearer …"))
+
+
+def failure_detail(tail: List[str], limit: int = 6) -> str:
+    """What the launcher last printed, made safe to show and to send: colours stripped, a key or a session
+    link masked, and every long file path cut to its last name (a path says whose computer and which
+    folder; the name is what tells us what failed). The last few lines only."""
+    out: List[str] = []
+    for ln in tail:
+        ln = strip_ansi(ln).strip()
+        if not ln or ln.lower().startswith("opening "):
+            continue
+        for rx, mask in _SECRETS:
+            ln = rx.sub(mask, ln)
+        ln = _PATH.sub(lambda m: "…/" + m.group(0).rsplit("/", 1)[1], ln)
+        out.append(ln[:300])
+    return "\n".join(out[-limit:])
 
 
 # ───────────────────────── the app ─────────────────────────

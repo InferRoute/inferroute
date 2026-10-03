@@ -1,0 +1,15 @@
+#!/bin/sh
+# Stage 1, PID 1 on the initial rootfs. bubblewrap confines with pivot_root, and the kernel refuses to
+# pivot the initial rootfs — so the whole userland moves to a tmpfs and control passes there.
+# Directory by directory, removing each source as it goes, so peak memory is the tree plus its largest
+# directory rather than twice the tree.
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+mkdir -p /newroot
+mount -t tmpfs -o mode=0755 tmpfs /newroot || exec sh -c 'while :; do sleep 3600; done'
+for d in bin etc lib opt sbin usr var; do
+  [ -e "/$d" ] || continue
+  cp -a "/$d" /newroot/ && rm -rf "/$d" 2>/dev/null
+done
+cp -a /init2 /newroot/init2
+for d in proc sys dev tmp run root matter config; do /newroot/bin/busybox mkdir -p "/newroot/$d"; done
+exec /newroot/bin/busybox switch_root /newroot /init2

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """DEVELOPMENT ONLY — one synthetic Probant session through the VM path, end to end, on Linux.
 
-    python3 tests/dev/run_linux_vm_e2e.py
+    python3 tests/dev/run_linux_vm_e2e.py                          # Linux: stand-in runner, container guest
+    python3 tests/dev/run_linux_vm_e2e.py --mac-runtime DIR        # macOS: the real runner, a real VM
 
 Real: Backend, Broker, wire protocol, WorkspaceSnapshot, the guest supervisor, AF_VSOCK, bubblewrap +
 Landlock + seccomp + the extra socket-family guard, Pi 0.84.1 and the ir-attested extension.
@@ -98,6 +99,13 @@ class Model(BaseHTTPRequestHandler):
 
 
 async def main() -> int:
+    # --mac-runtime DIR: the REAL runner on a Mac. DIR holds ProbantVM (native/macos/build_runner.sh) and the
+    # arm64 `kernel` and `initrd` (native/macos/guest/build_guest.py --arch aarch64). Still development: the
+    # Runtime is constructed here directly, with no vendor signature and no Developer ID check, which is the
+    # separate synthetic harness the runner's README allows and the product's own locate() never does.
+    mac_runtime = None
+    if "--mac-runtime" in sys.argv:
+        mac_runtime = Path(sys.argv[sys.argv.index("--mac-runtime") + 1]).resolve()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     model_url = f"http://127.0.0.1:{server.server_address[1]}"
@@ -108,10 +116,24 @@ async def main() -> int:
     (workspace / "disclosure.md").write_text("# Disclosure\n\nA synthetic wrist device with a synthetic sensor.\n")
     runtime_dir = tmp / "runtime"
     runtime_dir.mkdir()
-    shutil.copy2(HERE / "linux_vm_runner.py", runtime_dir / "ProbantVM")
-    (runtime_dir / "ProbantVM").chmod(0o755)
-    shutil.copy2(HERE / "guest_shim.py", runtime_dir / "guest_shim.py")
-    (runtime_dir / "boot.json").write_text("{}")
+    if mac_runtime is None:
+        shutil.copy2(HERE / "linux_vm_runner.py", runtime_dir / "ProbantVM")
+        (runtime_dir / "ProbantVM").chmod(0o755)
+        shutil.copy2(HERE / "guest_shim.py", runtime_dir / "guest_shim.py")
+        (runtime_dir / "boot.json").write_text("{}")
+    else:
+        # A private copy, exactly as the product's stage() makes one: close() removes the directory it ran from.
+        import hashlib
+        from inferroute_local.macos_vm.runtime import canonical
+        artifacts = {}
+        for name in ("ProbantVM", "kernel", "initrd"):
+            shutil.copy2(mac_runtime / name, runtime_dir / name)
+            if name != "ProbantVM":
+                data = (runtime_dir / name).read_bytes()
+                artifacts[name] = {"file": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        (runtime_dir / "ProbantVM").chmod(0o500)
+        (runtime_dir / "boot.json").write_bytes(canonical(
+            {"schema": 1, "development_only": False, "architecture": "arm64", "artifacts": artifacts}))
 
     backend = Backend(Runtime(runtime_dir, {}), workspace)
     result = {"events": [], "answer": "", "ok": False}

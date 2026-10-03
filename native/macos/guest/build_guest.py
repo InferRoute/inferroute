@@ -238,10 +238,10 @@ def write_cpio(root: Path, out: Path) -> None:
     """newc cpio, written here rather than by cpio(1) so ownership, order and time are all fixed."""
     buf = io.BytesIO()
 
-    def entry(name: str, mode: int, data: bytes, nlink: int = 1) -> None:
+    def entry(name: str, mode: int, data: bytes, nlink: int = 1, rdev: tuple[int, int] = (0, 0)) -> None:
         encoded = name.encode() + b"\0"
         header = "070701" + "".join(f"{v:08X}" for v in (
-            0, mode, 0, 0, nlink, EPOCH, len(data), 0, 0, 0, 0, len(encoded), 0))
+            0, mode, 0, 0, nlink, EPOCH, len(data), 0, 0, rdev[0], rdev[1], len(encoded), 0))
         buf.write(header.encode() + encoded)
         buf.write(b"\0" * (-(110 + len(encoded)) % 4))
         buf.write(data)
@@ -260,6 +260,12 @@ def write_cpio(root: Path, out: Path) -> None:
             entry(rel, 0o100000 | mode, path.read_bytes())
         else:
             die(f"unexpected file type in the guest tree: {rel}")
+    # The kernel gives PID 1 its stdio from /dev/console, and looks for it in the initramfs BEFORE anything
+    # is mounted — devtmpfs does not mount itself over an initramfs. Without this node the first-stage init
+    # runs with no output at all, which on a machine whose only diagnostic channel is its console means a
+    # boot failure that says nothing. Written as archive entries because an unprivileged build cannot mknod.
+    entry("dev/console", 0o020600, b"", rdev=(5, 1))
+    entry("dev/null", 0o020666, b"", rdev=(1, 3))
     entry("TRAILER!!!", 0, b"")
     with out.open("wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as gz:
         gz.write(buf.getvalue())

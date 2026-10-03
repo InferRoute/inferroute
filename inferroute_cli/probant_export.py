@@ -27,6 +27,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import probant_trust
+
 _EXPOSURE_WORD = {
     "this_session": "surfaced by this session's search",
     "earlier_session": "surfaced by an earlier session's search",
@@ -661,7 +663,7 @@ def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
         else:
             items.append(f"<li class=bad>The AI machine was not verified in {models.count(False)} of {len(sessions)} "
                          "sessions. <span class=who>As reported by this computer.</span></li>")
-        if confs and all(c.startswith("require, address-level") for c in confs):
+        if confs and all(probant_trust.closed_box(c) for c in confs):
             items.append("<li><b>The assistant worked in a closed box</b>: no internet, and no files beyond this matter's "
                          "folder. <span class=who>As reported by this computer.</span></li>")
         elif any("unconfined" in c or c == "not confined" for c in confs):
@@ -704,6 +706,12 @@ def _reach_note(recorded: str) -> str:
     # NOT "address-level": require mode has confined EGRESS by address since before the matter-dir bind
     # existed, and those sessions left the filesystem merely write-denied. Only the line that itself says
     # the files were absent earns the stronger sentence.
+    # A VM session's records are not in the agent's machine at all: the guest has no shared folder, and the
+    # record directory never leaves the host. Said in its own words rather than borrowing the Linux line's,
+    # which describes an empty network namespace this session did not use on the host.
+    if low.startswith("require, linux vm"):
+        return ("not present in the agent's machine at all (a separate Linux virtual machine with no network "
+                "device and no shared folders; these records stayed on the host)")
     if "absent rather than unwritable" in low:
         return ("not present in the agent's filesystem at all (address-level confinement: an empty network "
                 "namespace with only the matter directory bound in)")

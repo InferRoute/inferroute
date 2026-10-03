@@ -83,7 +83,10 @@ def test_no_route_beyond_what_the_page_needs(home):
                      # telling a pasted key apart from a typo before anything is recorded (24 Sep)
                      "/api/sharing/contact/preview", "/api/sharing/contact/remove",
                      # whether the scheduled search machine is up (24 Sep)
-                     "/api/search-status"}
+                     "/api/search-status",
+                     # the InferRoute key: whether one is held, and taking one from the page (3 Oct), so a
+                     # computer without one is asked FIRST instead of failing at the first session
+                     "/api/key"}
 
 
 # ── matters ──

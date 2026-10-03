@@ -1051,9 +1051,20 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             if mac_backend is not None:
                 try:
                     rc = await mac_backend.finish()
-                except macos_vm.VMUnavailable as e:
+                except (macos_vm.VMUnavailable, ValueError) as e:
+                    # ValueError: the workspace refused the files (WorkspaceError). Caught HERE, not by the
+                    # launch handler further out, which would call it a refusal to launch — after the
+                    # session had run — and skip the summary and the page that lets the record be exported.
                     console.print(f"[red]{e}; session outputs were not accepted.[/]")
                     rc = 2
+                else:
+                    aside = sorted({name.split("/", 1)[0] for name in mac_backend.exported
+                                    if name.startswith("vm-session-output-")})
+                    if aside:
+                        # The assistant works on a copy. A file that already existed is never replaced
+                        # from inside the session; its new version is put beside the original.
+                        console.print(f"[grey58]The assistant changed files that already existed. Your originals "
+                                      f"are untouched; its versions are in the matter folder under {aside[0]}/[/]")
             if agent == "pi":
                 from . import pi_attested
                 if sandbox is not None:
@@ -1080,6 +1091,11 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
         try:
             if mac_backend is not None:
                 await mac_backend.prepare()
+                left = getattr(mac_backend.snapshot, "withheld", {})
+                if left:
+                    names = ", ".join(sorted(left)[:5]) + (" …" if len(left) > 5 else "")
+                    console.print(f"[grey58]Not brought into this session (too large): {names}. They stay in the "
+                                  "matter folder; the assistant cannot see them.[/]")
             return await _run_session()
         except (macos_vm.VMUnavailable, ValueError) as e:
             if mac_backend is None:

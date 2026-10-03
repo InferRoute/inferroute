@@ -136,17 +136,24 @@ def test_commit_updates_and_adds_only_explicit_paths(tmp_path):
     assert not (root / ".inferroute-vm-export-stage").exists()
 
 
-def test_any_conflict_aborts_all_workspace_writes_before_commit(tmp_path):
+def test_a_conflict_keeps_both_versions_and_loses_nothing(tmp_path):
+    """It used to abort: one file the host touched discarded every file the session wrote."""
     root = tmp_path / "workspace"
     root.mkdir()
     (root / "a.txt").write_bytes(b"a0")
     (root / "b.txt").write_bytes(b"b0")
     with WorkspaceSnapshot(root) as snap:
-        (root / "b.txt").write_bytes(b"host edit")
-        with pytest.raises(WorkspaceError, match="changed since snapshot"):
-            snap.commit({"a.txt": b"guest edit", "b.txt": b"guest overwrite"})
+        (root / "b.txt").write_bytes(b"host edit")                 # edited while the session ran
+        (root / "appeared.txt").write_bytes(b"host created")       # created while the session ran
+        committed = snap.commit({"a.txt": b"guest edit", "b.txt": b"guest overwrite",
+                                 "appeared.txt": b"guest wrote the same name", "new.txt": b"plain new file"})
     assert (root / "a.txt").read_bytes() == b"a0"
     assert (root / "b.txt").read_bytes() == b"host edit"
+    assert (root / "appeared.txt").read_bytes() == b"host created"
+    assert (root / "new.txt").read_bytes() == b"plain new file"
+    outputs = {name.split("/", 1)[1]: (root / name).read_bytes() for name in committed if name.startswith("vm-session-output-")}
+    assert outputs == {"a.txt": b"guest edit", "b.txt": b"guest overwrite", "appeared.txt": b"guest wrote the same name"}
+    assert len({name.split("/", 1)[0] for name in committed if "/" in name}) == 1      # one output directory
     assert not (root / ".inferroute-vm-export-stage").exists()
 
 
@@ -166,18 +173,25 @@ def test_commit_refuses_symlink_ancestor_without_touching_target(tmp_path):
     assert (root / "safe-old" / "result.txt").read_text() == "before"
 
 
-def test_snapshot_limits_are_enforced(tmp_path, monkeypatch):
+def test_a_file_too_large_to_carry_is_left_behind_not_a_reason_to_refuse(tmp_path, monkeypatch):
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "large.bin").write_bytes(b"x" * (MAX_FILE_BYTES + 1))
-    with pytest.raises(WorkspaceError, match="file limit"):
-        WorkspaceSnapshot(root)
+    (root / "disclosure.md").write_bytes(b"the invention")
+    (root / "drawings.pdf").write_bytes(b"x" * (MAX_FILE_BYTES + 1))
+    with WorkspaceSnapshot(root) as snap:
+        assert set(snap.files) == {"disclosure.md"}
+        assert set(snap.withheld) == {"drawings.pdf"}
+        # the agent writing that name does not touch the host's file, and is not lost either
+        committed = snap.commit({"drawings.pdf": b"guest wrote this name"})
+    assert (root / "drawings.pdf").stat().st_size == MAX_FILE_BYTES + 1
+    assert (root / committed[0]).read_bytes() == b"guest wrote this name" and committed[0].startswith("vm-session-output-")
 
-    (root / "large.bin").unlink()
-    (root / "a.bin").write_bytes(b"x" * 8)
-    monkeypatch.setattr("inferroute_local.macos_vm.workspace.MAX_WORKSPACE_BYTES", 7)
-    with pytest.raises(WorkspaceError, match="byte limit"):
-        WorkspaceSnapshot(root)
+    (root / "drawings.pdf").unlink()
+    __import__("shutil").rmtree(root / committed[0].split("/")[0])
+    (root / "z-last.bin").write_bytes(b"x" * 8)
+    monkeypatch.setattr("inferroute_local.macos_vm.workspace.MAX_WORKSPACE_BYTES", 15)
+    with WorkspaceSnapshot(root) as snap:
+        assert set(snap.files) == {"disclosure.md"} and set(snap.withheld) == {"z-last.bin"}
 
 
 def test_bounded_framed_request_and_stream_response_use_ack_backpressure():
@@ -272,7 +286,7 @@ def test_host_edit_after_last_preflight_is_never_overwritten(tmp_path, monkeypat
             nonlocal calls
             writes = preflight(updated)
             calls += 1
-            if calls == 2:
+            if calls == 1:                       # the recheck is the only strict preflight now
                 (tmp_path / "document.txt").write_bytes(b"concurrent host edit")
             return writes
 

@@ -63,6 +63,11 @@ class WorkspaceError(ValueError):
     """The active workspace cannot be safely snapshotted or reconciled."""
 
 
+class TargetOccupied(WorkspaceError):
+    """Something this session did not put there now sits at an output path — and it is not a file the
+    snapshot could have carried (too large, a directory, a link). A conflict, not a reason to stop."""
+
+
 def _safe_relative(value: object) -> str:
     if not isinstance(value, str) or not value or "\\" in value or "\x00" in value:
         raise WorkspaceError("workspace path must be normalized relative POSIX text")
@@ -132,8 +137,9 @@ class WorkspaceSnapshot:
     `.files` maps safe POSIX-relative names to the exact initial bytes. `.manifest`
     maps those names to SHA-256 and size. `commit({path: bytes, ...})` updates or
     adds only the named files; it never deletes files. Existing-file updates are
-    preserved in a fresh output directory, never replaced in place. Detected
-    preflight conflicts abort; concurrent edits to originals are preserved.
+    preserved in a fresh output directory, never replaced in place — and so is the
+    session's version of any file the host changed or created meanwhile. `.withheld`
+    names files that were in the folder and too large to bring into the session.
     """
 
     def __init__(self, path: str | os.PathLike[str]):
@@ -156,6 +162,8 @@ class WorkspaceSnapshot:
             files: dict[str, bytes] = {}
             file_versions: dict[str, tuple[int, ...]] = {}
             self._entry_count = 0
+            # Files that exist in the folder and were NOT brought into the session, with the reason.
+            self.withheld: dict[str, str] = {}
             self._walk(self._root_fd, "", files, file_versions)
             self.total_bytes = sum(map(len, files.values()))
             self.files = MappingProxyType(files)
@@ -237,7 +245,12 @@ class WorkspaceSnapshot:
                     f"hard-linked file refused in active workspace: {rel}"
                 )
             if before.st_size > MAX_FILE_BYTES:
-                raise WorkspaceError(f"workspace file limit exceeded: {rel}")
+                # Left on the host, by name. A matter folder is a professional's folder: a scanned PDF of
+                # drawings is the ordinary case, and refusing the whole session over one is the wrong
+                # answer to it. The agent has no tool that reads such a file anyway; what it loses is
+                # the file's NAME in the folder listing. If it writes that name, commit() keeps both.
+                self.withheld[rel] = "larger than the per-file limit"
+                continue
             fd = self._open_file(dir_fd, name, before, rel)
             try:
                 data = bytearray()
@@ -263,7 +276,8 @@ class WorkspaceSnapshot:
             finally:
                 os.close(fd)
             if sum(map(len, files.values())) + len(data) > MAX_WORKSPACE_BYTES:
-                raise WorkspaceError("active workspace byte limit exceeded")
+                self.withheld[rel] = "the folder is over the session's size budget"
+                continue
             files[rel] = bytes(data)
             file_versions[rel] = _file_version(after)
 
@@ -358,7 +372,7 @@ class WorkspaceSnapshot:
                 or before.st_nlink != 1
                 or before.st_size > MAX_FILE_BYTES
             ):
-                raise WorkspaceError(
+                raise TargetOccupied(
                     "export target is no longer a regular unlinked file"
                 )
             fd = self._open_file(parent_fd, name, before, rel)
@@ -412,13 +426,27 @@ class WorkspaceSnapshot:
         return normalized
 
     def _preflight(self, updated: Mapping[str, bytes]) -> dict[str, bytes]:
+        """The strict form: any conflict raises. Used for the recheck just before files are placed."""
+        writes, conflicts = self._classify(updated)
+        if conflicts:
+            raise WorkspaceError(
+                "host workspace changed since snapshot: " + ", ".join(sorted(conflicts))
+            )
+        return writes
+
+    def _classify(self, updated: Mapping[str, bytes]) -> tuple[dict[str, bytes], list[str]]:
+        """(what can be placed as planned, what the host changed or created since the snapshot)."""
         writes: dict[str, bytes] = {}
         conflicts: list[str] = []
         for rel, data in updated.items():
             before = self.files.get(rel)
             if before == data:
                 continue
-            current_info = self._read_current(rel)
+            try:
+                current_info = self._read_current(rel)
+            except TargetOccupied:
+                conflicts.append(rel)
+                continue
             if before is None:
                 if current_info is not None:
                     conflicts.append(rel)
@@ -432,11 +460,7 @@ class WorkspaceSnapshot:
                 conflicts.append(rel)
             else:
                 writes[rel] = data
-        if conflicts:
-            raise WorkspaceError(
-                "host workspace changed since snapshot: " + ", ".join(sorted(conflicts))
-            )
-        return writes
+        return writes, conflicts
 
     def commit(self, updated: Mapping[str, bytes]) -> tuple[str, ...]:
         """Exclusively add outputs; preserve updates separately without overwriting.
@@ -448,15 +472,22 @@ class WorkspaceSnapshot:
         if self._closed:
             raise WorkspaceError("workspace capability is closed")
         normalized = self._validate_updates(updated)
-        writes = self._preflight(normalized)
+        planned, conflicts = self._classify(normalized)
+        # A conflict is a file the HOST changed, or created, while the session ran — the professional
+        # edited the disclosure in the page, or the agent wrote a name that a file left on the host
+        # already has. Aborting here used to discard every file the session wrote, to protect one. The
+        # agent's version goes to the fresh output directory instead: nothing of the host's is touched
+        # and nothing of the session's is lost.
+        diverted = {rel: normalized[rel] for rel in conflicts}
+        writes = {**planned, **diverted}
         if not writes:
             return ()
         preserved = {}
-        if any(rel in self.files for rel in writes):
+        if diverted or any(rel in self.files for rel in planned):
             output_dir = "vm-session-output-" + secrets.token_hex(16)
             os.mkdir(output_dir, 0o700, dir_fd=self._root_fd)
             preserved = {
-                rel: output_dir + "/" + rel for rel in writes if rel in self.files
+                rel: output_dir + "/" + rel for rel in writes if rel in self.files or rel in diverted
             }
         try:
             os.mkdir(_STAGE_NAME, 0o700, dir_fd=self._root_fd)
@@ -493,8 +524,9 @@ class WorkspaceSnapshot:
                     os.close(fd)
                 staged[rel] = stage_name
 
-            # Recheck all destinations after staging and before modifying targets.
-            self._preflight(writes)
+            # Recheck after staging and before modifying targets. Only what was planned to go in
+            # place can newly conflict; the diverted files go to a directory created a moment ago.
+            self._preflight(planned)
             for rel, data in sorted(writes.items()):
                 destination = preserved.get(rel, rel)
                 parent = self._open_parent(destination, create=True)

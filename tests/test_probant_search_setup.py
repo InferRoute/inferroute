@@ -30,7 +30,8 @@ def signed_reference(key, *, policy=SHA, valid_to=None):
 def site(tmp_path, monkeypatch):
     key = Ed25519PrivateKey.generate()
     ref, pub = signed_reference(key)
-    files = {"/reference/current.json": json.dumps(ref).encode(),
+    files = {"/reference/current.json": json.dumps(ref, indent=4).encode() + b"\n",       # deliberately NOT the form we would write
+             "/reference/current.json.ots": b"\x00OpenTimestamps\x00 synthetic proof",
              "/probant/search.json": json.dumps({"enclave": "http://203.0.113.9:8000"}).encode(),
              f"/policy/{SHA}.rego": REGO}
 
@@ -158,3 +159,40 @@ def test_the_key_comes_from_the_program_never_from_the_network_or_a_config(monke
     assert key == shipped == "748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204"
     src = open(SS.__file__).read()
     assert "reference_key\"]" not in src.split("def setup")[1].split("wanted")[0]      # not read back from a config
+
+
+def test_the_reference_is_kept_byte_for_byte_and_its_timestamp_proof_comes_with_it(site):
+    """The first audit run found it: the client held a re-serialised reference (2705 bytes against 2511
+    published) and no .ots, so its exported records lost the OpenTimestamps anchor the letter promises."""
+    files, key, pub, tmp = site
+    SS.setup(now=NOW)
+    held = tmp / "ir/confidential/reference.json"
+    assert held.read_bytes() == files["/reference/current.json"]                  # not one byte different
+    assert hashlib.sha256(held.read_bytes()).hexdigest() == hashlib.sha256(files["/reference/current.json"]).hexdigest()
+    assert (tmp / "ir/confidential/reference.json.ots").read_bytes() == files["/reference/current.json.ots"]
+
+
+def test_a_reference_with_no_timestamp_proof_is_fine_and_a_stale_proof_is_removed(site):
+    files, key, pub, tmp = site
+    SS.setup(now=NOW)
+    ots = tmp / "ir/confidential/reference.json.ots"
+    assert ots.is_file()
+    del files["/reference/current.json.ots"]                                     # the site no longer has one for this reference
+    assert SS.setup(now=NOW)[0] == "configured"
+    assert not ots.exists()                                                      # never left beside bytes it does not stamp
+    assert SS.setup(now=NOW)[0] == "unchanged"
+
+
+def test_a_timestamp_that_fails_to_download_stops_the_setup_rather_than_keeping_a_stale_one(site, monkeypatch):
+    files, key, pub, tmp = site
+    SS.setup(now=NOW)
+    real = SS._get_optional
+
+    def broken(url):
+        if url.endswith(".ots"):
+            raise SS.SetupError("could not reach the site (synthetic)")
+        return real(url)
+
+    monkeypatch.setattr(SS, "_get_optional", broken)
+    with pytest.raises(SS.SetupError):
+        SS.setup(now=NOW)

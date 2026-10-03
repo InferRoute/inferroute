@@ -4,6 +4,7 @@ A fresh install has no `confidential/search.json`, so the home page says search 
 file by hand is what a developer does; a client cannot. This does it from three public files:
 
   https://inferroute.ai/reference/current.json         the signed reference: which sealed builds are ours
+  https://inferroute.ai/reference/current.json.ots     its OpenTimestamps proof, when it has one
   https://inferroute.ai/probant/search.json            where the search machine is right now
   https://inferroute.ai/policy/<sha256>.rego           the container policy each reference entry names
 
@@ -69,14 +70,35 @@ def _get(url: str) -> bytes:
     return data
 
 
-def _json(url: str) -> Dict[str, Any]:
+def _parse(raw: bytes, url: str) -> Dict[str, Any]:
     try:
-        v = json.loads(_get(url))
+        v = json.loads(raw)
     except ValueError as e:
         raise SetupError(f"{url} is not valid JSON") from e
     if not isinstance(v, dict):
         raise SetupError(f"{url} is not what was expected")
     return v
+
+
+def _json(url: str) -> Dict[str, Any]:
+    return _parse(_get(url), url)
+
+
+def _get_optional(url: str) -> Optional[bytes]:
+    """The file if the site has it, None if it does not (404). Any other failure is still a failure."""
+    req = urllib.request.Request(url, headers={"User-Agent": "probant-setup-search"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            data = r.read(MAX_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise SetupError(f"could not read {url.split('//', 1)[-1].split('/', 1)[0]} (HTTP {e.code})") from e
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise SetupError(f"could not reach {url.split('//', 1)[-1].split('/', 1)[0]} ({getattr(e, 'reason', e)})") from e
+    if len(data) > MAX_BYTES:
+        raise SetupError(f"{url} is larger than expected")
+    return data
 
 
 def fixed_endpoint(value: Any) -> str:
@@ -119,7 +141,11 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
         return "kept", "A search configuration that Probant did not write is already here, so it was left alone."
 
     key = pinned_key()
-    ref = _json(f"{SITE}/reference/current.json")
+    # The reference is kept BYTE FOR BYTE as published. Its OpenTimestamps proof (below) is over those exact
+    # bytes, an auditor compares its hash with the site's, and re-serialising it — as the first version did,
+    # 2705 bytes against 2511 — silently voids both. (Found by the first audit run on ADE, 3 Oct.)
+    ref_bytes = _get(f"{SITE}/reference/current.json")
+    ref = _parse(ref_bytes, f"{SITE}/reference/current.json")
     ok, why = ref_mod.verify(ref, key)
     if not ok:
         raise SetupError("the published reference is not signed by InferRoute's publication key, so it was not used "
@@ -146,11 +172,19 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
         raise SetupError("the published reference names no usable policy. Nothing was changed.")
 
     ref_path = conf_dir / "reference.json"
-    new_ref = json.dumps(ref, indent=2, sort_keys=True).encode() + b"\n"
+    ots_path = Path(str(ref_path) + ".ots")          # where an exported record looks for it: beside the reference
+    # The independent date for the reference. Optional on the site (an unanchored reference simply has none),
+    # and it must be the proof for THESE bytes: a stale one beside a newer reference is removed, not kept.
+    ots = _get_optional(f"{SITE}/reference/current.json.ots")
     wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key,
               "policy_file": str(policy_path), "provisioned_by": MARK}
-    unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == new_ref)
-    _atomic(ref_path, new_ref)
+    unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == ref_bytes
+                 and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists()))
+    _atomic(ref_path, ref_bytes)
+    if ots is not None:
+        _atomic(ots_path, ots)
+    elif ots_path.exists():
+        ots_path.unlink()
     _atomic(cfg_path, json.dumps(wanted, indent=1).encode() + b"\n")
     if unchanged:
         return "unchanged", "Patent search was already set up and is up to date."

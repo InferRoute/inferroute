@@ -94,7 +94,14 @@ def validate(data, pack: Path, expected: dict) -> dict:
     """Validate association and completeness. This does not validate the auditor's reasoning."""
     if not isinstance(data, dict) or data.get("schema") != SCHEMA:
         raise ValueError("unsupported audit result format")
-    if data.get("pack") != expected or identity(pack) != expected:
+    got = data.get("pack")
+    if not isinstance(got, dict) or set(got) != set(expected):
+        # Not a different pack: a block that was not copied as given. Said as it is, because "different pack"
+        # sent the first reader of such a file looking for the wrong problem (3 Oct: one key renamed).
+        raise ValueError("the result's pack block is not the one this pack gave: it must have exactly the keys "
+                         f"{', '.join(sorted(expected))}. Ask the auditor to rebuild the file with "
+                         "stationery/check_report.py --make-json, which writes it exactly")
+    if got != expected or identity(pack) != expected:
         raise ValueError("this result is for a different or changed audit pack")
     manifest = json.loads((pack / "MANIFEST.json").read_text())
     claims = data.get("claims")
@@ -114,10 +121,12 @@ def validate(data, pack: Path, expected: dict) -> dict:
             raise ValueError("coverage is missing")
         total = totals.get(wanted["id"], counts["statements"])
         if type(coverage.get("total")) is not int or coverage["total"] != total:
-            raise ValueError("coverage total does not match this pack")
+            raise ValueError(f"claim {wanted['id']}: coverage total is {coverage.get('total')!r}; this pack holds "
+                             f"{total} operation(s) for this claim")
         for key in ("tool", "independent"):
             if type(coverage.get(key)) is not int or not 0 <= coverage[key] <= total:
-                raise ValueError("coverage counts are missing or out of range")
+                raise ValueError(f"claim {wanted['id']}: coverage '{key}' is {coverage.get(key)!r}; it must be a whole "
+                                 f"number from 0 to {total} (0 for a check not performed, never empty or text)")
         unchecked = _text(coverage.get("unchecked"), "unchecked coverage", required=False, limit=2000)
         if verdict == "VERIFIED" and (not total or unchecked or max(coverage["tool"], coverage["independent"]) != total):
             raise ValueError("a VERIFIED verdict leaves coverage unchecked")
@@ -131,8 +140,9 @@ def validate(data, pack: Path, expected: dict) -> dict:
                                                   required=verdict != "VERIFIED"),
                            "coverage": {**coverage, "unchecked": unchecked}})
     auditor = data.get("auditor")
-    if not isinstance(auditor, dict):
-        raise ValueError("auditor identity is missing")
+    if not isinstance(auditor, dict) or not all(str(auditor.get(k) or "").strip() for k in ("name", "model")):
+        raise ValueError("the auditor must be given as {\"name\": ..., \"model\": ...} — "
+                         f"this file has {sorted(auditor) if isinstance(auditor, dict) else 'none'}")
     auditor = {k: _text(auditor.get(k), f"auditor {k}", limit=160) for k in ("name", "model")}
     completed = _text(data.get("completed_at"), "completion time", limit=64)
     try:

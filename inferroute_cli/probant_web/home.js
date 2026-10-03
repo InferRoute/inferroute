@@ -51,7 +51,13 @@
   const RECORD_LINK = /^\/record\?id=[^#]*&name=[A-Za-z0-9._%-]+&v=[0-9a-f]{32}$/;
   function openLocal(url) {
     if (!SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
-    window.open(url, "_blank", "noopener,noreferrer");
+    // Where it opens decides how many tabs a day of work leaves behind. A SESSION replaces this tab (its page
+    // has a way back, and the session itself lives in a process, not in the tab). A RECORD goes to one named
+    // tab that every later record reuses. "_blank" made a new tab per click, which is what Henry hit on 3 Oct.
+    // No "noopener" on the named record tab, on purpose: it forces a NEW tab every time, defeating the reuse.
+    // It is safe for this one target — a record is our own page on our own origin, served with a policy that
+    // allows no scripts, so nothing in it could use the reference back to this page.
+    window.open(url, SESSION_LINK.test(url) ? "_self" : "probant-record");
   }
 
   function toast(message, level) {

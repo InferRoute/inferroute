@@ -839,7 +839,11 @@
         const r = await api("/api/intake", { text: text.value, name: picked || "pasted document", client: client.value.trim() });
         closeDialog();
         location.hash = `#/document/${enc(r.id)}`;
-      } catch (e) { err.textContent = `Could not start reading the document. ${e.message}`; go.disabled = false; go.textContent = "Read it"; }
+      } catch (e) {
+        // No key yet: the card that takes it is on the Matters page. Say so, and take them there.
+        if (/InferRoute key/.test(e.message)) { closeDialog(); toast(e.message, "error"); location.hash = "#/"; return; }
+        err.textContent = `Could not start reading the document. ${e.message}`; go.disabled = false; go.textContent = "Read it";
+      }
     });
     dialog("Read a document", [
       el("p", "", "The AI reads your document and creates one draft matter per invention, with a complete summary and supporting passage. "

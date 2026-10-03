@@ -186,7 +186,8 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
                   setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size)) == 0 else { return false }
         }
         do {
-            let bind = try JSONSerialization.data(withJSONObject: ["v": 1, "session": self.session, "op": "host.bind"])
+            let binding: [String: Any] = ["v": 1, "session": self.session, "op": "host.bind"]
+            let bind = try JSONSerialization.data(withJSONObject: binding)
             var size = UInt32(bind.count).bigEndian
             try writeAll(hostFD, withUnsafeBytes(of: &size) { Data($0) } + bind)
         } catch { DispatchQueue.main.async { self.finish("host binding failed") }; return false }
@@ -222,7 +223,14 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
         return true
     }
 
-    func guestDidStop(_ virtualMachine: VZVirtualMachine) { refuse("guest stopped before host teardown proof") }
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        // A guest that stops ITSELF is a failure. Once the host has begun its own teardown the stop is the
+        // host's, and finish() is the one place that decides the outcome: it requires the force-stop to
+        // succeed and the machine to be in .stopped before anything is reported. Refusing here as well would
+        // turn every clean session into exit 78 if the framework delivers this callback for a host stop.
+        if stopping { return }
+        refuse("guest stopped before host teardown proof")
+    }
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         refuse("VM runtime error")
     }
@@ -266,8 +274,10 @@ final class Supervisor: NSObject, VZVirtioSocketListenerDelegate, VZVirtualMachi
         #else
         let consoleOutput = FileHandle(forWritingAtPath: "/dev/null")
         #endif
+        // No reading handle at all: the guest's console has no input. (/dev/null would also give it none,
+        // but it is permanently "readable", which is an invitation to spin.)
         console.attachment = VZFileHandleSerialPortAttachment(
-            fileHandleForReading: FileHandle(forReadingAtPath: "/dev/null"),
+            fileHandleForReading: nil,
             fileHandleForWriting: consoleOutput)
         config.serialPorts = [console]
         try config.validate()

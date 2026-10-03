@@ -69,6 +69,10 @@ def save(api_key: str, api_url: str = DEFAULT_API_URL) -> Path:
         f"INFERROUTE_API_URL={api_url}\n"
         f"INFERROUTE_API_KEY={api_key}\n"
     )
-    CREDS_FILE.write_text(body)
+    # Created 0600 from the first byte: write_text() then chmod() leaves the key readable under the default
+    # umask for the instant between the two.
+    fd = os.open(CREDS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(body)
     os.chmod(CREDS_FILE, stat.S_IRUSR | stat.S_IWUSR)
     return CREDS_FILE

@@ -316,16 +316,18 @@ def terminal_argv(script: Path) -> Optional[List[str]]:
 
 
 def audit_ir_path() -> Optional[str]:
-    """How a NEW terminal window reaches `ir`: bare when it is on PATH, otherwise the absolute path of the
-    install running this page, otherwise None. The first version asked only whether `ir` was on THIS server's
-    PATH and said "InferRoute isn't available on this computer" to a person who had just installed it — a
-    venv install keeps `ir` in ~/probant/bin, which neither the server's PATH nor a fresh Terminal has (ADE,
-    3 Oct)."""
+    """The `ir` a NEW terminal window should run for the audit: the one that belongs to the install running
+    this page, by absolute path; failing that whatever the shell finds; failing that None.
+
+    Two failures made this order matter, both on ADE on 3 Oct. Asking only whether `ir` was on this server's
+    PATH said "InferRoute isn't available on this computer" to a person who had just installed it (a venv
+    install keeps `ir` in ~/probant/bin, on nobody's PATH). And a PATH lookup alone can find a DIFFERENT, older
+    install first (ADE had one in ~/.local/bin) — an audit run by the wrong version of the program."""
     import shutil
-    if shutil.which("ir"):
-        return "ir"
     mine = Path(sys.executable).parent / "ir"
-    return str(mine) if mine.is_file() and os.access(mine, os.X_OK) else None
+    if mine.is_file() and os.access(mine, os.X_OK):
+        return str(mine)
+    return "ir" if shutil.which("ir") else None
 
 
 def can_open_terminal() -> bool:

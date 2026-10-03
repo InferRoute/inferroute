@@ -315,6 +315,22 @@ def terminal_argv(script: Path) -> Optional[List[str]]:
     return None
 
 
+# Where the agent programs an audit may use are really installed. A new Terminal window (and the page's own
+# server) often has none of these on its PATH: Claude Code installs to ~/.local/bin, Homebrew to /opt/homebrew/bin.
+# `ir --plain` itself needs `claude` and says "`claude` not found on PATH" without it (ADE, 3 Oct).
+AGENT_DIRS = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
+
+
+def agent_search_path() -> str:
+    extra = [os.path.expanduser(d) for d in AGENT_DIRS]
+    return os.pathsep.join([*os.environ.get("PATH", "").split(os.pathsep), *[d for d in extra if os.path.isdir(d)]])
+
+
+def audit_agent_on_path(agent: str) -> bool:
+    import shutil
+    return shutil.which(agent, path=agent_search_path()) is not None
+
+
 def audit_ir_path() -> Optional[str]:
     """The `ir` a NEW terminal window should run for the audit: the one that belongs to the install running
     this page, by absolute path; failing that whatever the shell finds; failing that None.
@@ -327,7 +343,7 @@ def audit_ir_path() -> Optional[str]:
     mine = Path(sys.executable).parent / "ir"
     if mine.is_file() and os.access(mine, os.X_OK):
         return str(mine)
-    return "ir" if shutil.which("ir") else None
+    return "ir" if shutil.which("ir", path=agent_search_path()) else None
 
 
 def can_open_terminal() -> bool:
@@ -357,6 +373,9 @@ def audit_launch_script(pack: Path, command: str) -> Path:
     # One server can launch several auditors: its pid alone is not a unique run id.
     run = pack.parent / f"audit-run-{pack.name}-{os.getpid()}-{d.name}"
     sh.write_text("#!/bin/bash\n"
+                  # The places the agents install, appended AFTER the shell's own PATH: nothing the person has
+                  # is shadowed, and `claude` is found by the program (`ir`) that needs it.
+                  'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"\n'
                   f"cp -r {shlex.quote(str(pack))} {shlex.quote(str(run))} || exit 1\n"
                   f"chmod -R u+w {shlex.quote(str(run))}\n"
                   f"cd {shlex.quote(str(run))} || exit 1\n"
@@ -1268,7 +1287,7 @@ class Bridge:
                 return JSONResponse({"error": "prepare the audit pack first"}, status_code=409)
             import shutil
             ir_path = audit_ir_path() if agent == "ir" else None
-            if (ir_path is None) if agent == "ir" else (shutil.which(agent) is None):
+            if (ir_path is None) if agent == "ir" else (not audit_agent_on_path(agent)):
                 label = {"claude": "Claude", "codex": "Codex", "ir": "InferRoute"}[agent]
                 return JSONResponse({"error": f"{label} isn't available on this computer. Install it, then try again."},
                                     status_code=409)

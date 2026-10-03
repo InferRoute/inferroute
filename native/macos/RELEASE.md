@@ -55,6 +55,8 @@ Bump `version` in `pyproject.toml` (a published version is never republished wit
 
     python3 scripts/publish_client_wheel.py ...          # the client wheel, as for every release
     cp /tmp/runtime-dist/inferroute_macos_vm_runtime-<V>-py3-none-macosx_11_0_arm64.whl* <site>/public/client/
+    cp <staged>/inferroute-<V>-lock.txt* <site>/public/client/       # the hash-pinned list of every library
+    cp <staged>/install-probant.sh <site>/public/install-probant.sh
     (cd <site> && vercel --prod --yes)                   # a git push does NOT deploy
     curl -sL https://inferroute.ai/client/<each file> | sha256sum      # compare with the .sha256 beside it
 

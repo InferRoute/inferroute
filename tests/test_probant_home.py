@@ -295,9 +295,12 @@ def test_the_agent_program_missing_from_path_is_named_plainly():
     assert "npm install -g" in msg and "pi --version" not in msg
 
 
-def test_an_unrecognised_failure_shows_what_it_said_instead_of_pointing_at_a_terminal():
-    msg = H.failure_message(["opening Demo/glucose — date bound 2020-01-01", "something unexpected happened here"])
-    assert "something unexpected happened here" in msg
+def test_an_unrecognised_failure_is_plain_words_and_keeps_what_it_said_in_the_details():
+    tail = ["opening Demo/glucose — date bound 2020-01-01", "something unexpected happened here"]
+    msg = H.failure_message(tail)
+    assert msg == H.GENERIC_FAILURE and "nothing was sent" in msg.lower() and "Technical details" in msg
+    assert "something unexpected" not in msg                       # the launcher's words are not the message
+    assert "something unexpected happened here" in H.failure_detail(tail)      # but they are not lost
     assert "See the terminal" not in msg                 # often there is no terminal: a service, a shortcut
     assert H.failure_message([]) == "It stopped before printing anything. Nothing was sent."
 
@@ -675,3 +678,35 @@ def test_starting_home_inside_a_coding_assistant_says_so_before_handing_out_the_
     monkeypatch.setenv("IR_ALLOW_NESTED", "1")
     assert H.run(open_browser=False) == 0
     assert "WILL BE REFUSED" not in capsys.readouterr().out
+
+
+def test_the_technical_details_hide_whose_computer_it_was_and_never_carry_a_key():
+    tail = ["\x1b[31m/Users/arnaud/probant-vm-bringup/final-P/.intake/20261003T185326Z-8f48ac\x1b[0m",
+            "no InferRoute key (run `ir login`) and no IR_OPERATOR_API_KEY for direct mode",
+            "sent with Authorization: Bearer inf_ABCDEFGHIJKLMNOP and key inf_ZYXWVUTSRQPONM at "
+            "http://127.0.0.1:49439/#k=SECRETTOKEN123",
+            "opening Demo/x — date bound 2020-01-01"]
+    d = H.failure_detail(tail)
+    assert "/Users/arnaud" not in d and "final-P" not in d and "\x1b" not in d
+    assert "…/20261003T185326Z-8f48ac" in d                          # the name that says what failed survives
+    assert "inf_ABCDEFGH" not in d and "inf_ZYXWV" not in d and "SECRETTOKEN" not in d and "Bearer inf" not in d
+    assert "opening Demo" not in d and len(d.splitlines()) <= 6
+
+
+def test_a_failed_launch_view_carries_message_and_detail_apart(home):
+    h, c, _ = home
+    import subprocess, sys, time
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; print('boom at /Users/x/y/z.py'); sys.exit(3)"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    it = {"id": "t", "matter": "m", "state": "failed", "url": None, "started": time.time(), "message": H.GENERIC_FAILURE,
+          "detail": H.failure_detail(["boom at /Users/x/y/z.py"]), "proc": proc}
+    proc.wait()
+    v = h.launches.view(it)
+    assert v["message"] == H.GENERIC_FAILURE and v["detail"] == "boom at …/z.py"
+
+
+def test_the_page_shows_failures_as_a_sentence_with_the_details_folded_away():
+    js = (STATIC / "home.js").read_text()
+    assert "function failureNote" in js and 'el("details", "failure-detail"' in js and "Technical details" in js
+    assert js.count("failureNote(") >= 3                             # defined once, used for a session and for a reading
+    assert "It stopped with:" not in js

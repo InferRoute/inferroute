@@ -309,7 +309,36 @@
     try {
       await api("/api/sessions", { id: matterId });
       onChange();
-    } catch (e) { toast(e.message, "error"); }
+    } catch (e) {
+      toast(e.message, "error");
+      if (/InferRoute key/.test(e.message)) location.hash = "#/";
+    }
+  }
+
+  // The first thing a computer without a key shows. The key is typed or pasted into a masked field, sent to
+  // this computer's own page, checked with InferRoute, and saved here; it is never shown again.
+  function keyCard(done) {
+    const keyInput = input("password", "inf_…");
+    keyInput.autocomplete = "off";
+    keyInput.spellcheck = false;
+    const err = el("p", "form-error", "");
+    const save = button("Save the key", "primary", async () => {
+      err.textContent = "";
+      save.disabled = true;
+      try {
+        await api("/api/key", { key: keyInput.value });
+        keyInput.value = "";
+        toast("Key saved. You can start sessions.", "info");
+        done();
+      } catch (e) { err.textContent = e.message; save.disabled = false; }
+    });
+    keyInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save.click(); });
+    return el("div", "card key-card",
+      el("h2", "", "Add your InferRoute key"),
+      el("p", "", "Probant needs the key InferRoute sent you before it can run a session. Paste it here once; it "
+        + "is kept on this computer only, in a file only you can read. Sharing and Help work without it."),
+      field("Your key", keyInput, "It starts with inf_. Nothing is sent anywhere until you press the button, and then only to InferRoute, to check it."),
+      err, el("div", "dialog-actions", save));
   }
 
   // ── pages ──
@@ -440,11 +469,15 @@
 
   async function renderMatters() {
     const p = page();
+    const refresh = () => renderMatters();
     let data;
     try { data = await api("/api/overview"); } catch (e) { return; }
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Matters"),
       el("p", "sub", "Each matter is one invention: its disclosure, its sessions with the assistant, and the records you keep.")));
+    // No key, no sessions: say so FIRST, before anything the person could press and have fail. Sharing and
+    // Help do not need one and stay as they are.
+    if (data.key && !data.key.present) p.append(keyCard(() => refresh()));
     mountSearchStatus(p);
     // This page is the version the server started with. When a newer one is installed, say so rather than let
     // the difference show up as a button that fails.

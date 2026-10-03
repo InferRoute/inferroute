@@ -450,6 +450,27 @@ class Launches:
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
 
 
+def key_status() -> Dict[str, Any]:
+    """Whether this computer holds an InferRoute key, and nothing more: never the key, never a fragment."""
+    from . import config
+    try:
+        return {"present": bool(config.load().api_key.strip())}
+    except OSError:
+        return {"present": False}
+
+
+def key_problem(key: str) -> str:
+    """Plain words for a pasted key that cannot be one, before anything touches the network."""
+    from . import login
+    if not key:
+        return "Paste the key you were given."
+    if len(key) > 200 or any(c.isspace() for c in key):
+        return "That does not look like a key: it should be one line with no spaces."
+    if not login._looks_like_key(key):
+        return "That does not look like an InferRoute key. It starts with inf_."
+    return ""
+
+
 def session_stop_wait() -> float:
     """How long a session is given to end after being asked, before it is killed. Where the agent runs in a
     virtual machine the session needs its own grace (probant_web.VM_END_GRACE) to bring the agent's files
@@ -567,7 +588,30 @@ class Home:
                     recent.append({**s, "matter": m["id"]})
             recent.sort(key=lambda s: s["id"], reverse=True)
             running = [home.launches.view(it) for it in home.launches.items.values() if it["state"] in ("starting", "ready")]
-            return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale()}
+            return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale(),
+                    "key": key_status()}
+
+        @app.get("/api/key")
+        async def key_view():
+            return key_status()
+
+        @app.post("/api/key")
+        async def key_save(request: Request):
+            """Take the InferRoute key from the page, check it, keep it. The key is never echoed back, never
+            logged, and is written with mode 600 to the same file `ir login` writes."""
+            d = await body(request)
+            given = str(d.get("key") or "").strip()
+            problem_text = key_problem(given)
+            if problem_text:
+                return problem(problem_text, 400)
+            from . import config, login
+            status, n_models = await asyncio.to_thread(login._verify, config.load().api_url, given)
+            if status == "reject":
+                return problem("InferRoute did not accept this key. Check that it was copied whole, or ask for a new one.", 400)
+            if status != "ok":
+                return problem("Could not reach InferRoute to check the key, so it was not saved. Check the connection and try again.", 502)
+            await asyncio.to_thread(config.save, given, config.load().api_url)
+            return {"ok": True, **key_status()}
 
         @app.post("/api/matters")
         async def create(request: Request):
@@ -649,6 +693,8 @@ class Home:
                 return problem(str(e), 404)
             if rec.get("needs_review"):
                 return problem("Review this draft's disclosure and date before starting a session.", 409)
+            if not key_status()["present"]:
+                return problem("Add your InferRoute key first — the box at the top of the Matters page.", 409, extra={"needs_key": True})
             return home.launches.view(home.launches.start(f"{client}/{matter}"))
 
         @app.post("/api/sessions/end")

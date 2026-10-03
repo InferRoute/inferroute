@@ -693,3 +693,7 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 /* Asked again while it was already waiting: point at the copy that exists rather than making a second. */
 .msg-waiting-flash { border-color: var(--accent); opacity: 1; transition: border-color .15s, opacity .15s; }
 .audit-results { margin-top: .75rem; }
+
+.key-card { padding: 16px 18px; margin: 0 0 18px; border-left: 4px solid var(--accent, #2f6fed); }
+.key-card h2 { margin: 0 0 6px; font-size: 17px; }
+.key-card input { width: 100%; max-width: 420px; }

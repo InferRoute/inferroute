@@ -1383,12 +1383,24 @@ other order would have been marked down by a rule this brief had broken itself.
 
     cp REPORT-TEMPLATE.md ../REPORT-<this folder's name>.md  &&  chmod u+w ../REPORT-<this folder's name>.md
 
-The template ends with a JSON results form. Complete it too and save it as
-`../AUDIT-RESULT-<this folder's name>.json`, outside this folder. Preserve its pack hashes, claim IDs,
-titles and totals exactly; fill every verdict, coverage count, evidence field and supported statement.
-The client loads only complete results matching this exact pack and attributes them to you. It checks
-the form and the file association, not your reasoning. Use your actual model name, not the application's
-name, and write this file LAST so unfinished work is not presented as a completed audit.
+**When the report is written, do not hand-write the result file — make it from the report, then check both.**
+This is mechanical on purpose. On 3 Oct an auditor completed a good audit, then wrote the JSON by hand:
+it renamed `evidence_list_sha256`, moved `completed_at`, left every `tool` count null and dropped a field,
+and the professional's client would have refused the file five different ways with the wrong reason on
+screen. A file made by the tool cannot do that.
+
+    python3 stationery/check_report.py ../REPORT-<this folder's name>.md
+    python3 stationery/check_report.py --make-json ../REPORT-<this folder's name>.md \
+            --name "<who you are>" --model "<your actual model name>" > ../AUDIT-RESULT-<this folder's name>.json
+    python3 stationery/check_report.py ../REPORT-<this folder's name>.md ../AUDIT-RESULT-<this folder's name>.json
+
+Fix every line the first command prints and run it again until it prints OK; it checks that every heading
+is present with its exact title, that each claim has a Verdict and a **Covered by:** line, and that each
+verdict is what its own numbers say. The last command must print OK too. It is the same check the client
+applies to your file. It does not read your reasoning — that is yours — only the shape, the numbers and the
+pack binding. The client loads only complete results matching this exact pack and attributes them to you.
+Use your actual model name, not the application's name. Write the result file LAST, so unfinished work is
+not presented as a completed audit.
 
 Use a full timezone-aware completion timestamp, for example `2026-10-02T12:09:00Z`;
 a date such as `2026-10-02` is not accepted. Coverage counts are operations, not sessions:
@@ -2071,12 +2083,15 @@ def report_template(pack: Optional[Path] = None) -> str:
     if pack is not None:
         from . import probant_audit_results
         out += ["## Results for the client", "",
-                "Complete the form below and save ONLY the JSON as", "",
-                "    ../AUDIT-RESULT-<this folder's name>.json", "",
-                "Write it last. Preserve IDs, titles, totals and pack hashes. Use zero for a check you did",
-                "not perform; `unchecked` is empty only when none of the claim remains unexamined.",
+                "**Do not write this by hand.** Build it from your report with the checker, then check both:", "",
+                "    python3 stationery/check_report.py --make-json ../REPORT-<this folder's name>.md \\",
+                "        --name \"<who you are>\" --model \"<your actual model name>\" > ../AUDIT-RESULT-<this folder's name>.json",
+                "    python3 stationery/check_report.py ../REPORT-<this folder's name>.md ../AUDIT-RESULT-<this folder's name>.json", "",
+                "The form below is what that file looks like, for reference. Its pack hashes, claim IDs, titles and",
+                "totals are exact and must not be changed; the key names are exact. Use zero for a check you did",
+                "not perform (never null); `unchecked` is empty only when none of the claim remains unexamined.",
                 "A VERIFIED verdict needs full coverage. Other verdicts need explicit limitations.",
-                "The statements are YOUR conclusions, not new attestations. Use your actual model name.", "",
+                "The statements are YOUR conclusions, not new attestations.", "",
                 "```json", json.dumps(probant_audit_results.template(pack), indent=2), "```", ""]
     return "\n".join(out)
 
@@ -2449,6 +2464,9 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     manifest["stationery"] = {
         "REPORT-TEMPLATE.md": "yours to fill in — not evidence, deliberately not pinned in SHA256SUMS, "
                               "and writing to it does not disturb the record",
+        "stationery/check_report.py": "checks your report and result file against this pack, and makes the result "
+                                      "file from the report — not evidence, not pinned, reads nothing of the record "
+                                      "but MANIFEST.json and SHA256SUMS, makes no network call",
     }
     manifest["trust_anchors"] = {
         **({"reference_timestamp": block} if block else {}),
@@ -2530,6 +2548,15 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     # auditor could simply do in place. Belt and braces with the manifest: the brief names an output path,
     # this makes the wrong path fail at the first keystroke rather than at the integrity check.
     os.chmod(tmpl, 0o400)
+    # In a SUBFOLDER, not beside the verifier: the verifier lists the files at the top of this folder and
+    # fails a record with one it does not know. A subfolder is invisible to that check, so the shipped (and
+    # published) verifier does not have to change for a helper that is not evidence.
+    stationery = dest / "stationery"
+    stationery.mkdir()
+    os.chmod(stationery, 0o700)
+    checker = stationery / "check_report.py"
+    checker.write_bytes((Path(__file__).resolve().parent / "pi_attested" / "check_report.py").read_bytes())
+    os.chmod(checker, 0o500)
 
     anchors = dest / "trust-anchors"
     anchors.mkdir()

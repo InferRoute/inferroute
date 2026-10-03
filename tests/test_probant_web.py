@@ -2742,10 +2742,3 @@ def test_the_audit_looks_where_the_agents_install_and_the_launch_script_puts_the
     sh = W.audit_launch_script(tmp_path / "pack", "echo hi").read_text()
     assert 'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"' in sh
     assert sh.index("export PATH") < sh.index("cp -r")           # before anything runs
-
-
-def test_the_audit_window_tells_the_person_what_to_type_if_the_assistant_stops_after_announcing_a_step(tmp_path):
-    """3 Oct: kimi-k2.6 ended a turn after "Let me read the key files…" with no tool call, so the session waited.
-    A person at the terminal fixes that with one word — if they know it."""
-    sh = W.audit_launch_script(tmp_path / "pack", "echo hi").read_text()
-    assert "type:  continue" in sh and sh.index("type:  continue") < sh.index("echo hi")

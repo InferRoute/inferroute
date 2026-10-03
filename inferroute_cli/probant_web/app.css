@@ -705,3 +705,8 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .failure-detail pre { margin: 6px 0 0; padding: 8px 10px; background: rgba(0,0,0,.05); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .failure-body { overflow-wrap: anywhere; }
 .launch .failure-note { background: none; padding: 0; margin: 0; }
+
+.msg-waiting { display: flex; align-items: flex-start; gap: 10px; }
+.msg-waiting .queued-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.msg-waiting .cancel-queued { flex: none; }
+.msg-withdrawn { opacity: .6; text-decoration: line-through; }

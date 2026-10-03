@@ -315,6 +315,19 @@ def terminal_argv(script: Path) -> Optional[List[str]]:
     return None
 
 
+def audit_ir_path() -> Optional[str]:
+    """How a NEW terminal window reaches `ir`: bare when it is on PATH, otherwise the absolute path of the
+    install running this page, otherwise None. The first version asked only whether `ir` was on THIS server's
+    PATH and said "InferRoute isn't available on this computer" to a person who had just installed it — a
+    venv install keeps `ir` in ~/probant/bin, which neither the server's PATH nor a fresh Terminal has (ADE,
+    3 Oct)."""
+    import shutil
+    if shutil.which("ir"):
+        return "ir"
+    mine = Path(sys.executable).parent / "ir"
+    return str(mine) if mine.is_file() and os.access(mine, os.X_OK) else None
+
+
 def can_open_terminal() -> bool:
     """Whether this computer has a terminal to open. The page asks before offering the button, for the same
     reason the deep-search button asks about the search machine: an action that cannot work should not be
@@ -583,6 +596,9 @@ class Bridge:
         row: Optional[Dict[str, Any]] = None
         if kind == "user":
             row = {"kind": "user", "text": event.get("text", "")}
+        elif kind == "queue_cancel":
+            # The question was asked of THIS page and is already on record above; say it never went.
+            row = {"kind": "withdrawn", "text": event.get("text", "")}
         elif kind == "assistant_end" and (event.get("text") or "").strip():
             row = {"kind": "assistant", "text": event.get("text", "")}
         elif kind == "tool_end" and event.get("tool") == "prior_art_search":
@@ -729,6 +745,20 @@ class Bridge:
             await self.stop_agent()
         finally:
             self.closed.set()
+
+    def cancel_queued(self, index: int, text: str) -> bool:
+        """Withdraw a held question, if and only if it is still held.
+
+        The page names it by position AND by its text, so a question that was delivered a moment ago — the
+        queue shifted under the click — is never confused with the one that took its place, and the answer
+        to "was it cancelled" is the truth: False means it has already been sent and cannot be recalled.
+        """
+        if type(index) is not int or not 0 <= index < len(self.pending_prompts) or self.pending_prompts[index] != text:
+            return False
+        self.pending_prompts.pop(index)
+        self.publish({"kind": "queue_cancel", "index": index, "text": text})
+        self.publish({"kind": "queue_update", "waiting": len(self.pending_prompts)})
+        return True
 
     async def _drain_pending(self) -> None:
         """Send the oldest held question, once, now that the assistant is free.
@@ -1045,6 +1075,18 @@ class Bridge:
             bridge.publish({"kind": "user", "text": text})
             return {"ok": True}
 
+        @app.post("/api/prompt/cancel")
+        async def prompt_cancel(request: Request):
+            """Take back a question that is still waiting for the assistant to finish."""
+            data = await body(request)
+            index, text = data.get("index"), data.get("text")
+            if type(index) is not int or not isinstance(text, str):
+                return JSONResponse({"error": "which question?"}, status_code=400)
+            if not bridge.cancel_queued(index, text):
+                return JSONResponse({"error": "It was already sent: the assistant has taken it up, so it cannot be taken back."},
+                                    status_code=409)
+            return {"ok": True, "waiting": len(bridge.pending_prompts)}
+
         @app.post("/api/abort")
         async def abort():
             """Stop the current turn — and say whether it actually stopped. Writing `abort` into the agent's
@@ -1188,7 +1230,7 @@ class Bridge:
                     "can_launch": can_open_terminal(),
                     "claude": probant_export.audit_command("claude"),
                     "codex": probant_export.audit_command("codex"),
-                    "ir": probant_export.audit_command("ir")}
+                    "ir": probant_export.audit_command("ir", ir_path=audit_ir_path() or "ir")}
 
         @app.get("/api/audit-results")
         async def audit_results():
@@ -1223,11 +1265,12 @@ class Bridge:
             if not pack or not Path(pack).is_dir():
                 return JSONResponse({"error": "prepare the audit pack first"}, status_code=409)
             import shutil
-            if shutil.which(agent) is None:
+            ir_path = audit_ir_path() if agent == "ir" else None
+            if (ir_path is None) if agent == "ir" else (shutil.which(agent) is None):
                 label = {"claude": "Claude", "codex": "Codex", "ir": "InferRoute"}[agent]
                 return JSONResponse({"error": f"{label} isn't available on this computer. Install it, then try again."},
                                     status_code=409)
-            command = probant_export.audit_command(agent)
+            command = probant_export.audit_command(agent, ir_path=ir_path or "ir")
             argv = terminal_argv(audit_launch_script(Path(pack), command))
             if argv is None:
                 return JSONResponse({"error": "no terminal to open on this computer"}, status_code=501)

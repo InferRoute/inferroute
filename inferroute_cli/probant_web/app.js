@@ -88,7 +88,9 @@
   function goHome(route) {
     const url = route ? `${homeUrl}&r=${encodeURIComponent(route)}` : homeUrl;
     if (!HOME_LINK.test(url)) { toast("This session was started from a terminal, so it has no home page to go back to. To see all your matters, run: ir probant home", "info"); return; }
-    window.open(url, "_blank", "noopener,noreferrer");
+    // This tab, not a new one: the home page is where this session came from, and the session keeps running
+    // without the tab (reopening it replays the conversation). A new tab per click is what piled them up.
+    window.open(url, "_self");
   }
   // Every way out of a finished session, in one place, so a session is never a dead end: back to the
   // matter (where another session is one click), back to home, or — with no home page — the command.

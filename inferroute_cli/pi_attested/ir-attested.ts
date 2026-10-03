@@ -1121,6 +1121,104 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
+	// REGISTERED BEFORE THE SEARCH-ONLY HALF, since 3 Oct. This tool sat below the `if (!SEARCH) return;`
+	// that follows, so a matter session with no search machine configured never got it — while `read` and
+	// `grep` were already withheld in its favour. Such a session could not read its own disclosure at all.
+	// It is what the ADE test on 2 Oct ran into ("listed the matter folder, then said it could not read
+	// disclosure.md"), and the first tool-using run through the VM harness reproduced it exactly: the model
+	// was offered `edit` and `write` and nothing that reads. Reading the disclosure has nothing to do with
+	// whether a search machine exists.
+	// READING IS SCOPED IN THE MATTER FLOW. Pi's built-in `read` and `grep` are withheld here (see
+	// MATTER_TOOLS) and replaced by this, so "only the disclosure" is enforced by the tool rather than
+	// asked for in the prompt. On 2026-09-30 an assistant read a disclosure.md.bak from the previous day
+	// and called it "useful matter context": the survey then ran partly on text the professional had
+	// revised away. A contract line alone would have been advice; this refuses.
+	//
+	// It is a real boundary here, unusually: the attested session has NO shell tool, so there is no second
+	// route to a file. `grep` goes too — it returns matching LINES, which is reading by another name.
+	//
+	// Intake is untouched: reading an arbitrary document IS the task there, and it has no search tool, so
+	// nothing can leave while a whole document is in context.
+	pi.registerTool({
+		name: "read_matter_file",
+		label: "Read a matter file",
+		description:
+			"Read a file from the matter workspace. `disclosure.md` is the disclosure and is always readable — read it " +
+			"first and search from it. ANY OTHER FILE IS REFUSED unless the professional has named it for this session: " +
+			"a backup, an earlier draft, an export or a file whose name merely begins with \"disclosure\" is not the " +
+			"disclosure, and a survey steered by a superseded draft searches for an invention they are no longer " +
+			"describing. If you think another file bears on the matter, NAME IT AND ASK rather than trying to read it.",
+		promptSnippet: "Read the disclosure",
+		parameters: Type.Object({
+			path: Type.Optional(Type.String({
+				description: "File name inside the matter workspace. Omit it to read disclosure.md, which is what this tool is for.",
+			})),
+		}),
+		execute: async (params: { path?: string }) => {
+			const root = process.cwd();
+			// NO PATH MEANS THE DISCLOSURE. This tool exists to read disclosure.md; its own promptSnippet is
+			// "Read the disclosure". A model that takes that literally calls it with no argument, and before
+			// this default that produced `resolve(root, "")` === root, so rel === "" and the guard threw
+			// "undefined is outside the matter workspace" — an error that is both wrong and unactionable,
+			// because the path it names does not exist and the workspace was never the problem.
+			// It blocked a real session on 2026-09-30. A required argument whose only correct value is a
+			// constant is not a parameter, it is a trap.
+			const asked = String(params.path ?? "").trim() || DISCLOSURE;
+			const want = resolve(root, asked);
+			const rel = relative(root, want);
+			// Outside the workspace, or reached by climbing out of it, is refused before the allowlist is
+			// even consulted — an allowlist checked on an unresolved path is not an allowlist.
+			if (rel.startsWith("..") || rel === "" || resolve(root, rel) !== want) {
+				throw new Error(`${asked} is outside the matter workspace; nothing was read`);
+			}
+			const allowed = new Set(
+				[DISCLOSURE, ...String(process.env.IR_ATTESTED_READABLE ?? "").split(",")]
+					.map((x) => x.trim()).filter(Boolean),
+			);
+			if (!allowed.has(rel)) {
+				throw new Error(
+					`${rel} is not the disclosure and has not been named for this session, so it was not read. ` +
+					`disclosure.md is the disclosure. If ${rel} bears on this matter, tell the professional it is ` +
+					`there and ask whether to include it — do not read it on your own judgement.`,
+				);
+			}
+			// THE OTHER FILES, BY NAME, WITH THE DISCLOSURE. `ls` and `find` are no longer given to the matter
+			// flow (pi_attested.MATTER_TOOLS): kept so a stale draft could be noticed, what they produced was a
+			// folder listing at the start of every session before the disclosure was read, and once a session
+			// that listed the folder and then said it could not read disclosure.md. The inventory arrives here
+			// instead, in the one call every session makes anyway — names only, nothing read — so a competing
+			// draft is still seen, at the moment it matters, without a capability to exercise.
+			const others = (): string[] => {
+				try {
+					return readdirSync(root, { withFileTypes: true })
+						.filter((d) => d.isFile() && !d.name.startsWith(".") && d.name !== DISCLOSURE)
+						.map((d) => d.name).sort();
+				} catch { return []; }
+			};
+			let text: string;
+			try {
+				text = readFileSync(want, "utf8");
+			} catch (e) {
+				if (rel === DISCLOSURE && (e as NodeJS.ErrnoException).code === "ENOENT") {
+					const there = others();
+					throw new Error(
+						`disclosure.md is not in the matter folder, so there is no disclosure to read. ` +
+						(there.length ? `The folder holds: ${there.join(", ")}. ` : `The folder holds no other files. `) +
+						`Ask the professional which file is the disclosure; do not choose one yourself.`,
+					);
+				}
+				throw new Error(`could not read ${rel}: ${(e as Error).message}`);
+			}
+			if (rel !== DISCLOSURE) return { content: [{ type: "text", text }] };
+			const there = others();
+			const footer = there.length
+				? `Other files in the matter folder (not read; the professional's own working files): ${there.join(", ")}. ` +
+				  `If one bears on the matter, name it and ask — once.`
+				: `No other files in the matter folder.`;
+			return { content: [{ type: "text", text: `${text}\n\n---\n${footer}` }] };
+		},
+	});
+
 	if (!SEARCH) return;
 
 	// ── one sealed search, end to end ──────────────────────────────────────────────────────────────
@@ -1331,97 +1429,6 @@ export default function (pi: ExtensionAPI) {
 		}
 		return { sp, out, earlier };
 	}
-
-	// READING IS SCOPED IN THE MATTER FLOW. Pi's built-in `read` and `grep` are withheld here (see
-	// MATTER_TOOLS) and replaced by this, so "only the disclosure" is enforced by the tool rather than
-	// asked for in the prompt. On 2026-09-30 an assistant read a disclosure.md.bak from the previous day
-	// and called it "useful matter context": the survey then ran partly on text the professional had
-	// revised away. A contract line alone would have been advice; this refuses.
-	//
-	// It is a real boundary here, unusually: the attested session has NO shell tool, so there is no second
-	// route to a file. `grep` goes too — it returns matching LINES, which is reading by another name.
-	//
-	// Intake is untouched: reading an arbitrary document IS the task there, and it has no search tool, so
-	// nothing can leave while a whole document is in context.
-	pi.registerTool({
-		name: "read_matter_file",
-		label: "Read a matter file",
-		description:
-			"Read a file from the matter workspace. `disclosure.md` is the disclosure and is always readable — read it " +
-			"first and search from it. ANY OTHER FILE IS REFUSED unless the professional has named it for this session: " +
-			"a backup, an earlier draft, an export or a file whose name merely begins with \"disclosure\" is not the " +
-			"disclosure, and a survey steered by a superseded draft searches for an invention they are no longer " +
-			"describing. If you think another file bears on the matter, NAME IT AND ASK rather than trying to read it.",
-		promptSnippet: "Read the disclosure",
-		parameters: Type.Object({
-			path: Type.Optional(Type.String({
-				description: "File name inside the matter workspace. Omit it to read disclosure.md, which is what this tool is for.",
-			})),
-		}),
-		execute: async (params: { path?: string }) => {
-			const root = process.cwd();
-			// NO PATH MEANS THE DISCLOSURE. This tool exists to read disclosure.md; its own promptSnippet is
-			// "Read the disclosure". A model that takes that literally calls it with no argument, and before
-			// this default that produced `resolve(root, "")` === root, so rel === "" and the guard threw
-			// "undefined is outside the matter workspace" — an error that is both wrong and unactionable,
-			// because the path it names does not exist and the workspace was never the problem.
-			// It blocked a real session on 2026-09-30. A required argument whose only correct value is a
-			// constant is not a parameter, it is a trap.
-			const asked = String(params.path ?? "").trim() || DISCLOSURE;
-			const want = resolve(root, asked);
-			const rel = relative(root, want);
-			// Outside the workspace, or reached by climbing out of it, is refused before the allowlist is
-			// even consulted — an allowlist checked on an unresolved path is not an allowlist.
-			if (rel.startsWith("..") || rel === "" || resolve(root, rel) !== want) {
-				throw new Error(`${asked} is outside the matter workspace; nothing was read`);
-			}
-			const allowed = new Set(
-				[DISCLOSURE, ...String(process.env.IR_ATTESTED_READABLE ?? "").split(",")]
-					.map((x) => x.trim()).filter(Boolean),
-			);
-			if (!allowed.has(rel)) {
-				throw new Error(
-					`${rel} is not the disclosure and has not been named for this session, so it was not read. ` +
-					`disclosure.md is the disclosure. If ${rel} bears on this matter, tell the professional it is ` +
-					`there and ask whether to include it — do not read it on your own judgement.`,
-				);
-			}
-			// THE OTHER FILES, BY NAME, WITH THE DISCLOSURE. `ls` and `find` are no longer given to the matter
-			// flow (pi_attested.MATTER_TOOLS): kept so a stale draft could be noticed, what they produced was a
-			// folder listing at the start of every session before the disclosure was read, and once a session
-			// that listed the folder and then said it could not read disclosure.md. The inventory arrives here
-			// instead, in the one call every session makes anyway — names only, nothing read — so a competing
-			// draft is still seen, at the moment it matters, without a capability to exercise.
-			const others = (): string[] => {
-				try {
-					return readdirSync(root, { withFileTypes: true })
-						.filter((d) => d.isFile() && !d.name.startsWith(".") && d.name !== DISCLOSURE)
-						.map((d) => d.name).sort();
-				} catch { return []; }
-			};
-			let text: string;
-			try {
-				text = readFileSync(want, "utf8");
-			} catch (e) {
-				if (rel === DISCLOSURE && (e as NodeJS.ErrnoException).code === "ENOENT") {
-					const there = others();
-					throw new Error(
-						`disclosure.md is not in the matter folder, so there is no disclosure to read. ` +
-						(there.length ? `The folder holds: ${there.join(", ")}. ` : `The folder holds no other files. `) +
-						`Ask the professional which file is the disclosure; do not choose one yourself.`,
-					);
-				}
-				throw new Error(`could not read ${rel}: ${(e as Error).message}`);
-			}
-			if (rel !== DISCLOSURE) return { content: [{ type: "text", text }] };
-			const there = others();
-			const footer = there.length
-				? `Other files in the matter folder (not read; the professional's own working files): ${there.join(", ")}. ` +
-				  `If one bears on the matter, name it and ask — once.`
-				: `No other files in the matter folder.`;
-			return { content: [{ type: "text", text: `${text}\n\n---\n${footer}` }] };
-		},
-	});
 
 	pi.registerTool({
 		name: "prior_art_search",

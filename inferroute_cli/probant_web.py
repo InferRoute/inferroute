@@ -88,6 +88,12 @@ STALL_SECONDS = float(env("STALL_SECONDS", "120"))
 ABORT_GRACE = float(os.environ.get("IR_PROBANT_ABORT_GRACE", "6"))
 END_GRACE = float(os.environ.get("IR_PROBANT_END_GRACE", "5"))
 KILL_GRACE = float(os.environ.get("IR_PROBANT_KILL_GRACE", "3"))
+# When the agent runs in a virtual machine, ending politely is not one process exiting: Pi exits, the guest
+# compares its folder with what it was given and sends back what changed, the host accepts it, and only then
+# is the machine stopped. Stopping the runner before that is over DISCARDS every file the session wrote —
+# and five seconds was not always enough even for a session that had written nothing (ADE, 3 Oct). A wedged
+# session still ends; it takes this long to be sure it was wedged.
+VM_END_GRACE = 60.0
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; "
        "font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
@@ -375,6 +381,7 @@ class Bridge:
         self.search_endpoint = search_endpoint
         self._receipt, self._rebuild, self._export = receipt, rebuild_summary, export
         self.token = secrets.token_urlsafe(32)
+        self.end_grace = 0.0                # raised by the launcher for a VM-held agent; see VM_END_GRACE
         self.port = 0
         self.history: List[Dict[str, Any]] = []
         self.subscribers: List[asyncio.Queue] = []
@@ -859,7 +866,7 @@ class Bridge:
         except Exception:                               # noqa: BLE001
             pass
         try:
-            await asyncio.wait_for(asyncio.shield(proc.wait()), END_GRACE)
+            await asyncio.wait_for(asyncio.shield(proc.wait()), max(END_GRACE, self.end_grace))
             return "closed"
         except Exception:                               # noqa: BLE001
             pass

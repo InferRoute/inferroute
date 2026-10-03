@@ -95,3 +95,70 @@ def test_every_refusal_the_runtime_can_raise_reaches_a_vm_message_not_the_generi
     generic = "The AI machine could not be verified"
     wrong = [t for t in texts if generic in probant_home.failure_message([f"  ir: {t}. Refusing before Pi startup."])]
     assert wrong == [], wrong
+
+
+# ── ending a VM session must outlast the journey its files make back ─────────────────────────────────────
+
+
+def test_the_page_waits_long_enough_for_a_vm_session_to_bring_its_files_back(monkeypatch):
+    import asyncio
+    from inferroute_cli import probant_web as W
+
+    assert W.VM_END_GRACE >= 30 > W.END_GRACE
+
+    class SlowToEnd:
+        """Exits 0.3 s after its input closes: longer than the ordinary grace as patched, shorter than the VM's."""
+        returncode = None
+
+        def __init__(self):
+            self.stdin = self
+            self.closed_at = None
+            self.terminated = False
+
+        def is_closing(self):
+            return self.closed_at is not None
+
+        def close(self):
+            self.closed_at = asyncio.get_running_loop().time()
+
+        async def wait(self):
+            while self.closed_at is None or asyncio.get_running_loop().time() - self.closed_at < 0.3:
+                if self.terminated:
+                    break
+                await asyncio.sleep(0.01)
+            self.returncode = -15 if self.terminated else 0
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+
+        kill = terminate
+
+    monkeypatch.setattr(W, "END_GRACE", 0.05)
+    monkeypatch.setattr(W, "KILL_GRACE", 1.0)
+
+    async def run(grace):
+        bridge = W.Bridge.__new__(W.Bridge)
+        bridge.proc = SlowToEnd()
+        bridge.end_grace = grace
+        return await bridge.stop_agent(), bridge.proc.terminated
+
+    assert asyncio.run(run(0.0)) == ("terminated", True)        # the ordinary grace gives up on it
+    assert asyncio.run(run(5.0)) == ("closed", False)           # the VM's lets it finish
+
+
+def test_home_gives_a_vm_session_longer_than_the_session_gives_itself(monkeypatch):
+    from inferroute_cli import probant_web as W
+    from inferroute_local import macos_vm
+
+    monkeypatch.setattr(macos_vm, "required_for", lambda agent, probant=None: True)
+    assert probant_home.session_stop_wait() > W.VM_END_GRACE
+    monkeypatch.setattr(macos_vm, "required_for", lambda agent, probant=None: False)
+    assert probant_home.session_stop_wait() == 10
+
+
+def test_the_launcher_raises_the_grace_only_for_a_vm_held_agent():
+    source = (Path(probant_home.__file__).parent / "confidential.py").read_text()
+    assert "page.bridge.end_grace = probant_web.VM_END_GRACE" in source
+    at = source.index("page.bridge.end_grace = probant_web.VM_END_GRACE")
+    assert "if mac_backend is not None:" in source[at - 120:at]

@@ -204,18 +204,21 @@ def main():
         status_stream.settimeout(600)
         status_channel = Channel(status_stream, session)
 
-        def heartbeat():
+        def heartbeat(target):
             import time
 
             while True:
                 time.sleep(30)
                 try:
-                    channel.json("session.keep-alive")
-                    status_channel.json("session.keep-alive")
+                    target.json("session.keep-alive")
                 except (OSError, ValueError, EOFError):
                     os._exit(78)
 
-        threading.Thread(target=heartbeat, daemon=True).start()
+        # One per channel. A keep-alive waits its turn behind whatever the channel is carrying, and a long
+        # model answer can hold the main one for minutes; a single loop over both left the status channel
+        # silent for as long, and the runner stops the machine when either goes ten minutes without a frame.
+        for target in (channel, status_channel):
+            threading.Thread(target=heartbeat, args=(target,), daemon=True).start()
         servers = [proxy(channel, MODEL, MODEL_ROUTES, status_channel)]
         ports = [MODEL]
         if launch["env"].get("IR_SEARCH_ENDPOINT"):

@@ -1,12 +1,16 @@
 """Host-owned VM session broker. URLs, credentials and filesystem rights stay here."""
 
 from __future__ import annotations
-import json, threading, urllib.request, urllib.error
+import http.client, json, threading, urllib.request, urllib.error
 from . import VMUnavailable
 from .wire import receive_frame, receive_request, send_response, CHUNK_BYTES
 import base64
 
 CHUNK = CHUNK_BYTES
+# How long the verifying proxy may take to START answering. A sealed search does all its work before its
+# first byte, and a busy model can take most of a minute to produce one; the first real session through
+# this broker (3 Oct) would have died at the original 10 seconds. The same 600 the stream itself is given.
+HEADER_SECONDS = 600
 
 
 def decode(text):
@@ -31,9 +35,14 @@ ROUTES = {
 }
 
 
+class RedirectRefused(urllib.error.URLError):
+    """The fixed local verifier tried to send the request somewhere else. Not a failed call: an anomaly,
+    and it still ends the session, as it always did."""
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args):
-        raise urllib.error.URLError("redirect refused")
+        raise RedirectRefused("redirect refused")
 
 
 class Broker:
@@ -121,12 +130,25 @@ class Broker:
             method=method,
         )
         try:
-            response = self.opener.open(request, timeout=10)
+            response = self.opener.open(request, timeout=HEADER_SECONDS)
         except urllib.error.HTTPError as e:
             # Preserve refusal status/body from the fixed verifier, never follow redirects.
             if 300 <= e.code < 400:
                 raise ValueError("proxy redirect refused")
             response = e
+        except RedirectRefused:
+            raise
+        except (urllib.error.URLError, OSError):
+            # The verifying proxy did not answer THIS request. That is one failed call, which the agent
+            # sees as an error and can retry — exactly what it would see with no VM in between. Raising
+            # here instead ends serve(), and with it the whole session and everything written in it.
+            if self.stopped.is_set():
+                raise VMUnavailable("VM broker stopped")
+            yield json.dumps({"status": 502, "content_type": "application/json"}).encode()
+            yield json.dumps(
+                {"error": {"message": "the local verifying proxy did not answer", "type": "proxy_unavailable"}}
+            ).encode()
+            return
         with self._response_lock:
             self._responses.add(response)
         try:
@@ -146,7 +168,13 @@ class Broker:
             ).encode()
             with response:
                 while not self.stopped.is_set():
-                    chunk = response.read1(CHUNK)
+                    try:
+                        chunk = response.read1(CHUNK)
+                    except (OSError, http.client.HTTPException):
+                        # The proxy dropped the stream part-way. The guest's relay then closes its side
+                        # too, so the agent sees a response that ended early — the same thing it would
+                        # see on a direct connection — rather than losing the session.
+                        break
                     if not chunk:
                         break
                     yield chunk

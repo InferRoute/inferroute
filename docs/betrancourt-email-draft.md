@@ -154,22 +154,25 @@ Ils vous parviendront chiffrés à votre seule clé, avec les huit objets, dans 
 ouvrez sur votre poste : les objets deviennent vos propres dossiers, les documents se placent à côté, et
 vous pouvez créer les vôtres à partir de là sans qu'ils se mélangent aux miens.
 
-Il me faut pour cela votre **clé publique**. Quatre commandes dans un terminal, et la dernière l'affiche :
+Il me faut pour cela votre **clé publique**. Deux lignes dans le Terminal, et la seconde l'affiche — mais
+une vérification d'abord : tapez `uname -m`. Si le Terminal répond `arm64`, c'est un Mac à puce Apple (M1 ou
+plus récent) et tout ce qui suit fonctionne. S'il répond `x86_64`, c'est un Mac Intel, sur lequel le client
+ne s'installe pas encore : dites-le-moi simplement, avant d'aller plus loin.
 
 ```
-curl -LO https://inferroute.ai/client/inferroute-0.9.97-py3-none-any.whl
-python3 -m venv ~/probant
-~/probant/bin/pip install "./inferroute-0.9.97-py3-none-any.whl[confidential]"
+curl -LsSf https://inferroute.ai/install-probant.sh | sh
 ~/probant/bin/ir probant identity
 ```
 
-Un lien plutôt qu'une pièce jointe : les passerelles de messagerie rejettent volontiers ce type de fichier,
-et un lien peut être retiré, ce qu'une pièce jointe dans une boîte aux lettres ne peut plus être. L'adresse
-n'est publiée nulle part et ne mène qu'à ce fichier.
+La première ligne installe le programme dans un dossier à lui, `~/probant`, ainsi que la petite machine
+virtuelle dans laquelle l'agent travaille. Elle ne demande aucun mot de passe, ne modifie rien d'autre sur
+votre Mac, et vérifie chaque fichier téléchargé contre une empreinte avant de s'en servir. Pour tout retirer
+ensuite : `rm -rf ~/probant ~/Probant ~/.inferroute`. Le script est lisible à la même adresse, avant de
+l'exécuter, si vous préférez le lire d'abord.
 
-Vous me renvoyez ce qu'affiche la dernière de ces quatre commandes. Cette clé ne contient que des clés publiques : elle ne permet rien
+Vous me renvoyez ce qu'affiche la seconde ligne. Cette clé ne contient que des clés publiques : elle ne permet rien
 d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
-ne parte. (Sous Windows les chemins diffèrent — dites-le-moi et je vous envoie l'équivalent.)
+ne parte. (Windows n'est pas pris en charge pour l'instant.)
 
 Le programme est du Python en clair sur votre disque : il se lit entièrement, sans avoir à nous croire.
 Si vous souhaitez le faire examiner, deux commandes produisent le dossier à remettre tel quel à votre
@@ -180,7 +183,7 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 ~/probant/bin/ir probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.97-py3-none-any.whl
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.101-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce
@@ -204,10 +207,18 @@ OpenTimestamps : des serveurs indépendants, puis un bloc Bitcoin, attestent la 
 exact existait. C'est la seule date du dossier qui ne vienne pas de nous. Elle ne dit rien du contenu de la
 référence — seulement qu'il n'a pas pu être écrit après coup pour s'accorder à un certificat.
 
-Le client vous dira, en haut de sa page d'accueil, que la recherche d'antériorité n'y est pas encore
-installée : c'est exact, et c'est voulu à ce stade. Rien ne quitte votre poste tant qu'elle ne l'est pas.
-Vous pouvez dès maintenant y travailler vos descriptions ; le même client vous servira pour l'essai, que je
-vous proposerai quand la prochaine version du moteur sera déployée — avec un chiffre à jour et une date.
+L'installation met aussi en place la recherche d'antériorité. Elle télécharge la référence que nous signons
+et en contrôle la signature avec la clé ci-dessus, qui est intégrée au programme : ce n'est pas notre site
+qui lui dit quelle clé croire. Rien ne quitte votre poste avant qu'une machine de recherche n'ait été
+vérifiée contre cette référence. C'est le moteur d'aujourd'hui, celui dont le chiffre figure plus haut ;
+je vous proposerai de refaire l'essai quand la prochaine version sera déployée — avec un chiffre à jour et
+une date.
+
+**Sur Mac, trois choses que vous remarquerez.** L'agent s'exécute dans une petite machine virtuelle sans
+connexion réseau et sans accès à vos autres dossiers. Ses fichiers n'apparaissent dans le dossier de
+l'affaire qu'à la fin de la session. Un fichier qu'il modifie n'est jamais remplacé : sa version apparaît à
+côté, dans un dossier `vm-session-output-…`, et votre original reste intact. Enfin, les fichiers de plus de
+4 Mo ne lui sont pas montrés : ils restent dans votre dossier.
 
 **Votre question sur l'IA.** Vous me demandiez si j'avais une contre-indication à ce que vous utilisiez
 l'IA de votre côté. Plutôt qu'un avis sur Claude Team ou ChatGPT Business, je préfère vous proposer
@@ -217,7 +228,8 @@ son usage vous est offert — les frais sont pour moi.
 Les textes denses dont vous parlez sont précisément ce pour quoi il est fait : l'envoi scellé arrive
 directement sous forme de dossiers dans le client, et vous les travaillez avec l'assistant sans que rien
 n'en reparte en clair. Il vous faudra une clé pour l'activer ; je vous la donnerai de vive voix, en même
-temps que nous vérifierons l'empreinte.
+temps que nous vérifierons l'empreinte. À la première ouverture, le client vous la demande, une seule fois,
+en haut de sa page d'accueil : vous la collez, elle reste sur votre poste.
 
 Une précision, parce qu'elle décide de la comparaison : l'enceinte *lit* vos textes pour vous répondre.
 Ce qu'elle apporte n'est pas qu'aucune machine ne les voie, c'est qu'aucune machine non vérifiée ne le

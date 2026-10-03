@@ -2,6 +2,7 @@
 """DEVELOPMENT ONLY — one synthetic Probant session through the VM path, end to end, on Linux.
 
     python3 tests/dev/run_linux_vm_e2e.py                          # Linux: stand-in runner, container guest
+    python3 tests/dev/run_linux_vm_e2e.py --qemu-guest DIR         # Linux: stand-in runner, REAL arm64 guest (QEMU)
     python3 tests/dev/run_linux_vm_e2e.py --mac-runtime DIR        # macOS: the real runner, a real VM
 
 Real: Backend, Broker, wire protocol, WorkspaceSnapshot, the guest supervisor, AF_VSOCK, bubblewrap +
@@ -11,6 +12,8 @@ Stand-in: the runner (tests/dev/linux_vm_runner.py) and the VM (a no-network con
 x86_64 output of native/macos/guest/build_guest.py).
 
 Needs: `docker import <out>/rootfs.tar probant-guest-dev:x86` done once after building the x86_64 guest.
+--qemu-guest needs an image `probant-qemu-dev:arm64` (alpine + `apk add qemu-system-aarch64`) and
+/dev/vhost-vsock on the host.
 """
 import asyncio
 import json
@@ -106,6 +109,12 @@ async def main() -> int:
     mac_runtime = None
     if "--mac-runtime" in sys.argv:
         mac_runtime = Path(sys.argv[sys.argv.index("--mac-runtime") + 1]).resolve()
+    # --qemu-guest DIR: Linux, but the guest is the REAL arm64 kernel + initrd under QEMU emulation rather
+    # than a container: the image's own /init, kernel modules, console and virtio-vsock device are exercised.
+    # Slow (emulated CPU), so the readiness deadline is raised on this instance only.
+    qemu_guest = None
+    if "--qemu-guest" in sys.argv:
+        qemu_guest = Path(sys.argv[sys.argv.index("--qemu-guest") + 1]).resolve()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Model)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     model_url = f"http://127.0.0.1:{server.server_address[1]}"
@@ -121,6 +130,9 @@ async def main() -> int:
         (runtime_dir / "ProbantVM").chmod(0o755)
         shutil.copy2(HERE / "guest_shim.py", runtime_dir / "guest_shim.py")
         (runtime_dir / "boot.json").write_text("{}")
+        if qemu_guest is not None:
+            for name in ("kernel", "initrd"):
+                shutil.copy2(qemu_guest / name, runtime_dir / name)
     else:
         # A private copy, exactly as the product's stage() makes one: close() removes the directory it ran from.
         import hashlib
@@ -136,6 +148,9 @@ async def main() -> int:
             {"schema": 1, "development_only": False, "architecture": "arm64", "artifacts": artifacts}))
 
     backend = Backend(Runtime(runtime_dir, {}), workspace)
+    slow = 10 if qemu_guest is not None else 1
+    if qemu_guest is not None:
+        backend.READY_SECONDS = 300
     result = {"events": [], "answer": "", "ok": False}
     try:
         await backend.prepare()
@@ -170,14 +185,14 @@ async def main() -> int:
                 if kind == "agent_end":
                     return True
 
-        ended = await asyncio.wait_for(read_until_end(), 180)
+        ended = await asyncio.wait_for(read_until_end(), 180 * slow)
         print(f"[3] Pi events: {sorted(set(result['events']))}")
         print(f"    answer through the VM path: {result['answer']!r}  (agent_end: {ended})")
         proc.stdin.close()
         note = workspace / "notes.md"
         print(f"    before the machine is stopped, the host workspace has notes.md: {note.exists()}")
         early = note.exists()
-        code = await asyncio.wait_for(backend.finish(), 120)
+        code = await asyncio.wait_for(backend.finish(), 120 * slow)
         print(f"[4] finish(): agent exit {code}; exported {backend.exported}")
         text = note.read_text() if note.exists() else None
         print(f"    after the stop is proved, notes.md on the host: {text!r}")

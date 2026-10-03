@@ -1260,7 +1260,7 @@ def test_codex_launch_uses_the_server_command_and_refuses_injected_commands(clie
     (pack / "MANIFEST.json").write_text("{}")
     (pack / "SHA256SUMS").write_text("")
     monkeypatch.setattr(E, "write_audit_pack", lambda _: pack)
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(shutil, "which", lambda name, **kw: f"/usr/bin/{name}")
     monkeypatch.setattr(W, "terminal_argv", lambda script: ["terminal", str(script)])
     scripts, opened = [], []
     monkeypatch.setattr(W, "audit_launch_script", lambda p, command: scripts.append((p, command)) or tmp_path / "run.sh")
@@ -1276,7 +1276,7 @@ def test_codex_launch_uses_the_server_command_and_refuses_injected_commands(clie
     assert args[args.index("--add-dir") + 1] == ".."
     assert args[-1] == E.AUDIT_PROMPT
     assert c.post("/api/audit-launch", json={"agent": "codex; touch /tmp/injected"}).status_code == 400
-    monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda _, **kw: None)
     assert c.post("/api/audit-launch", json={"agent": "codex"}).status_code == 409
     assert len(scripts) == len(opened) == 1
 
@@ -2655,7 +2655,7 @@ def test_an_install_whose_ir_is_not_on_path_still_launches_the_audit_by_its_abso
     ir.write_text("#!/bin/sh\n")
     ir.chmod(ir.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setattr(sys, "executable", str(fake_bin / "python"))
-    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name, **kw: None)
     assert W.audit_ir_path() == str(ir)
     from inferroute_cli import probant_export as E
     cmd = E.audit_command("ir", ir_path=str(ir))
@@ -2667,7 +2667,7 @@ def test_an_install_whose_ir_is_not_on_path_still_launches_the_audit_by_its_abso
     assert shlex.split(E.audit_command("ir", ir_path=str(spaced / "ir")))[0] == str(spaced / "ir")   # quoted
     ir.unlink()
     assert W.audit_ir_path() is None                       # genuinely absent: the refusal is still honest
-    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/ir")
+    monkeypatch.setattr(shutil, "which", lambda name, **kw: "/usr/bin/ir")
     assert W.audit_ir_path() == "ir"                       # no install of its own beside this python: the shell's
     ir.write_text("#!/bin/sh\n")
     ir.chmod(0o755)
@@ -2724,3 +2724,21 @@ def test_the_waiting_row_has_a_cancel_button_and_the_page_removes_it_on_the_even
     assert "/api/prompt/cancel" in js and 'case "queue_cancel": dropWaiting' in js
     css = (STATIC / "app.css").read_text()
     assert ".cancel-queued" in css and ".msg-withdrawn" in css
+
+
+def test_the_audit_looks_where_the_agents_install_and_the_launch_script_puts_them_on_path(tmp_path, monkeypatch):
+    """`ir --plain` says "`claude` not found on PATH" when ~/.local/bin is not on PATH, and a fresh Terminal
+    window may not have it. The pre-check and the script must both look in the usual install places."""
+    import stat
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    claude = home / ".local" / "bin" / "claude"
+    claude.write_text("#!/bin/sh\n")
+    claude.chmod(claude.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    assert W.audit_agent_on_path("claude") is True
+    assert W.audit_agent_on_path("definitely-not-installed-xyz") is False
+    sh = W.audit_launch_script(tmp_path / "pack", "echo hi").read_text()
+    assert 'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"' in sh
+    assert sh.index("export PATH") < sh.index("cp -r")           # before anything runs

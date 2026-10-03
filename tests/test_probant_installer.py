@@ -18,22 +18,28 @@ def wheels(tmp_path, client_v="1.2.3", runtime_v="1.2.3"):
     r = tmp_path / f"inferroute_macos_vm_runtime-{runtime_v}-py3-none-macosx_11_0_arm64.whl"
     c.write_bytes(b"CLIENT")
     r.write_bytes(b"RUNTIME")
+    (tmp_path / f"inferroute-{client_v}-lock.txt").write_bytes(b"click==8.1.7 --hash=sha256:" + b"0" * 64 + b"\n")
     return c, r
+
+
+def lock_of(c):
+    return c.parent / c.name.replace("-py3-none-any.whl", "-lock.txt")
 
 
 def test_the_script_names_exactly_the_files_it_is_given(tmp_path):
     c, r = wheels(tmp_path)
-    text = render.render(c, r)
+    text = render.render(c, r, lock_of(c))
     import hashlib
     assert f'CLIENT_SHA256="{hashlib.sha256(b"CLIENT").hexdigest()}"' in text
     assert f'RUNTIME_SHA256="{hashlib.sha256(b"RUNTIME").hexdigest()}"' in text
+    assert f'LOCK_SHA256="{hashlib.sha256(lock_of(c).read_bytes()).hexdigest()}"' in text
     assert 'VERSION="1.2.3"' in text and "@" not in text.replace("@" + "1.2.3", "")
 
 
 def test_a_release_ships_one_version_of_each(tmp_path):
     c, r = wheels(tmp_path, runtime_v="1.2.4")
     with pytest.raises(SystemExit, match="one version"):
-        render.render(c, r)
+        render.render(c, r, lock_of(c))
 
 
 def test_the_template_never_reaches_for_privilege_or_the_shell_profile():
@@ -45,7 +51,7 @@ def test_the_template_never_reaches_for_privilege_or_the_shell_profile():
 def _run(tmp_path, base, home, extra_env=None):
     c, r = wheels(tmp_path)
     script = tmp_path / "install.sh"
-    script.write_text(render.render(c, r))
+    script.write_text(render.render(c, r, lock_of(c)))
     # a stand-in uv: records what it was asked to do, installs nothing
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -53,7 +59,7 @@ def _run(tmp_path, base, home, extra_env=None):
     uv.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> {tmp_path}/uv.calls
-        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir";; esac
+        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir";; esac
         exit 0
         """))
     uv.chmod(0o755)
@@ -96,8 +102,10 @@ def test_on_linux_only_the_client_is_fetched_and_installed(tmp_path, monkeypatch
     r.unlink()                                         # the runtime is not even on the server
     done = _run(tmp_path, site, tmp_path / "ok-target")
     assert done.returncode == 0, done.stderr
-    pip = [l for l in (tmp_path / "uv.calls").read_text().splitlines() if l.startswith("pip")][0]
-    assert "macos_vm_runtime" not in pip and "[confidential]" in pip
+    pips = [l for l in (tmp_path / "uv.calls").read_text().splitlines() if l.startswith("pip")]
+    assert any("--require-hashes" in l and "-lock.txt" in l for l in pips)          # the libraries, by hash
+    ours = [l for l in pips if "--no-deps" in l][0]                                  # our wheel, nothing resolved
+    assert "macos_vm_runtime" not in ours and "inferroute-1.2.3-py3-none-any.whl" in ours
 
 
 def test_the_installer_sets_up_search_and_survives_that_failing(tmp_path):
@@ -113,3 +121,37 @@ def test_the_installer_sets_up_search_and_survives_that_failing(tmp_path):
     # the stand-in `ir` exits 0; one that fails must not fail the install
     text = (REPO / "scripts/install_probant.sh.in").read_text()
     assert 'probant setup-search 2>&1 | sed' in text and "|| true" in text.split("setup-search")[1].split("\n")[0]
+
+
+def test_the_lock_must_be_named_for_the_version_it_pins(tmp_path):
+    c, r = wheels(tmp_path)
+    wrong = tmp_path / "inferroute-9.9.9-lock.txt"
+    wrong.write_bytes(b"x")
+    with pytest.raises(SystemExit, match="must be inferroute-1.2.3-lock.txt"):
+        render.render(c, r, wrong)
+
+
+def test_libraries_are_installed_only_from_the_hash_pinned_list_and_our_wheels_without_resolution():
+    text = (REPO / "scripts/install_probant.sh.in").read_text()
+    assert '--require-hashes -r "$WORK/$LOCK_FILE"' in text
+    assert text.count("--no-deps") == 2                      # with and without the VM runtime
+    # nothing may let the installer pick versions on the day: no unpinned install line
+    for line in text.splitlines():
+        if "pip install" in line and "uv" in line.lower():
+            assert "--require-hashes" in line or "--no-deps" in line, line
+
+
+def test_the_installed_version_must_be_exactly_the_one_the_script_names(tmp_path):
+    import sys
+    if sys.platform != "linux":
+        pytest.skip("Linux branch")
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    script_text = render.render(*[site / n for n in (
+        "inferroute-1.2.3-py3-none-any.whl", "inferroute_macos_vm_runtime-1.2.3-py3-none-macosx_11_0_arm64.whl",
+        "inferroute-1.2.3-lock.txt")])
+    # an install that left a DIFFERENT version behind must not be reported as success
+    bad = script_text.replace('VERSION="1.2.3"', 'VERSION="9.9.9"')
+    assert 'stop "the installed program reports version' in script_text
+    assert bad != script_text

@@ -6,8 +6,10 @@
 # What it does, and all it does:
 #   1. installs `uv` if there is none (it brings its own Python; your system Python is not touched);
 #   2. makes a private environment in ~/probant;
-#   3. downloads Probant @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — checks each
-#      file against the fingerprint written into this script, and installs them there;
+#   3. downloads Probant @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — together with
+#      the exact list of every library it needs, checks each file against the fingerprint written into this
+#      script, and installs them there. Libraries are installed ONLY if they match that list byte for byte, so
+#      two installs of this version are the same program, today and in a year;
 #   4. sets up patent search from InferRoute's published, signed files (re-checked each time Probant starts);
 #   5. prints the next command.
 # It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv) and
@@ -24,6 +26,8 @@ CLIENT_FILE="inferroute-@VERSION@-py3-none-any.whl"
 CLIENT_SHA256="@CLIENT_SHA256@"
 RUNTIME_FILE="inferroute_macos_vm_runtime-@VERSION@-py3-none-macosx_11_0_arm64.whl"
 RUNTIME_SHA256="@RUNTIME_SHA256@"
+LOCK_FILE="inferroute-@VERSION@-lock.txt"
+LOCK_SHA256="@LOCK_SHA256@"
 TARGET="${PROBANT_HOME:-$HOME/probant}"
 
 say()  { printf '%s\n' "$*"; }
@@ -62,6 +66,7 @@ fetch() {   # name expected-sha256
   [ "$(sha "$WORK/$1")" = "$2" ] || stop "$1 does not match the fingerprint in this installer. Nothing was installed. Please tell InferRoute."
 }
 fetch "$CLIENT_FILE" "$CLIENT_SHA256"
+fetch "$LOCK_FILE" "$LOCK_SHA256"
 [ "$NEEDS_VM" = "yes" ] && fetch "$RUNTIME_FILE" "$RUNTIME_SHA256"
 
 # ── the environment ──────────────────────────────────────────────────────────────────────────────────────────
@@ -70,20 +75,35 @@ if [ -e "$TARGET" ] && [ ! -x "$TARGET/bin/python" ]; then
 fi
 say "Setting up $TARGET ..."
 "$UV" venv --quiet --allow-existing --python 3.12 "$TARGET" || stop "could not create the environment."
+# 1. every library, from the pinned list, each refused unless its hash matches. 2. Probant itself and, on a Mac,
+# its virtual machine, WITHOUT letting the installer choose anything: they were fingerprinted above.
+"$UV" pip install --quiet --python "$TARGET/bin/python" --require-hashes -r "$WORK/$LOCK_FILE" \
+  || stop "a library did not match its pinned fingerprint, or could not be fetched. Nothing was installed. The messages above say which."
 if [ "$NEEDS_VM" = "yes" ]; then
-  "$UV" pip install --quiet --python "$TARGET/bin/python" "$WORK/$CLIENT_FILE[confidential]" "$WORK/$RUNTIME_FILE" \
+  "$UV" pip install --quiet --python "$TARGET/bin/python" --no-deps "$WORK/$CLIENT_FILE" "$WORK/$RUNTIME_FILE" \
     || stop "the install failed. The messages above say why."
 else
-  "$UV" pip install --quiet --python "$TARGET/bin/python" "$WORK/$CLIENT_FILE[confidential]" \
+  "$UV" pip install --quiet --python "$TARGET/bin/python" --no-deps "$WORK/$CLIENT_FILE" \
     || stop "the install failed. The messages above say why."
 fi
-"$TARGET/bin/ir" --version >/dev/null 2>&1 || stop "the installed program does not start."
+# The program that now exists must be exactly the one this script names — not whatever an older install left.
+GOT=$("$TARGET/bin/ir" --version 2>/dev/null | awk '{print $NF}')
+[ "$GOT" = "$VERSION" ] || stop "the installed program reports version '${GOT:-nothing}', not $VERSION."
 
 # Patent search: fetch InferRoute's signed reference and where the search machine is, and write the
 # configuration. Probant checks the reference's signature against a key built into the program. If this
 # fails (no connection, say) the install is still good: Probant tries again every time it starts.
 say "Setting up patent search ..."
 "$TARGET/bin/ir" probant setup-search 2>&1 | sed 's/^/  /' || true
+
+# Another `ir` earlier on PATH is common (an older install). Probant never uses it — it runs its own — but a person
+# typing `ir` would, so say so rather than let two versions answer to one name.
+OTHER=$(command -v ir 2>/dev/null || true)
+if [ -n "$OTHER" ] && [ "$OTHER" != "$TARGET/bin/ir" ]; then
+  say ""
+  say "  Note: typing just  ir  here runs a different program ($OTHER, $("$OTHER" --version 2>/dev/null | awk '{print $NF}')),"
+  say "        not this one. Use the full path shown below; Probant itself always uses its own."
+fi
 
 say ""
 say "Probant $VERSION is installed."

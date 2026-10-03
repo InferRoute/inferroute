@@ -98,3 +98,18 @@ def test_on_linux_only_the_client_is_fetched_and_installed(tmp_path, monkeypatch
     assert done.returncode == 0, done.stderr
     pip = [l for l in (tmp_path / "uv.calls").read_text().splitlines() if l.startswith("pip")][0]
     assert "macos_vm_runtime" not in pip and "[confidential]" in pip
+
+
+def test_the_installer_sets_up_search_and_survives_that_failing(tmp_path):
+    import sys
+    if sys.platform != "linux":
+        pytest.skip("Linux branch")
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    done = _run(tmp_path, site, tmp_path / "t")
+    assert done.returncode == 0, done.stderr
+    assert "Setting up patent search" in done.stdout
+    # the stand-in `ir` exits 0; one that fails must not fail the install
+    text = (REPO / "scripts/install_probant.sh.in").read_text()
+    assert 'probant setup-search 2>&1 | sed' in text and "|| true" in text.split("setup-search")[1].split("\n")[0]

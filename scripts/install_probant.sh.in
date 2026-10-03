@@ -8,7 +8,8 @@
 #   2. makes a private environment in ~/probant;
 #   3. downloads Probant @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — checks each
 #      file against the fingerprint written into this script, and installs them there;
-#   4. prints the next command.
+#   4. sets up patent search from InferRoute's published, signed files (re-checked each time Probant starts);
+#   5. prints the next command.
 # It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv) and
 # uv's own Python folder. To remove it all:  rm -rf ~/probant ~/Probant ~/.inferroute
 #
@@ -78,9 +79,15 @@ else
 fi
 "$TARGET/bin/ir" --version >/dev/null 2>&1 || stop "the installed program does not start."
 
+# Patent search: fetch InferRoute's signed reference and where the search machine is, and write the
+# configuration. Probant checks the reference's signature against a key built into the program. If this
+# fails (no connection, say) the install is still good: Probant tries again every time it starts.
+say "Setting up patent search ..."
+"$TARGET/bin/ir" probant setup-search 2>&1 | sed 's/^/  /' || true
+
 say ""
 say "Probant $VERSION is installed."
 say ""
-say "  Start it:            $TARGET/bin/ir probant home"
+say "  Start it:            $TARGET/bin/ir probant home   (it will ask for your InferRoute key first)"
 say "  Your public key:     $TARGET/bin/ir probant identity"
 say ""

@@ -573,6 +573,19 @@ def _apply_autocompact_env(env: dict, model_id: str) -> dict:
     return env
 
 
+# Claude Code gives up on a response after 5 minutes without a byte when the endpoint is not Anthropic's own,
+# and sends the request again. A slow model compacting a 120k-token context needs 7 to 8 minutes, so on
+# 2026-10-04 the same /compact was sent four times, each ~7 minutes of paid work (Kimi-K3, one session).
+# The cap is Claude Code's own (10 s to 30 min); 20 minutes leaves room without letting a dead stream hang.
+STREAM_IDLE_TIMEOUT_MS = "1200000"
+
+
+def _apply_stream_idle_env(env: dict) -> dict:
+    """Raise Claude Code's idle-stream timeout above its 5-minute default; a user's own value wins."""
+    env.setdefault("CLAUDE_STREAM_IDLE_TIMEOUT_MS", STREAM_IDLE_TIMEOUT_MS)
+    return env
+
+
 def launch_through_inferroute(
     model_id: str,
     creds: Credentials,
@@ -738,6 +751,7 @@ def launch_through_inferroute(
     # CC native auto-compact for custom model ids (see _auto_compact_window);
     # without this, long ir sessions never compact and hard-overflow the context.
     _apply_autocompact_env(env, model_id)
+    _apply_stream_idle_env(env)
 
     # Opt-in wire capture (IR_CAPTURE_WIRE=1): per-process OTEL raw-body sink the
     # SessionEnd ingest mines (system hash + tools) then deletes. No-op by default.

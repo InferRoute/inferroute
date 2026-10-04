@@ -512,6 +512,13 @@ def cmd_proof(spec: str) -> int:
     return 0 if live.get("ok") else 1
 
 
+def cli_main() -> int:
+    """The `probant` command. Typed alone it opens the home page, which is what every new user wants first; with
+    arguments it is exactly `ir probant ...`."""
+    args = sys.argv[1:]
+    return main(args if args else ["home"])
+
+
 def main(argv: list[str] | None = None) -> int:
     # Everything a Probant command writes, and everything it starts (the search verifier, Pi), is created
     # owner-only: records hold search text and results, receipts and state hold the matter's history. A

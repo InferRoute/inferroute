@@ -12,8 +12,9 @@
 #      two installs of this version are the same program, today and in a year;
 #   4. sets up patent search from InferRoute's published, signed files (re-checked each time Probant starts);
 #   5. prints the next command.
-# It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv) and
-# uv's own Python folder. To remove it all:  rm -rf ~/probant ~/Probant ~/.inferroute
+# It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv, and a link
+# named `probant`) and uv's own Python folder. To remove it all:
+#   rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant
 #
 # The fingerprints below are what make this script fetch exactly the files we released. What makes the
 # virtual machine trustworthy is separate: Probant itself refuses to start it unless its files carry
@@ -114,9 +115,25 @@ if [ -n "$OTHER" ] && [ "$OTHER" != "$TARGET/bin/ir" ]; then
   say "        not this one. Use the full path shown below; Probant itself always uses its own."
 fi
 
+# A bare `probant` command: a link in ~/.local/bin, where uv already lives. It is made only when nothing else is
+# there (or what is there is already a link), so a program of the same name is never overwritten.
+LINK_DIR="$HOME/.local/bin"
+LINKED=no
+if [ -x "$TARGET/bin/probant" ] && mkdir -p "$LINK_DIR" 2>/dev/null; then
+  if [ ! -e "$LINK_DIR/probant" ] || [ -L "$LINK_DIR/probant" ]; then
+    ln -sf "$TARGET/bin/probant" "$LINK_DIR/probant" 2>/dev/null && LINKED=yes
+  fi
+fi
+
 say ""
 say "Probant $VERSION is installed."
 say ""
-say "  Start it:            $TARGET/bin/ir probant home   (it will ask for your InferRoute key first)"
-say "  Your public key:     $TARGET/bin/ir probant identity"
+if [ "$LINKED" = "yes" ]; then
+  say "  Start it:            probant            (in a new Terminal window; it will ask for your InferRoute key first)"
+  say "                       If your Terminal says 'command not found', run $TARGET/bin/probant"
+  say "  Your public key:     probant identity"
+else
+  say "  Start it:            $TARGET/bin/probant   (it will ask for your InferRoute key first)"
+  say "  Your public key:     $TARGET/bin/probant identity"
+fi
 say ""

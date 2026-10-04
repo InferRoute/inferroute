@@ -2,6 +2,7 @@
 import importlib.util
 import os
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def _run(tmp_path, base, home, extra_env=None):
     uv.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> {tmp_path}/uv.calls
-        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir";; esac
+        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant";; esac
         exit 0
         """))
     uv.chmod(0o755)
@@ -185,3 +186,43 @@ def test_a_dropped_download_resumes_instead_of_failing_the_install(tmp_path):
     assert "continuing from where it stopped" in done.stdout
     calls = (tmp_path / "curl.calls").read_text().splitlines()
     assert calls and all(c.startswith("resume=1") for c in calls)
+
+
+def test_the_installer_links_a_bare_probant_command_and_says_how_to_start_it(tmp_path):
+    """4 Oct: the first client should type `probant`, not a path into a private environment. The link goes in ~/.local/bin."""
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    target = tmp_path / "home-target"
+    done = _run(tmp_path, site, target)
+    assert done.returncode == 0, done.stderr
+    link = tmp_path / "home" / ".local" / "bin" / "probant"
+    assert link.is_symlink() and link.resolve() == (target / "bin" / "probant").resolve()
+    assert "Start it:            probant" in done.stdout and "command not found" in done.stdout
+    assert "rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant" in (site.parent / "install.sh").read_text()
+
+
+def test_a_program_already_named_probant_is_never_overwritten_and_the_message_gives_the_full_path(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    other = tmp_path / "home" / ".local" / "bin"
+    other.mkdir(parents=True)
+    (other / "probant").write_text("#!/bin/sh\necho someone else's program\n")
+    (other / "probant").chmod(0o755)
+    target = tmp_path / "home-target"
+    done = _run(tmp_path, site, target)
+    assert done.returncode == 0, done.stderr
+    assert not (other / "probant").is_symlink() and "someone else" in (other / "probant").read_text()
+    assert f"{target}/bin/probant" in done.stdout and "Start it:            probant " not in done.stdout
+
+
+def test_the_probant_command_alone_opens_home_and_with_arguments_is_ir_probant(monkeypatch):
+    from inferroute_cli import probant as P
+    seen = []
+    monkeypatch.setattr(P, "main", lambda argv=None: seen.append(argv) or 0)
+    monkeypatch.setattr(sys, "argv", ["probant"])
+    assert P.cli_main() == 0 and seen[-1] == ["home"]
+    monkeypatch.setattr(sys, "argv", ["probant", "identity", "--show"])
+    assert P.cli_main() == 0 and seen[-1] == ["identity", "--show"]
+

@@ -349,6 +349,12 @@ def test_a_verified_claim_cannot_list_something_it_could_not_reach(pack, tmp_pat
     assert any("not independent" in lim for c in data["claims"] if c["id"] == 3 for lim in c["limitations"])
 
 
+def test_the_brief_says_a_verified_claim_leaves_nothing_under_could_not_reach():
+    head = " ".join(E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")].split())
+    assert 'A claim is VERIFIED only when nothing is left under "What I could not reach"' in head
+    assert "withheld on purpose" in head and "belong in the closing section" in head
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

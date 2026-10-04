@@ -183,7 +183,7 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 ~/probant/bin/ir probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.103-py3-none-any.whl
+~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.104-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce

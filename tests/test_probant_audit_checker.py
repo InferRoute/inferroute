@@ -306,6 +306,15 @@ def test_the_brief_tells_the_auditor_to_keep_raw_evidence_out_of_its_context():
     assert "print only the fields you need" in head and "re-read your report file" in head
 
 
+def test_the_brief_says_which_bytes_the_runtime_data_hash_covers():
+    """4 Oct, final K2.6 run: the auditor could not reproduce the runtime_data hash and filed claim 2 as verified
+    only in part. The hash is over the base64-decoded bytes exactly as they decode; a re-serialisation (or the
+    base64 text) gives a different value."""
+    brief = " ".join(E.VERIFY_MD.split())            # the record's own guide, which the auditor is pointed to
+    assert "base64-DECODED content of `offer.runtime_data`, exactly as decoded" in brief
+    assert "do not parse and re-serialise them" in brief
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

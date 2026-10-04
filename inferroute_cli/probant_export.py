@@ -230,7 +230,9 @@ COSE_Sign1), `offer.runtime_data` (base64 JSON), and `policy_b64` (a sibling of 
 * **Statement signature** — Ed25519 over the canonical JSON of `statement` (keys sorted, no spaces,
   `sig` removed) under `signer_pub`.
 * **Signer is hardware-bound** — `signer_pub` == `statement_signer_pub` inside `runtime_data`, and the
-  report's `REPORT_DATA` (bytes 0x50..0x90) == SHA-256(runtime_data bytes) ‖ 32 zero bytes.
+  report's `REPORT_DATA` (bytes 0x50..0x90) == SHA-256(runtime_data bytes) ‖ 32 zero bytes. The bytes are the
+  base64-DECODED content of `offer.runtime_data`, exactly as decoded: do not parse and re-serialise them, and
+  do not hash the base64 text. The statement's `runtime_data_sha256` is the same hash.
 * **AMD chain** — report signed (ECDSA P-384, R/S little-endian at 0x2A0) under the VCEK; VCEK ← ASK ← ARK;
   ARK SPKI SHA-256 == AMD's published root for the product (printed with the KDS URL — compare it yourself);
   VCEK hwID and TCB match the report; VMPL 0; debug off; AMD certificate dates enforced.
@@ -960,6 +962,10 @@ AUDIT_IR_MODEL = "kimi-k2.6"
 # the model unless a request says not to; this header says not to. (Found 2026-10-04: 64 of 70 turns of one audit
 # run had compression applied. The service honours exactly "1".)
 AUDIT_IR_HEADERS = "x-inferroute-no-compress: 1"
+# Claude Code's own system prompt tells the model it is "Claude", so an auditor run through ir wrote "Auditor: Claude"
+# over a Kimi model (4 Oct). ir knows which model it pinned; the prompt says so, so the report names the right one.
+AUDIT_IR_PROMPT = (AUDIT_PROMPT + f" The model running you is {AUDIT_IR_MODEL}, served through InferRoute; "
+                   f"give that as your name and model in the report, not the name of the program you run inside.")
 
 
 def audit_command(agent: str, ir_path: str = "ir") -> str:
@@ -983,7 +989,7 @@ def audit_command(agent: str, ir_path: str = "ir") -> str:
         # `ir_path` is "ir" when the shell finds it, and otherwise the absolute path of the install that is
         # running this — a Mac install lives in ~/probant/bin, which no new Terminal window has on its PATH.
         return (f"ANTHROPIC_CUSTOM_HEADERS={shlex.quote(AUDIT_IR_HEADERS)} "
-                f"{shlex.quote(ir_path)} --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}")
+                f"{shlex.quote(ir_path)} --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_IR_PROMPT)}")
     raise ValueError(f"unknown audit agent: {agent}")
 
 AUDIT_MD = """# Audit brief: an independent check of a sealed prior-art search record

@@ -1118,7 +1118,7 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     # hand-rolled quote breaks the day it contains a " or a $.
     import shlex as _shlex
     from inferroute_cli import probant_export as _E
-    assert r["ir"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
+    assert r["ir"].endswith(_shlex.quote(_E.AUDIT_IR_PROMPT))        # ir alone also names its own model
     assert r["claude"].endswith(_shlex.quote(_E.AUDIT_PROMPT))
     assert _shlex.split(r["codex"])[0] == "codex"
     assert _shlex.split(r["codex"])[-1] == _E.AUDIT_PROMPT
@@ -2743,3 +2743,13 @@ def test_the_audit_looks_where_the_agents_install_and_the_launch_script_puts_the
     sh = W.audit_launch_script(tmp_path / "pack", "echo hi").read_text()
     assert 'export PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"' in sh
     assert sh.index("export PATH") < sh.index("cp -r")           # before anything runs
+
+
+def test_the_ir_audit_command_names_the_model_so_the_report_does_not_say_claude():
+    """4 Oct: an auditor that was Kimi wrote "Auditor: Claude", because the program it ran inside told it so."""
+    from inferroute_cli import probant_export as E
+    cmd = E.audit_command("ir")
+    assert E.AUDIT_IR_MODEL in E.AUDIT_IR_PROMPT and "not the name of the program" in E.AUDIT_IR_PROMPT
+    assert E.AUDIT_IR_PROMPT.startswith(E.AUDIT_PROMPT)
+    assert shlex.split(cmd)[-1] == E.AUDIT_IR_PROMPT            # the shown command and the run command agree
+

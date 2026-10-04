@@ -381,6 +381,28 @@ def test_the_brief_says_a_verified_claim_leaves_nothing_under_could_not_reach():
     assert "withheld on purpose" in head and "belong in the closing section" in head
 
 
+def test_the_report_template_prints_the_ceiling_and_the_not_limits_under_each_claim_heading(pack):
+    """4 Oct: auditors filed by-design notes as limits and rated claims 1, 2 and 6 in part, despite the brief. The note now sits
+    under the heading, where the auditor writes. Claims 3, 5 and 7 say they cannot be VERIFIED; a pack's manifest can lift that."""
+    t = E.report_template()
+    def section(n):
+        i = t.index(f"## Claim {n} — ")
+        j = t.find("\n## ", i + 1)
+        return t[i:j]
+    for n in (3, 5, 7):
+        assert "cannot be VERIFIED from a pack like this one" in section(n), n
+    for n in (1, 2, 4, 6, 8):
+        assert "Not limits on this claim" in section(n), n
+    assert "per-chip revocation list for Genoa" in section(1) and "relying on the verifier" in section(2)
+    assert "that the enclave's behaviour matches its report" in section(6)
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    m["claim_ceilings"] = {"3": None}
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    lifted = E.report_template(pack)
+    assert "cannot be VERIFIED" not in lifted[lifted.index("## Claim 3 — "):lifted.index("## Claim 4 — ")]
+    assert "cannot be VERIFIED" in lifted[lifted.index("## Claim 5 — "):lifted.index("## Claim 6 — ")]
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

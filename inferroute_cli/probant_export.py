@@ -1999,6 +1999,38 @@ def audit_claims() -> "list[tuple[int, str]]":
     return claims
 
 
+# Notes printed under each claim's heading in the report template. They sit where the auditor writes, because the
+# brief's long prose did not stop the same by-design notes being filed as limits (4 Oct: 3 of 6 audits on 0.9.104 rated
+# claim 1, 2 or 6 "in part" for them; none overclaimed).
+NOT_LIMITS = {
+    1: "AMD publishes no per-chip revocation list for Genoa (every VCEK has serial 0); the TCB floor being the "
+       "operator's declared threshold (that is claim 3's matter); having recomputed only a sample while the tool "
+       "read every operation (the tool's reading counts in 'Covered by').",
+    2: "relying on the verifier for the operations you did not recompute yourself (the tool reading all of them "
+       "counts); what the software did with the text after decrypting it (outside this claim).",
+    4: "the withheld query, result and document texts: by design, say so in the closing section.",
+    6: "that the enclave's behaviour matches its report. This claim is what the signed statements say the filters were "
+       "and what the enclave reports applying them did; when those are present and consistent it can be VERIFIED.",
+    8: "the withheld document text: by design, say so in the closing section.",
+}
+
+
+def _claim_hint(n: int, manifest_ceilings: Optional[dict] = None) -> list:
+    """The blockquote under claim n's heading, or [] when there is nothing to say."""
+    import importlib.util
+    path = Path(__file__).resolve().parent / "pi_attested" / "check_report.py"
+    spec = importlib.util.spec_from_file_location("_probant_check_report", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cap = mod.ceiling_of({"claim_ceilings": manifest_ceilings or {}}, n)
+    if cap and cap[0] != "VERIFIED":
+        return [f"> **This claim cannot be VERIFIED from a pack like this one:** {cap[1]}. Give {cap[0]} and name "
+                "exactly what stays open."]
+    if n in NOT_LIMITS:
+        return [f"> **Not limits on this claim, so not a reason for VERIFIED IN PART:** {NOT_LIMITS[n]}"]
+    return []
+
+
 def report_template(pack: Optional[Path] = None) -> str:
     """A report SKELETON, shipped in the pack, with the eight headings already written.
 
@@ -2097,9 +2129,19 @@ def report_template(pack: Optional[Path] = None) -> str:
            "should weigh — including whether the machine you audited on also holds the vendor's own",
            "material. Only you can write this.>",
            ""]
+    manifest_ceilings = {}
+    if pack is not None:
+        try:
+            manifest_ceilings = json.loads((Path(pack) / "MANIFEST.json").read_text()).get("claim_ceilings") or {}
+        except (OSError, ValueError):
+            manifest_ceilings = {}
     for n, title in claims:
         out += [f"## Claim {n} — {title}",
-                "",
+                ""]
+        hint = _claim_hint(n, manifest_ceilings)
+        if hint:
+            out += hint + [""]
+        out += [
                 # The completeness rule printed where the word is written, not only in the brief. An
                 # auditor on 25 Sep wrote VERIFIED on claim 3 and then, in the same section, named a part
                 # of it it could not reach — the two sentences sat four lines apart. The brief says this

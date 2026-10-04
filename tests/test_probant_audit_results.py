@@ -32,6 +32,9 @@ def completed(pack):
     for claim in data["claims"]:
         claim.update(verdict="VERIFIED", verified_statement="The stated claim holds.", evidence="Recomputed.")
         claim["coverage"].update(tool=claim["coverage"]["total"], independent=1)
+    # claims 3, 5 and 7 cannot be VERIFIED from a pack like this one (see check_report.DEFAULT_CEILINGS)
+    data["claims"][2].update(verdict="VERIFIED IN PART", limitations=["The reference's origin is not independent."])
+    data["claims"][4].update(verdict="VERIFIED IN PART", limitations=["Operations dropped from the end of a lifetime are not detectable."])
     data["claims"][6].update(verdict="VERIFIED IN PART", limitations=["The receipt is not bound to the searches."])
     return data
 
@@ -143,3 +146,18 @@ async def _client_scenario(pack, monkeypatch):
         assert not (await c.get("/api/audit-results")).json()["results"]
         assert (await c.post("/api/prove", json={})).status_code == 200
         assert not (await c.get("/api/audit-results")).json()["prepared"]
+
+
+def test_the_client_refuses_a_verified_verdict_above_the_claims_ceiling_even_without_the_checker(pack):
+    """4 Oct: a result file can be written without running the pack's checker, so the client holds the same ceilings."""
+    data = completed(pack)
+    data["claims"][2].update(verdict="VERIFIED", limitations=[])
+    with pytest.raises(ValueError, match=r"claim 3 is VERIFIED, but this pack cannot establish it fully"):
+        R.validate(data, pack, R.identity(pack))
+    # a pack that carries what claim 3 lacked says so, and the same result is accepted
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    m["claim_ceilings"] = {"3": None}
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    data["pack"] = R.identity(pack)
+    assert R.validate(data, pack, R.identity(pack))["claims"][2]["verdict"] == "VERIFIED"
+

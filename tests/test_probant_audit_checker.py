@@ -50,9 +50,10 @@ def filled_report(pack, verdicts=None, covered=None, closing="Seven operations w
         total = C.claim_total(m, n)
         # A claim the pack holds nothing for (no receipts, no document reads in the synthetic pack) cannot be
         # verified: COULD NOT CHECK is the honest answer, and the client refuses anything else.
-        v = verdicts.get(n, "VERIFIED" if total else "COULD NOT CHECK")
+        capped = bool(total) and n in C.DEFAULT_CEILINGS          # claims 3 and 5 cannot be VERIFIED from a pack like this
+        v = verdicts.get(n, ("VERIFIED IN PART" if capped else "VERIFIED") if total else "COULD NOT CHECK")
         cov = covered.get(n, f"tool: {total} of {total} operations · my own recomputation: {1 if total else 0} of {total} · neither: "
-                             f"{'none' if total else 'the pack holds none'}")
+                             f"{'the reference origin' if capped else ('none' if total else 'the pack holds none')}")
         block = re.compile(rf"(## Claim {n} — .*?)\*\*Verdict:\*\* _\(.*?\)_\n\n\*\*Covered by:\*\* _\(.*?\)_\n\n"
                            r"\*\*What I computed myself:\*\* \n\n\*\*What I could not reach, and why:\*\* \n", re.S)
         assert block.search(text), n
@@ -81,7 +82,7 @@ def test_a_correctly_filled_report_and_the_result_made_from_it_pass_and_the_clie
     assert C.check_result(str(pack), data) == [] and C.cross_check(info, data) == []
     accepted = R.validate(copy.deepcopy(data), pack, R.identity(pack))               # the PROFESSIONAL's client agrees
     assert accepted["auditor"] == {"name": "an auditor", "model": "kimi-k2.6"}
-    assert [c["verdict"] for c in accepted["claims"]] == ["VERIFIED"] * 6 + ["COULD NOT CHECK"] * 2
+    assert [c["verdict"] for c in accepted["claims"]] == ["VERIFIED", "VERIFIED", "VERIFIED IN PART", "VERIFIED", "VERIFIED IN PART", "VERIFIED"] + ["COULD NOT CHECK"] * 2
 
 
 def test_the_unfilled_template_is_refused_with_what_to_fix(pack):
@@ -328,25 +329,50 @@ def _with_could_not_reach(text, n, replacement):
 def test_a_verified_claim_cannot_list_something_it_could_not_reach(pack, tmp_path):
     """4 Oct: two audits rated claim 3 VERIFIED while its 'could not reach' paragraph named limits (a reference
     that is not independent, no engagement letter). The counts line said 'neither: none', so the old check passed it,
-    and the result file drops the limits of a VERIFIED claim, so the professional would never have seen them."""
+    and the result file drops the limits of a VERIFIED claim, so the professional would never have seen them.
+    Claim 1 is used here: claims 3 and 5 cannot be VERIFIED at all (see the ceiling test below)."""
     base = filled_report(pack)
-    bad = _with_could_not_reach(base, 3, "The reference is self-consistency with InferRoute, not an independent rebuild.")
+    bad = _with_could_not_reach(base, 1, "The AMD revocation list is not available per chip, so I did not check it.")
     problems, _ = C.check_report(str(pack), str(write(tmp_path, "bad.md", bad)))
-    assert any(w == "claim 3" and "names something you could not reach" in why for w, why, _ in problems), problems
+    assert any(w == "claim 1" and "names something you could not reach" in why for w, why, _ in problems), problems
     # 'Nothing' followed by a bold limitation is the same contradiction, one line lower
-    sly = _with_could_not_reach(base, 3, "Nothing. The checks passed.\n\n**Limitation:** the reference is self-referential.")
+    sly = _with_could_not_reach(base, 1, "Nothing. The checks passed.\n\n**Limitation:** the chain is only as old as its dates.")
     problems, _ = C.check_report(str(pack), str(write(tmp_path, "sly.md", sly)))
-    assert any(w == "claim 3" and "then states a limitation" in why for w, why, _ in problems), problems
+    assert any(w == "claim 1" and "then states a limitation" in why for w, why, _ in problems), problems
     # the honest forms still pass: nothing left out, or the verdict that says something was
-    ok = _with_could_not_reach(base, 3, "Nothing. Every operation was read and recomputed.")
+    ok = _with_could_not_reach(base, 1, "Nothing. Every operation was read and recomputed.")
     assert C.check_report(str(pack), str(write(tmp_path, "ok.md", ok)))[0] == []
-    part_covered = {3: "tool: 1 of 1 operations · my own recomputation: 0 of 1 · neither: the reference's origin"}
-    part = _with_could_not_reach(filled_report(pack, verdicts={3: "VERIFIED IN PART"}, covered=part_covered), 3,
-                                 "The reference is not independent of InferRoute.")
+    part = _with_could_not_reach(base, 3, "The reference is not independent of InferRoute.")      # claim 3 is VERIFIED IN PART by default
     problems, _ = C.check_report(str(pack), str(write(tmp_path, "part.md", part)))
     assert problems == [], problems
     data = C.make_json(str(pack), str(write(tmp_path, "part2.md", part)), "an auditor", "kimi-k2.6")
     assert any("not independent" in lim for c in data["claims"] if c["id"] == 3 for lim in c["limitations"])
+
+
+def test_claims_3_and_5_cannot_be_verified_from_a_pack_like_this_and_a_pack_can_lift_the_ceiling(pack, tmp_path):
+    """Scored against what a pack can establish, 3 of 7 audit rounds on 4 Oct overclaimed claim 3 or 5. The ceiling is
+    deterministic, so it is enforced; a pack that carries the missing evidence says so in its manifest."""
+    over = filled_report(pack, verdicts={3: "VERIFIED", 5: "VERIFIED"},
+                         covered={3: "tool: 1 of 1 operations · my own recomputation: 1 of 1 · neither: none",
+                                  5: "tool: 1 of 1 operations · my own recomputation: 1 of 1 · neither: none"})
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "over.md", over)))
+    flagged = sorted(w for w, why, _ in problems if "cannot establish" in why)
+    assert flagged == ["claim 3", "claim 5"], problems
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    m["claim_ceilings"] = {"3": None}                      # the product later ships what claim 3 was missing
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "over2.md", over)))
+    assert sorted(w for w, why, _ in problems if "cannot establish" in why) == ["claim 5"], problems
+    m["claim_ceilings"] = {"5": {"verdict": "NOT VERIFIED", "why": "x"}}
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    assert C.ceiling_of(m, 5) == ("NOT VERIFIED", "x") and C.ceiling_of(m, 3) is not None
+
+
+def test_the_brief_names_the_three_claims_that_cannot_be_verified_and_what_claim_6_asserts():
+    head = " ".join(E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")].split())
+    assert "Three claims cannot be VERIFIED" in head and "**claim 3**" in head and "**claim 5**" in head and "**claim 7**" in head
+    assert "Claim 6** is about what the signed statements say" in head.replace("**Claim 6**", "Claim 6**") or "**Claim 6** is about what the signed statements say" in head
+    assert "no per-chip revocation list for Genoa" in head
 
 
 def test_the_brief_says_a_verified_claim_leaves_nothing_under_could_not_reach():

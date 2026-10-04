@@ -136,6 +136,31 @@ def covered_of(body):
     return parse_covered(line), line
 
 
+# What can be established FROM A PACK, per claim, when the pack carries no more than today's packs do. A claim whose
+# ceiling is VERIFIED IN PART cannot be VERIFIED by any auditor, however careful: the missing piece is not in the
+# folder. Scored against these, 2 of 7 audit rounds on 4 Oct overclaimed claim 3 and 1 overclaimed claim 5. A
+# pack that carries the missing evidence says so in MANIFEST "claim_ceilings" ({"3": {"verdict": ..., "why": ...}}),
+# which replaces the default for that claim: the table follows the product's versions, not this file.
+DEFAULT_CEILINGS = {
+    3: ("VERIFIED IN PART", "the reference's origin cannot be established from the pack (no engagement-letter copy) and the "
+                            "build from published source to the running image is not published"),
+    5: ("VERIFIED IN PART", "a record cannot show operations dropped from the end of an enclave's lifetime, or a whole lifetime "
+                            "left out"),
+    7: ("VERIFIED IN PART", "the conversation receipt is not signed to the searches, and the online Intel and NVIDIA checks "
+                            "are not redone from the pack"),
+}
+
+
+def ceiling_of(manifest, n):
+    """(verdict, why) the claim cannot exceed from this pack, or None."""
+    over = (manifest.get("claim_ceilings") or {}).get(str(n))
+    if isinstance(over, dict) and over.get("verdict"):
+        return (over["verdict"], over.get("why") or "")
+    if isinstance(manifest.get("claim_ceilings"), dict) and str(n) in manifest["claim_ceilings"]:
+        return None                                     # the pack says this claim has no ceiling
+    return DEFAULT_CEILINGS.get(n)
+
+
 NOTHING_LED = re.compile(r"^\W*(nothing|none|n/?a|no limit)\b", re.I)
 LIMIT_LINE = re.compile(r"(?im)^\W*limitations?\b|\*\*limitations?\b")
 
@@ -225,6 +250,11 @@ def check_report(pack, report_path):
         if v == "VERIFIED" and (not none_left or reached != total):
             problems.append((where, f"VERIFIED, but your numbers leave something out (tool {cov['tool']}, own {cov['own']} of {total}; neither: {cov['neither'][:60] or 'blank'})",
                              "VERIFIED needs one of tool/own to equal the total and 'neither: none'; otherwise it is VERIFIED IN PART"))
+        cap = ceiling_of(manifest, n)
+        if v == "VERIFIED" and cap and cap[0] != "VERIFIED":
+            problems.append((where, f"VERIFIED, but this pack cannot establish claim {n} fully: {cap[1]}",
+                             f"write {cap[0]} and name what stays open; if the pack really does carry what is missing, say so "
+                             "in 'What I computed myself'"))
         if v == "VERIFIED":
             # The counts line says "neither: none" and the paragraph below it says what could not be reached: two
             # places, and an auditor can satisfy the first and contradict it in the second. On 4 Oct two audits

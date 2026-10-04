@@ -287,3 +287,19 @@ def test_the_brief_warns_against_reading_an_exit_code_from_the_end_of_a_pipe():
     that about the verifier. The verifier had caught both tampers; the shell had hidden its exit code."""
     head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
     assert "never from the end of a pipe" in head and 'echo "exit $?"' in head
+
+
+def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
+    # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
+    _bullets = C._bullets
+    wrapped = ("A manifest-versus-source rebuild chain: the deployment template needed to run\n"
+               "acipolicygen is NOT shipped in this pack; build_inputs is empty.\n"
+               "\n"
+               "The 97 enclave operations before seq 98 are not in this record.\n")
+    assert _bullets(wrapped) == [
+        "A manifest-versus-source rebuild chain: the deployment template needed to run "
+        "acipolicygen is NOT shipped in this pack; build_inputs is empty.",
+        "The 97 enclave operations before seq 98 are not in this record."]
+    assert _bullets("- first thing\n  continued here\n- second thing\n* third\n1. fourth") == [
+        "first thing continued here", "second thing", "third", "fourth"]
+    assert _bullets("   \n") == []

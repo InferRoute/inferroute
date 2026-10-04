@@ -330,8 +330,29 @@ def cross_check(report_info, data):
 
 # ── making the result from the report ───────────────────────────────────────────────────────────────────────
 def _bullets(text):
-    items = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", ln).strip() for ln in text.splitlines()]
-    items = [i for i in items if i]
+    """The items of a "could not reach" section. A bullet starts an item; the lines under it, wrapped at 80
+    columns or not, belong to it; a blank line ends it. Text with no bullets is read as paragraphs. Splitting
+    on every line, as this once did, turned one wrapped sentence into four limitations (found 2026-10-04, in a
+    report an auditor wrote with hard-wrapped paragraphs)."""
+    items, cur = [], []
+
+    def flush():
+        if cur:
+            items.append(" ".join(cur))
+            cur.clear()
+
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            flush()
+            continue
+        m = re.match(r"^(?:[-*\u2022]|\d+[.)])\s+(.*)$", s)
+        if m:
+            flush()
+            cur.append(m.group(1).strip())
+        else:
+            cur.append(s)
+    flush()
     return items or ([text.strip()] if text.strip() else [])
 
 

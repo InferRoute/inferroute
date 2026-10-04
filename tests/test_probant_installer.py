@@ -1,6 +1,7 @@
 """The one-line installer: what it is filled with, and what it refuses."""
 import importlib.util
 import os
+import platform
 import subprocess
 import sys
 import textwrap
@@ -225,4 +226,34 @@ def test_the_probant_command_alone_opens_home_and_with_arguments_is_ir_probant(m
     assert P.cli_main() == 0 and seen[-1] == ["home"]
     monkeypatch.setattr(sys, "argv", ["probant", "identity", "--show"])
     assert P.cli_main() == 0 and seen[-1] == ["identity", "--show"]
+
+
+def test_the_installer_prints_what_this_computer_is_at_the_end_and_when_it_stops(tmp_path):
+    """4 Oct: we need the processor and the system version from each Mac, sent back with the public key."""
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    done = _run(tmp_path, site, tmp_path / "home-target")
+    assert done.returncode == 0, done.stderr
+    assert "This computer:" in done.stdout and "send it back with your public key" in done.stdout.replace("copy this line and ", "")
+    assert platform.machine() in done.stdout                                            # the real uname -m, not a placeholder
+    bad = tmp_path / "site2"
+    bad.mkdir()
+    c, _ = wheels(bad)
+    (bad / c.name).write_bytes(b"TAMPERED")
+    refused = _run(tmp_path / "again", bad, tmp_path / "home-target2") if (tmp_path / "again").mkdir() is None else None
+    assert refused.returncode != 0 and "This computer:" in refused.stderr               # a refusal still says what the computer is
+
+
+def test_probant_identity_prints_this_computer_inside_the_block_the_person_copies(tmp_path, monkeypatch, capsys):
+    from inferroute_cli import probant as P
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    (tmp_path / "h").mkdir()
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setattr(P.Path, "home", classmethod(lambda cls: tmp_path / "h"))
+    assert P.main(["identity", "--show"]) == 0
+    out = capsys.readouterr().out
+    block = out[out.index("copy everything between the lines"):out.index("── end ──")]
+    assert "this computer: " + P._this_computer() in block and platform.machine() in block
+    assert '"mlkem_pub"' in block                                                       # the card is still in the same block
 

@@ -32,7 +32,14 @@ LOCK_SHA256="@LOCK_SHA256@"
 TARGET="${PROBANT_HOME:-$HOME/probant}"
 
 say()  { printf '%s\n' "$*"; }
-stop() { printf '\n  Probant was not installed: %s\n\n' "$*" >&2; exit 1; }
+# What this computer is, in one line: the processor (uname -m) and the system version. It is printed when the install ends
+# or stops, so the person can send it back with their public key. Nothing is sent from here.
+machine_line() {
+  M=$(uname -m 2>/dev/null || echo unknown)
+  if command -v sw_vers >/dev/null 2>&1; then V="macOS $(sw_vers -productVersion 2>/dev/null)"; else V=$(uname -sr 2>/dev/null); fi
+  printf '%s · %s' "$M" "$V"
+}
+stop() { printf '\n  Probant was not installed: %s\n  This computer: %s\n\n' "$*" "$(machine_line)" >&2; exit 1; }
 
 OS=$(uname -s); ARCH=$(uname -m)
 NEEDS_VM=no
@@ -127,6 +134,9 @@ fi
 
 say ""
 say "Probant $VERSION is installed."
+say ""
+say "  This computer:       $(machine_line)"
+say "                       (copy this line and send it back with your public key)"
 say ""
 if [ "$LINKED" = "yes" ]; then
   say "  Start it:            probant            (in a new Terminal window; it will ask for your InferRoute key first)"

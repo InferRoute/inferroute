@@ -62,7 +62,16 @@ trap 'rm -rf "$WORK"' EXIT INT TERM
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
 fetch() {   # name expected-sha256
   say "Downloading $1 ..."
-  curl -fL --retry 3 --progress-bar -o "$WORK/$1" "$BASE/$1" || stop "could not download $BASE/$1"
+  # A dropped connection resumes where it stopped (-C -) rather than starting a 69 MB file again: on a weak link
+  # one failure in a single pass used to mean the whole install failed. The fingerprint below is still what decides.
+  tries=0
+  until curl -fL --retry 3 --retry-delay 2 -C - --progress-bar -o "$WORK/$1" "$BASE/$1"; do
+    [ -f "$WORK/$1" ] && [ "$(sha "$WORK/$1")" = "$2" ] && break          # it was whole; only the close failed
+    tries=$((tries + 1))
+    [ "$tries" -ge 6 ] && stop "could not download $BASE/$1"
+    say "  the connection dropped; continuing from where it stopped ..."
+    sleep 2
+  done
   [ "$(sha "$WORK/$1")" = "$2" ] || stop "$1 does not match the fingerprint in this installer. Nothing was installed. Please tell InferRoute."
 }
 fetch "$CLIENT_FILE" "$CLIENT_SHA256"

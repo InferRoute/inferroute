@@ -155,3 +155,33 @@ def test_the_installed_version_must_be_exactly_the_one_the_script_names(tmp_path
     bad = script_text.replace('VERSION="1.2.3"', 'VERSION="9.9.9"')
     assert 'stop "the installed program reports version' in script_text
     assert bad != script_text
+
+
+def test_a_dropped_download_resumes_instead_of_failing_the_install(tmp_path):
+    # A weak connection (2026-10-04, a 69 MB runtime cut at 42%) used to fail the whole install. The stand-in curl
+    # delivers half of each file and dies, then completes it only when asked to continue (-C -).
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "curl").write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        resume=0
+        while [ $# -gt 0 ]; do
+          case "$1" in -o) out="$2"; shift;; -C) resume=1; shift;; esac
+          last="$1"; shift
+        done
+        src="${{last#file://}}"
+        echo "resume=$resume $(basename "$src")" >> {tmp_path}/curl.calls
+        if [ ! -f "$out" ]; then
+          head -c $(( $(wc -c < "$src") / 2 )) "$src" > "$out"; exit 56
+        fi
+        have=$(wc -c < "$out"); tail -c +$((have + 1)) "$src" >> "$out"; exit 0
+        """))
+    (bin_dir / "curl").chmod(0o755)
+    done = _run(tmp_path, site, tmp_path / "home-target")
+    assert done.returncode == 0, done.stderr
+    assert "continuing from where it stopped" in done.stdout
+    calls = (tmp_path / "curl.calls").read_text().splitlines()
+    assert calls and all(c.startswith("resume=1") for c in calls)

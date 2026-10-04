@@ -111,8 +111,14 @@ def test_a_result_file_is_data_and_cannot_redirect_the_reader_to_another_file(pa
     assert not got["results"] and "link" in got["rejected"][0]["reason"]
 
 
-@pytest.mark.asyncio
-async def test_client_loads_only_its_own_pack_results_and_clears_them_on_new_export(pack, monkeypatch):
+def test_client_loads_only_its_own_pack_results_and_clears_them_on_new_export(pack, monkeypatch):
+    # Run through asyncio.run: the project does not declare pytest-asyncio, so the marker alone made this test
+    # fail (or be skipped) in any environment that lacked the plugin.
+    import asyncio
+    asyncio.run(_client_scenario(pack, monkeypatch))
+
+
+async def _client_scenario(pack, monkeypatch):
     import httpx
     from inferroute_cli import probant_web as W, probant_check
     b = W.Bridge(matter="Test/matter", date_bound="2020-01-01", workspace=pack,

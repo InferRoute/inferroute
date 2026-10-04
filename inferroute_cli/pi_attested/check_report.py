@@ -136,6 +136,10 @@ def covered_of(body):
     return parse_covered(line), line
 
 
+NOTHING_LED = re.compile(r"^\W*(nothing|none|n/?a|no limit)\b", re.I)
+LIMIT_LINE = re.compile(r"(?im)^\W*limitations?\b|\*\*limitations?\b")
+
+
 def labelled(body, *labels):
     """The text after the first bold label that starts with any of `labels`, up to the next bold label."""
     for label in labels:
@@ -221,6 +225,24 @@ def check_report(pack, report_path):
         if v == "VERIFIED" and (not none_left or reached != total):
             problems.append((where, f"VERIFIED, but your numbers leave something out (tool {cov['tool']}, own {cov['own']} of {total}; neither: {cov['neither'][:60] or 'blank'})",
                              "VERIFIED needs one of tool/own to equal the total and 'neither: none'; otherwise it is VERIFIED IN PART"))
+        if v == "VERIFIED":
+            # The counts line says "neither: none" and the paragraph below it says what could not be reached: two
+            # places, and an auditor can satisfy the first and contradict it in the second. On 4 Oct two audits
+            # rated claim 3 VERIFIED while that paragraph listed limits (a reference that is not independent, no
+            # engagement letter), and the result file, which keeps limits only for a claim that is not VERIFIED,
+            # would have dropped them from what the professional sees.
+            # Everything from the label to the end of the claim: it is the template's last field, and an auditor
+            # who adds a bold "Limitation:" line under it would otherwise end `labelled` early and hide it.
+            tail = re.search(r"(?is)\*\*What I could not[^*]*\*\*:?\s*(.*)\Z", body)
+            miss = tail.group(1).strip() if tail else ""
+            if miss and not NOTHING_LED.match(miss):
+                problems.append((where, "VERIFIED, but 'What I could not reach' names something you could not reach: "
+                                        f"{' '.join(miss.split())[:80]}",
+                                 "a claim with a stated limit is VERIFIED IN PART. If it is not a limit on this claim, take it out "
+                                 "of this paragraph and write 'Nothing.' here"))
+            elif miss and LIMIT_LINE.search(miss):
+                problems.append((where, "VERIFIED, but the 'could not reach' paragraph says 'Nothing' and then states a limitation",
+                                 "a claim with a stated limit is VERIFIED IN PART; move the limit's claim to that verdict"))
         if v == "VERIFIED IN PART" and not reached:
             problems.append((where, "VERIFIED IN PART, but tool and own are both 0",
                              "you reached none of it: that is NOT VERIFIED or COULD NOT CHECK — or fill in what the tool read"))

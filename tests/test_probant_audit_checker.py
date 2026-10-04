@@ -315,6 +315,40 @@ def test_the_brief_says_which_bytes_the_runtime_data_hash_covers():
     assert "do not parse and re-serialise them" in brief
 
 
+def _with_could_not_reach(text, n, replacement):
+    """The report with claim n's 'What I could not reach' paragraph replaced."""
+    start = text.index(f"## Claim {n} — ")
+    end = text.find("\n## ", start + 1)
+    end = len(text) if end < 0 else end
+    block = text[start:end]
+    block = re.sub(r"(\*\*What I could not reach, and why:\*\* ).*\Z", lambda mo: mo.group(1) + replacement + "\n", block, flags=re.S)
+    return text[:start] + block + text[end:]
+
+
+def test_a_verified_claim_cannot_list_something_it_could_not_reach(pack, tmp_path):
+    """4 Oct: two audits rated claim 3 VERIFIED while its 'could not reach' paragraph named limits (a reference
+    that is not independent, no engagement letter). The counts line said 'neither: none', so the old check passed it,
+    and the result file drops the limits of a VERIFIED claim, so the professional would never have seen them."""
+    base = filled_report(pack)
+    bad = _with_could_not_reach(base, 3, "The reference is self-consistency with InferRoute, not an independent rebuild.")
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "bad.md", bad)))
+    assert any(w == "claim 3" and "names something you could not reach" in why for w, why, _ in problems), problems
+    # 'Nothing' followed by a bold limitation is the same contradiction, one line lower
+    sly = _with_could_not_reach(base, 3, "Nothing. The checks passed.\n\n**Limitation:** the reference is self-referential.")
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "sly.md", sly)))
+    assert any(w == "claim 3" and "then states a limitation" in why for w, why, _ in problems), problems
+    # the honest forms still pass: nothing left out, or the verdict that says something was
+    ok = _with_could_not_reach(base, 3, "Nothing. Every operation was read and recomputed.")
+    assert C.check_report(str(pack), str(write(tmp_path, "ok.md", ok)))[0] == []
+    part_covered = {3: "tool: 1 of 1 operations · my own recomputation: 0 of 1 · neither: the reference's origin"}
+    part = _with_could_not_reach(filled_report(pack, verdicts={3: "VERIFIED IN PART"}, covered=part_covered), 3,
+                                 "The reference is not independent of InferRoute.")
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "part.md", part)))
+    assert problems == [], problems
+    data = C.make_json(str(pack), str(write(tmp_path, "part2.md", part)), "an auditor", "kimi-k2.6")
+    assert any("not independent" in lim for c in data["claims"] if c["id"] == 3 for lim in c["limitations"])
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

@@ -289,6 +289,15 @@ def test_the_brief_warns_against_reading_an_exit_code_from_the_end_of_a_pipe():
     assert "never from the end of a pipe" in head and 'echo "exit $?"' in head
 
 
+def test_the_brief_warns_that_printed_evidence_may_have_been_shortened_on_the_way():
+    """4 Oct: a service between an agent and its model replaces large tool output with markers like <<ccr:...>>
+    and shortens the rest, without telling the agent. Evidence must be computed from the file, not copied out of
+    printed output, and a marker or a short read must be reported."""
+    head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
+    assert "may have been shortened on its way to you" in head and "<<ccr:" in head
+    assert "compute from it" in head and "could not check" in head
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

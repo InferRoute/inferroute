@@ -403,6 +403,50 @@ def test_the_report_template_prints_the_ceiling_and_the_not_limits_under_each_cl
     assert "cannot be VERIFIED" in lifted[lifted.index("## Claim 5 — "):lifted.index("## Claim 6 — ")]
 
 
+def _key_script():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_key_check", Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested" / "check_key_attestation.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_pack_ships_a_key_attestation_check_that_is_the_one_in_the_client_and_is_declared(pack):
+    src = Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested" / "check_key_attestation.py"
+    shipped = pack / "stationery" / "check_key_attestation.py"
+    assert shipped.read_bytes() == src.read_bytes() and (shipped.stat().st_mode & 0o777) == 0o500
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert "MAKES NETWORK CALLS" in m["stationery"]["stationery/check_key_attestation.py"]
+    assert "check_key_attestation.py" in E.VERIFY_MD
+    assert "check_key_attestation.py" in E.report_template(pack)[E.report_template(pack).index("## Claim 3 — "):
+                                                                  E.report_template(pack).index("## Claim 4 — ")]
+
+
+def test_the_key_check_says_pass_fail_or_could_not_run_and_decides_nothing_it_could_not_run(tmp_path, monkeypatch, capsys):
+    mod = _key_script()
+    pk = tmp_path / "pack"
+    (pk / "trust-anchors").mkdir(parents=True)
+    # no attestation in the pack: an absence, not a failure
+    assert mod.main(["--pack", str(pk)]) == 3 and "COULD NOT RUN" in capsys.readouterr().out
+    (pk / "trust-anchors" / "publication-key-attestation.json").write_text(json.dumps({"publication_key": "ab" * 32}))
+    (pk / "trust-anchors" / "publication-key-attestation.bundle").write_text("{}")
+    (pk / "trust-anchors" / "reference.json").write_text(json.dumps({"publication_key": "cd" * 32}))
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "/x/cosign" if name == "cosign" else None)
+    calls = []
+    monkeypatch.setattr(mod, "_run", lambda cmd, timeout=240: (calls.append(cmd) or (0, "Verified OK")))
+    assert mod.main(["--pack", str(pk)]) == 0
+    out = capsys.readouterr().out
+    assert "KEY ATTESTATION: PASS" in out and "a DIFFERENT key" in out                   # a reference naming another key is said
+    assert calls[0][:2] == ["cosign", "verify-blob"] and "henry@inferroute.ai" in calls[0]
+    assert mod.main(["--pack", str(pk), "--identity", "other@example.com"]) == 0 and "other@example.com" in calls[-1]
+    monkeypatch.setattr(mod, "_run", lambda cmd, timeout=240: (1, "no matching CertificateIdentity found"))
+    assert mod.main(["--pack", str(pk)]) == 1 and "KEY ATTESTATION: FAIL" in capsys.readouterr().out
+    monkeypatch.setattr(mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(mod, "_venv_run", lambda sig: (3, "no network"))
+    assert mod.main(["--pack", str(pk)]) == 3 and "COULD NOT RUN" in capsys.readouterr().out
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

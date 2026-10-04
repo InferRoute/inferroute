@@ -195,6 +195,13 @@ verify is the weakest form: you would be trusting InferRoute again, just later. 
          --certificate-oidc-issuer https://accounts.google.com \
          trust-anchors/publication-key-attestation.json
 
+   The pack ships a helper that does exactly this with `cosign`, or with a pinned `sigstore` package fetched by
+   `uv` or into a throwaway environment, and prints one line (`KEY ATTESTATION: PASS`, `FAIL` or `COULD NOT RUN`):
+
+       python3 stationery/check_key_attestation.py
+
+   It needs the network and decides nothing it could not run. `--identity` tests a different identity.
+
    Decide whether that is the identity you intended to trust; do not replace the expected identity with
    whichever identity happens to be in a supplied certificate. Check that the attestation's
    `publication_key` equals the key verifying the reference. The public verification roots are
@@ -2024,8 +2031,14 @@ def _claim_hint(n: int, manifest_ceilings: Optional[dict] = None) -> list:
     spec.loader.exec_module(mod)
     cap = mod.ceiling_of({"claim_ceilings": manifest_ceilings or {}}, n)
     if cap and cap[0] != "VERIFIED":
-        return [f"> **This claim cannot be VERIFIED from a pack like this one:** {cap[1]}. Give {cap[0]} and name "
-                "exactly what stays open."]
+        out = [f"> **This claim cannot be VERIFIED from a pack like this one:** {cap[1]}. Give {cap[0]} and name "
+               "exactly what stays open."]
+        if n == 3:
+            out += [">",
+                    "> Run `python3 stationery/check_key_attestation.py` (it needs the network) and report its "
+                    "`KEY ATTESTATION:` line under 'What I computed myself'. A PASS settles who the key belongs to, "
+                    "not whether the reference's contents are true."]
+        return out
     if n in NOT_LIMITS:
         return [f"> **Not limits on this claim, so not a reason for VERIFIED IN PART:** {NOT_LIMITS[n]}"]
     return []
@@ -2567,6 +2580,10 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "stationery/check_report.py": "checks your report and result file against this pack, and makes the result "
                                       "file from the report — not evidence, not pinned, reads nothing of the record "
                                       "but MANIFEST.json and SHA256SUMS, makes no network call",
+        "stationery/check_key_attestation.py": "checks, with cosign or a pinned sigstore, who InferRoute's publication key "
+                                               "belongs to (the Sigstore bundle in trust-anchors) — not evidence, not "
+                                               "pinned, reads only trust-anchors, MAKES NETWORK CALLS (Sigstore's roots "
+                                               "and the public log)",
     }
     manifest["trust_anchors"] = {
         **({"reference_timestamp": block} if block else {}),
@@ -2657,6 +2674,9 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     checker = stationery / "check_report.py"
     checker.write_bytes((Path(__file__).resolve().parent / "pi_attested" / "check_report.py").read_bytes())
     os.chmod(checker, 0o500)
+    key_check = stationery / "check_key_attestation.py"
+    key_check.write_bytes((Path(__file__).resolve().parent / "pi_attested" / "check_key_attestation.py").read_bytes())
+    os.chmod(key_check, 0o500)
 
     anchors = dest / "trust-anchors"
     anchors.mkdir()

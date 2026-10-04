@@ -298,6 +298,14 @@ def test_the_brief_warns_that_printed_evidence_may_have_been_shortened_on_the_wa
     assert "compute from it" in head and "could not check" in head
 
 
+def test_the_brief_tells_the_auditor_to_keep_raw_evidence_out_of_its_context():
+    """4 Oct: an auditor read three evidence files whole (70k to 99k characters of hex each) and its context was
+    summarised twice in the first four minutes. The remedy is to compute in code and print only fields."""
+    head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
+    assert "Do not read an evidence file whole into your conversation" in head
+    assert "print only the fields you need" in head and "re-read your report file" in head
+
+
 def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
     # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
     _bullets = C._bullets

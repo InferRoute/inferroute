@@ -725,3 +725,36 @@ def test_going_somewhere_never_opens_another_tab_per_click():
     assert "noopener" not in re.sub(r"//[^\n]*", "", opener)            # it would force a new tab each time
     back = app_js[app_js.index("function goHome"):app_js.index("function renderTrust")]
     assert 'window.open(url, "_self")' in back
+
+
+def test_a_share_chosen_with_the_file_chooser_arrives_as_bytes_and_a_typed_path_still_works(home, tmp_path):
+    """5 Oct, the first test on a second Mac: "a shame that we have to input a path manually". A page is never given a
+    file's path, so the chooser sends the file's bytes (as the document dialog sends its text)."""
+    import base64
+    from inferroute_cli import probant_share as SH
+    _h, c, _tmp = home
+    me = SH.identity()
+    payload = SH.build_share([{"matter": "Acme/bike", "date_bound": "2026-02-01", "disclosure": "a bike light",
+                               "marks": {}, "claims": [], "origin": "x"}], note="n", files=[], corpus_name="Acme cluster")
+    blob = SH.seal_to(SH.public_card(me), payload, me)
+    b64 = base64.b64encode(blob).decode()
+    look = c.post("/api/sharing/open", json={"data_b64": b64}).json()
+    assert look["preview"] is True and [m["matter"] for m in look["matters"]] == ["Acme/bike"]
+    made = c.post("/api/sharing/open", json={"data_b64": b64, "client": "FromChooser"}).json()
+    assert made["opened"] == ["FromChooser/bike"]
+    # the typed path is unchanged
+    share = tmp_path / "x.probant-share"
+    share.write_bytes(blob)
+    assert c.post("/api/sharing/open", json={"path": str(share)}).json()["preview"] is True
+    # what goes wrong is said in words
+    assert "did not arrive intact" in c.post("/api/sharing/open", json={"data_b64": "not base64!!"}).json()["error"]
+    assert "choose the file" in c.post("/api/sharing/open", json={}).json()["error"]
+    assert c.post("/api/sharing/open", json={"data_b64": base64.b64encode(b"junk").decode()}).status_code == 400
+
+
+def test_the_share_dialog_offers_a_file_chooser_and_sends_the_files_bytes_not_a_path():
+    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    body = js[js.index("function openShareDialog()"):js.index("// ── routing ──")]
+    assert "Choose the file" in body and 'picker.type = "file"' in body and "readAsDataURL" in body
+    assert "data_b64" in body and body.count("source(") >= 2          # both Look and Open use the chosen file
+

@@ -55,6 +55,10 @@ SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily — us
 # Read from the host config (search.json) so it is set per installation rather than compiled in, and so a
 # future backend-served value has one place to land. ABSENT MEANS ALWAYS: a schedule is the special case,
 # and claiming one that does not exist is the error this constant was changed to prevent.
+# The largest delivery the page will take from a file chooser. Real ones are a few hundred KB.
+SHARE_FILE_LIMIT = 64_000_000
+
+
 def search_availability(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """{"mode": "always"} or {"mode": "scheduled", "from_hour", "to_hour", "tz"}."""
     conf = (cfg or {}).get("availability")
@@ -1129,11 +1133,27 @@ class Home:
             import asyncio
             from . import probant_share as SH
             d = await body(request)
-            path = Path(str(d.get("path") or "")).expanduser()
-            try:
-                blob = await asyncio.to_thread(path.read_bytes)
-            except OSError:
-                return problem("could not read that file on this computer", 400)
+            # The page reads the chosen file itself and sends its bytes: a browser never gives a page a file's path, and
+            # asking a professional to type one was the last place the sharing dialog made them hunt for a file. A typed
+            # path still works for the terminal-minded.
+            if d.get("data_b64"):
+                import base64
+                import binascii
+                raw = str(d["data_b64"])
+                if len(raw) > SHARE_FILE_LIMIT * 4 // 3 + 8:
+                    return problem(f"that file is larger than {SHARE_FILE_LIMIT // 1000000} MB, which is more than a share is", 413)
+                try:
+                    blob = base64.b64decode(raw, validate=True)
+                except (binascii.Error, ValueError):
+                    return problem("that file did not arrive intact; choose it again", 400)
+            else:
+                if not str(d.get("path") or "").strip():
+                    return problem("choose the file you were sent", 400)
+                path = Path(str(d.get("path") or "")).expanduser()
+                try:
+                    blob = await asyncio.to_thread(path.read_bytes)
+                except OSError:
+                    return problem("could not read that file on this computer", 400)
             try:
                 payload = SH.open_sealed(blob)
             except S.ProbantError as e:

@@ -437,7 +437,7 @@ def _forward_headers(incoming: dict[str, str]) -> dict[str, str]:
         # Per-request pins a caller sets through ANTHROPIC_CUSTOM_HEADERS: no latency-hedge race, no model
         # substitution. Found 2026-10-04: with this daemon in the path both were silently stripped, so a run
         # that asked to stay on ONE model was answered by another and nothing said so.
-        "x-inferroute-no-hedge", "x-inferroute-no-model-fallback",
+        "x-inferroute-no-hedge", "x-inferroute-no-model-fallback", "x-inferroute-no-compress",
     }
     headers = {k.lower(): v for k, v in incoming.items() if k.lower() in keep}
     headers.setdefault("content-type", "application/json")

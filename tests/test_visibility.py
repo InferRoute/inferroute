@@ -117,10 +117,12 @@ def test_forward_keeps_the_per_request_model_pins():
         "authorization": "Bearer k",
         "x-inferroute-no-hedge": "1",
         "x-inferroute-no-model-fallback": "1",
+        "x-inferroute-no-compress": "1",
         "x-inferroute-something-else": "still dropped",
     })
     assert out["x-inferroute-no-hedge"] == "1"
     assert out["x-inferroute-no-model-fallback"] == "1"
+    assert out["x-inferroute-no-compress"] == "1"
     assert "x-inferroute-something-else" not in out
 
 

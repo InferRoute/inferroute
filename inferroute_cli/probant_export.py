@@ -956,6 +956,10 @@ WITHHELD_FIELDS = ("query_text", "result", "text")
 
 AUDIT_PROMPT = "Read AUDIT.md in this folder and do what it says."
 AUDIT_IR_MODEL = "kimi-k2.6"
+# An auditor must read the evidence as it is. The InferRoute service shortens large tool output on the way to
+# the model unless a request says not to; this header says not to. (Found 2026-10-04: 64 of 70 turns of one audit
+# run had compression applied. The service honours exactly "1".)
+AUDIT_IR_HEADERS = "x-inferroute-no-compress: 1"
 
 
 def audit_command(agent: str, ir_path: str = "ir") -> str:
@@ -978,7 +982,8 @@ def audit_command(agent: str, ir_path: str = "ir") -> str:
     if agent == "ir":
         # `ir_path` is "ir" when the shell finds it, and otherwise the absolute path of the install that is
         # running this — a Mac install lives in ~/probant/bin, which no new Terminal window has on its PATH.
-        return f"{shlex.quote(ir_path)} --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}"
+        return (f"ANTHROPIC_CUSTOM_HEADERS={shlex.quote(AUDIT_IR_HEADERS)} "
+                f"{shlex.quote(ir_path)} --plain --model {AUDIT_IR_MODEL} {shlex.quote(AUDIT_PROMPT)}")
     raise ValueError(f"unknown audit agent: {agent}")
 
 AUDIT_MD = """# Audit brief: an independent check of a sealed prior-art search record

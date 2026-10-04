@@ -1113,7 +1113,7 @@ def test_the_audit_pack_is_made_from_the_record_this_page_proved_never_a_path_it
     # `ir` reads a bare first word as a subcommand, so its command starts with a flag; an enclave-backed model.
     # --plain since 24 Sep: the pack carries no client words, so there is nothing to seal and
     # the sealed lane would only put a proof card and a keypress before the auditor's work.
-    assert " --plain --model kimi-k2.6 " in r["ir"] and shlex.split(r["ir"])[0].endswith("ir") and r["claude"].startswith("claude ")
+    assert " --plain --model kimi-k2.6 " in r["ir"] and shlex.split(r["ir"])[1].endswith("ir") and "x-inferroute-no-compress: 1" in r["ir"] and r["claude"].startswith("claude ")
     # Quoted with shlex, not wrapped in double quotes by hand: the prompt is a literal argument, and a
     # hand-rolled quote breaks the day it contains a " or a $.
     import shlex as _shlex
@@ -1247,7 +1247,7 @@ def test_the_shown_command_and_the_run_command_are_the_same_string():
     for agent in ("claude", "codex", "ir"):
         assert f'probant_export.audit_command("{agent}"' in py or "audit_command(agent" in py
     assert E.audit_command("claude").startswith("claude ")
-    assert E.audit_command("ir").startswith("ir --plain --model ")
+    assert E.audit_command("ir").startswith("ANTHROPIC_CUSTOM_HEADERS='x-inferroute-no-compress: 1' ir --plain --model ")
 
 
 def test_codex_launch_uses_the_server_command_and_refuses_injected_commands(client, tmp_path, monkeypatch):
@@ -2659,12 +2659,13 @@ def test_an_install_whose_ir_is_not_on_path_still_launches_the_audit_by_its_abso
     assert W.audit_ir_path() == str(ir)
     from inferroute_cli import probant_export as E
     cmd = E.audit_command("ir", ir_path=str(ir))
-    assert shlex.split(cmd)[0] == str(ir) and "--plain" in cmd
+    assert shlex.split(cmd)[0] == "ANTHROPIC_CUSTOM_HEADERS=x-inferroute-no-compress: 1"   # one word: the header, quoted
+    assert shlex.split(cmd)[1] == str(ir) and "--plain" in cmd
     spaced = tmp_path / "a folder" / "bin"
     spaced.mkdir(parents=True)
     (spaced / "ir").write_text("#!/bin/sh\n")
     (spaced / "ir").chmod(0o755)
-    assert shlex.split(E.audit_command("ir", ir_path=str(spaced / "ir")))[0] == str(spaced / "ir")   # quoted
+    assert shlex.split(E.audit_command("ir", ir_path=str(spaced / "ir")))[1] == str(spaced / "ir")   # quoted
     ir.unlink()
     assert W.audit_ir_path() is None                       # genuinely absent: the refusal is still honest
     monkeypatch.setattr(shutil, "which", lambda name, **kw: "/usr/bin/ir")

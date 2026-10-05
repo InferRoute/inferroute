@@ -114,6 +114,15 @@ def parse(text: str, code: int) -> Dict[str, Any]:
             result = r.group(1).strip()
     verdict, headline, explainer = VERDICTS.get(code, ("failed", f"The check ended with code {code}.",
                                                        "That is not a code this version knows. Tell us."))
+    # A record with NO sealed search makes the verifier exit 1 ("NOTHING VERIFIED"), which is the right exit for a
+    # script: it must never read as a pass. For a person it is not a failure — nothing was wrong, there was nothing
+    # to check — and a red cross on a record made before the first search read as an accusation (5 Oct).
+    if code == 1 and result.upper().startswith("NOTHING VERIFIED"):
+        return {"code": code, "verdict": "nothing", "headline": "Nothing to check yet.",
+                "explainer": "This record has no sealed search in it, so there was nothing for the check to look at. "
+                             "It is not a failure and not a pass. Run a search in a session, then export and check again.",
+                "result_line": result, "groups": [], "checks": len(rows), "failed": [], "output": text,
+                "plain": plain_block(text)}
     groups = []
     for key, question, ok_text, _ in (*GROUPS, ("other", "Other checks", "Everything else passed.", ())):
         mine = [r for r in rows if r["group"] == key]

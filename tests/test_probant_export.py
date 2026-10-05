@@ -291,3 +291,18 @@ def test_the_pack_says_which_client_wrote_it_and_calls_that_self_reported():
     assert "client_version" in E.AUDIT_MD
     assert "audited party naming itself" in E.AUDIT_MD
     assert E._client_version()          # and it is actually populated
+
+
+def test_a_record_with_no_search_reads_as_nothing_to_check_not_as_a_failure():
+    """The verifier exits 1 on a record with no sealed search so that a script never reads it as a pass. A person
+    read the red cross on a record made before the first search as an accusation (5 Oct)."""
+    from inferroute_cli import probant_check as C
+    out = ("  PASS bundle integrity: 8 files match\n"
+           "  FAIL sealed searches: this record contains NO sealed search, so this program verified nothing\n"
+           "RESULT: NOTHING VERIFIED — this record contains no sealed search, so there was nothing for this program to check.\n")
+    r = C.parse(out, 1)
+    assert r["verdict"] == "nothing" and r["headline"] == "Nothing to check yet." and r["failed"] == [] and r["groups"] == []
+    assert "not a failure" in r["explainer"]
+    # A genuine failure is untouched.
+    bad = C.parse("  FAIL signer key: wrong\nRESULT: FAILED — a check did not pass\n", 1)
+    assert bad["verdict"] == "failed" and bad["failed"] == ["signer key"]

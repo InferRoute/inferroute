@@ -971,7 +971,10 @@ class Bridge:
                     "search_timing": bridge.search_stats(), "now": round(time.time() * 1000),
                     # Where this session came from, so a finished session is not a dead end. Only what the
                     # launcher was told; a session started from a terminal has none and the page shows no link.
-                    "home": os.environ.get("IR_PROBANT_HOME_URL", "")}
+                    "home": os.environ.get("IR_PROBANT_HOME_URL", ""),
+                    # A session that continues an earlier one: the message the home page wrote from it. The page
+                    # puts it in the message box for the person to read and edit; nothing is sent from here.
+                    "draft": os.environ.get("IR_PROBANT_DRAFT", "")[:8000]}
 
         @app.get("/api/intake/drafts")
         async def intake_drafts():

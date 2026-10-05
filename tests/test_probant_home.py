@@ -760,3 +760,110 @@ def test_the_share_dialog_offers_a_file_chooser_and_sends_the_files_bytes_not_a_
     # the typed path is out of sight until asked for, but still there
     assert "pathField.hidden = true" in body and "Type the file" in body and "pathField.hidden = false" in body
 
+
+
+# ── continuing an earlier session, and the session that is still open ──
+
+def test_a_continuation_puts_the_whole_earlier_session_in_the_matter_folder_and_a_short_message_in_the_box(home, monkeypatch):
+    h, c, tmp = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    S.state_path("Acme", "cooling").write_text(json.dumps({"marks": {"WO-1-A1": {"latest": {"value": "relevant"}}}}))
+    seen = {}
+    url = "http://127.0.0.1:40123/#k=" + "k" * 43
+
+    def fake_popen(argv, **kw):
+        seen["env"] = kw["env"]
+        p = FakeProc([f"Open this session in your browser:  {url}\n"])
+        p.wait = lambda: time.sleep(0.5) or 0
+        return p
+    monkeypatch.setattr(H.subprocess, "Popen", fake_popen)
+    r = c.post("/api/sessions", json={"id": "Acme/cooling", "continue_from": SID}).json()
+    assert r["state"] in ("starting", "ready") and r["started_at"] > 0
+    message = seen["env"]["IR_PROBANT_DRAFT"]
+    assert message.startswith("Continue the session of") and f"previous-sessions/{SID[:13]}.md" in message
+    assert "Read that file first" in message and len(message) < 600           # short: the box is for the person to edit
+    ws = Path(S.load_record("Acme", "cooling")["workspace"])
+    notes = (ws / "previous-sessions" / f"{SID[:13]}.md").read_text()
+    assert "**The professional:** Run a survey" in notes and "**The assistant:** **Two** documents." in notes
+    assert "> a wrist device" in notes                                         # the FULL query, not a cut-off one
+    assert "1. WO-1-A1 (2019) — Title of WO-1-A1" in notes and "2. US-2-B2 (2019) — Title of US-2-B2" in notes
+    assert "**relevant**" in notes and "- WO-1-A1 — Title of WO-1-A1" in notes
+    assert "unsigned" not in notes                                              # an unsigned row is not a search
+    assert not H.disclosure_info(ws)["files"] or "previous-sessions" not in [f["name"] for f in H.disclosure_info(ws)["files"]]
+
+
+def test_a_long_query_is_kept_whole_in_the_notes(home):
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    q = "word " * 200
+    rdir = S.records_dir("Acme", "cooling")
+    rows = [json.loads(ln) for ln in (rdir / f"{SID}.searches.jsonl").read_text().splitlines()]
+    rows[0]["query_text"] = q.strip()
+    (rdir / f"{SID}.searches.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    notes = H.continue_notes("Acme", "cooling", SID)["markdown"]
+    assert q.strip() in notes and "…" not in notes
+
+
+def test_a_continuation_of_something_that_is_not_a_session_of_this_matter_is_refused(home):
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    assert c.post("/api/sessions", json={"id": "Acme/cooling", "continue_from": "../../etc/passwd"}).status_code == 404
+    assert c.post("/api/sessions", json={"id": "Acme/cooling", "continue_from": "20260101T000000Z-deadbeef"}).status_code == 404
+
+
+def test_a_continuation_does_not_rewrite_the_notes_a_live_session_is_reading(home, monkeypatch):
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    url = "http://127.0.0.1:40123/#k=" + "k" * 43
+    def live(argv, **kw):
+        p = FakeProc([f"Open this session in your browser:  {url}\n"])
+        p.poll = lambda: None                                    # still running
+        p.wait = lambda: time.sleep(5) or 0
+        return p
+    monkeypatch.setattr(H.subprocess, "Popen", live)
+    c.post("/api/sessions", json={"id": "Acme/cooling"})
+    ws = Path(S.load_record("Acme", "cooling")["workspace"])
+    for _ in range(40):
+        if h.launches.running_for("Acme/cooling"):
+            break
+        time.sleep(0.05)
+    c.post("/api/sessions", json={"id": "Acme/cooling", "continue_from": SID})
+    assert not (ws / "previous-sessions").exists()
+
+
+def test_an_ordinary_session_carries_no_draft(home, monkeypatch):
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    seen = {}
+    monkeypatch.setattr(H.subprocess, "Popen", lambda argv, **kw: seen.update(env=kw["env"]) or FakeProc([]))
+    monkeypatch.setenv("IR_PROBANT_DRAFT", "left over from a parent")
+    c.post("/api/sessions", json={"id": "Acme/cooling"})
+    assert "IR_PROBANT_DRAFT" not in seen["env"]
+
+
+def test_the_pages_return_to_a_running_session_and_offer_to_continue_a_finished_one():
+    js = (STATIC / "home.js").read_text()
+    app_js = (STATIC / "app.js").read_text()
+    # A row that is the open session goes into it; anything else shows what it did.
+    assert "if (s.__live) openLocal(s.__live.url);" in js and '"● open now"' in js
+    # ...and a row is the open one only if it began after the launch did: the previous session is not it.
+    assert "Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5" in js
+    assert 'button("Open your running session", "primary", () => openLocal(m.running.url))' in js
+    assert 'button("Continue from this session", "primary"' in js and "continue_from: sid" in js
+
+    # The session page puts the draft in the message box and sends nothing.
+    assert "box.value = String(s.draft)" in app_js and "Nothing is sent until you press Send." in app_js
+    assert 'send(String(s.draft))' not in app_js
+
+
+def test_a_past_sessions_searches_fold_and_use_their_own_columns():
+    """Seen 5 Oct: opening a past session showed each document one letter wide. Its rows have three children, the
+    live card's have four, and both used the four-column grid."""
+    home_js, css = (STATIC / "home.js").read_text(), (STATIC / "app.css").read_text()
+    assert 'el("details", "card")' in home_js and 'el("summary", "card-head"' in home_js
+    assert 'el("li", "doc past"' in home_js
+    assert ".doc.past { grid-template-columns: 26px minmax(0, 1fr) auto; }" in css
+    assert "details.card > summary.card-head" in css

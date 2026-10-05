@@ -264,7 +264,9 @@
           `checking the AI machine and the search machine from this computer (${l.elapsed} s; usually under a minute).`));
       } else if (l.state === "ready") {
         box.className = "launch ready";
-        box.append(el("div", "", el("b", "", "Your session is ready. "), "It opens in its own tab, checked and private."),
+        const since = l.started_at ? new Date(l.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+        box.append(el("div", "", el("b", "", "A session is open on this matter. "),
+            `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session, checked and private.`),
           el("div", "row actions",
             button("Open the session", "primary", () => openLocal(l.url)),
             // END IT FROM HERE. Without this a session could only be ended from inside its own tab, so one
@@ -541,13 +543,25 @@
     p.append(grid);
     if (data.recent.length) {
       p.append(el("h2", "section", "Recent sessions"));
-      p.append(sessionTable(data.recent, true));
+      p.append(sessionTable(data.recent, true, liveMap(data.running)));
     }
     await renderDeleted(p);
   }
 
-  function sessionTable(sessions, withMatter) {
+  const liveMap = (launches) => Object.fromEntries((launches || []).filter((l) => l.state === "ready" && l.url).map((l) => [l.matter, l]));
+
+  // The session that is RUNNING is the newest row of its matter that began after the launch did: a matter runs one
+  // at a time, and its record is written once the session is going, so for a while the newest row is the PREVIOUS
+  // session and marking that one "open" would send the person into the wrong place. `live` maps matter id -> its
+  // running launch (state "ready").
+  function sessionTable(sessions, withMatter, live) {
     const t = el("div", "sessions");
+    const newest = new Set();
+    const startedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
+    for (const s of sessions) {
+      const l = (live || {})[s.matter];
+      if (l && !newest.has(s.matter) && startedAfter(s, l)) { newest.add(s.matter); s.__live = l; }
+    }
     for (const s of sessions) {
       const matterId = s.matter;
       const row = el("button", "session-row",
@@ -556,9 +570,14 @@
         el("span", "how", s.surface === "browser" ? "browser" : s.surface === "terminal" ? "terminal" : "—"),
         el("span", "", plural(s.searches, "search", "searches")),
         el("span", "", plural(s.documents, "document", "documents")),
-        el("span", s.ai_verified && s.boxed ? "ok-text" : "warn-text", s.ai_verified && s.boxed ? "✓ checked" : "◐ see details"));
+        s.__live ? el("span", "live-text", "● open now")
+          : el("span", s.ai_verified && s.boxed ? "ok-text" : "warn-text", s.ai_verified && s.boxed ? "✓ checked" : "◐ see details"));
       row.type = "button";
-      row.addEventListener("click", () => { location.hash = `#/session/${enc(matterId)}/${enc(s.id)}`; });
+      // A session that is still open goes straight back INTO it; a finished one shows what it did, with a way to continue.
+      row.addEventListener("click", () => {
+        if (s.__live) openLocal(s.__live.url);
+        else location.hash = `#/session/${enc(matterId)}/${enc(s.id)}`;
+      });
       t.append(row);
     }
     return t;
@@ -577,6 +596,8 @@
       el("p", "sub", `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
     p.append(el("div", "row actions",
       m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
+        : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
+        : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
         : button("Start a session", "primary", () => startSession(m.id, refresh)),
       button(words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
       button("Export the record", "ghost", async (ev) => {
@@ -595,7 +616,7 @@
 
     p.append(el("h2", "section", "Sessions"));
     if (!m.sessions.length) p.append(el("p", "sub", "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
-    else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false));
+    else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false, liveMap(m.running ? [m.running] : [])));
 
     // A cleared mark is a row in the store's history, not a mark: the professional asked for NO opinion on
     // that document. Counted here it would show as a fourth kind ("US-X · cleared") and inflate the total,
@@ -708,6 +729,24 @@
       button(matterId, "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
     p.append(el("div", "page-head", el("h1", "", `Session of ${localTime(s.started_at)}`),
       el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${plural(s.searches.length, "search", "searches")} · ${plural(s.documents || 0, "document", "documents")}`)));
+    // Continue: a finished session cannot be resumed (a stored transcript is never reopened in attested mode), so this
+    // starts a NEW session that begins from this one: its conversation, searches and marks are put in the matter's
+    // folder for the assistant to read. One session at a time per matter.
+    let running = null;
+    try { running = (await api(`/api/matter?id=${enc(matterId)}`)).running; } catch (_) { running = null; }
+    const next = el("div", "row actions");
+    if (running && running.state === "ready") {
+      next.append(button("Open your running session", "primary", () => openLocal(running.url)),
+        el("span", "sub", "A session is already open on this matter, so a new one cannot start."));
+    } else if (running) {
+      next.append(button("Starting…", "primary", () => {}));
+    } else {
+      next.append(button("Continue from this session", "primary", async () => {
+        try { await api("/api/sessions", { id: matterId, continue_from: sid }); location.hash = `#/matter/${enc(matterId)}`; }
+        catch (e) { toast(e.message, "error"); }
+      }), el("span", "sub", "Starts a new session that begins from this one: its conversation, searches and marks are put in the matter's folder for the assistant to read. You edit the first message before anything is sent."));
+    }
+    p.append(next);
     p.append(el("div", "checks",
       el("div", s.model.verified ? "ok-text" : "bad-text", s.model.verified ? `✓ The AI ran in a sealed machine this computer verified (${s.model.checks || "checks passed"})` : "✗ The AI machine was not verified in this session"),
       el("div", s.boxed ? "ok-text" : "warn-text", s.boxed ? "✓ The assistant worked in a closed box: no internet, only the matter's folder" : "◐ The assistant was not fully boxed in this session"),
@@ -738,16 +777,21 @@
     p.append(el("h2", "section", "Searches"));
     if (!s.searches.length) p.append(el("p", "sub", "No sealed search completed in this session."));
     for (const x of s.searches) {
-      const card = el("div", "card");
-      card.append(el("div", "card-head", el("span", "title", `🔍 Search ${x.n}`), el("span", "sub", `${localTime(x.at)} · ${plural(x.documents.length, "document", "documents")}`)));
+      // A past search folds like any card: the heading is the handle, and it starts open.
+      const card = el("details", "card");
+      card.open = true;
+      card.append(el("summary", "card-head", el("span", "title", `🔍 Search ${x.n}`), el("span", "sub", `${localTime(x.at)} · ${plural(x.documents.length, "document", "documents")}`)));
       if (x.query) card.append(el("div", "card-query", x.query.length > 400 ? `${x.query.slice(0, 400)}…` : x.query));
       const list = el("ol", "docs");
       x.documents.forEach((d, i) => {
         const mark = s.marks[d.key];
-        list.append(el("li", "doc",
+        const title = el("div", "dtitle", d.title);
+        const row = el("li", "doc past",
           el("span", "rank", String(i + 1)),
-          el("div", "", el("span", "key", d.key), d.year ? el("span", "year", String(d.year)) : null, el("div", "dtitle", d.title)),
-          mark ? el("span", `mark-chip m-${mark}`, mark.replace("-", " ")) : el("span", "")));
+          el("div", "", el("span", "key", d.key), d.year ? el("span", "year", String(d.year)) : null, title),
+          mark ? el("span", `mark-chip m-${mark}`, mark.replace("-", " ")) : el("span", ""));
+        title.addEventListener("click", () => row.classList.toggle("open"));
+        list.append(row);
       });
       card.append(list);
       p.append(card);

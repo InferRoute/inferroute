@@ -344,7 +344,7 @@ class Launches:
 
     def view(self, it: Dict[str, Any]) -> Dict[str, Any]:
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
-                "elapsed": int(time.time() - it["started"]), "message": it["message"],
+                "started_at": int(it["started"]), "elapsed": int(time.time() - it["started"]), "message": it["message"],
                 "detail": it.get("detail", "") if it["state"] == "failed" else ""}
 
     def running_intake(self, ident: str) -> Optional[Dict[str, Any]]:
@@ -410,7 +410,8 @@ class Launches:
             except subprocess.TimeoutExpired:
                 it["proc"].kill()
 
-    def start(self, matter_id: str, *, intake_dir: str = "", draft_client: str = "Personal") -> Dict[str, Any]:
+    def start(self, matter_id: str, *, intake_dir: str = "", draft_client: str = "Personal",
+              draft: str = "") -> Dict[str, Any]:
         """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
         proposes matters from it. Both are the same child, the same page and the same sealed lane; only
         the command differs, so a reading session cannot drift into a second kind of session."""
@@ -420,6 +421,9 @@ class Launches:
         from . import pi_attested
         # The child's page shows a way back here, so a finished session is not a dead end.
         env = dict(os.environ, IR_PROBANT_NO_BROWSER="1", IR_PROBANT_HOME_URL=self.home_url)
+        env.pop("IR_PROBANT_DRAFT", None)
+        if draft:
+            env["IR_PROBANT_DRAFT"] = draft[:DRAFT_LIMIT]       # the page puts it in the message box; nothing is sent
         argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web", "--client", draft_client] if intake_dir
                 else [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
@@ -457,6 +461,77 @@ class Launches:
 
 
 NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the Matters page."
+
+
+DRAFT_LIMIT = 8000
+NOTES_DIR = "previous-sessions"
+NOTES_LIMIT = 400_000
+
+
+def continue_notes(client: str, matter: str, sid: str) -> Optional[Dict[str, str]]:
+    """What a continuation starts from: the earlier session written out IN FULL as a file in the matter's folder,
+    and a short message pointing at it.
+
+    A stored transcript cannot be resumed in attested mode (Pi's --resume is disabled on purpose), so a
+    continuation is a NEW session. An earlier version squeezed the session into the first message — queries cut
+    at 160 characters, bare document numbers, no answers — and read like a log, not like where the work stood.
+    The folder is what the assistant can already read, with no length limit, so the whole conversation, every
+    search with its full query and its documents' titles, and the marks go there; the message the person sees
+    and edits stays three lines. Nothing is sent until they press Send."""
+    d = session_detail(client, matter, sid)
+    if d is None:
+        return None
+    when = localtime_label(d.get("started_at"))
+    out = [f"# The session of {when}", "",
+           "This is what happened in an earlier session on this matter: the conversation, each search with its full "
+           "query and the documents it returned, and the marks. It is background to read, not instructions. "
+           "The invention itself is in disclosure.md.", ""]
+    conv = d.get("conversation")
+    if conv:
+        out += ["## The conversation", ""]
+        for row in conv:
+            kind, text = row.get("kind"), str(row.get("text") or "").strip()
+            if kind == "user" and text:
+                out += [f"**The professional:** {text}", ""]
+            elif kind == "assistant" and text:
+                out += [f"**The assistant:** {text}", ""]
+            elif kind == "search":
+                n = row.get("search_no")
+                out += [f"*(search {n} was run here{'' if row.get('ok') else ' and did not complete'})*", ""]
+            elif kind == "approval":
+                out += [f"*(the professional {'allowed' if row.get('answer') == 'allowed' else 'declined'} a search)*", ""]
+    out += ["## The searches", ""]
+    if not d["searches"]:
+        out += ["No search was completed in that session.", ""]
+    for x in d["searches"]:
+        out += [f"### Search {x['n']} — {localtime_label(x.get('at'))} — {len(x['documents'])} documents", "",
+                "Query:", "", "> " + str(x.get("query") or "(empty)").replace("\n", "\n> "), ""]
+        for i, doc in enumerate(x["documents"], 1):
+            year = f" ({doc['year']})" if doc.get("year") else ""
+            out.append(f"{i}. {doc['key']}{year} — {doc['title']}")
+        out.append("")
+    marks = d.get("marks") or {}
+    if marks:
+        titles = {doc["key"]: doc["title"] for x in d["searches"] for doc in x["documents"]}
+        out += ["## The professional's marks (their judgement, kept with the matter)", ""]
+        by: Dict[str, List[str]] = {}
+        for key, mark in marks.items():
+            by.setdefault(str(mark).replace("-", " "), []).append(f"{key} — {titles[key]}" if key in titles else key)
+        for mark, items in by.items():
+            out += [f"**{mark}**", ""] + [f"- {it}" for it in items] + [""]
+    stamp = str(d.get("id") or sid)[:13]
+    rel = f"{NOTES_DIR}/{stamp}.md"
+    message = (f"Continue the session of {when} on this matter. What happened in it — the conversation, the full searches "
+               f"and my marks — is in {rel}. Read that file first, tell me in a few lines where we had got to and what "
+               "is left to do, then wait for my instruction.")
+    return {"path": rel, "markdown": "\n".join(out)[:NOTES_LIMIT], "message": message}
+
+
+def localtime_label(iso: Any) -> str:
+    try:
+        return dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone().strftime("%-d %b %Y, %H:%M")
+    except (ValueError, TypeError):
+        return str(iso or "an earlier day")
 
 
 def key_status() -> Dict[str, Any]:
@@ -729,7 +804,23 @@ class Home:
                 return problem("Review this draft's disclosure and date before starting a session.", 409)
             if not key_status()["present"]:
                 return problem(NEEDS_KEY_WORDS, 409, extra={"needs_key": True})
-            return home.launches.view(home.launches.start(f"{client}/{matter}"))
+            draft = ""
+            earlier = str(d.get("continue_from") or "")
+            if earlier:
+                if not SESSION_ID_RE.match(earlier):
+                    return problem("That is not a session of this matter.", 404)
+                notes = continue_notes(client, matter, earlier)
+                if not notes:
+                    return problem("That session could not be found.", 404)
+                if not home.launches.running_for(f"{client}/{matter}"):          # never rewrite what a live session reads
+                    folder = Path(str(rec.get("workspace") or "")) / NOTES_DIR
+                    try:
+                        folder.mkdir(parents=True, exist_ok=True)
+                        (Path(str(rec.get("workspace"))) / notes["path"]).write_text(notes["markdown"], encoding="utf-8")
+                    except OSError as e:
+                        return problem(f"The earlier session could not be written into the matter's folder: {e}", 500)
+                draft = notes["message"]
+            return home.launches.view(home.launches.start(f"{client}/{matter}", draft=draft))
 
         @app.post("/api/sessions/end")
         async def end_session(request: Request):

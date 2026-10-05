@@ -155,6 +155,17 @@ button.brand:hover { background: var(--user); }
 .card-note.bad { color: var(--bad); background: var(--bad-soft); }
 .card-note.warn { color: var(--warn); background: var(--warn-soft); }
 .docs { list-style: none; margin: 0; padding: 0; }
+/* A past session's rows have THREE children (rank, document, mark chip) — no relevance bar, no buttons — so they
+   need their own columns; under the four-column rule the document fell into the 28px bar column and wrapped
+   one letter per line (Oct 5). */
+.doc.past { grid-template-columns: 26px minmax(0, 1fr) auto; }
+.doc.past .dtitle { cursor: pointer; }
+/* Cards that fold: the heading is the handle. */
+details.card > summary.card-head { cursor: pointer; list-style: none; }
+details.card > summary.card-head::-webkit-details-marker { display: none; }
+details.card > summary.card-head::before { content: "▾"; color: var(--faint); font-size: 12px; }
+details.card:not([open]) > summary.card-head { border-bottom: 0; }
+details.card:not([open]) > summary.card-head::before { content: "▸"; }
 /* FOUR columns: rank, relevance bar, document, marks. It was three, and the relevance bar was added as a
    fourth child without widening it — so the bar took the document's column, the document took the marks'
    column, and the mark buttons wrapped onto an implicit second row into the 26px rank column, where they
@@ -424,7 +435,7 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 .check-verdict { display: inline-block; font-weight: 650; border-radius: 999px; padding: 3px 12px; margin-bottom: 8px; }
 .check-verdict.passed { background: var(--accent-soft); color: var(--accent); }
 .check-verdict.failed { background: var(--bad-soft); color: var(--bad); }
-.check-verdict.test, .check-verdict.unauthenticated, .check-verdict.refused { background: var(--warn-soft); color: var(--warn); }
+.check-verdict.test, .check-verdict.unauthenticated, .check-verdict.refused, .check-verdict.nothing { background: var(--warn-soft); color: var(--warn); }
 .check-headline { font-weight: 650; margin-bottom: 2px; }
 .check-result p { margin: 4px 0; }
 .check-group { border-top: 1px solid var(--line); padding: 10px 0 8px; }
@@ -710,3 +721,5 @@ textarea.dropping { outline: 2px dashed var(--accent); outline-offset: 2px; }
 .msg-waiting .queued-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .msg-waiting .cancel-queued { flex: none; }
 .msg-withdrawn { opacity: .6; text-decoration: line-through; }
+
+.live-text { color: var(--accent); font-weight: 650; }

@@ -2191,6 +2191,15 @@
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
+    // A continuation: the home page wrote a first message from the earlier session. It goes in the box for the
+    // person to read and edit — nothing is sent until they press Send.
+    if (s.draft && !$("input").value) {
+      const box = $("input");
+      box.value = String(s.draft);
+      box.rows = Math.min(14, String(s.draft).split("\n").length + 1);
+      box.focus();
+      toast("Continuing an earlier session: the message below is ready to edit. Nothing is sent until you press Send.", "info");
+    }
     // Documents opened in EARLIER sessions on this matter, present from the first paint. That is the point of
     // reading them from the archive rather than from this page's own history.
     refreshDocuments();

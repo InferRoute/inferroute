@@ -1695,3 +1695,46 @@ def test_the_disclosure_can_be_read_in_a_session_with_no_search_machine():
     # The search tools stay where they were: they need the search machine and must not exist without one.
     for name in ('name: "prior_art_search"', 'name: "read_patent"', 'name: "deep_prior_art_search"'):
         assert ts.index(name) > cut, name
+
+
+def _run_ts(js):
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip(f"this node cannot run TypeScript: {r.stderr.strip()[:120]}")
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_a_read_that_cannot_open_a_returned_document_hands_over_what_the_device_holds():
+    """5 Oct, live: four results marked relevant, every read_patent came back 'not in this index', and the
+    assistant dropped the follow-up it could have run from text the device already held. The fallback runs the
+    extension's own heldInstead() and its trigger pattern in node."""
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    start = ts.index("const READ_FAILED_BUT_HELD")
+    fn = ts[start:ts.index("\n}\n", ts.index("function heldInstead")) + 3]
+    why = "US-1-A1 is not in this index, so there is nothing to read; do not describe it from memory"
+    js = (fn + f"\nconsole.log(JSON.stringify({{ trig: [READ_FAILED_BUT_HELD.test({json.dumps(why)}), "
+           "READ_FAILED_BUT_HELD.test('the local search verifier did not answer; the read did not complete'), "
+           "READ_FAILED_BUT_HELD.test(\"US-1-A1 was published on or after this matter's date bound, so the sealed machine refused to return it\"), "
+           "READ_FAILED_BUT_HELD.test('read_patent needs the user at this machine to approve sealed requests; refused without sending anything')], "
+           f"text: heldInstead('US-1-A1', 'A wearable cuff. Measures pressure.', {json.dumps(why)}) }}));")
+    got = json.loads(_run_ts(js))
+    assert got["trig"] == [True, True, False, False]            # a refusal the date bound or the professional made is not covered up
+    t = got["text"]
+    assert t.startswith("US-1-A1 — the sealed read could not open it (US-1-A1 is not in this index") and "nothing to read" not in t.split("\n")[0]
+    assert "NOT a full read" in t and "A wearable cuff. Measures pressure." in t
+
+
+def test_the_marks_list_says_what_each_marked_document_is_and_that_no_read_is_needed_first():
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "const held = (docText.get(key) ?? priorDocs.get(key) ?? \"\")" in ts
+    assert "(its text is not held on this device)" in ts
+    assert "you do not need read_patent first" in ts
+    # the read tool falls back to held text, and only for a read that could not be done
+    assert "if (held && READ_FAILED_BUT_HELD.test(why))" in ts and "throw err;" in ts

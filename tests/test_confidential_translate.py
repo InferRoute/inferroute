@@ -211,3 +211,30 @@ def test_native_openai_passthrough_pins_model_drops_identifiers_and_prepends_pre
     assert u == {"input_tokens": 6, "output_tokens": 3, "cache_read_input_tokens": 4, "cache_creation_input_tokens": 0}
     T.scan_openai_usage(b"data: [DONE]\n", u)
     assert T.openai_error("x")["error"]["message"] == "x"
+
+
+def test_a_tool_name_the_model_wraps_in_whitespace_is_trimmed_in_both_directions_of_streaming():
+    """5 Oct, live: every tool call after one turn came back as ' read_patent' (leading space) and the agent answered
+    'Tool  read_patent not found' to each — the follow-up search the professional asked for never ran."""
+    ev = _events([
+        _chunk({"tool_calls": [{"index": 0, "id": "call_a", "function": {"name": " read_patent", "arguments": '{"key":"US-1-A1"}'}}]}),
+        _chunk({"tool_calls": [{"index": 1, "id": "call_b", "function": {"name": " prior_art_search ", "arguments": "{}"}}]}),
+        _chunk(finish="tool_calls"),
+    ])
+    starts = [e["content_block"]["name"] for e in ev if e["type"] == "content_block_start"]
+    assert starts == ["read_patent", "prior_art_search"]
+    # a name that arrives as whitespace alone is not a name yet; the real one follows
+    ev = _events([
+        _chunk({"tool_calls": [{"index": 0, "id": "call_c", "function": {"name": " ", "arguments": ""}}]}),
+        _chunk({"tool_calls": [{"index": 0, "function": {"name": " matter_marks", "arguments": "{}"}}]}),
+        _chunk(finish="tool_calls"),
+    ])
+    assert [e["content_block"]["name"] for e in ev if e["type"] == "content_block_start"] == ["matter_marks"]
+
+
+def test_a_tool_name_with_whitespace_is_trimmed_in_a_non_streaming_reply_too():
+    resp = {"id": "x", "choices": [{"finish_reason": "tool_calls", "message": {"role": "assistant", "content": None, "tool_calls": [
+        {"id": "call_1", "type": "function", "function": {"name": " read_patent", "arguments": '{"key":"US-1-A1"}'}}]}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    out = T.from_openai(resp, KIMI)
+    assert [b["name"] for b in out["content"] if b["type"] == "tool_use"] == ["read_patent"]

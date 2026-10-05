@@ -307,6 +307,27 @@ function readText(out: SearchVerdict, key: string): string {
 	].filter(Boolean).join("\n");
 }
 
+// WHAT THE ASSISTANT GETS WHEN THE SEALED READ CANNOT OPEN A DOCUMENT THE SEARCH ITSELF RETURNED.
+//
+// Seen live, 5 Oct: the professional marked four results relevant and asked to "look deeper" at them. The
+// assistant opened each with read_patent first, every read came back "not in this index" — the enclave's read
+// store does not hold every document its search index returns, and a hiccup in the verifier looks the same —
+// and it then abandoned the follow-up searches it could have run from text this device already held. The text of
+// every returned document comes back WITH the search result, so a failed read is not a reason to know nothing
+// about it. What is held is handed over, labelled as exactly that: not a full read, no claims, no description.
+const READ_FAILED_BUT_HELD = /is not in this index|did not answer|did not verify/;
+function heldInstead(key: string, held: string, why: string): string {
+	const reason = why.replace(/[;,]?\s*(so )?(there is )?nothing (was |is )?(sent|to read).*$/i, "").trim() || "no reason given";
+	return [
+		`${key} — the sealed read could not open it (${reason}).`,
+		"What this device already holds for it is the text that came back with the search result that returned it. " +
+			"This is NOT a full read: you have not read its claims or its description, and you must not describe them. " +
+			"You can still search like this document, or read it against a feature of the disclosure, from this text.",
+		"",
+		held,
+	].join("\n");
+}
+
 async function searchCall(path: string, body: unknown, signal: AbortSignal | undefined): Promise<SearchVerdict> {
 	const timeout = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
 	const res = await fetch(`${SEARCH}${path}`, {
@@ -1554,13 +1575,31 @@ export default function (pi: ExtensionAPI) {
 			if (!docText.has(key) && !priorDocs.has(key)) {
 				throw new Error(`${key} was not returned by any search on this matter, so there is nothing to open; nothing was sent`);
 			}
-			const out = await sealedRead({ key, ctx, signal, phase: (name: string) => {
-				try { onUpdate?.({ content: [], details: { phase: name } }); } catch { /* decoration */ }
-			} });
+			let out: { sp: SearchProof; out: SearchVerdict };
+			try {
+				out = await sealedRead({ key, ctx, signal, phase: (name: string) => {
+					try { onUpdate?.({ content: [], details: { phase: name } }); } catch { /* decoration */ }
+				} });
+			} catch (err) {
+				const why = err instanceof Error ? err.message : String(err);
+				const held = docText.get(key) ?? priorDocs.get(key);
+				// Only for a read that could not be done. Not for a refusal the professional or the date bound made.
+				if (held && READ_FAILED_BUT_HELD.test(why)) {
+					return { content: [{ type: "text", text: heldInstead(key, held, why) }], details: undefined };
+				}
+				throw err;
+			}
 			return { content: [{ type: "text", text: readText(out.out, key) }], details: out.sp };
 		},
 
 		renderResult(result, { expanded }, theme) {
+			// No proof record means the sealed read could not open the document and the text held from the search
+			// result was handed over instead: say that, plainly, rather than "no search verification record".
+			if (!result.details) {
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.fg("dim", "Not opened in the sealed index: the text held from the search result was used"), 0, 0));
+				return box;
+			}
 			return renderSearchProof(result.details as SearchProof | undefined, expanded, theme);
 		},
 	});
@@ -2379,13 +2418,24 @@ export default function (pi: ExtensionAPI) {
 				throw new Error("the local search verifier did not answer; the marks could not be read");
 			}
 			const entries = Object.entries(state.marks ?? {});
+			let anyHeld = false;
 			const lines = entries.map(([key, m]) => {
 				const l = m.latest ?? {};
 				const exp = l.surfaced ? `; ${EXPOSURE_NOTE[l.surfaced] ?? l.surfaced}${l.surfaced === "this_session" && l.rank ? `, rank ${l.rank}` : ""}` : "";
-				return `- ${key}: ${MARK_LABEL[String(l.value)] ?? l.value}${exp}`;
+				// WHAT EACH MARKED DOCUMENT IS, right here. The assistant used to get only numbers and went to read each
+				// one first — four sealed reads that could fail — before it could search outward from them. The text
+				// came back with the search that returned the document and is held on this device.
+				const held = (docText.get(key) ?? priorDocs.get(key) ?? "").replace(/\s+/g, " ").trim();
+				if (held) anyHeld = true;
+				const about = held ? ` — "${held.length > 240 ? `${held.slice(0, 239)}…` : held}"` : " — (its text is not held on this device)";
+				return `- ${key}: ${MARK_LABEL[String(l.value)] ?? l.value}${exp}${about}`;
 			});
 			const text = entries.length
-				? ["The professional's relevance marks for this matter (their judgment, not yours):", ...lines].join("\n")
+				? ["The professional's relevance marks for this matter (their judgment, not yours):", ...lines,
+					...(anyHeld ? ["", "You already hold the text of the documents above, from the searches that returned them. To look deeper at " +
+						"one, search like it (prior_art_search with `like` set to its number) or read it against a feature of the disclosure — " +
+						"you do not need read_patent first. read_patent is for the parts a result trims, and it can answer \"not in this " +
+						"index\" for a document a search did return."] : [])].join("\n")
 				: "The professional has not marked any document on this matter yet.";
 			return { content: [{ type: "text", text }], details: { count: entries.length } };
 		},

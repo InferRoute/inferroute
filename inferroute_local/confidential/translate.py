@@ -247,13 +247,24 @@ def from_openai(resp: dict, model: str) -> dict:
             args = json.loads(fn.get("arguments") or "{}")
         except json.JSONDecodeError:
             args = {"_raw": fn.get("arguments")}
-        blocks.append({"type": "tool_use", "id": tc.get("id") or _tool_id(), "name": fn.get("name") or "",
+        blocks.append({"type": "tool_use", "id": tc.get("id") or _tool_id(), "name": _tool_name(fn.get("name")),
                        "input": args if isinstance(args, dict) else {"value": args}})
     if not blocks:
         blocks.append({"type": "text", "text": ""})
     return {"id": _msg_id(resp.get("id")), "type": "message", "role": "assistant", "model": model,
             "content": blocks, "stop_reason": _stop_reason(choice.get("finish_reason"), bool(calls)),
             "stop_sequence": None, "usage": _usage(resp.get("usage"))}
+
+
+def _tool_name(name) -> str:
+    """A tool's name as the model wrote it, without the whitespace it sometimes wraps it in.
+
+    Seen live, 5 Oct, on Kimi through the confidential lane: after one assistant turn the model began writing every
+    tool call's name with a LEADING SPACE (" read_patent", " prior_art_search") — the same space its text then
+    starts with. The agent matches names exactly, so each call came back "Tool  read_patent not found", the
+    assistant concluded the search tools "are not responding", and the follow-up the professional asked for was
+    abandoned. No tool name has whitespace in it, so trimming is never a loss."""
+    return name.strip() if isinstance(name, str) else ""
 
 
 def error_body(message: str, kind: str = "api_error") -> dict:
@@ -402,11 +413,11 @@ class StreamTranslator:
         fn = tc.get("function") or {}
         st = self.tools.get(idx)
         if st is None:
-            st = self.tools[idx] = {"id": tc.get("id"), "name": fn.get("name"), "block": None, "started": False, "pending": ""}
+            st = self.tools[idx] = {"id": tc.get("id"), "name": _tool_name(fn.get("name")) or None, "block": None, "started": False, "pending": ""}
         if tc.get("id"):
             st["id"] = tc["id"]
-        if fn.get("name"):
-            st["name"] = fn["name"]
+        if _tool_name(fn.get("name")):
+            st["name"] = _tool_name(fn["name"])
         if fn.get("arguments"):
             st["pending"] += fn["arguments"]
         if not st["started"] and st["name"]:

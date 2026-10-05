@@ -1175,7 +1175,10 @@ export default function (pi: ExtensionAPI) {
 				description: "File name inside the matter workspace. Omit it to read disclosure.md, which is what this tool is for.",
 			})),
 		}),
-		execute: async (params: { path?: string }) => {
+		// (toolCallId, params) — Pi passes the call id FIRST. This was declared as (params) alone, so `params` was the call
+		// id string, `params.path` was always undefined, and every call returned disclosure.md whatever file was asked for:
+		// the allowlist below never saw a path, and a named notes file "read" back as the disclosure (Henry, 5 Oct).
+		execute: async (_toolCallId: string, params: { path?: string }) => {
 			const root = process.cwd();
 			// NO PATH MEANS THE DISCLOSURE. This tool exists to read disclosure.md; its own promptSnippet is
 			// "Read the disclosure". A model that takes that literally calls it with no argument, and before

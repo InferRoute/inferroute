@@ -1738,3 +1738,17 @@ def test_the_marks_list_says_what_each_marked_document_is_and_that_no_read_is_ne
     assert "you do not need read_patent first" in ts
     # the read tool falls back to held text, and only for a read that could not be done
     assert "if (held && READ_FAILED_BUT_HELD.test(why))" in ts and "throw err;" in ts
+
+
+def test_every_tool_receives_its_arguments_where_pi_puts_them():
+    """Pi calls execute(toolCallId, params, signal, onUpdate, ctx). read_matter_file was declared execute(params): it was
+    handed the call id, params.path was always undefined, and it returned disclosure.md for EVERY path — so a notes
+    file the professional had named read back as the disclosure, and the scoped-reading allowlist never saw a path
+    (5 Oct). Every tool must take the call id first."""
+    import re
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    decls = re.findall(r"\bexecute(?::\s*async\s*|\s*)\(([^)]*)\)", ts)
+    decls = [d for d in decls if d is not None]
+    assert len(decls) >= 8
+    bad = [d for d in decls if not d.strip().startswith("_toolCallId")]
+    assert not bad, f"tools whose execute() does not take the call id first: {bad}"

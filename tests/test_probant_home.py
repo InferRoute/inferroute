@@ -781,6 +781,8 @@ def test_a_continuation_puts_the_whole_earlier_session_in_the_matter_folder_and_
     r = c.post("/api/sessions", json={"id": "Acme/cooling", "continue_from": SID}).json()
     assert r["state"] in ("starting", "ready") and r["started_at"] > 0
     message = seen["env"]["IR_PROBANT_DRAFT"]
+    # The notes file is NAMED for this session: the assistant's file tool refuses everything but the disclosure otherwise.
+    assert seen["env"]["IR_ATTESTED_READABLE"] == f"previous-sessions/{SID[:13]}.md"
     assert message.startswith("Continue the session of") and f"previous-sessions/{SID[:13]}.md" in message
     assert "Read that file first" in message and len(message) < 600           # short: the box is for the person to edit
     ws = Path(S.load_record("Acme", "cooling")["workspace"])
@@ -841,7 +843,7 @@ def test_an_ordinary_session_carries_no_draft(home, monkeypatch):
     monkeypatch.setattr(H.subprocess, "Popen", lambda argv, **kw: seen.update(env=kw["env"]) or FakeProc([]))
     monkeypatch.setenv("IR_PROBANT_DRAFT", "left over from a parent")
     c.post("/api/sessions", json={"id": "Acme/cooling"})
-    assert "IR_PROBANT_DRAFT" not in seen["env"]
+    assert "IR_PROBANT_DRAFT" not in seen["env"] and "IR_ATTESTED_READABLE" not in seen["env"]
 
 
 def test_the_pages_return_to_a_running_session_and_offer_to_continue_a_finished_one():

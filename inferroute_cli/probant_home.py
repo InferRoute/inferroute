@@ -411,7 +411,7 @@ class Launches:
                 it["proc"].kill()
 
     def start(self, matter_id: str, *, intake_dir: str = "", draft_client: str = "Personal",
-              draft: str = "") -> Dict[str, Any]:
+              draft: str = "", readable: str = "") -> Dict[str, Any]:
         """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
         proposes matters from it. Both are the same child, the same page and the same sealed lane; only
         the command differs, so a reading session cannot drift into a second kind of session."""
@@ -424,6 +424,11 @@ class Launches:
         env.pop("IR_PROBANT_DRAFT", None)
         if draft:
             env["IR_PROBANT_DRAFT"] = draft[:DRAFT_LIMIT]       # the page puts it in the message box; nothing is sent
+        if readable:
+            # The assistant may read ONLY disclosure.md unless the professional has named another file for the session
+            # (read_matter_file refuses the rest, on purpose: a stale backup once steered a survey). Choosing to
+            # continue an earlier session IS naming its notes file, so it is named here, for this session alone.
+            env["IR_ATTESTED_READABLE"] = ",".join(x for x in (env.get("IR_ATTESTED_READABLE", ""), readable) if x)
         argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web", "--client", draft_client] if intake_dir
                 else [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
@@ -820,7 +825,8 @@ class Home:
                     except OSError as e:
                         return problem(f"The earlier session could not be written into the matter's folder: {e}", 500)
                 draft = notes["message"]
-            return home.launches.view(home.launches.start(f"{client}/{matter}", draft=draft))
+            return home.launches.view(home.launches.start(f"{client}/{matter}", draft=draft,
+                                                          readable=notes["path"] if earlier else ""))
 
         @app.post("/api/sessions/end")
         async def end_session(request: Request):

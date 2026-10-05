@@ -1255,6 +1255,15 @@
       rd.readAsDataURL(f);
     });
     path.addEventListener("input", () => { if (path.value.trim()) { picked = null; chosen.textContent = ""; picker.value = ""; } });
+    // The typed path is the way through when a desktop's file chooser does not work (one hung on a Linux desktop whose file
+    // portal was stuck). Most people never need it, so it stays out of sight until asked for.
+    const pathField = field("Type its path", path);
+    pathField.hidden = true;
+    const typeLink = button("Can\u2019t use the chooser? Type the file\u2019s path instead", "ghost small", () => {
+      pathField.hidden = false;
+      typeLink.hidden = true;
+      path.focus();
+    });
     const source = (extra) => (picked ? { data_b64: picked.b64, ...extra } : { path: path.value, ...extra });
     const look = button("Look at it", "ghost", async () => {
       err.textContent = "";
@@ -1299,7 +1308,8 @@
         + "inside. Opening it creates one matter of your own per matter in the share, each with the date "
         + "bound the sender set."),
       el("div", "row", button("Choose the file\u2026", "ghost small", () => picker.click()), chosen),
-      field("Or type its path", path),
+      typeLink,
+      pathField,
       field("Open them under this client name", client, "Yours to choose — e.g. the sender's name."),
       err, preview,
     ], [button("Cancel", "ghost", closeDialog), look, go]);

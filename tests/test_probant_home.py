@@ -757,4 +757,6 @@ def test_the_share_dialog_offers_a_file_chooser_and_sends_the_files_bytes_not_a_
     body = js[js.index("function openShareDialog()"):js.index("// ── routing ──")]
     assert "Choose the file" in body and 'picker.type = "file"' in body and "readAsDataURL" in body
     assert "data_b64" in body and body.count("source(") >= 2          # both Look and Open use the chosen file
+    # the typed path is out of sight until asked for, but still there
+    assert "pathField.hidden = true" in body and "Type the file" in body and "pathField.hidden = false" in body
 

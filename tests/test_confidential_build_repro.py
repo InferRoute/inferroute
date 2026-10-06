@@ -306,9 +306,9 @@ def _direct():
 
 def test_the_direct_boot_build_claims_only_what_was_recomputed():
     b = _direct()
-    assert b["status"] == "observed", "RTMR3 is unreproduced and the image was not audited: not `reviewed`"
-    assert b["reproduced"] == ["rtmr1", "rtmr2"], "mrtd was not recomputed for this build and rtmr3 cannot be"
-    assert set(b["reproduced_from"]) == {"vmlinuz", "initrd", "cmdline"}
+    assert b["status"] == "observed", "the root filesystem was not rebuilt from source and the image was not audited: not `reviewed`"
+    assert b["reproduced"] == ["rtmr1", "rtmr2", "rtmr3"], "mrtd was not recomputed for this build"
+    assert set(b["reproduced_from"]) == {"vmlinuz", "initrd", "cmdline", "rtmr3_manifest"}
     for reg in b["reproduced"]:
         assert b.get(reg)
 
@@ -336,3 +336,55 @@ def test_direct_boot_cmdline_is_measured_with_initrd_prefixed_and_a_terminator()
 
 def test_a_changed_initramfs_changes_direct_boot_rtmr2():
     assert repro.rtmr2_direct("a b", b"initrd-one")[0] != repro.rtmr2_direct("a b", b"initrd-two")[0]
+
+
+# ── RTMR3 on direct-boot images: one extend over the file list baked into the initramfs ──
+
+def _manifest(rows):
+    return ("# header\n" + "".join(f"{p} {h}\n" for p, h in rows)).encode()
+
+
+def test_rtmr3_is_one_extend_over_the_sorted_hash_path_list():
+    import hashlib
+    h1, h2 = "1" * 96, "2" * 96
+    # manifest order is "<path> <hash>"; the measured chain is "<hash> <path>", sorted by path bytes
+    got, n = repro.rtmr3_from_manifest(_manifest([("/usr/b", h2), ("/etc/a", h1)]))
+    chain = f"{h1} /etc/a\n{h2} /usr/b\n".encode()
+    assert n == 2
+    assert got == hashlib.sha384(bytes(48) + hashlib.sha384(chain).digest()).hexdigest()
+
+
+def test_rtmr3_sorts_by_bytes_not_by_locale_and_keeps_spaces_in_paths():
+    import hashlib
+    h = "a" * 96
+    got, _ = repro.rtmr3_from_manifest(_manifest([("/x/b c", h), ("/x/B", h), ("/x/a", h)]))
+    chain = f"{h} /x/B\n{h} /x/a\n{h} /x/b c\n".encode()      # LC_ALL=C: uppercase first
+    assert got == hashlib.sha384(bytes(48) + hashlib.sha384(chain).digest()).hexdigest()
+
+
+def test_rtmr3_moves_when_any_listed_file_or_path_changes():
+    base = [("/etc/a", "1" * 96), ("/usr/b", "2" * 96)]
+    r0 = repro.rtmr3_from_manifest(_manifest(base))[0]
+    assert repro.rtmr3_from_manifest(_manifest([base[0], ("/usr/b", "3" * 96)]))[0] != r0
+    assert repro.rtmr3_from_manifest(_manifest([base[0], ("/usr/c", "2" * 96)]))[0] != r0
+    assert repro.rtmr3_from_manifest(_manifest(base + [("/usr/new", "4" * 96)]))[0] != r0
+
+
+def test_a_malformed_or_empty_manifest_is_refused_not_hashed():
+    with pytest.raises(ValueError):
+        repro.rtmr3_from_manifest(b"# only comments\n")
+    with pytest.raises(ValueError):
+        repro.rtmr3_from_manifest(_manifest([("/etc/a", "Z" * 96)]))
+
+
+# ── a refused build: seen, decided against, and not re-admittable ──
+
+def _refused():
+    return next(b for b in builds.BUNDLED if b["id"] == "tee-vm-2026-09-12")
+
+
+def test_guest_image_131_is_refused_with_its_reason():
+    b = _refused()
+    assert b["status"] == "refused" and b["refused_on"] == "2026-10-06"
+    assert "overlayroot" in b["refused_because"]
+    assert b["reproduced"], "the record of what was checked survives the refusal"

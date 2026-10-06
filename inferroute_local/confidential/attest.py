@@ -132,11 +132,16 @@ def situational_limitations(checks: dict) -> list[tuple[str, str]]:
                                  "IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1; nothing about this image has been reviewed."))
     elif "recomputed BY INFERROUTE" in why:
         regs = why.split("recomputed BY INFERROUTE")[0].rsplit(";", 1)[-1].strip()
+        if "RTMR3" in regs:
+            rest = ("The root-filesystem measurement was recomputed from the file list the operator bakes into "
+                    "the initial RAM filesystem, which the earlier measurement already pins; the files themselves "
+                    "were not rebuilt from source, so their hashes are the operator's output, checked for "
+                    "consistency rather than reproduced.")
+        else:
+            rest = ("What is not recomputed is the measurement over the root filesystem, which is encrypted in "
+                    "the published image.")
         out.append(("reproduced", f"For this build InferRoute recomputed {regs} on its own machine from artifacts "
-                                  "the operator publishes, and they matched — the firmware, the bootloader chain, "
-                                  "the kernel command line and the initial RAM filesystem. What is not recomputed "
-                                  "is the measurement over the root filesystem, which is encrypted in the "
-                                  "published image."))
+                                  f"the operator publishes, and they matched. {rest}"))
     elif "signed with a key held offline" in why:
         out.append(("signed-build", "This enclave build was authorised by InferRoute after your client was "
                                     "released, using a key kept off our servers — so a compromise of them "
@@ -336,6 +341,11 @@ def check_build_recorded(q: dict) -> Check:
         return Check(False, "no quote to match")
     rtmrs = [q[k].hex() for k in ("rtmr0", "rtmr1", "rtmr2", "rtmr3")]
     b = builds.lookup(q["mrtd"].hex(), rtmrs)
+    if b is not None and b.get("status") == "refused" and b.get("origin") == "bundled":
+        # Checked before IR_CONFIDENTIAL_ALLOW_NEW_BUILD on purpose: that switch admits builds we have
+        # not SEEN, and this is one we have seen and decided against.
+        return Check(False, f"build {b.get('id', '?')} — REFUSED by InferRoute since {b.get('refused_on', '?')}: "
+                            f"{b.get('refused_because', 'no reason recorded')}")
     if b is not None:
         st = b.get("status", "observed")
         repro = b.get("reproduced") or []

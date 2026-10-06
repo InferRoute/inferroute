@@ -14,6 +14,10 @@ firmware configuration and legitimately varies across hosts of one fleet (8 vari
 Statuses:
   reviewed  — InferRoute reproduced or audited the image behind these measurements.
   observed  — InferRoute has recorded this build in production and watches it; reproduction pending.
+  refused   — InferRoute has recorded this build and REFUSES it, for the reason in `refused_because`.
+              A refused build is never opened: not by IR_CONFIDENTIAL_ALLOW_NEW_BUILD, not by a row
+              the relay serves, not by a local override (all three are additions, and the bundled
+              row for the same measurements always wins).
 
 `reproduced` lists the registers InferRoute has recomputed ITSELF, from artifacts published by
 the operator but fetched and measured on our own machine — not taken from the attestation path
@@ -23,9 +27,13 @@ A register in this list no longer rests on the operator's word:
          is why one MRTD covers a whole fleet of differently-shaped hosts).
   rtmr1  the bootloader chain: partition table, then shim and GRUB, Authenticode-hashed.
   rtmr2  the owner-key variables, then the kernel command line and the initramfs.
-Registers NOT listed are still recorded-and-watched rather than reproduced. For this image that
-is rtmr3, which hashes a list of root-filesystem files — and that filesystem is encrypted in the
-published image, so it cannot be recomputed from the download.
+  rtmr3  the root-filesystem file list. Only for direct-boot images (1.4.x): there it is one extend
+         over the sorted file-hash list the build bakes into the initramfs, and the initramfs is
+         itself in rtmr2 — so the list is pinned by a register we derive, and rtmr3 follows from it.
+         On the 1.3.x images the root filesystem is encrypted in the download and rtmr3 cannot be
+         recomputed. In neither case have we rebuilt that filesystem from source: rtmr3 in this list
+         means "the measured file list is the published one", not "the files are what the recipe makes".
+Registers NOT listed are still recorded-and-watched rather than reproduced.
   (absent)  — a build InferRoute has never seen: the session REFUSES unless
               IR_CONFIDENTIAL_ALLOW_NEW_BUILD=1, in which case it opens with a warning on the panel.
 
@@ -42,7 +50,19 @@ from pathlib import Path
 BUNDLED: list[dict] = [
     {
         "id": "tee-vm-2026-09-12",
-        "status": "observed",
+        # REFUSED 2026-10-06. This is the operator's guest image 1.3.1, and it carries the overlayroot
+        # defect we reported to the operator on 2026-09-13: an unmeasured /etc/overlayroot.local.conf
+        # enables a host-attached config disk (LABEL=OROOTCFG), and overlayroot runs immediately
+        # before the RTMR3 measurement, so whoever attaches disks to the VM can shadow /usr, /opt and
+        # /etc/systemd with RTMR3 unchanged. The operator fixed it in 1.4.0 (hooks and the local conf
+        # removed, both conf paths measured), but its registry still lists 1.3.x as accepted and 3 of
+        # 16 kimi-k2.6 instances were still running it on 2026-10-06. A measurement that a known
+        # defect leaves unchanged cannot vouch for that image, so we stop opening it rather than
+        # caveat it. The row stays, with its reproduction, so the record of what we checked survives
+        # and so no run-time row can re-admit the same measurements.
+        "status": "refused",
+        "refused_on": "2026-10-06",
+        "refused_because": "guest image 1.3.1 lets the host shadow the root filesystem without changing RTMR3 (overlayroot config disk, fixed by the operator in 1.4.0)",
         "first_seen": "2026-09-12",
         "mrtd": "261ce538b435e2d0e85fc97e254bc99154c507b7a8e13d59b69f8532384f1d0bfaadfddf3fccc6e0a411203840bbee8d",
         "rtmr1": "9b8b2915351a3166f742024edafb6cce244c1df4056eb1f9eb608c3616b9d63729ae00c98d1dc108009c0978b19dc207",
@@ -83,10 +103,18 @@ BUNDLED: list[dict] = [
         #               kernel / initramfs / command line (`scripts/reproduce_enclave_build.py
         #               --direct`). Both matched the LIVE quotes exactly, so the model was
         #               validated against hardware, not only against the tool that computes it.
+        #   reproduced  RTMR3, by us, on 2026-10-06. From 1.4.0 the boot measurement is one extend over
+        #               the sorted "<sha384> <path>" list of 49,177 measured files, and the build bakes
+        #               that list into the initramfs (/etc/tdx-rtmr3-expected-hashes). The initramfs is
+        #               in RTMR2, which we reproduce, so the list is pinned by a register we derive; the
+        #               computed RTMR3 matched 12 live kimi-k2.6 quotes the same day. Coverage is now the
+        #               OS itself (/usr/lib, /usr/bin, the service venv, kernel modules, systemd units),
+        #               not only configuration. We did NOT rebuild the root filesystem from the operator's
+        #               pinned recipe, so the 49k file hashes are the operator's output, checked for
+        #               consistency, not reproduced from source.
         #   NOT         MRTD (not recomputed today: the firmware blob is byte-identical to the one
         #               MRTD was reproduced from on 2026-09-12 and the register is unchanged, but
-        #               that is an identity, not a recomputation), and RTMR3 (the root filesystem
-        #               is encrypted in the published image, as for the previous build).
+        #               that is an identity, not a recomputation).
         #   NOT         audited: the 1.3.1 -> 1.4.1 diff was not read, only its changelog.
         # The measurements are also on the operator's own published list, which is what
         # `measurement_ok` checks; that is the operator agreeing with itself and counts for nothing here.
@@ -97,8 +125,8 @@ BUNDLED: list[dict] = [
         "rtmr1": "d3a862ff47357f374fc72c7f02a480a13790d1805e24aaa8de1f03994256625ce0f593ae35ea8f0c24d09f7df36cb0ed",
         "rtmr2": "da23f73e0fddeb8128f706ecfbecbcf8cee34af7e4907d8fbc85e9b216acee27bf6cc3655eaf4d33cab76adea79fa153",
         "rtmr3": "d9dc4c6079fb12a21ad2aa8e329d8bfa61aaa13d3ffd10a93a2c4e82f0e35efbf28f5cf3bed0c0c1b517a7c327a25226",
-        "reproduced": ["rtmr1", "rtmr2"],
-        "reproduced_on": "2026-09-30",
+        "reproduced": ["rtmr1", "rtmr2", "rtmr3"],
+        "reproduced_on": "2026-10-06",
         # Direct boot: the host hands the firmware kernel + initramfs + command line, so shim and GRUB
         # are not in this chain (see the reproduction script). SHA-256 of the three files, which also
         # equal the sha256 the operator's manifest.json lists for them.
@@ -106,8 +134,10 @@ BUNDLED: list[dict] = [
             "vmlinuz": "d5d71ed32239eaa9bcb0528227a7adb62688250ce9f163b3e04e9675ddf86cff",
             "initrd": "69ff9c75a88cbea772664ad5ec6c8174c657074845170f82ea0dc67493a2b0a0",
             "cmdline": "27cf61470fee944b05843b78e18fdb596ed8c4db299c0d5153410604b4dd550a",
+            # the RTMR3 file list, as extracted from that initramfs
+            "rtmr3_manifest": "c9ac615e2233ebca19bdfafdeb1275c99c174bc88c048c72b92dfe46d8197cd3",
         },
-        "note": "operator guest image 1.4.1 (direct boot); RTMR1+RTMR2 recomputed from the published kernel/initramfs/cmdline; MRTD and RTMR3 not recomputed; 1.4.0 is NOT recorded (its artifacts are no longer published)",
+        "note": "operator guest image 1.4.1 (direct boot); RTMR1+RTMR2+RTMR3 recomputed from the published kernel/initramfs/cmdline (RTMR3 from the file list baked into the initramfs; root filesystem not rebuilt from source); MRTD not recomputed; 1.4.0 is NOT recorded (its artifacts are no longer published)",
     },
 ]
 

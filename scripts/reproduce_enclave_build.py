@@ -28,8 +28,19 @@ which carries a BOOT_IMAGE= prefix the configuration file does not show.
 
 NOT reproduced here, and deliberately not claimed:
   RTMR0  measures host firmware configuration and legitimately varies per host.
-  RTMR3  hashes a list of root-filesystem files. That filesystem is encrypted in the published
-         image, so it cannot be recomputed from the download alone.
+  RTMR3 on the GRUB-chain images (1.3.x): it folds root-filesystem files one by one, that filesystem
+         is encrypted in the published image, so it cannot be recomputed from the download alone.
+
+RTMR3 on direct-boot images (1.4.x) IS reproduced, and the reason is structural, not a shortcut.
+From 1.4.0 the boot-time measurement is ONE extend over the whole sorted file-hash list:
+    RTMR3 = SHA384(0^48 || SHA384("<sha384> <path>\n" for every measured file, sorted under LC_ALL=C))
+and the build bakes the expected list into the initramfs (/etc/tdx-rtmr3-expected-hashes). The
+initramfs is measured into RTMR2, which this script recomputes, so the list is pinned by a register
+we already derive and RTMR3 follows from it by arithmetic. A boot whose real files differ from the
+list either powers off (a listed file changed) or produces a different RTMR3 (a file added), which
+the recorded-build check then refuses. What this does NOT establish: that the 49k hashes in the list
+are what the operator's public build recipe produces. That would take rebuilding the root filesystem
+from the pinned base image and package snapshot, which is not done here.
 
 Two boot models, because the operator changed how it boots between image versions:
 
@@ -50,7 +61,7 @@ Usage
     reproduce_enclave_build.py --direct <prefix-or-URL-prefix> [--build <id>] [--out f.json]
         # reads <prefix>.vmlinuz, <prefix>.initrd, <prefix>.cmdline
 
-Requires: qemu-img and debugfs (e2fsprogs). MRTD additionally needs a build of tdx-measure
+Requires: qemu-img and debugfs (e2fsprogs); --direct RTMR3 needs unmkinitramfs (initramfs-tools-core). MRTD additionally needs a build of tdx-measure
 (github.com/virtee/tdx-measure); without it the script still does RTMR1 and RTMR2, which need
 nothing beyond the published image itself.
 """
@@ -351,6 +362,41 @@ def rtmr2_direct(cmdline: str, initrd: bytes) -> tuple[str, list[tuple[str, str]
     return _fold([d for _, d in log]), [(n, d.hex()) for n, d in log]
 
 
+MANIFEST_IN_INITRD = "etc/tdx-rtmr3-expected-hashes"
+
+
+def rtmr3_from_manifest(text: bytes) -> tuple[str, int]:
+    """RTMR3 of a 1.4.x image from its baked file-hash manifest ("<path> <sha384hex>" per line).
+
+    Mirrors the boot path exactly: `tdx-measure hash` emits "<sha384> <path>" per file, sorted by
+    path under LC_ALL=C (byte order), and `rtmr3-measure` extends RTMR3 once with SHA-384 of that
+    text. Paths may contain spaces, so the hash is taken from a fixed offset at the end of the line,
+    as the boot script does, never by splitting on whitespace."""
+    entries: dict[bytes, bytes] = {}
+    for line in text.split(b"\n"):
+        if line.startswith(b"#") or len(line) < 98:
+            continue
+        path, digest = line[:-97], line[-96:]
+        if line[-97:-96] != b" " or not all(c in b"0123456789abcdef" for c in digest):
+            raise ValueError(f"unexpected manifest line: {line[:80]!r}")
+        entries[path] = digest
+    if not entries:
+        raise ValueError("manifest holds no file hashes")
+    chain = b"".join(entries[p] + b" " + p + b"\n" for p in sorted(entries))
+    return hashlib.sha384(bytes(48) + hashlib.sha384(chain).digest()).hexdigest(), len(entries)
+
+
+def manifest_from_initrd(initrd: Path, workdir: Path) -> bytes | None:
+    """Pull the RTMR3 manifest out of an initramfs (early microcode cpio + compressed main cpio)."""
+    out = workdir / "initrd-unpacked"
+    r = subprocess.run(["unmkinitramfs", str(initrd), str(out)], capture_output=True)
+    if r.returncode != 0:
+        print(f"    unmkinitramfs failed ({r.returncode}); RTMR3 skipped")
+        return None
+    hits = sorted(out.glob(f"**/{MANIFEST_IN_INITRD}"))
+    return hits[0].read_bytes() if hits else None
+
+
 def _fetch(prefix: str, ext: str, dest: Path) -> bytes:
     src = f"{prefix}.{ext}"
     if "://" in src:
@@ -533,6 +579,13 @@ def _main_direct(a) -> int:
     r1, log1 = rtmr1_direct(kernel)
     r2, log2 = rtmr2_direct(cmdline, initrd)
     computed = {"rtmr1": r1, "rtmr2": r2}
+    manifest = manifest_from_initrd(tmp / "initrd", tmp)
+    if manifest is None:
+        print(f"    rtmr3 skipped: no /{MANIFEST_IN_INITRD} in the initramfs (pre-1.4 image, or unmkinitramfs missing)")
+    else:
+        computed["rtmr3"], n_files = rtmr3_from_manifest(manifest)
+        inputs["rtmr3_manifest"] = hashlib.sha256(manifest).hexdigest()
+        print(f"    rtmr3 from the initramfs manifest: {n_files} files")
     for tag, log in (("rtmr1", log1), ("rtmr2", log2)):
         for name, digest in log:
             print(f"    {tag} event  {digest[:24]}…  {name}")

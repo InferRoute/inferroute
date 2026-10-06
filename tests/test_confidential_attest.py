@@ -728,3 +728,33 @@ def test_errors_cannot_exceed_requests_in_the_success_rate(tmp_path, monkeypatch
     _receipts_c(tmp_path, monkeypatch, [("odd", 3, 3, 5, 40)])
     s, _ = C.fleet_success("odd")
     assert 0.0 <= s <= 1.0, f"the success rate left [0,1]: {s}"
+
+
+def test_a_refused_build_stays_refused_whatever_tries_to_admit_it(world, monkeypatch):
+    """A refused build is one we have SEEN and decided against. The new-build switch, a relay row and
+    a local override are all ways to admit builds we have NOT seen; none of them may reopen this one."""
+    from inferroute_local.confidential import builds
+    monkeypatch.setattr(builds, "BUNDLED", [{"id": "bad-image", "status": "refused", "refused_on": "2026-10-06",
+                                            "refused_because": "the host can shadow the root filesystem",
+                                            "first_seen": "2026-01-01", "mrtd": "aa" * 48,
+                                            "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}])
+    r = A.verify_instance(world["inst"], NONCE, world["ref"], world["e2e_pk"])
+    c = r.checks["build_recorded"]
+    assert not c.ok and not r.verified
+    assert "REFUSED" in c.why and "shadow the root filesystem" in c.why and "not recorded" not in c.why
+    monkeypatch.setenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD", "1")
+    assert not A.verify_instance(world["inst"], NONCE, world["ref"], world["e2e_pk"]).checks["build_recorded"].ok
+    assert builds.absorb_remote([{"id": "readmit", "status": "reviewed", "mrtd": "aa" * 48,
+                                  "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 0
+    assert not A.verify_instance(world["inst"], NONCE, world["ref"], world["e2e_pk"]).checks["build_recorded"].ok
+
+
+def test_the_reproduced_limitation_says_what_rtmr3_reproduction_does_and_does_not_mean():
+    lim = dict(A.situational_limitations({"build_recorded": {"why": (
+        "build x — recorded by InferRoute since 2026-09-30; RTMR1+RTMR2+RTMR3 recomputed BY INFERROUTE from published artifacts")}}))
+    text = lim["reproduced"]
+    assert "RTMR1+RTMR2+RTMR3" in text and "not rebuilt from source" in text
+    assert "encrypted in the published image" not in text
+    old = dict(A.situational_limitations({"build_recorded": {"why": (
+        "build x — recorded by InferRoute since 2026-09-12; MRTD+RTMR1+RTMR2 recomputed BY INFERROUTE from published artifacts")}}))
+    assert "encrypted in the published image" in old["reproduced"]

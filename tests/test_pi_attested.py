@@ -215,7 +215,7 @@ def test_verdict_is_read_locally_and_never_reaches_the_model(tmp_path, user_pi):
     assert leaked == [], f"verdict strings reached the provider payload: {leaked}"
     cards = _proof_entries(env)
     assert cards and cards[0]["ok"] is True and cards[0]["instance"] == INSTANCE_MARK[:8]
-    assert cards[0]["passed"] == cards[0]["total"] == 15
+    assert cards[0]["passed"] == cards[0]["total"] == 16   # 15 + quote_in_signed_evidence (2026-10-07)
     assert cards[0]["receiptPath"].endswith(RECEIPT_MARK)
 
 

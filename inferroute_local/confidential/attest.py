@@ -64,7 +64,7 @@ _OFF = {
     "td_attributes": (120, 128), "mrtd": (136, 184), "rtmr0": (328, 376),
     "rtmr1": (376, 424), "rtmr2": (424, 472), "rtmr3": (472, 520), "report_data": (520, 584),
 }
-REQUIRED = ("nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "build_recorded", "chain_ok")
+REQUIRED = ("quote_in_signed_evidence", "nonce_in_body", "sig_ok", "spki_bound", "e2e_key_bound", "tdx_shape", "measurement_ok", "build_recorded", "chain_ok")
 # Online checks (Intel PCS + NVIDIA NRAS), added by `verify_online`; an instance is verified only
 # when BOTH sets pass. Kept separate so the offline pass can run over a whole fleet cheaply and the
 # online pass only over the instances a session could actually use.
@@ -72,6 +72,7 @@ REQUIRED_ONLINE = ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe
 
 # Plain-language labels + the one line of "why it matters" the display prints beside each.
 LABELS: dict[str, tuple[str, str]] = {
+    "quote_in_signed_evidence": ("Quote inside the signed evidence", "the quote checked is the copy the enclave signed, not the unsigned one beside it"),
     "nonce_in_body": ("Fresh challenge answered", "the evidence was made for this session, not replayed"),
     "sig_ok": ("Signature valid", "signed by the key the enclave holds"),
     "spki_bound": ("Signing key bound to enclave", "the hardware quote commits to that signing key"),
@@ -455,12 +456,35 @@ def check_chain(certs: list) -> Check:
 
 # ───────────────────────────── verdicts ─────────────────────────────
 
+def signed_quote(inst: dict) -> tuple[bytes, Check]:
+    """The TDX quote as it sits INSIDE the signed attested body (`evidence.tdx_quote`, base64).
+
+    The evidence also carries a top-level `quote`, but the operator has confirmed (2026-10-07) that the
+    top-level `quote` and `gpu_evidence` are historical copies the signature does NOT cover, kept for
+    old verifiers, and will become opt-out. So the quote every check reads is the signed one, and the
+    loose copy, when present, must be byte-identical. Not exploitable before this change, since a quote
+    is Intel-signed and bound to our nonce, the sealing key and the signing certificate, but there is no
+    reason to read the unsigned copy of anything, and when the loose copy goes away this keeps working."""
+    try:
+        body = json.loads(body_bytes(inst.get("attested_body") or "")[0])
+        tq = (body.get("evidence") or {}).get("tdx_quote")
+    except Exception:
+        tq = None
+    if not isinstance(tq, str) or not tq:
+        return b"", Check(False, "the signed attested body carries no TDX quote")
+    loose = inst.get("quote")
+    if loose and loose != tq:
+        return b"", Check(False, "the quote outside the signed body DIFFERS from the signed copy")
+    return _b64(tq), Check(True, "quote read from the enclave-signed body (the copy the signature covers)")
+
+
 def verify_instance(inst: dict, nonce: str, reference, e2e_pubkey_b64: str | None = None) -> InstanceReport:
     body = inst.get("attested_body") or ""
-    quote_b = _b64(inst.get("quote") or "")
+    quote_b, quote_check = signed_quote(inst)
     q = quote_fields(quote_b)
     certs = embedded_chain(quote_b)
     checks = {
+        "quote_in_signed_evidence": quote_check,
         "nonce_in_body": check_nonce(body, nonce),
         "sig_ok": check_signature(body, inst.get("signature") or "", inst.get("certificate") or ""),
         "spki_bound": check_spki_bound(q, inst.get("certificate") or ""),
@@ -554,7 +578,7 @@ async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, ti
     """Add the Intel PCS + NVIDIA NRAS checks to an offline-verified report (in place) and recompute
     `verified`. Never raises: an unreachable service is a failed check with the reason named."""
     from . import attest_intel, attest_nvidia
-    quote_b = _b64(inst.get("quote") or "")
+    quote_b = signed_quote(inst)[0]
     certs = embedded_chain(quote_b)
     ck = report.checks
     try:

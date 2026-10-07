@@ -244,7 +244,7 @@ def test_verify_online_marks_unreachable_services_as_failed_checks_never_raises(
         async def post(self, *a, **k):
             raise ConnectionError("offline")
     gpu = [{"arch": "BLACKWELL", "evidence": "x", "certificate": "y"}]
-    inner = json.dumps({"evidence": {"tdx_quote": "…", "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
+    inner = json.dumps({"evidence": {"tdx_quote": base64.b64encode(q).decode(), "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
     inst = {"quote": base64.b64encode(q).decode(), "attested_body": base64.b64encode(inner).decode(), "gpu_evidence": gpu}
     out = asyncio.run(A.verify_online(rep, inst, NONCE, Dead()))
     assert out.checks["quote_sig"].ok, "the quote's own signature needs no network"
@@ -261,7 +261,7 @@ def test_gpu_reports_are_taken_from_the_signed_body_and_a_divergent_loose_copy_i
     import base64 as b64
     q = intel["quote"]
     gpu = [{"arch": "BLACKWELL", "evidence": "AAAA", "certificate": "BBBB"}]
-    inner = json.dumps({"evidence": {"tdx_quote": "…", "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
+    inner = json.dumps({"evidence": {"tdx_quote": b64.b64encode(q).decode(), "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
     inst = {"quote": b64.b64encode(q).decode(), "attested_body": b64.b64encode(inner).decode(), "gpu_evidence": gpu}
     assert A.signed_gpu_evidence(inst) == gpu
     rep = A.InstanceReport("i-1", {k: A.Check(True, "x") for k in A.REQUIRED}, 1, "aa", [], True, e2e_pubkey="PK")
@@ -288,7 +288,7 @@ def test_gpu_reports_are_taken_from_the_signed_body_and_a_divergent_loose_copy_i
     tampered = dict(inst, gpu_evidence=[{"arch": "BLACKWELL", "evidence": "ZZZZ", "certificate": "BBBB"}])
     out = asyncio.run(A.verify_online(rep, tampered, NONCE, Http()))
     assert not out.checks["gpu_in_signed_evidence"].ok and "DIFFERS" in out.checks["gpu_in_signed_evidence"].why
-    nogpu = dict(inst, attested_body=b64.b64encode(json.dumps({"evidence": {}, "nonce": NONCE}).encode()).decode())
+    nogpu = dict(inst, attested_body=b64.b64encode(json.dumps({"evidence": {"tdx_quote": inst["quote"]}, "nonce": NONCE}).encode()).decode())
     out = asyncio.run(A.verify_online(rep, nogpu, NONCE, Http()))
     assert "carries no GPU evidence" in out.checks["gpu_in_signed_evidence"].why
 

@@ -321,7 +321,7 @@ def test_the_claim_the_lane_depends_on_is_conditioned():
         checks = {k: {"ok": True} for k in (
             "e2e_key_bound", "tdx_shape", "build_recorded", "gpu_verified", "measurement_ok",
             "chain_ok", "sig_ok", "nonce_in_body", "spki_bound", "quote_sig", "root_pinned",
-            "not_revoked", "tcb_current", "qe_current", "gpu_in_signed_evidence")}
+            "not_revoked", "tcb_current", "qe_current", "gpu_in_signed_evidence", "quote_in_signed_evidence")}
         verdict = "confidential"; model_short = "kimi-k3"; upstream_model = "x/K3-TEE"
         started_at = "2026-09-30T22:00:00Z"; verified_at = started_at
         instance = {"id": "i-a"}

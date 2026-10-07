@@ -228,7 +228,7 @@ def render_summary(r: Receipt, console: Console | None = None) -> None:
 
 
 # Short column heads for the operator fleet table (offline | online), in check order.
-FLEET_COLS = {"nonce_in_body": "nonce", "sig_ok": "sig", "spki_bound": "spki", "e2e_key_bound": "key", "tdx_shape": "tdx",
+FLEET_COLS = {"quote_in_signed_evidence": "q∈sig", "nonce_in_body": "nonce", "sig_ok": "sig", "spki_bound": "spki", "e2e_key_bound": "key", "tdx_shape": "tdx",
               "measurement_ok": "build", "chain_ok": "chain", "quote_sig": "qsig", "root_pinned": "root", "not_revoked": "crl",
               "tcb_current": "tcb", "qe_current": "qe", "gpu_in_signed_evidence": "gpu∈sig", "gpu_verified": "gpu", "build_recorded": "rec"}
 

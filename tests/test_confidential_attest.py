@@ -47,6 +47,14 @@ def _record_fixture_build(monkeypatch):
     monkeypatch.setattr(builds, "_EXTRA", [])
 
 
+def _with_quote(world, quote_b64: str) -> dict:
+    """The fixture instance carrying a different quote, as the operator would serve it: inside the
+    signed body (re-signed by the same key) AND as the loose top-level copy."""
+    inner = json.dumps({"evidence": {"tdx_quote": quote_b64}, "nonce": NONCE}).encode()
+    sig = base64.b64encode(world["key"].sign(inner, padding.PKCS1v15(), hashes.SHA256())).decode()
+    return dict(world["inst"], quote=quote_b64, signature=sig, attested_body=base64.b64encode(inner).decode())
+
+
 @pytest.fixture
 def world():
     key, cert = _cert()
@@ -54,9 +62,10 @@ def world():
     spki = cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     e2e_pk = base64.b64encode(b"\x42" * 1184).decode()
     rd = hashlib.sha256((NONCE + e2e_pk).encode()).digest() + hashlib.sha256(spki).digest()
-    inner = json.dumps({"evidence": {"tdx_quote": "…"}, "nonce": NONCE}).encode()
+    quote = base64.b64encode(_quote(rd, chain=pem)).decode()
+    inner = json.dumps({"evidence": {"tdx_quote": quote}, "nonce": NONCE}).encode()
     sig = base64.b64encode(key.sign(inner, padding.PKCS1v15(), hashes.SHA256())).decode()
-    inst = {"instance_id": "i-good", "quote": base64.b64encode(_quote(rd, chain=pem)).decode(),
+    inst = {"instance_id": "i-good", "quote": quote,
             "certificate": pem.decode(), "signature": sig,
             "attested_body": base64.b64encode(inner).decode(), "gpu_evidence": [{}] * 8}
     ref = {"configs": [{"name": "h200-x8", "mrtd": "aa" * 48, "rtmrs": ["b0" * 48, "b1" * 48, "b2" * 48, "b3" * 48]},
@@ -88,7 +97,7 @@ def test_tampered_body_and_wrong_key_signature_are_refused(world):
 
 def test_quote_not_bound_to_the_certificate_is_refused(world):
     q = base64.b64encode(_quote(b"\x22" * 64, chain=world["pem"].encode())).decode()
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, world["ref"], world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, world["ref"], world["e2e_pk"])
     assert not r.checks["spki_bound"].ok and "MISMATCH" in r.checks["spki_bound"].why
 
 
@@ -96,12 +105,12 @@ def test_quote_not_bound_to_the_certificate_is_refused(world):
     ({"debug": True}, "DEBUG"), ({"tee": 0x00}, "not TDX"), ({"ver": 3}, "version 3")])
 def test_debuggable_non_tdx_and_wrong_version_quotes_are_refused(world, kw, expect):
     q = base64.b64encode(_quote(world["rd"], chain=world["pem"].encode(), **kw)).decode()
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, world["ref"], world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, world["ref"], world["e2e_pk"])
     assert not r.checks["tdx_shape"].ok and expect in r.checks["tdx_shape"].why
 
 
 def test_short_buffer_is_refused_not_crashed(world):
-    r = A.verify_instance(dict(world["inst"], quote=base64.b64encode(b"\x00" * 10).decode()), NONCE, world["ref"], world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, base64.b64encode(b"\x00" * 10).decode()), NONCE, world["ref"], world["e2e_pk"])
     assert not r.verified and not r.checks["tdx_shape"].ok and not r.checks["spki_bound"].ok
 
 
@@ -110,12 +119,12 @@ def test_measurements_must_all_sit_in_one_registry_config(world):
                          {"name": "b", "rtmrs": ["b2" * 48, "b3" * 48]}]}
     assert not A.verify_instance(world["inst"], NONCE, split).checks["measurement_ok"].ok
     q = base64.b64encode(_quote(world["rd"], mrtd=b"\xCC" * 48, chain=world["pem"].encode())).decode()
-    assert not A.verify_instance(dict(world["inst"], quote=q), NONCE, world["ref"], world["e2e_pk"]).checks["measurement_ok"].ok
+    assert not A.verify_instance(_with_quote(world, q), NONCE, world["ref"], world["e2e_pk"]).checks["measurement_ok"].ok
 
 
 def test_chain_without_certificates_or_with_a_stranger_is_refused(world):
     q = base64.b64encode(_quote(world["rd"])).decode()          # no embedded PEM
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, world["ref"], world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, world["ref"], world["e2e_pk"])
     assert not r.checks["chain_ok"].ok and "no certificates" in r.checks["chain_ok"].why
     _, stranger = _cert("stranger")
     leafkey, leaf = _cert("leaf2", issuer=world["cert"].subject, issuer_key=world["key"])
@@ -183,11 +192,11 @@ def test_an_unrecorded_build_is_refused_unless_explicitly_allowed(world, monkeyp
     from inferroute_local.confidential import builds
     q = base64.b64encode(_quote(world["rd"], mrtd=b"\xCC" * 48, chain=world["pem"].encode())).decode()
     ref = {"configs": [{"name": "x", "mrtd": "cc" * 48, "rtmrs": ["b0" * 48, "b1" * 48, "b2" * 48, "b3" * 48]}]}
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, ref, world["e2e_pk"])
     assert r.checks["measurement_ok"].ok, "published by the operator…"
     assert not r.checks["build_recorded"].ok and "not recorded" in r.checks["build_recorded"].why and not r.verified
     monkeypatch.setenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD", "1")
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, ref, world["e2e_pk"])
     assert r.checks["build_recorded"].ok and "NEW BUILD" in r.checks["build_recorded"].why
     monkeypatch.delenv("IR_CONFIDENTIAL_ALLOW_NEW_BUILD")
     # A build served at run time is accepted so a genuine new operator build can be recorded in
@@ -195,7 +204,7 @@ def test_an_unrecorded_build_is_refused_unless_explicitly_allowed(world, monkeyp
     # claim that it is. It is the seam a compromised relay would use: every other check would pass
     # truthfully against an enclave the attacker controls, so this row is the whole attack.
     assert builds.absorb_remote([{"id": "later", "status": "reviewed", "mrtd": "cc" * 48, "rtmr1": "b1" * 48, "rtmr2": "b2" * 48, "rtmr3": "b3" * 48}]) == 1
-    r = A.verify_instance(dict(world["inst"], quote=q), NONCE, ref, world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, q), NONCE, ref, world["e2e_pk"])
     why = r.checks["build_recorded"].why
     assert r.checks["build_recorded"].ok
     assert "PENDING" in why and "run time" in why
@@ -222,7 +231,7 @@ def test_rtmr0_is_not_part_of_the_build_identity(world):
     body[328:376] = b"\x99" * 48
     q2 = q[:A._HDR] + bytes(body) + q[A._HDR + A._BODY:]
     ref = {"configs": [{"name": "h", "mrtd": "aa" * 48, "rtmrs": ["99" * 48, "b1" * 48, "b2" * 48, "b3" * 48]}]}
-    r = A.verify_instance(dict(world["inst"], quote=base64.b64encode(q2).decode()), NONCE, ref, world["e2e_pk"])
+    r = A.verify_instance(_with_quote(world, base64.b64encode(q2).decode()), NONCE, ref, world["e2e_pk"])
     assert r.checks["build_recorded"].ok
 
 
@@ -758,3 +767,22 @@ def test_the_reproduced_limitation_says_what_rtmr3_reproduction_does_and_does_no
     old = dict(A.situational_limitations({"build_recorded": {"why": (
         "build x — recorded by InferRoute since 2026-09-12; MRTD+RTMR1+RTMR2 recomputed BY INFERROUTE from published artifacts")}}))
     assert "encrypted in the published image" in old["reproduced"]
+
+
+def test_the_quote_is_read_from_the_signed_body_not_the_loose_copy(world):
+    """The operator confirmed the top-level `quote` is NOT covered by the signature. The verifier reads
+    the signed copy; a loose copy that differs fails the instance, and a body with no quote fails it."""
+    r = A.verify_instance(world["inst"], NONCE, world["ref"], world["e2e_pk"])
+    assert r.checks["quote_in_signed_evidence"].ok and "signed body" in r.checks["quote_in_signed_evidence"].why
+    other = base64.b64encode(_quote(world["rd"], mrtd=b"\xCC" * 48, chain=world["pem"].encode())).decode()
+    r = A.verify_instance(dict(world["inst"], quote=other), NONCE, world["ref"], world["e2e_pk"])
+    assert not r.verified and "DIFFERS" in r.checks["quote_in_signed_evidence"].why
+    assert r.mrtd == "", "the differing loose copy must not be the one measured"
+    # the loose copy going away (the operator plans to make it opt-out) changes nothing
+    loose_gone = {k: v for k, v in world["inst"].items() if k != "quote"}
+    assert A.verify_instance(loose_gone, NONCE, world["ref"], world["e2e_pk"]).verified
+    inner = json.dumps({"evidence": {}, "nonce": NONCE}).encode()
+    sig = base64.b64encode(world["key"].sign(inner, padding.PKCS1v15(), hashes.SHA256())).decode()
+    bare = dict(world["inst"], signature=sig, attested_body=base64.b64encode(inner).decode())
+    r = A.verify_instance(bare, NONCE, world["ref"], world["e2e_pk"])
+    assert not r.verified and "no TDX quote" in r.checks["quote_in_signed_evidence"].why

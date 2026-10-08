@@ -53,7 +53,9 @@ EPOCH = 1759449600                                  # 2025-10-03T00:00:00Z — o
 APK_STATIC = ("apk-tools-static-3.0.8-r0.apk", "c8e2c88c13ba12a12269b79a3543e1190ff8c0ab0beb32b58cadfd5881c619e3")
 ALPINE_KEYS = ("alpine-keys-2.6-r0.apk", "dd211936d544f4050924ce8aec078d24e7b1b036ae70b30bd07867349587c708")
 
-KERNEL = {"aarch64": ("linux-virt-6.18.54-r0.apk", "9a4a6fa042b60b70f453dded99762810516b35793c64d776d75986b0b110b6e0")}
+# 2026-10-08: 6.18.54-r0 -> 6.18.55-r0 (aports 52fae6d7, 2026-10-05, a stable point release); the mirror no longer
+# serves 6.18.54. The new package's Alpine signature was verified (apk verify) before its sha256 was pinned here.
+KERNEL = {"aarch64": ("linux-virt-6.18.55-r0.apk", "c7fb892408d7fe163a18671e5c7816752976d1c67fd17794dfba794aa0d6c1ac")}
 MODULES = ("net/vmw_vsock/vsock", "net/vmw_vsock/vmw_vsock_virtio_transport_common",
            "net/vmw_vsock/vmw_vsock_virtio_transport", "drivers/char/hw_random/rng-core",
            "drivers/char/hw_random/virtio-rng")
@@ -72,8 +74,10 @@ LOCK = {
     "pyc": "3.14.8-r0", "python3": "3.14.8-r0", "python3-pyc": "3.14.8-r0",
     "python3-pycache-pyc0": "3.14.8-r0", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
     "simdutf": "9.0.0-r0", "sqlite-libs": "3.53.4-r0", "ssl_client": "1.37.0-r31", "xz-libs": "5.8.4-r0",
-    "zlib": "1.3.2-r0", "zstd-libs": "1.5.7-r2",
+    "zlib": "1.3.2-r1", "zstd-libs": "1.5.7-r2",
 }
+# 2026-10-08: zlib 1.3.2-r0 -> r1 is Alpine aports 0afa2da0 (2026-10-06), "backport fix for CVE-2026-85091";
+# the stable mirror no longer serves r0. Reviewed and taken on purpose: a security fix, nothing else in the package.
 PI_VERSION = "0.84.1"
 
 

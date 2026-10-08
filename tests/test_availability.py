@@ -133,7 +133,7 @@ def test_the_server_owns_capability_and_the_local_table_is_only_a_fallback():
 class _Listing:
     def __init__(self, *rounds):
         self.rounds, self.i = list(rounds), 0
-    async def instances(self, _fleet):
+    async def nonces(self, _fleet):
         r = self.rounds[min(self.i, len(self.rounds) - 1)]
         self.i += 1
         return {"instances": r, "nonce_expires_in": 60}
@@ -179,7 +179,7 @@ def test_nonce_depth_is_a_number_not_a_boolean():
 def test_could_not_ask_is_not_zero_instances():
     p = A.Prober()
     class _Boom:
-        async def instances(self, _f):
+        async def nonces(self, _f):
             raise RuntimeError("down")
     pr = asyncio.run(p.probe(_Boom(), "f"))
     assert pr.instances == -1 and pr.reachable is False and pr.line() == "could not ask"

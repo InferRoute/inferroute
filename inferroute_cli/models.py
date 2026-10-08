@@ -39,7 +39,8 @@ class ModelAlias:
     tier: str            # "fast" | "balanced" | "smart"
     price: Price | None = None  # $/1M tokens; None = priced on your own plan
     aliases: tuple = ()  # bare/family shorts that also resolve here (e.g. "kimi")
-    ref_key: str = ""    # backend key (e.g. moonshotai/Kimi-K2.6-TEE) — internal,
+    enclave: bool = False  # served from a hardware enclave (the catalog's neutral flag)
+    ref_key: str = ""    # backend key — internal,
                          # used only to reverse-map a served/persisted backend id
                          # back to the canonical short for display.
 
@@ -84,7 +85,7 @@ def _to_alias(m: dict) -> ModelAlias:
     return ModelAlias(short=m["short"], model_id=m["model_id"],
                       label=m.get("label", m["short"]), tier=m.get("tier", "balanced"),
                       price=price, aliases=tuple(m.get("aliases") or ()),
-                      ref_key=m.get("_ref_key", "") or "")
+                      enclave=bool(m.get("enclave")), ref_key=m.get("_ref_key", "") or "")
 
 
 def all_aliases() -> list[ModelAlias]:
@@ -125,7 +126,7 @@ def short_for_model_id(model_id: str) -> str | None:
     ml = model_id.strip().lower()
     for a in all_aliases():
         # Title-case model_id OR the internal backend key → canonical short, so a
-        # served/persisted backend id (e.g. moonshotai/Kimi-K2.6-TEE) never leaks
+        # served/persisted backend id never leaks
         # into the status line (naming-standard invariant: backend keys not user-facing).
         if a.model_id.lower() == ml or a.ref_key.lower() == ml:
             return a.short

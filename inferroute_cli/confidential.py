@@ -319,12 +319,19 @@ async def server_fleet_health(transport) -> dict:
     return fleets if isinstance(fleets, dict) else {}
 
 
+def _lane_for(catalog: list, short: str) -> dict | None:
+    """The carrier's lane for an InferRoute model name. Lanes are matched by OUR name, never by how an
+    operator spells the model: the carrier maps one to the other, and this client does not know either."""
+    s = (short or "").lower()
+    return next((m for m in catalog if str(m.get("name") or "").lower() == s and m.get("sealed_model")), None)
+
+
 async def probe_fleet(transport, fleet_id: str) -> int:
     """Instances offering a nonce right now. No attestation, so this is cheap enough to run before
     choosing. A probe that fails returns -1 (unknown) rather than 0 — "we could not ask" must not read
     as "there is nothing there", or one flaky listing would rule out a healthy fleet."""
     try:
-        e2 = await transport.instances(fleet_id)
+        e2 = await transport.nonces(fleet_id)
     except Exception:                                    # noqa: BLE001
         return -1
     return sum(1 for i in (e2.get("instances") or [])
@@ -344,7 +351,7 @@ async def health_ordered(order: list[str], catalog: list, transport, console=Non
     """
     scored: list[tuple[str, float, float, float]] = []     # (short, expected, lo, hi)
     for short in order:
-        ref = next((m for m in catalog if str(m.get("name", "")).endswith(short) or m.get("name") == short), None)
+        ref = _lane_for(catalog, short)
         fleet = (ref or {}).get("fleet_id")
         if not fleet:
             continue
@@ -494,7 +501,7 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
         console.print(f"[red]{e}[/]")
         sys.exit(2)
     import httpx
-    with console.status(f"[bold]resolving {alias.ref_key} on the confidential lane…", spinner="dots"):
+    with console.status(f"[bold]resolving {alias.short} on the confidential lane…", spinner="dots"):
         try:
             catalog = await transport.models()
         except RelayUnavailable as e:
@@ -547,11 +554,12 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
         cand = alias if short == alias.short else _resolve_model_quietly(short)
         if cand is None:
             continue
-        fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == cand.ref_key), None)
+        lane = _lane_for(catalog, cand.short)
+        fleet_id = (lane or {}).get("fleet_id")
         if not fleet_id:
             tried.append(f"{short} (not offered)")
             continue
-        session = ConfidentialSession(session_id=session_id, model_short=cand.short, upstream_model=cand.ref_key,
+        session = ConfidentialSession(session_id=session_id, model_short=cand.short, upstream_model=lane["sealed_model"],
                                       fleet_id=fleet_id, transport=transport, http=http,
                                       price=_lane_price(cand, economy), economy=economy)
         status = console.status(f"[bold]verifying the enclave from this device… ({cand.short})", spinner="dots")
@@ -586,15 +594,14 @@ async def _open_continuity(order, alias, catalog, session_id, transport, http, e
         cand = alias if short == alias.short else _resolve_model_quietly(short)
         if cand is None:
             continue
-        fleet_id = next((m.get("fleet_id") for m in catalog if m.get("name") == cand.ref_key), None)
+        meta = _lane_for(catalog, cand.short) or {}
+        fleet_id = meta.get("fleet_id")
         if not fleet_id:
             continue
-        meta = next((m for m in catalog if m.get("name") == cand.ref_key), {}) or {}
         cands.append(cont.Candidate(
-            fleet_id=fleet_id, model_short=cand.short, upstream_model=cand.ref_key,
-            # The relay publishes only {fleet_ref, fleet_id, name} today, so this is usually 0 and every
-            # standby is treated as context-compatible. Stated as a gap rather than hidden as a default;
-            # it becomes a real guard the moment /confidential/models carries the field.
+            fleet_id=fleet_id, model_short=cand.short, upstream_model=meta["sealed_model"],
+            # 0 when the carrier does not state a context length, in which case every standby is treated as
+            # context-compatible. Stated as a gap rather than hidden as a default.
             context_length=int(meta.get("context_length") or 0), meta=meta))
     if not cands:
         return None
@@ -778,7 +785,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             return 1
     session_id = resuming or launch_mod._new_session_id()
     # What Claude Code shows as the model name — the one persistent on-screen reminder
-    # of the lane. The local endpoint answers to this id; the enclave sees `alias.ref_key`.
+    # of the lane. The local endpoint answers to this id; the enclave sees the carrier's `sealed_model`.
     shown_model = f"{alias.short} [confidential]"
 
     async def _run_session() -> int:

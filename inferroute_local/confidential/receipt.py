@@ -38,8 +38,8 @@ def _client_version() -> str:
 class Receipt:
     session_id: str
     model_short: str
-    upstream_model: str
-    fleet_id: str
+    upstream_model: str      # the InferRoute lane name (kept under this key for receipt-schema compatibility)
+    fleet_id: str            # an opaque carrier handle, not an operator id
     transport: str
     started_at: str = field(default_factory=_now)
     ended_at: str = ""

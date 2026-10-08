@@ -183,9 +183,8 @@ RANK_CAPABILITY = "capability"         # biggest/ablest first — Probant
 RANK_COST = "cost"                     # cheapest first
 RANK_PREFERENCE = "preference"         # exactly the order the caller listed
 
-# Capability, when the operator does not tell us. Measured 2026-09-30: /confidential/models returns only
-# {fleet_ref, fleet_id, name} — the relay DROPS the context_length and quantization that the upstream
-# catalogue carries, so there is nothing authoritative to rank by yet. This table is the stopgap and is
+# Capability, when the carrier does not tell us. Measured 2026-09-30: the relay's lane list carried no
+# context length or quantization, so there is nothing authoritative to rank by yet. This table is the stopgap and is
 # explicitly the weakest part of this module: it is a judgement, not a measurement.
 #
 # The server should own it. When /confidential/models grows `capability` (or context_length and
@@ -620,7 +619,7 @@ class Prober:
     async def probe(self, transport, fleet_id: str, *, now: Optional[float] = None) -> Probe:
         t = now or time.time()
         try:
-            e2 = await transport.instances(fleet_id)
+            e2 = await transport.nonces(fleet_id)
         except Exception:                               # noqa: BLE001 — could not ask
             return Probe(fleet_id, t)
         rows = e2.get("instances") or []

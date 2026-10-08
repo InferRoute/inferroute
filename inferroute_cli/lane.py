@@ -47,7 +47,7 @@ class Lane:
         return self.kind == STANDARD
 
 
-# The catalog that marks a model "-TEE" is fetched from InferRoute's own server and cached on this
+# The catalog that flags a model as enclave-backed is fetched from InferRoute's own server and cached on this
 # machine, so the server can stop marking a model and move a user to the readable lane. It can only ever
 # DOWNGRADE — attestation still has to pass, so it cannot make a plain model look sealed — but downgrade
 # is the direction that matters. These were enclave-backed in this release: the catalog may ADD to this
@@ -66,7 +66,9 @@ def enclave_backed(model: str | None) -> bool:
     if short.lower() in ENCLAVE_FLOOR:
         return True
     a = models.get(m)
-    return bool(a and (getattr(a, "ref_key", "") or "").endswith("-TEE"))
+    # The catalog's neutral flag. A catalog cached from a server that predates the flag lacks it; the floor
+    # above already covers every model that was enclave-backed then.
+    return bool(a and getattr(a, "enclave", False))
 
 
 def decide(model: str | None, *, plain: bool, enclave_backed=None) -> Lane:

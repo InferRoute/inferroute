@@ -456,7 +456,7 @@ def test_a_probe_that_fails_is_unknown_not_empty():
     from inferroute_cli import confidential as C
 
     class _Boom:
-        async def instances(self, fleet):
+        async def nonces(self, fleet):
             raise RuntimeError("listing unavailable")
     assert asyncio.run(C.probe_fleet(_Boom(), "f")) == -1
 
@@ -465,11 +465,11 @@ def test_health_ordering_keeps_the_preferred_model_when_it_is_healthy_and_moves_
     import asyncio
     from inferroute_cli import confidential as C
 
-    catalog = [{"name": m, "fleet_id": f"fleet-{m}"} for m in ("kimi-k3", "kimi-k2.6", "glm-5.2")]
+    catalog = [{"name": m, "fleet_id": f"fleet-{m}", "sealed_model": m} for m in ("kimi-k3", "kimi-k2.6", "glm-5.2")]
 
     class _T:
         def __init__(self, live): self.live = live; self.calls = 0
-        async def instances(self, fleet):
+        async def nonces(self, fleet):
             self.calls += 1
             n = self.live.get(fleet.replace("fleet-", ""), 0)
             return {"instances": [{"e2e_pubkey": "k", "nonces": ["n"]} for _ in range(n)]}
@@ -628,10 +628,10 @@ def test_thin_evidence_cannot_promote_a_fleet_over_the_users_preference(tmp_path
     lo_t, hi_t = C.fleet_yield_interval("thin")
     assert hi_t >= lo_p and lo_t <= hi_p, "fixture is wrong: these intervals must overlap"
 
-    catalog = [{"name": "x/preferred", "fleet_id": "fp"}, {"name": "x/thin", "fleet_id": "ft"}]
+    catalog = [{"name": "preferred", "fleet_id": "fp", "sealed_model": "x/preferred"}, {"name": "thin", "fleet_id": "ft", "sealed_model": "x/thin"}]
 
     class _T:
-        async def instances(self, fleet):
+        async def nonces(self, fleet):
             return [{"instance_id": f"{fleet}-0"}]
 
     # live=1 ON PURPOSE. With a comfortable live count the preferred model's expected usable count clears
@@ -656,10 +656,10 @@ def test_a_separated_difference_still_reorders(tmp_path, monkeypatch):
     lo_h, hi_h = C.fleet_yield_interval("healthy")
     assert hi_p < lo_h, "fixture is wrong: these intervals must be separated"
 
-    catalog = [{"name": "x/preferred", "fleet_id": "fp"}, {"name": "x/healthy", "fleet_id": "fh"}]
+    catalog = [{"name": "preferred", "fleet_id": "fp", "sealed_model": "x/preferred"}, {"name": "healthy", "fleet_id": "fh", "sealed_model": "x/healthy"}]
 
     class _T:
-        async def instances(self, fleet):
+        async def nonces(self, fleet):
             return [{"instance_id": f"{fleet}-{i}"} for i in range(4)]
 
     monkeypatch.setattr(C, "probe_fleet", lambda t, f: _ok(4))

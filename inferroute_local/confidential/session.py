@@ -32,6 +32,45 @@ REVERIFY_EVERY_S = 30 * 60
 # confirm — which is exactly what an attacker who can drop our Intel and NVIDIA traffic wants.
 REVERIFY_FAILURES_ALLOWED = 3
 NONCE_SAFETY_S = 5.0
+# Fresh evidence costs the operator an evidence fetch, which it rate-limits across everyone the relay serves.
+EVIDENCE_REFETCH_MIN_S = 60.0
+# An instance that failed recently is tried last, not never: on a small fleet it may be the only one left.
+RECENT_FAILURE_S = 6 * 3600
+
+
+def _failures_path() -> Path:
+    import os
+    return Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "confidential" / "instance-failures.json"
+
+
+def _load_failures() -> dict[str, float]:
+    try:
+        d = json.loads(_failures_path().read_text())
+        now = time.time()
+        return {k: float(v) for k, v in d.items() if now - float(v) < RECENT_FAILURE_S}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def record_failure(instance_id: str) -> None:
+    """Remember that this instance failed, across sessions on this device (2026-10-07: one instance was
+    re-pinned four hours after it had failed). Best-effort: a write error never affects a session."""
+    if not instance_id:
+        return
+    d = _load_failures()
+    d[instance_id] = time.time()
+    try:
+        p = _failures_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(d))
+    except OSError:
+        pass
+
+
+def _by_recent_failure(ids: list[str]) -> list[str]:
+    """Never-failed first (in the given order), then the least recently failed."""
+    f = _load_failures()
+    return sorted(ids, key=lambda i: (i in f, f.get(i, 0.0)))
 # The terminator of an OpenAI SSE stream. Agents wait for it; a stream that ends without one has been cut
 # short, and passing that on as a body that simply stops leaves the agent waiting for ever.
 DONE = b"data: [DONE]\n\n"
@@ -64,7 +103,10 @@ class ConfidentialSession:
         self.fleet_id = fleet_id
         self.transport = transport
         self.http = http
-        self.receipt = Receipt(session_id=session_id, model_short=model_short, upstream_model=upstream_model,
+        # `upstream_model` is the string the carrier says to place INSIDE the ciphertext. It never goes into
+        # a record, a display or a model list: those carry the InferRoute lane name, so nothing this device
+        # writes names how any operator spells its models.
+        self.receipt = Receipt(session_id=session_id, model_short=model_short, upstream_model=model_short,
                                fleet_id=fleet_id, transport=transport.name)
         self.receipt.e2ee = {"kem": "ML-KEM-768 (FIPS 203)", "aead": "ChaCha20-Poly1305", "kdf": "HKDF-SHA256",
                              "backend": e2ee.backend().name}
@@ -79,6 +121,10 @@ class ConfidentialSession:
         self._pool_expire = 0.0
         self._verified_at = 0.0
         self._reverify_failures = 0
+        self._registry = None                       # the published measurement list behind self.fleet
+        self._last_e2: dict = {}                    # the latest instance union (keys + nonces)
+        self._last_e2_at = 0.0
+        self._evidence_at = 0.0                     # when evidence was last fetched (rate guard on refetch)
         self._lock = asyncio.Lock()
         self._closed = False
         # The fault class of the most recent failure, for a caller that can do something about it.
@@ -90,28 +136,21 @@ class ConfidentialSession:
 
     async def open(self, progress: Callable[[str], None] | None = None) -> Receipt:
         say = progress or (lambda s: None)
-        say("asking which instances accept sealed requests, and for their encryption keys…")
-        # The nonces in this listing start expiring NOW, not after verification: the Intel and NVIDIA pass
-        # below can take longer than a nonce lives (68 s measured, against 60 s), and a pool timed from the
-        # end of verification was handed out already dead.
-        fetched_at = time.time()
-        try:
-            e2 = await self.transport.instances(self.fleet_id)
-        except Exception as e:
-            return self._refuse(f"could not list sealable enclaves via {self.transport.name}: {public_reason(e)}")
-        keys = _keys_of(e2)
-        profile = await self.transport.profile()
+        say("fetching the enclave evidence for a challenge chosen on this device…")
         from . import builds as _builds
         _builds.load_user_overrides()
         if hasattr(self.transport, "builds"):
             _builds.absorb_remote(await self.transport.builds())
-        say("fetching the enclave fleet's attestation evidence (this is the slow part)…")
+        # The invocation nonces in the document start expiring NOW, not after verification: the Intel and
+        # NVIDIA pass below can take longer than a nonce lives (68 s measured, against 60 s).
+        fetched_at = time.time()
         try:
-            # the quote is checked against the very keys we will seal to
-            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, profile, e2e_pubkeys=keys)
-            self._raw_evidence = self.fleet.raw
+            await self._load_candidates()
+        except attest.UnsupportedScheme as e:
+            return self._refuse(str(e))
         except Exception as e:
-            return self._refuse(f"could not fetch the enclave fleet's attestation evidence: {public_reason(e)}")
+            return self._refuse(f"could not obtain the enclave fleet's attestation evidence: {public_reason(e)}")
+        e2 = self._last_e2
         self._verified_at = time.time()
         say("checking the platform with Intel and the GPUs with NVIDIA…")
         await self._online_pass(e2)
@@ -134,12 +173,47 @@ class ConfidentialSession:
             failing = {i.instance_id[:8]: i.failing for i in self.fleet.instances if not i.verified}
             return self._refuse("no instance is BOTH verified and e2ee-capable"
                                 + (f" (failing checks: {failing})" if failing else " (verified set and e2ee set are disjoint)"))
-        self._pin(eligible[0], "session opened")
+        self._pin(_by_recent_failure(eligible)[0], "session opened")
         self.receipt.verdict = "confidential"
         self._restate_claim()
         self.receipt.verified_at = self.receipt.started_at
         self.receipt.save()
         return self.receipt
+
+    async def _load_candidates(self) -> None:
+        """Fetch a candidate document for a fresh nonce of OURS and verify it offline. The carrier fetched the
+        evidence; nothing it said is trusted until the checks below and the online pass have run."""
+        nonce = attest.new_nonce()
+        doc = await self.transport.candidates(self.fleet_id, nonce)
+        self.fleet = attest.verify_candidates(self.fleet_id, doc, nonce)
+        self._raw_evidence = self.fleet.raw
+        self._registry = doc.get("registry")
+        self._last_e2 = {"instances": doc.get("instances") or [], "nonce_expires_in": doc.get("nonce_expires_in")}
+        self._last_e2_at = self._evidence_at = time.time()
+
+    async def _admit_late_keys(self, e2: dict) -> int:
+        """Instances whose sealing key we did not have when the evidence was checked failed only the key
+        binding. Their quotes are already in hand and committed to their keys at that time, so a key that
+        arrives later is checked against THE SAME QUOTE with the SAME checks — offline and online — and the
+        instance is admitted only if every one passes. No new evidence is fetched, and nothing is relaxed:
+        a key the quote does not commit to fails exactly as before."""
+        if not self.fleet:
+            return 0
+        rows = {str(r.get("instance_id") or ""): r for r in (self._raw_evidence or [])}
+        reports = {r.instance_id: r for r in self.fleet.instances}
+        fresh = []
+        for inst in e2.get("instances") or []:
+            iid, key = str(inst.get("instance_id") or ""), inst.get("e2e_pubkey") or ""
+            old = reports.get(iid)
+            if not key or iid not in rows or old is None or old.verified or old.e2e_pubkey:
+                continue
+            rep = attest.verify_instance(rows[iid], self.fleet.nonce, self._registry, key)
+            if rep.verified:
+                fresh.append(rep)
+        if fresh:
+            await asyncio.gather(*(attest.verify_online(r, rows[r.instance_id], self.fleet.nonce, self.http) for r in fresh))
+            self.fleet.instances = [next((f for f in fresh if f.instance_id == r.instance_id), r) for r in self.fleet.instances]
+        return sum(1 for f in fresh if f.verified)
 
     async def _online_pass(self, e2: dict) -> None:
         """Intel + NVIDIA checks for every instance that passed offline AND offers a sealing key —
@@ -248,7 +322,7 @@ class ConfidentialSession:
                 sha = sha or ""
         self.receipt.served_by.append({
             "at": _now(), "why": why,
-            "model_short": self.model_short, "upstream_model": self.upstream_model,
+            "model_short": self.model_short, "upstream_model": self.model_short,
             "fleet_id": self.fleet_id, "instance": dict(self.receipt.instance),
             "checks": dict(self.receipt.checks), "limitations": list(self.receipt.limitations),
             "attestation_sha256": sha,
@@ -275,14 +349,35 @@ class ConfidentialSession:
             return p, p.nonces.pop(0)
 
     async def _refresh_pool(self) -> None:
+        """Find nonces for the pinned instance, or a verified alternative, in three steps of rising cost:
+        a fresh instance union (no evidence), keys for instances whose quotes we already hold, and — at most
+        once a minute — fresh evidence for a new challenge. Only then refuse. Each step admits verified
+        instances only; none of them loosens a check."""
         fetched_at = time.time()
-        e2 = await self.transport.instances(self.fleet_id)
+        e2 = await self.transport.nonces(self.fleet_id)
+        self._last_e2, self._last_e2_at = e2, fetched_at
         current = self.pinned.instance_id if self.pinned else None
         self._absorb_pool(e2, fetched_at=fetched_at)
         if current in self._pool and self._pool[current].nonces:
             self.pinned = self._pool[current]
             return
-        alt = next((i for i, p in self._pool.items() if p.nonces), None)
+        if current:
+            record_failure(current)
+        alt = self._choose_alt()
+        if alt is None and await self._admit_late_keys(e2):
+            self._absorb_pool(e2, fetched_at=fetched_at)
+            alt = self._choose_alt()
+        if alt is None and time.time() - self._evidence_at > EVIDENCE_REFETCH_MIN_S:
+            try:
+                fetched_at = time.time()
+                await self._load_candidates()
+                await self._online_pass(self._last_e2)
+                self._verified_at = time.time()
+                self._absorb_pool(self._last_e2, fetched_at=fetched_at)
+                self.receipt.note("evidence-refetched", "no verified instance had nonces; fetched fresh evidence")
+                alt = self._choose_alt()
+            except Exception as e:
+                self.receipt.note("evidence-refetch-failed", public_reason(e))
         if alt is None:
             self.pinned = None
             self.receipt.verdict = "degraded"
@@ -296,6 +391,9 @@ class ConfidentialSession:
                   else "the pinned instance failed re-verification; switched to one the re-check verified")
         self.receipt.counters["instance_switches"] = self.receipt.counters.get("instance_switches", 0) + 1
         self.receipt.save()
+
+    def _choose_alt(self) -> str | None:
+        return next(iter(_by_recent_failure([i for i, p in self._pool.items() if p.nonces])), None)
 
     def _restate_claim(self) -> None:
         """Write the claim where it becomes true, never in advance.
@@ -332,10 +430,8 @@ class ConfidentialSession:
 
     async def _reverify(self) -> None:
         try:
-            e2 = await self.transport.instances(self.fleet_id)
-            self.fleet = await attest.fetch_and_verify(self.fleet_id, self.http, await self.transport.profile(), e2e_pubkeys=_keys_of(e2))
-            self._raw_evidence = self.fleet.raw
-            await self._online_pass(e2)
+            await self._load_candidates()
+            await self._online_pass(self._last_e2)
         except Exception as e:
             # Failing open here was silent: the receipt got a note, the screen and the status line
             # kept showing the original verification time, and the session sealed on indefinitely.
@@ -361,6 +457,7 @@ class ConfidentialSession:
         ok = set(self.fleet.verified_ids)
         self.receipt.note("reverified", f"{len(ok)}/{len(self.fleet.instances)} instances verified")
         if self.pinned and self.pinned.instance_id not in ok:
+            record_failure(self.pinned.instance_id)
             self.receipt.note("pinned-failed-reverify", self.pinned.instance_id)
             self.pinned = None
             self._pool = {}
@@ -412,6 +509,7 @@ class ConfidentialSession:
             # first, so the retry cannot land on the same machine that just failed — a retry to the same
             # place is a delay, not a recovery.
             if attempt == 1 and status in _RETRY_ON_OTHER_INSTANCE:
+                record_failure(pinned.instance_id)
                 async with self._lock:
                     self._pool.pop(pinned.instance_id, None)
                     if self.pinned is not None and self.pinned.instance_id == pinned.instance_id:
@@ -682,7 +780,7 @@ class ConfidentialSession:
                 + c["output_tokens"] / 1e6 * float(self.price.get("output", 0)), 6)
         self.receipt.save()
         asyncio.ensure_future(self.transport.report_usage({
-            "session_id": self.session_id, "fleet_id": self.fleet_id, "model": self.upstream_model,
+            "session_id": self.session_id, "fleet_id": self.fleet_id, "model": self.model_short,
             "model_short": self.model_short, "economy": self.economy,
             "instance_id": self.pinned.instance_id if self.pinned else "",
             "usage": {**usage, "latency_ms": int(latency_ms)}, "self_reported": True}))

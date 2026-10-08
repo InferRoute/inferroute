@@ -10,10 +10,13 @@ Two carriers, one contract:
                      in ``IR_OPERATOR_PROFILE``). InferRoute is not in the path at all; used for
                      development and by users who prefer it.
 
-**No operator endpoint is compiled into this client.** The addresses to fetch attestation
-evidence from, and the header names the operator's gateway routes on, arrive at run time as an
-*operator profile* — from the relay (``GET /confidential/endpoints``) or, for direct mode, from a
-local JSON file. To this client they are opaque strings.
+**No operator endpoint, name or id reaches this client on the relay path.** The relay is a locator
+and a courier: it lists lanes under InferRoute names with opaque fleet handles, and for a session it
+fetches the enclave evidence WITH THIS DEVICE'S NONCE and hands it over byte-for-byte
+(``POST /confidential/v2/candidates``). It never decides whether an enclave is trusted — every byte
+it delivers is checked on this device against roots it cannot forge (see
+docs/DESIGN-provider-neutral-enclave-lane-2026-10-08.md). Direct mode keeps an *operator profile* in a
+local JSON file and builds the same candidate document itself.
 
 What that costs in trust, stated precisely, because the honest version is narrower than the
 tempting one. Everything fetched through the profile is verified independently on this device:
@@ -58,6 +61,32 @@ import httpx
 INVOKE_PATH = "/v1/chat/completions"
 UA = "inferroute-confidential/1"
 
+# The attestation scheme and sealing wire format this client can verify and speak. Named by protocol,
+# never by operator: a new operator that speaks these needs no client change, only a relay adapter.
+DEFAULT_SCHEME = "tdx-nvgpu-signed-body/v1"
+DEFAULT_WIRE = "mlkem768-chacha20/v1"
+SUPPORTED_SCHEMES = frozenset({DEFAULT_SCHEME})
+SUPPORTED_WIRES = frozenset({DEFAULT_WIRE})
+
+
+def union_draws(draws: list[dict]) -> dict:
+    """Merge several instance listings (each a random sample of the fleet) into one: every instance seen,
+    the nonces of its most recent appearance, the shortest expiry. Order: first appearance."""
+    seen: dict[str, dict] = {}
+    ttl = None
+    for d in draws:
+        if not isinstance(d, dict):
+            continue
+        t = d.get("nonce_expires_in")
+        if t is not None:
+            ttl = t if ttl is None else min(ttl, t)
+        for inst in d.get("instances") or []:
+            iid = str(inst.get("instance_id") or "")
+            if iid:
+                seen[iid] = inst
+    return {"instances": list(seen.values()), "nonce_expires_in": ttl}
+
+
 # What THIS client sends to the InferRoute relay. The relay maps these onto whatever the operator's
 # gateway expects, so the operator's own header names never appear here.
 NEUTRAL_HEADERS = {"fleet": "X-IR-Fleet", "instance": "X-IR-Instance", "nonce": "X-IR-Nonce",
@@ -79,6 +108,8 @@ class OperatorProfile:
     # Which field of the operator's model listing carries the fleet id (direct mode only; the
     # relay normalises it to `fleet_id` before we see it). Operator naming stays in the profile.
     fleet_field: str = "fleet_id"
+    lanes: list = field(default_factory=list)   # direct mode: [{"lane", "fleet", "sealed_model", ...}]
+    draws: int = 3                              # instance listings unioned per refresh
 
     @classmethod
     def from_dict(cls, d: dict) -> "OperatorProfile":
@@ -87,7 +118,8 @@ class OperatorProfile:
         h = {**NEUTRAL_HEADERS, **(d.get("headers") or {})}
         return cls(evidence=d["evidence"], measurements=d["measurements"], models=d.get("models", ""),
                    instances=d.get("instances", ""), invoke=d.get("invoke", ""), headers=h,
-                   fleet_field=d.get("fleet_field") or "fleet_id")
+                   fleet_field=d.get("fleet_field") or "fleet_id", lanes=list(d.get("lanes") or []),
+                   draws=int(d.get("draws") or 3))
 
     def evidence_url(self, fleet_id: str, nonce: str) -> str:
         return self.evidence.replace("{fleet}", fleet_id).replace("{nonce}", nonce)
@@ -131,9 +163,19 @@ class Transport:
         raise NotImplementedError
 
     async def models(self) -> list[dict]:
+        """Lanes this carrier offers: [{"name": <InferRoute lane>, "fleet_id": <opaque handle>,
+        "sealed_model": <the model string placed INSIDE the ciphertext>, "context_length", "scheme", "wire"}]."""
         raise NotImplementedError
 
-    async def instances(self, fleet_id: str) -> dict:
+    async def candidates(self, fleet_id: str, nonce: str) -> dict:
+        """Everything needed to verify and pin, for evidence answering OUR nonce:
+        {"scheme", "nonce_expires_in", "instances": [{instance_id, e2e_pubkey, nonces}],
+         "evidence": [rows], "unavailable_instance_ids": [...], "registry": <published measurement list>}."""
+        raise NotImplementedError
+
+    async def nonces(self, fleet_id: str) -> dict:
+        """Invocation nonces and sealing keys only — {"instances": [...], "nonce_expires_in"}. No evidence:
+        an instance found here is usable only if this session already verified it."""
         raise NotImplementedError
 
     async def invoke(self, *, fleet_id: str, instance_id: str, nonce: str, stream: bool, blob: bytes,
@@ -175,17 +217,32 @@ class DirectOperator(Transport):
         return {"Authorization": f"Bearer {self.api_key}", "User-Agent": UA}
 
     async def models(self) -> list[dict]:
-        r = await self.http.get(self._profile.models, headers={"User-Agent": UA}, timeout=30)
-        r.raise_for_status()
-        f = self._profile.fleet_field
-        return [{"name": m.get("id"), "fleet_id": m.get(f), "quantization": m.get("quantization"),
-                 "context_length": m.get("context_length")}
-                for m in r.json().get("data", []) if m.get(f) and str(m.get("id", "")).endswith("-TEE")]
+        """Direct mode: the profile names its lanes ({"lanes": [{"lane", "fleet", "sealed_model"}]}),
+        because nothing in this client knows how any operator spells an enclave-backed model."""
+        return [{"name": ln.get("lane"), "fleet_id": ln.get("fleet"), "sealed_model": ln.get("sealed_model"),
+                 "context_length": ln.get("context_length") or 0,
+                 "scheme": ln.get("scheme") or DEFAULT_SCHEME, "wire": ln.get("wire") or DEFAULT_WIRE}
+                for ln in self._profile.lanes if ln.get("lane") and ln.get("fleet") and ln.get("sealed_model")]
 
     async def instances(self, fleet_id: str) -> dict:
         r = await self.http.get(self._profile.instances_url(fleet_id), headers=self._auth(), timeout=30)
         r.raise_for_status()
         return r.json()
+
+    async def nonces(self, fleet_id: str) -> dict:
+        return union_draws([await self.instances(fleet_id) for _ in range(max(1, self._profile.draws))])
+
+    async def candidates(self, fleet_id: str, nonce: str) -> dict:
+        from .attest import _get_retry
+        e2 = await self.nonces(fleet_id)
+        h = {"User-Agent": UA}
+        ev = (await _get_retry(self.http, self._profile.evidence_url(fleet_id, nonce), h, 240.0)).json()
+        reg = (await _get_retry(self.http, self._profile.measurements_url(), h, 240.0)).json()
+        rows = ev.get("evidence") if isinstance(ev, dict) else ev
+        return {"scheme": DEFAULT_SCHEME, "nonce_expires_in": e2.get("nonce_expires_in"),
+                "instances": e2.get("instances") or [], "evidence": list(rows or []),
+                "unavailable_instance_ids": list((ev.get("failed_instance_ids") if isinstance(ev, dict) else None) or []),
+                "registry": reg}
 
     async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path=INVOKE_PATH):
         h = {**self._auth(), **invoke_headers(self._profile.headers, fleet_id=fleet_id, instance_id=instance_id,
@@ -208,15 +265,6 @@ class InferRouteRelay(Transport):
             h["x-inferroute-session"] = self.session_id
         return h
 
-    async def profile(self) -> OperatorProfile:
-        if self._profile is None:
-            r = await self.http.get(f"{self.base}/confidential/endpoints", headers=self._auth(), timeout=30)
-            if r.status_code == 404:
-                raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
-            r.raise_for_status()
-            self._profile = OperatorProfile.from_dict(r.json())
-        return self._profile
-
     async def builds(self) -> list:
         """Builds InferRoute has recorded since this client was released (additions only)."""
         try:
@@ -225,12 +273,27 @@ class InferRouteRelay(Transport):
         except Exception:
             return []
 
-    async def models(self) -> list[dict]:
-        r = await self.http.get(f"{self.base}/confidential/models", headers=self._auth(), timeout=30)
-        if r.status_code == 404:
+    async def _v2(self, method: str, path: str, *, json_body: dict | None = None, timeout: float = 30) -> dict:
+        r = await self.http.request(method, f"{self.base}/confidential/v2/{path}", headers=self._auth(),
+                                    json=json_body, timeout=timeout)
+        if r.status_code == 404 and path == "lanes":
             raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
         r.raise_for_status()
-        return [{**m, "fleet_id": m.get("fleet_id") or m.get("fleet_id")} for m in r.json().get("models", [])]
+        return r.json()
+
+    async def models(self) -> list[dict]:
+        lanes = (await self._v2("GET", "lanes")).get("lanes", [])
+        return [{"name": ln.get("lane"), "fleet_id": ln.get("fleet"), "sealed_model": ln.get("sealed_model"),
+                 "context_length": ln.get("context_length") or 0,
+                 "scheme": ln.get("scheme") or DEFAULT_SCHEME, "wire": ln.get("wire") or DEFAULT_WIRE}
+                for ln in lanes if ln.get("lane") and ln.get("fleet") and ln.get("sealed_model")]
+
+    async def candidates(self, fleet_id: str, nonce: str) -> dict:
+        # The relay fetches the evidence with OUR nonce; nothing it returns is trusted until checked here.
+        return await self._v2("POST", "candidates", json_body={"fleet": fleet_id, "nonce": nonce}, timeout=240)
+
+    async def nonces(self, fleet_id: str) -> dict:
+        return await self._v2("POST", "nonces", json_body={"fleet": fleet_id}, timeout=60)
 
     async def fleet_health(self) -> dict:
         """The operator's view of which fleets are currently usable: {"fleets": {<fleet_id>: {...}}}.
@@ -248,17 +311,10 @@ class InferRouteRelay(Transport):
         r.raise_for_status()
         return r.json()
 
-    async def instances(self, fleet_id: str) -> dict:
-        r = await self.http.get(f"{self.base}/confidential/instances/{fleet_id}", headers=self._auth(), timeout=30)
-        if r.status_code == 404:
-            raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
-        r.raise_for_status()
-        return r.json()
-
     async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path=INVOKE_PATH):
         h = {**self._auth(), **invoke_headers(NEUTRAL_HEADERS, fleet_id=fleet_id, instance_id=instance_id,
                                               nonce=nonce, stream=stream, path=path)}
-        return await self._send(f"{self.base}/confidential/invoke", h, blob)
+        return await self._send(f"{self.base}/confidential/v2/invoke", h, blob)
 
     async def report_usage(self, payload: dict) -> None:
         try:

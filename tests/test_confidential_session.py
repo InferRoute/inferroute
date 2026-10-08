@@ -39,12 +39,19 @@ class FakeCarrier:
         self.truncate = False
 
     async def models(self):
-        return [{"name": "fake/Model-TEE", "fleet_id": "fleet-x1"}]
+        return [{"name": "fake", "fleet_id": "fl_1", "sealed_model": "fake/Model"}]
 
-    async def profile(self):
-        from inferroute_local.confidential.transport import OperatorProfile
-        return OperatorProfile.from_dict({"evidence": "https://op.test/{fleet}/evidence?nonce={nonce}",
-                                          "measurements": "https://op.test/measurements"})
+    async def candidates(self, fleet_id, nonce):
+        """The v2 contract: the carrier fetches evidence FOR OUR NONCE and hands it over with the keys."""
+        self.candidates_nonces = getattr(self, "candidates_nonces", []) + [nonce]
+        e2 = await self.instances(fleet_id)
+        from inferroute_local.confidential.transport import DEFAULT_SCHEME
+        return {"scheme": DEFAULT_SCHEME, "nonce_expires_in": e2["nonce_expires_in"], "instances": e2["instances"],
+                "evidence": [{"instance_id": i} for i in list(self.enclaves) + ["i-c"]],
+                "unavailable_instance_ids": [], "registry": {"configs": []}}
+
+    async def nonces(self, fleet_id):
+        return await self.instances(fleet_id)
 
     async def instances(self, fleet_id):
         self.instances_calls += 1
@@ -82,17 +89,17 @@ def world(monkeypatch, tmp_path):
     encl = {"i-a": FakeEnclave(), "i-b": FakeEnclave()}
     verified = {"i-a": True, "i-b": True}
 
-    async def fake_fetch(fleet_id, http, profile=None, nonce=None, timeout=0, e2e_pubkeys=None):
-        world["profile_seen"] = profile
-        # the fake verifier "binds" whatever key the session handed it — exactly the real
-        # contract: the report carries the key the quote committed to
-        keys = e2e_pubkeys or {}
+    def fake_verify(fleet_id, doc, nonce):
+        world["nonce_seen"] = nonce
+        # the fake verifier "binds" whatever key the carrier offered — exactly the real contract: the report
+        # carries the key the quote committed to
+        keys = {i["instance_id"]: i["e2e_pubkey"] for i in doc.get("instances") or []}
         world["keys_seen"] = dict(keys)
-        return attest.FleetReport(fleet_id, nonce or "n" * 64,
+        return attest.FleetReport(fleet_id, nonce,
                                   [_report(i, verified[i], keys.get(i, "")) for i in encl] + [_report("i-c", False)],
-                                  raw=[{"instance_id": i} for i in list(encl) + ["i-c"]])
+                                  raw=list(doc.get("evidence") or []))
 
-    monkeypatch.setattr(attest, "fetch_and_verify", fake_fetch)
+    monkeypatch.setattr(attest, "verify_candidates", fake_verify)
 
     async def fake_online(report, inst, nonce, http, timeout=0):
         world["online_seen"] = world.get("online_seen", []) + [report.instance_id]
@@ -106,7 +113,7 @@ def world(monkeypatch, tmp_path):
 
 
 def _session(carrier, price=None):
-    return S.ConfidentialSession(session_id="s1", model_short="fake", upstream_model="fake/Model-TEE", fleet_id="fleet-x1",
+    return S.ConfidentialSession(session_id="s1", model_short="fake", upstream_model="fake/Model-TEE", fleet_id="fl_1",
                                  transport=carrier, http=None, price=price)
 
 
@@ -183,9 +190,9 @@ def test_refuses_when_verified_and_sealable_sets_are_disjoint(world):
 
 
 def test_refuses_when_evidence_cannot_be_fetched(world, monkeypatch):
-    async def boom(*a, **k):
+    def boom(*a, **k):
         raise RuntimeError("operator down")
-    monkeypatch.setattr(attest, "fetch_and_verify", boom)
+    monkeypatch.setattr(attest, "verify_candidates", boom)
     r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
     assert r.verdict == "refused" and "operator down" in r.refusal
 
@@ -411,7 +418,8 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     assert sysmsg["role"] == "system"
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
-    for needle in ("fake/Model-TEE", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
+    assert "fake/Model" not in pre, "the operator's model string rides inside the ciphertext only, never in the preamble"
+    for needle in ("fake", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
                    "InferRoute records the enclave builds"):
         assert needle in pre, needle
     assert "attributed" not in pre
@@ -532,10 +540,10 @@ def test_public_reason_never_leaks_urls_or_hosts():
 
 def test_a_429_on_evidence_refuses_with_a_clean_reason(world, monkeypatch):
     import httpx
-    async def boom(*a, **k):
+    def boom(*a, **k):
         req = httpx.Request("GET", "https://api.example-provider.ai/fleets/abc/evidence")
         raise httpx.HTTPStatusError("429 for url 'https://api.example-provider.ai/fleets/abc/evidence'", request=req, response=httpx.Response(429, request=req))
-    monkeypatch.setattr(attest, "fetch_and_verify", boom)
+    monkeypatch.setattr(attest, "verify_candidates", boom)
     r = asyncio.run(_session(FakeCarrier(world["enclaves"])).open())
     assert r.verdict == "refused" and "answered 429" in r.refusal and "http" not in r.refusal and "example-provider" not in r.refusal
 
@@ -549,18 +557,23 @@ def test_usage_is_priced_locally_and_reported_with_model_short_and_latency(world
     assert c["input_tokens"] == 5 and c["output_tokens"] == 2
     assert abs(c["estimated_cost_usd"] - (5 / 1e6 * 1.0 + 2 / 1e6 * 10.0)) < 1e-12
     rep = carrier.usage_reports[-1]
-    assert rep["model_short"] == "fake" and rep["model"] == "fake/Model-TEE" and rep["economy"] is False
+    assert rep["model_short"] == "fake" and rep["model"] == "fake" and rep["economy"] is False, \
+        "usage names the lane; the operator's model string stays inside the ciphertext"
     assert rep["usage"]["input_tokens"] == 5 and "latency_ms" in rep["usage"]
 
 
-def test_the_evidence_endpoint_comes_from_the_carrier_not_from_this_client(world):
-    """No operator address is compiled in: the session asks its carrier where the evidence lives."""
-    s = _session(FakeCarrier(world["enclaves"]))
+def test_the_carrier_fetches_evidence_for_a_nonce_this_device_chose(world):
+    """No operator address is known here: the carrier fetches the evidence. What keeps that safe is that the
+    challenge is OURS — a fresh 64-hex nonce per fetch — and verification is run against exactly it."""
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
     asyncio.run(s.open())
-    prof = world["profile_seen"]
-    assert prof is not None
-    assert prof.evidence_url("F", "N") == "https://op.test/F/evidence?nonce=N"
-    assert prof.measurements_url() == "https://op.test/measurements"
+    sent = carrier.candidates_nonces[-1]
+    assert len(sent) == 64 and all(c in "0123456789abcdef" for c in sent)
+    assert world["nonce_seen"] == sent and s.fleet.nonce == sent
+    s2 = _session(FakeCarrier(world["enclaves"]))
+    asyncio.run(s2.open())
+    assert s2.fleet.nonce != sent, "every fetch gets a fresh challenge"
 
 
 def test_a_pinned_instance_dropped_at_reverification_is_replaced_by_a_verified_one(world):
@@ -643,9 +656,11 @@ def test_an_upstream_payment_solicitation_never_reaches_the_client(world, caplog
 
 
 def _stall_reverification(s, monkeypatch):
-    async def boom(fleet_id):
+    async def boom(*a, **k):
         raise RuntimeError("the operator gateway is unreachable")
     monkeypatch.setattr(s.transport, "instances", boom)
+    monkeypatch.setattr(s.transport, "candidates", boom)
+    monkeypatch.setattr(s.transport, "nonces", boom)
 
 
 def test_a_session_that_already_sent_is_degraded_not_refused_when_reverification_lapses(world, monkeypatch):
@@ -765,7 +780,8 @@ def test_the_receipt_carries_our_side_of_the_exchange_so_the_key_binding_can_be_
     r = asyncio.run(s.open())
     mine = r.attestation["checked_with"]
 
-    assert mine["challenge"] == "n" * 64, "the challenge this device verified with was not recorded"
+    assert mine["challenge"] == s.fleet.nonce and len(mine["challenge"]) == 64, \
+        "the challenge this device verified with was not recorded"
     assert mine["e2e_pubkey"] == world["enclaves"]["i-a"].pubkey_b64, "the key sealed to was not recorded"
 
     # The binding itself, recomputed from the receipt alone — which is what the brief asks of the auditor.

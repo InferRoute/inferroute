@@ -60,9 +60,8 @@ def _home(path: str) -> str:
 
 
 def _title_model(r: Receipt) -> str:
-    """The catalog name only — the upstream model key is the provider's naming, and stays on the receipt."""
-    fam = r.upstream_model.split("/")[-1].replace("-TEE", "")
-    return f"{fam}  [{DIM}](ir --model {r.model_short})[/]"
+    """The InferRoute lane name. The operator's spelling of the model never reaches this device's records."""
+    return f"{r.model_short}  [{DIM}](ir --model {r.model_short})[/]"
 
 
 def checks_table(r: Receipt) -> Table:

@@ -2240,9 +2240,10 @@ def test_the_brief_disarms_the_two_misreadings_the_1_oct_audits_produced():
     assert "\"self-signed\" is a per-certificate fact" in b
     assert "The AMD ROOT (ARK) is self-signed" in b
     # And per-RECEIPT, which my own correction got wrong: measured 2 Oct on a two-session record, one receipt
-    # was subject==issuer CN=attestation-service and the other chained to CN=guest-vm-root-ca,O=operator.
+    # was subject==issuer CN=attestation-service and the other chained to the operator's own root CA. The brief
+    # describes that CA without naming it (2026-10-08: the operator's identity is not printed by this client).
     assert "TWO RECEIPTS IN ONE RECORD CAN DIFFER" in b
-    assert "guest-vm-root-ca" in b
+    assert "the enclave operator's own root CA" in b
     assert "neither answer is a finding on its own" in b
     assert "generalised across receipts exactly as the sentence it was correcting" in b
 

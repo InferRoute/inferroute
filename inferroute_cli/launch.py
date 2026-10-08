@@ -450,7 +450,7 @@ def _gate_strip_prefix(
     statusLine no terminal width, so the hint can't be right-pegged on this line
     either. The model name in the header already implies how to relaunch. We
     reverse-map the resolved model_id back to the friendly short (`kimi`, not
-    `moonshotai/Kimi-K2.6-TEE`) for that header; cost is appended last so it's the
+    a backend model key) for that header; cost is appended last so it's the
     first thing CC's width-clip drops on a narrow terminal.
     """
     from . import models
@@ -547,7 +547,7 @@ def _resolve_flags(permission_mode: str | None, extra_args: Iterable[str]) -> li
 def _auto_compact_window(model_id: str) -> int:
     """Effective context window (tokens) for Claude Code's native auto-compact.
 
-    CC has no built-in window for our custom model ids (e.g. "moonshotai/Kimi-K2.6-TEE")
+    CC has no built-in window for our custom model ids (backend model keys)
     so its auto-compact never fires — long ir sessions grow unbounded and hard-overflow
     instead of compacting (verified 2026-06-09). Setting CLAUDE_CODE_AUTO_COMPACT_WINDOW
     makes it fire at ~92% of this.

@@ -1,14 +1,13 @@
 """Verify an enclave instance's attestation ON THIS DEVICE, with no vendor SDK.
 
-Evidence is fetched from the enclave operator directly — never through InferRoute, because the
-point of the check is that the user does not have to trust InferRoute (or the operator) about it:
-
-    GET <operator evidence endpoint>?nonce={64 hex}   (unauthenticated)
-    GET <operator measurement registry>                (unauthenticated)
-
-Both addresses come from the operator profile the carrier hands us (see ``transport.py``); none
-is compiled into this client, and none needs to be trusted — every byte they return is checked
-below against Intel's pinned root, Intel's and NVIDIA's own services, and our recorded builds.
+Where the evidence comes from does not matter, and that is the design. The carrier (InferRoute's relay,
+or the operator itself in direct mode) fetches it WITH A NONCE THIS DEVICE CHOSE and hands it over
+byte-for-byte; nothing it says is trusted. Every byte is checked below against Intel's pinned root,
+Intel's and NVIDIA's own services (reached from this device directly), the binding of our nonce and of
+the sealing key into the hardware quote, and InferRoute's recorded builds. A carrier can withhold an
+enclave; it cannot make this device accept one. (An earlier version said evidence was fetched "never
+through InferRoute"; that was never the reason the check holds, and the relay now carries it so that no
+operator address, name or id reaches the device.)
 
 Per running instance the evidence carries an Intel TDX ``quote``, NVIDIA ``gpu_evidence``, a
 ``certificate``, a ``signature`` and a base64-JSON ``attested_body`` that embeds our nonce.
@@ -522,6 +521,26 @@ def new_nonce() -> str:
 
 
 
+
+
+class UnsupportedScheme(Exception):
+    """The carrier offered evidence in a shape this client cannot verify. Never guessed at."""
+
+
+def verify_candidates(fleet_id: str, doc: dict, nonce: str) -> FleetReport:
+    """Verify a carrier's candidate document (transport.Transport.candidates) for OUR nonce.
+
+    The scheme is checked first: an unknown scheme is refused outright rather than read with the nearest
+    parser, because a parser applied to the wrong shape is how a check silently stops checking. The keys in
+    the document are the ones the quotes must commit to; a key a quote does not bind fails that instance."""
+    from .transport import SUPPORTED_SCHEMES
+    scheme = (doc or {}).get("scheme")
+    if scheme not in SUPPORTED_SCHEMES:
+        raise UnsupportedScheme(f"the enclave evidence is in a format this client cannot verify ({scheme!r}); "
+                                "update ir to use this lane")
+    keys = {str(i.get("instance_id")): i.get("e2e_pubkey") for i in (doc.get("instances") or []) if i.get("e2e_pubkey")}
+    evidence = {"evidence": doc.get("evidence") or [], "failed_instance_ids": doc.get("unavailable_instance_ids") or []}
+    return verify_fleet(fleet_id, evidence, doc.get("registry"), nonce, keys)
 
 
 async def fetch_and_verify(fleet_id: str, http, profile, nonce: str | None = None, timeout: float = 240.0,

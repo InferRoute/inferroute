@@ -388,3 +388,43 @@ def test_guest_image_131_is_refused_with_its_reason():
     assert b["status"] == "refused" and b["refused_on"] == "2026-10-06"
     assert "overlayroot" in b["refused_because"]
     assert b["reproduced"], "the record of what was checked survives the refusal"
+
+
+# ── signed records under the offline publication key (2026-10-08) ──
+
+def test_the_shipped_signing_key_is_the_publication_key():
+    """One trust root: the key that signs releases (and so the bundled list) signs run-time records."""
+    assert builds.SIGNING_KEYS == ("748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204",)
+
+
+def test_a_build_signature_is_domain_separated_from_other_uses_of_the_key(signing):
+    """The publication key signs other artifacts too. A signature over the bare measurement record — what
+    any other protocol signing the same JSON would produce — must not verify as an enclave-build record."""
+    import json
+    row = _row()
+    bare = json.dumps({k: str(row.get(k, "")).lower() for k in ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3", "status")},
+                      sort_keys=True, separators=(",", ":")).encode()
+    assert not builds.verify_signature({**row, "sig": signing.sign(bare).hex()})
+    assert b'"purpose":"inferroute-enclave-build/v1"' in builds.signed_bytes(row)
+
+
+def test_changing_the_status_invalidates_the_signature(signing):
+    """Otherwise a relay could turn a signed admission into a refusal, or the reverse."""
+    signed = _sign(signing, _row(status="refused"))
+    assert builds.verify_signature(signed)
+    assert not builds.verify_signature({**signed, "status": "observed"})
+
+
+def test_a_signed_refusal_retires_even_a_bundled_build(signing):
+    b = next(x for x in builds.BUNDLED if x["id"] == "tee-vm-2026-09-20")
+    row = {k: b[k] for k in ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3")}
+    assert builds.lookup(b["mrtd"], ["", b["rtmr1"], b["rtmr2"], b["rtmr3"]])["status"] == "observed"
+    builds.absorb_remote([_sign(signing, {**row, "status": "refused", "refused_because": "retired"})])
+    got = builds.lookup(b["mrtd"], ["", b["rtmr1"], b["rtmr2"], b["rtmr3"]])
+    assert got["status"] == "refused" and got["origin"] == "signed"
+
+
+def test_an_unsigned_refusal_decides_nothing(signing):
+    b = next(x for x in builds.BUNDLED if x["id"] == "tee-vm-2026-09-20")
+    builds.absorb_remote([{k: b[k] for k in ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3")} | {"status": "refused"}])
+    assert builds.lookup(b["mrtd"], ["", b["rtmr1"], b["rtmr2"], b["rtmr3"]])["status"] == "observed"

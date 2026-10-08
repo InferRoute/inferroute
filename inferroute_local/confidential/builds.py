@@ -156,7 +156,14 @@ BUNDLED: list[dict] = [
 #
 # Rotation: add the new key here alongside the old one, ship a release, then stop signing with
 # the old. Verification accepts any key in this tuple, so the two overlap without a flag day.
-SIGNING_KEYS: tuple[str, ...] = ()   # Ed25519 public keys, hex, 32 bytes each
+# InferRoute's offline publication key (generated 2026-09-16, held on the IR-PUBKEY drive) — the same root
+# that signs the releases carrying BUNDLED, so a signed run-time row and a shipped row rest on one key.
+SIGNING_KEYS: tuple[str, ...] = (
+    "748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204",
+)
+# Domain separation: the publication key also signs other artifacts, so these bytes name their purpose and a
+# signature over an enclave-build record can never be valid for anything else, or the reverse.
+SIGNED_PURPOSE = "inferroute-enclave-build/v1"
 
 _EXTRA: list[dict] = []          # builds fetched from the relay this process
 
@@ -175,6 +182,12 @@ def known() -> dict[tuple, dict]:
         # key that nothing ever set, so it could not fire; the ordering was doing the work.)
         if k not in out:
             out[k] = b
+    # A SIGNED refusal outranks any admission of the same measurements, bundled included: retiring a build
+    # must not wait for a client release, and only the offline key can sign one. An unsigned refusal from
+    # the relay is never taken — it could not admit anything, but nothing unsigned decides here.
+    for b in _EXTRA:
+        if b.get("origin") == "signed" and b.get("status") == "refused":
+            out[key_of(b.get("mrtd", ""), ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")])] = b
     return out
 
 
@@ -185,9 +198,10 @@ def signed_bytes(row: dict) -> bytes:
     timestamp changed, and would let anything we later add to the shape ride along unexamined.
     What must not be forgeable is WHICH ENCLAVE this row blesses — that is the four measurements
     — plus the id, so one signature cannot be replayed onto a different entry."""
-    fields = ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3")
-    return json.dumps({k: str(row.get(k, "")).lower() for k in fields},
-                      sort_keys=True, separators=(",", ":")).encode()
+    fields = ("id", "mrtd", "rtmr1", "rtmr2", "rtmr3", "status")
+    body = {k: str(row.get(k, "")).lower() for k in fields}
+    body["purpose"] = SIGNED_PURPOSE
+    return json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
 
 
 def verify_signature(row: dict) -> bool:
@@ -227,10 +241,11 @@ def absorb_remote(rows, origin: str = "relay") -> int:
         if not isinstance(b, dict) or not b.get("mrtd"):
             continue
         k = key_of(b["mrtd"], ["", b.get("rtmr1", ""), b.get("rtmr2", ""), b.get("rtmr3", "")])
-        if k in have:
-            continue
         signed = verify_signature(b)
-        _EXTRA.append({**b, "status": "signed" if signed else "pending",
+        refusal = signed and str(b.get("status", "")).lower() == "refused"
+        if k in have and not refusal:
+            continue
+        _EXTRA.append({**b, "status": "refused" if refusal else ("signed" if signed else "pending"),
                        "origin": ("signed" if signed else origin)})
         have.add(k)
         n += 1

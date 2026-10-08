@@ -341,7 +341,7 @@ def check_build_recorded(q: dict) -> Check:
         return Check(False, "no quote to match")
     rtmrs = [q[k].hex() for k in ("rtmr0", "rtmr1", "rtmr2", "rtmr3")]
     b = builds.lookup(q["mrtd"].hex(), rtmrs)
-    if b is not None and b.get("status") == "refused" and b.get("origin") == "bundled":
+    if b is not None and b.get("status") == "refused" and b.get("origin") in ("bundled", "signed"):
         # Checked before IR_CONFIDENTIAL_ALLOW_NEW_BUILD on purpose: that switch admits builds we have
         # not SEEN, and this is one we have seen and decided against.
         return Check(False, f"build {b.get('id', '?')} — REFUSED by InferRoute since {b.get('refused_on', '?')}: "

@@ -1162,3 +1162,23 @@ def test_continuity_carries_a_real_session_onto_a_second_real_fleet(world, monke
     assert len([i for i in ids if i]) >= 2, f"the record names only {ids}"
     assert lane.active.receipt.counters["continuity_switches"] == 1
     assert any(e["kind"] == "carried" for e in lane.active.receipt.events)
+
+
+def test_the_agent_never_sees_the_operators_model_string_in_a_reply(world):
+    """The enclave answers under the operator's model string (live 2026-10-08: the native path handed it to
+    Pi verbatim). The device rewrites only `model`, after decryption, to the lane name; nothing else moves."""
+    def reply(body):
+        return [{"id": "c", "model": "fake/Model-TEE", "choices": [{"index": 0, "delta": {"content": "a"}, "finish_reason": None}]},
+                {"id": "c", "model": "fake/Model-TEE", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                 "usage": {"prompt_tokens": 1, "completion_tokens": 1}}]
+    carrier = FakeCarrier(world["enclaves"], reply=reply)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    st, _, out = asyncio.run(_oai(s, {"model": "x", "stream": True, "messages": [{"role": "user", "content": "go"}]}))
+    text = out.decode()
+    assert st == 200 and "Model-TEE" not in text and text.rstrip().endswith("data: [DONE]")
+    chunks = [json.loads(l[6:]) for l in text.split("\n") if l.startswith("data: {")]
+    assert [c["model"] for c in chunks] == ["fake", "fake"] and chunks[0]["choices"][0]["delta"]["content"] == "a"
+    carrier.reply = lambda body: {"id": "c", "model": "fake/Model-TEE", "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    st, _, out = asyncio.run(_oai(s, {"model": "x", "stream": False, "messages": [{"role": "user", "content": "q"}]}))
+    assert json.loads(out)["model"] == "fake" and b"Model-TEE" not in out

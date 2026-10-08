@@ -652,15 +652,15 @@ class ConfidentialSession:
                     line, linebuf = linebuf[:i + 1], linebuf[i + 1:]
                     translate.scan_openai_usage(line, usage)
                     done = done or _is_done(line)
-                    yield line
+                    yield self._relabel(line)
             tail = opener.flush()
             if tail:
                 translate.scan_openai_usage(tail, usage)
                 done = done or _is_done(tail)
-                yield tail
+                yield self._relabel(tail)
             if linebuf:
                 done = done or _is_done(linebuf)
-                yield linebuf
+                yield self._relabel(linebuf)
         except e2ee.E2EEError as e:
             _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
             yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
@@ -680,6 +680,24 @@ class ConfidentialSession:
             yield DONE
         self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
 
+    def _relabel(self, line: bytes) -> bytes:
+        """An SSE `data:` line, decrypted here, with its `model` field set to the lane name. The enclave answers
+        under the operator's model string; the agent only ever sees InferRoute's. Anything that is not a JSON
+        object with a `model` field passes through untouched."""
+        if b'"model"' not in line or not line.lstrip().startswith(b"data:"):
+            return line
+        head, _, rest = line.partition(b"data:")
+        body = rest.strip()
+        end = rest[len(rest.rstrip(b"\r\n")):]
+        try:
+            obj = json.loads(body)
+        except ValueError:
+            return line
+        if not isinstance(obj, dict) or "model" not in obj:
+            return line
+        obj["model"] = self.model_short
+        return head + b"data: " + json.dumps(obj).encode() + end
+
     async def _open_json_native(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         c = self.receipt.counters
         try:
@@ -696,6 +714,8 @@ class ConfidentialSession:
             return
         c["response_bytes_opened_here"] += len(data)
         self._account(translate._usage(resp.get("usage")), int((time.monotonic() - t0) * 1000) if t0 else 0)
+        if isinstance(resp, dict) and "model" in resp:
+            resp["model"] = self.model_short           # the operator's model string never reaches the agent
         yield json.dumps(resp).encode()
 
     async def _open_stream(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:

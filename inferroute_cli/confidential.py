@@ -820,7 +820,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             session, receipt = await _open_session(alias, session_id, http, console,
                                                    continuity=use_continuity)
             search_endpoint = None
-            if agent == "pi" and receipt.is_confidential:
+            if agent == "pi" and receipt.is_confidential and probant is not None:
                 from . import pi_attested
                 try:
                     pi_attested.check_workspace(os.getcwd())      # W1: never make a protected tree writable
@@ -993,7 +993,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             reset_sigint = lambda: signal.signal(signal.SIGINT, signal.SIG_DFL)  # noqa: E731
             preexec = reset_sigint
             sandbox = None
-            if agent == "pi" and mac_backend is None:
+            if agent == "pi" and mac_backend is None and probant is not None:
                 from . import pi_attested
                 ok_confine, notice = pi_attested.confine_precheck()
                 if notice:

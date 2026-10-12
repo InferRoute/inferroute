@@ -34,6 +34,9 @@ EXTENSION = Path(__file__).resolve().parent / "pi_attested" / "ir-attested.ts"
 PROVIDER = "inferroute"
 TOOLS = ("read", "edit", "write", "grep", "find", "ls")
 
+# A plain `ir pi` is the user's own agent in their own folder: the built-ins plus a shell, unconfined.
+GENERAL_TOOLS = TOOLS + ("bash",)
+
 # THE MATTER FLOW READS THROUGH OUR OWN TOOL, not Pi's. `read` and `grep` are withheld and replaced by
 # `read_matter_file`, which refuses anything but disclosure.md unless the professional named it for this
 # session — so "only the disclosure" is ENFORCED rather than asked for in the prompt. `grep` goes with
@@ -366,7 +369,8 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         for k in ("IR_INTAKE_OUT", "IR_INTAKE_DIR", "IR_CLUSTER_OUT", "IR_MATTER_RECORD_DIR",
                   "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
             env.pop(k, None)
-        tools = TOOLS
+        tools = GENERAL_TOOLS
+        env["IR_GENERAL"] = "1"
     elif intake or cluster_out:
         create_drafts = bool(intake and env.get("IR_INTAKE_CREATE_DRAFTS") == "1")
         tools = (("read", "grep", "find", "ls", "create_draft_matter") if create_drafts else

@@ -904,7 +904,7 @@ export default function (pi: ExtensionAPI) {
 		}
 		if (WRITE_TOOLS.has(event.toolName)) {
 			const target = String((event as { input?: { path?: unknown } }).input?.path ?? "");
-			if (!target || !insideMatter(target)) {
+			if (process.env.IR_GENERAL !== "1" && (!target || !insideMatter(target))) {
 				return { block: true, reason: `refused: ${event.toolName} may only touch files in this `
 					+ `matter's folder, and ${target || "(no path given)"} is outside it. Nothing was written.` };
 			}

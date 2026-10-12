@@ -1765,7 +1765,8 @@ def test_plain_ir_pi_is_a_general_agent_not_the_prior_art_assistant(tmp_path, mo
     prompt = (Path(env["PI_CODING_AGENT_DIR"]) / "system-prompt.txt").read_text()
     assert "prior-art" not in prompt.lower() and "patent" not in prompt.lower()
     assert "<!--" not in prompt
-    assert argv[argv.index("--tools") + 1] == ",".join(PA.TOOLS)
+    assert argv[argv.index("--tools") + 1] == ",".join(PA.GENERAL_TOOLS) and "bash" in PA.GENERAL_TOOLS
+    assert env["IR_GENERAL"] == "1"
     assert "IR_SEARCH_ENDPOINT" not in env and "IR_REPORT_MATTER" not in env and "IR_MATTER_DOCS" not in env
     assert env["IR_CONTRACT_MODIFIED"] == "0"
     # and the Probant launch is unchanged

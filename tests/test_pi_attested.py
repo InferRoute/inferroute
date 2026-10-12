@@ -1784,3 +1784,12 @@ def test_plain_ir_pi_may_resume_but_probant_may_not():
     for flag in ("--tools", "-e", "--provider"):          # the allowlist and route stay refused for everyone
         with pytest.raises(PA.Refused):
             PA.check_passthrough([flag], general=True)
+
+
+def test_env_argv_lets_a_plain_launch_resume_but_still_refuses_probant(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path))
+    kw = dict(base_url="http://127.0.0.1:1", api_key="k", alias=ALIAS, upstream_name="u")
+    argv = PA.env_argv("pi", {}, ["-c"], general=True, **kw)
+    assert "-c" in argv
+    with pytest.raises(PA.Refused):
+        PA.env_argv("pi", {}, ["-c"], **kw)

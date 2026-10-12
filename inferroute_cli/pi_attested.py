@@ -364,7 +364,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`.
     `general`: a plain `ir pi` launch, not a Probant matter — Pi's ordinary file tools and a general system
     prompt, with none of the matter or search machinery. Only `ir probant open` gets the prior-art assistant."""
-    check_passthrough(passthrough)
+    check_passthrough(passthrough, general=general)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
     # Document readings have no search tools. New readings get a host-bound draft
     # capability and read-only file tools; legacy proposal/cluster flows keep their tools.

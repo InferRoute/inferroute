@@ -1752,3 +1752,23 @@ def test_every_tool_receives_its_arguments_where_pi_puts_them():
     assert len(decls) >= 8
     bad = [d for d in decls if not d.strip().startswith("_toolCallId")]
     assert not bad, f"tools whose execute() does not take the call id first: {bad}"
+
+
+def test_plain_ir_pi_is_a_general_agent_not_the_prior_art_assistant(tmp_path, monkeypatch):
+    """Only `ir probant open` is the prior-art assistant. A plain `ir pi` (general=True) gets a general
+    prompt, Pi's ordinary file tools, and none of the matter or search machinery, even with stray matter
+    variables in the user's environment."""
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path))
+    env = {"IR_REPORT_MATTER": "M1", "IR_MATTER_RECORD_DIR": str(tmp_path), "IR_INTAKE_DIR": str(tmp_path)}
+    argv = PA.env_argv("pi", env, [], base_url="http://127.0.0.1:1", api_key="k", alias=ALIAS,
+                       upstream_name="u", search_endpoint="http://127.0.0.1:2", general=True)
+    prompt = (Path(env["PI_CODING_AGENT_DIR"]) / "system-prompt.txt").read_text()
+    assert "prior-art" not in prompt.lower() and "patent" not in prompt.lower()
+    assert "<!--" not in prompt
+    assert argv[argv.index("--tools") + 1] == ",".join(PA.TOOLS)
+    assert "IR_SEARCH_ENDPOINT" not in env and "IR_REPORT_MATTER" not in env and "IR_MATTER_DOCS" not in env
+    assert env["IR_CONTRACT_MODIFIED"] == "0"
+    # and the Probant launch is unchanged
+    env2 = {}
+    PA.env_argv("pi", env2, [], base_url="http://127.0.0.1:1", api_key="k", alias=ALIAS, upstream_name="u")
+    assert "prior-art research assistant" in (Path(env2["PI_CODING_AGENT_DIR"]) / "system-prompt.txt").read_text()

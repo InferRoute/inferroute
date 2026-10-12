@@ -65,6 +65,7 @@ LOOPBACK = ("127.0.0.1", "localhost", "::1")
 # changed only deliberately. A drifted on-disk sha is not silently run — the panel and session record
 # say "contract modified" and the launch carries the flag.
 PREAMBLE_FILE = Path(__file__).resolve().parent / "pi_attested" / "preamble.md"
+GENERAL_FILE = Path(__file__).resolve().parent / "pi_attested" / "general.md"
 INTAKE_FILE = Path(__file__).resolve().parent / "pi_attested" / "intake.md"
 CONTRACT_FILE = Path(__file__).resolve().parent / "pi_attested" / "contract.md"
 PINNED_PREAMBLE_SHA = "02c4257239c895fd11e63a13f1870bf3c7bd932c391591495325a72b951290e1"
@@ -85,6 +86,14 @@ def load_contract() -> dict:
     c_sha = hashlib.sha256(contract.encode()).hexdigest()
     return {"text": preamble + "\n" + contract, "preamble_sha": p_sha, "contract_sha": c_sha,
             "modified": p_sha != PINNED_PREAMBLE_SHA or c_sha != PINNED_CONTRACT_SHA}
+
+
+def load_general_prompt() -> dict:
+    """The system prompt for a plain `ir pi` launch: a general assistant, not the Probant prior-art persona.
+    Same shape as load_contract() so the session record still pins which prompt ran."""
+    text = _strip_comments(GENERAL_FILE.read_text())
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    return {"text": text, "preamble_sha": "", "contract_sha": sha, "modified": False}
 
 
 def load_intake_prompt(create_drafts: bool = False) -> dict:
@@ -341,15 +350,24 @@ def matter_titles(records_dir, keys=None) -> dict:
 
 
 def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-             headers: dict | None = None, search_endpoint: str | None = None) -> list[str]:
-    """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`."""
+             headers: dict | None = None, search_endpoint: str | None = None, general: bool = False) -> list[str]:
+    """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`.
+    `general`: a plain `ir pi` launch, not a Probant matter — Pi's ordinary file tools and a general system
+    prompt, with none of the matter or search machinery. Only `ir probant open` gets the prior-art assistant."""
     check_passthrough(passthrough)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
     # Document readings have no search tools. New readings get a host-bound draft
     # capability and read-only file tools; legacy proposal/cluster flows keep their tools.
     intake = str(env.get("IR_INTAKE_DIR") or "")
     cluster_out = str(env.get("IR_CLUSTER_OUT") or "")
-    if intake or cluster_out:
+    if general:
+        intake = cluster_out = ""
+        search_endpoint = None
+        for k in ("IR_INTAKE_OUT", "IR_INTAKE_DIR", "IR_CLUSTER_OUT", "IR_MATTER_RECORD_DIR",
+                  "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
+            env.pop(k, None)
+        tools = TOOLS
+    elif intake or cluster_out:
         create_drafts = bool(intake and env.get("IR_INTAKE_CREATE_DRAFTS") == "1")
         tools = (("read", "grep", "find", "ls", "create_draft_matter") if create_drafts else
                  TOOLS + ((PROPOSE_TOOL, BATCH_TOOL) if intake else ()) + ((CLUSTER_TOOL,) if cluster_out else ()))
@@ -376,7 +394,8 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         env[name] = _with_loopback(env.get("no_proxy") if env.get("no_proxy") is not None else env.get("NO_PROXY"))
     # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
     # config dir; its stamps go to the extension for the panel and the session record.
-    contract = load_intake_prompt(env.get("IR_INTAKE_CREATE_DRAFTS") == "1") if intake else load_contract()
+    contract = (load_general_prompt() if general else
+                load_intake_prompt(env.get("IR_INTAKE_CREATE_DRAFTS") == "1") if intake else load_contract())
     # The documents this matter's searching has returned in EARLIER sessions, so "find documents like X" works for
     # them too. It searched only this session's results, while the marks note and the page offered "like" for
     # marks made in earlier sessions — ten refused requests in a row on 19 Sep. Written after config_dir's scrub,

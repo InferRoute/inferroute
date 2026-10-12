@@ -854,7 +854,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 # this launch, not one promised for later.
                 # Reading a document offers no search tool, so no search verifier is started for it: nothing
                 # about a whole document in context can leave for a search machine.
-                search_endpoint = None if os.environ.get("IR_INTAKE_DIR") else (
+                search_endpoint = None if (os.environ.get("IR_INTAKE_DIR") or probant is None) else (
                     pi_attested.start_search_proxy(confinement=mac_backend.label, trusted_vm=mac_backend.ready)
                     if mac_backend is not None else pi_attested.start_search_proxy())
             if probant is not None and receipt.is_confidential:
@@ -970,7 +970,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 else:
                     argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
                                                 alias=alias, upstream_name=f"{alias.model_id} [confidential]",
-                                                search_endpoint=search_endpoint)
+                                                search_endpoint=search_endpoint, general=probant is None)
                 pi_confine_ports = [port] + ([int(search_endpoint.rsplit(":", 1)[1])] if search_endpoint else [])
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key=local_key,

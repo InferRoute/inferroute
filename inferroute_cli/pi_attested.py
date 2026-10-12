@@ -144,9 +144,16 @@ class Refused(ValueError):
     """The launch cannot be made attested as asked; the message says which flag and why."""
 
 
-def check_passthrough(passthrough: list[str]) -> None:
+# A plain `ir pi` keeps its own transcript in the ir-owned config dir, so resuming it is the user's own
+# history on their own disk, re-verified from scratch. Probant refuses these (D2 above).
+GENERAL_ALLOWED = frozenset({"-r", "--resume", "-c", "--continue", "--fork"})
+
+
+def check_passthrough(passthrough: list[str], general: bool = False) -> None:
     for arg in passthrough:
         flag = arg.split("=", 1)[0]
+        if general and flag in GENERAL_ALLOWED:
+            continue
         if flag in REFUSED_FLAGS:
             raise Refused(f"`{flag}` is not accepted on the attested lane: it {REFUSED_FLAGS[flag]}. "
                           "Use `ir pi --plain` for an unattested session.")

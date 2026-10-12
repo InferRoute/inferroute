@@ -746,7 +746,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     if agent == "pi":
         from . import pi_attested
         try:
-            pi_attested.check_passthrough(passthrough)       # refuse before verifying, not after
+            pi_attested.check_passthrough(passthrough, general=probant is None)       # refuse before verifying, not after
         except pi_attested.Refused as e:
             sys.stderr.write(f"\n  ir: {e}\n\n")
             return 2

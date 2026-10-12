@@ -1774,3 +1774,13 @@ def test_plain_ir_pi_is_a_general_agent_not_the_prior_art_assistant(tmp_path, mo
     PA.env_argv("pi", env2, [], base_url="http://127.0.0.1:1", api_key="k", alias=ALIAS, upstream_name="u")
     assert "prior-art research assistant" in (Path(env2["PI_CODING_AGENT_DIR"]) / "system-prompt.txt").read_text()
     assert "IR_GENERAL" not in env2
+
+
+def test_plain_ir_pi_may_resume_but_probant_may_not():
+    for flag in ("-c", "--continue", "-r", "--resume", "--fork"):
+        PA.check_passthrough([flag], general=True)
+        with pytest.raises(PA.Refused):
+            PA.check_passthrough([flag])
+    for flag in ("--tools", "-e", "--provider"):          # the allowlist and route stay refused for everyone
+        with pytest.raises(PA.Refused):
+            PA.check_passthrough([flag], general=True)

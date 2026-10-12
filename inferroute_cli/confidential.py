@@ -732,6 +732,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
         passthrough = [*passthrough, "--mode", "rpc"]
     # Probant never asks the user to pick a model from a price list: it runs the default, the model its
     # mission contract is written and tested against.
+    if user_model is None and probant is None and agent == "pi" and any(a in ("-c", "--continue") for a in passthrough):
+        from . import pi_attested as _pa
+        user_model = _pa.resume_model(os.getcwd())
+        if user_model:
+            sys.stderr.write(f"\n  Continuing on {user_model}, the model this session was using "
+                             f"(add --model to change it; a long session may not fit another model).\n\n")
     if user_model is None and _interactive(passthrough) and probant is None:
         # No pin → the same picker as bare `ir`, narrowed to the enclave-capable models.
         from . import choose as choose_mod

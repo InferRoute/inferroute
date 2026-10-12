@@ -159,6 +159,34 @@ def check_passthrough(passthrough: list[str], general: bool = False) -> None:
                           "Use `ir pi --plain` for an unattested session.")
 
 
+def resume_model(cwd: str) -> str | None:
+    """The model the newest Pi transcript for `cwd` last ran on, or None. A resumed transcript replayed to a
+    DIFFERENT model fails with a bare 400 once it outgrows that model's window (measured 12 Oct: a 150k-token
+    GLM-5.2 session answered by GLM-5.2, refused by GLM-5.1 and Kimi K2.6), so `ir pi -c` continues on the
+    model the session was using unless the user names another."""
+    home = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute"))
+    key = "--" + re.sub(r"[/\\:]", "-", str(Path(cwd).resolve()).lstrip("/\\")) + "--"
+    try:
+        newest = max((home / "pi-attested" / "sessions" / key).glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    except (ValueError, OSError):
+        return None
+    model = None
+    try:
+        for line in newest.read_text().splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("type") == "model_change" and row.get("modelId"):
+                model = row["modelId"]
+            m = row.get("message") or {}
+            if m.get("role") == "assistant" and m.get("stopReason") in ("stop", "toolUse") and m.get("model"):
+                model = m["model"]
+    except OSError:
+        return None
+    return model
+
+
 def _with_loopback(value: str | None) -> str:
     have = [h.strip() for h in (value or "").split(",") if h.strip()]
     return ",".join(list(LOOPBACK) + [h for h in have if h not in LOOPBACK])

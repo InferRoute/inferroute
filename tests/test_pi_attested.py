@@ -1793,3 +1793,19 @@ def test_env_argv_lets_a_plain_launch_resume_but_still_refuses_probant(tmp_path,
     assert "-c" in argv
     with pytest.raises(PA.Refused):
         PA.env_argv("pi", {}, ["-c"], **kw)
+
+
+def test_resume_model_is_the_model_the_newest_transcript_last_ran_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "h"))
+    cwd = tmp_path / "proj"; cwd.mkdir()
+    key = "--" + str(cwd.resolve()).lstrip("/").replace("/", "-") + "--"
+    d = tmp_path / "h" / "pi-attested" / "sessions" / key; d.mkdir(parents=True)
+    old = d / "a.jsonl"; old.write_text(json.dumps({"type": "model_change", "modelId": "kimi-k2.6"}) + "\n")
+    os.utime(old, (1, 1))
+    new = d / "b.jsonl"
+    new.write_text("\n".join(json.dumps(r) for r in [
+        {"type": "model_change", "modelId": "glm-5.1"},
+        {"type": "message", "message": {"role": "assistant", "model": "glm-5.2", "stopReason": "stop"}},
+        {"type": "message", "message": {"role": "assistant", "model": "glm-5.1", "stopReason": "error"}}]) + "\n")
+    assert PA.resume_model(str(cwd)) == "glm-5.2"          # an errored turn on another model does not count
+    assert PA.resume_model(str(tmp_path / "elsewhere")) is None

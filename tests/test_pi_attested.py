@@ -1770,6 +1770,7 @@ def test_plain_ir_pi_is_a_general_agent_not_the_prior_art_assistant(tmp_path, mo
     assert "IR_SEARCH_ENDPOINT" not in env and "IR_REPORT_MATTER" not in env and "IR_MATTER_DOCS" not in env
     assert env["IR_CONTRACT_MODIFIED"] == "0"
     # and the Probant launch is unchanged
-    env2 = {}
+    env2 = {"IR_GENERAL": "1"}               # a stray variable in the user's shell must not lift the Probant fence
     PA.env_argv("pi", env2, [], base_url="http://127.0.0.1:1", api_key="k", alias=ALIAS, upstream_name="u")
     assert "prior-art research assistant" in (Path(env2["PI_CODING_AGENT_DIR"]) / "system-prompt.txt").read_text()
+    assert "IR_GENERAL" not in env2

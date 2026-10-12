@@ -363,6 +363,8 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # capability and read-only file tools; legacy proposal/cluster flows keep their tools.
     intake = str(env.get("IR_INTAKE_DIR") or "")
     cluster_out = str(env.get("IR_CLUSTER_OUT") or "")
+    if not general:
+        env.pop("IR_GENERAL", None)          # never inherited: it lifts the write fence, so only a general launch sets it
     if general:
         intake = cluster_out = ""
         search_endpoint = None

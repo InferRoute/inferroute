@@ -71,6 +71,9 @@ def main() -> int:
     for r in rows:
         print(f"  {r['id']:<24} {str(r['status']).lower():<9} mrtd {r['mrtd'][:12]}…  rtmr1 {r['rtmr1'][:12]}…  "
               f"rtmr2 {r['rtmr2'][:12]}…  rtmr3 {r['rtmr3'][:12]}…" + (f"  ({r['refused_because']})" if r.get("refused_because") else ""))
+    print("\n  Signing an 'observed' record asserts that this build measures the operating system's programs,"
+          "\n  libraries and configuration (RTMR3 over the file list in its initramfs), as guest 1.4.x does: every"
+          "\n  receipt's limitation text says so of the builds InferRoute accepts. Check that before signing.")
     print("\n  Type YES to sign these records: ", end="", flush=True)
     if sys.stdin.readline().strip() != "YES":
         raise SystemExit("not signed")

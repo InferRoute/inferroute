@@ -269,15 +269,40 @@ def test_a_session_caveat_becomes_a_limitation_so_it_reaches_the_receipt_and_the
 
 
 def test_the_standing_limitation_states_the_real_coverage_of_the_measurements():
-    """Written into every receipt. It must not claim a per-build reproduction, and it must not
-    claim that any change to the image is caught: the measured set covers the firmware, the boot
-    chain and a short config list, not the filesystem the model runs from, and the operator holds
-    the disk key. Verified against the operator's own published image on 2026-09-12."""
-    text = dict(A.LIMITATIONS)["build-review"]
-    assert "NOT the whole" in text
+    """Written into every receipt and the model preamble. Since guest 1.4.x (the only builds accepted, 2026-10-13)
+    the measurements cover firmware, start-up and the operating system; what they do not cover is what the machine
+    loads after it starts — signature-checked containers, and serving code nothing measures (an open gap the
+    operator confirmed on 2026-10-08). The text must say both halves, and never claim any change is caught."""
+    text = " ".join(dict(A.LIMITATIONS)["build-review"].split())
+    assert "operating system's programs, libraries and configuration" in text
+    assert "in the builds InferRoute accepts" in text, "OS coverage is a property of accepted builds, not of TDX"
+    assert "do NOT cover what the machine loads after it starts" in text
+    assert "the code the model is served with, which nothing measures" in text
     assert "without changing any measurement" in text
     # and it must not make the older, stronger claim
     assert "any change" not in text.replace("without changing any measurement", "")
+    # nor the stale one: the disk key is not why software can change unseen on the accepted builds
+    assert "disk key" not in text and "short list" not in text
+
+
+def test_every_surface_states_the_same_measurement_coverage():
+    """The receipt, the trust page, the browser home page and the auditor brief are four places a reader meets
+    this claim. They disagreed once already (the tick claimed 'the room' while the limit said 'the doorframe');
+    they must say the same thing now."""
+    from pathlib import Path
+    from inferroute_cli import probant_export, probant_trust
+    root = Path(probant_trust.__file__).resolve().parents[1]
+    trust = " ".join(probant_trust.limits("ok"))
+    home = (root / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    for where, t in (("trust page", trust), ("home page", home)):
+        assert "firmware, start-up and the operating system" in t, where
+        assert "loads after it starts" in t, where
+        assert "not its whole filesystem" not in t, where
+    brief = " ".join(probant_export.AUDIT_MD.split())
+    assert "loads after it starts is not measured; the receipt's own limitations say so" in brief
+    # the brief points at the receipt; the receipt must actually say it
+    assert "loads after it starts" in " ".join(dict(A.LIMITATIONS)["build-review"].split())
+    assert "disk key" not in brief
 
 
 def test_the_gpu_limitation_does_not_imply_a_binding_nvidia_does_not_provide():

@@ -834,7 +834,7 @@
           "Browser conversations are kept with the matter on this computer, readable only by your account. Terminal sessions keep their searches, not the conversation.")),
       sec("What it can't prove",
         list("Hardware checks do not prove that software inside a machine cannot retain or disclose plaintext. Cloud platform components inside that boundary remain part of the trust set.",
-          "The AI check measures firmware and start-up, not its whole filesystem. The search fingerprint matches a reference; an independent proof from source to the deployed image is still missing.",
+          "The AI check measures firmware, start-up and the operating system, not the model-serving software the machine loads after it starts. The search fingerprint matches a reference; an independent proof from source to the deployed image is still missing.",
           "A search finds related documents. It doesn't prove novelty, or that nothing else exists.",
           "Browser extensions allowed to read every page can read these pages too. For client matters, use a browser profile without extensions.")),
       sec("Limits right now",

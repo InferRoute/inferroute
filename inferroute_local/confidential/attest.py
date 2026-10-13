@@ -104,10 +104,13 @@ LIMITATIONS = (
                      "non-debuggable enclave and are readable nowhere else in transit.\n\n"
                      "Why this computer cannot check it: InferRoute records the enclave builds it has "
                      "seen and refuses unrecorded ones, and recomputes what it can — stated per session "
-                     "above. But the measurements cover the firmware, the boot chain and a short list of "
-                     "configuration files, NOT the whole filesystem the model runs from. The enclave "
-                     "operator holds the disk key, so they could change code outside that list without "
-                     "changing any measurement."),
+                     "above. The measurements cover the machine's firmware, its start-up and, in the builds "
+                     "InferRoute accepts, the operating system's programs, libraries and configuration. They "
+                     "do NOT cover what the machine loads after it starts: the software containers the model "
+                     "runs in, which the operator checks against its own signatures rather than measures, and "
+                     "the code the model is served with, which nothing measures — the operator has confirmed "
+                     "that gap and plans to add a proof of it. That software could change without changing "
+                     "any measurement."),
     ("gpu-binding", "The GPU reports are signed by the same quote-bound key as the rest of the evidence, so "
                     "the enclave itself vouches that these are its GPUs — but NVIDIA provides no way to prove "
                     "from the outside that an attested GPU is attached to an attested CPU enclave. That step "
@@ -133,10 +136,11 @@ def situational_limitations(checks: dict) -> list[tuple[str, str]]:
     elif "recomputed BY INFERROUTE" in why:
         regs = why.split("recomputed BY INFERROUTE")[0].rsplit(";", 1)[-1].strip()
         if "RTMR3" in regs:
-            rest = ("The root-filesystem measurement was recomputed from the file list the operator bakes into "
-                    "the initial RAM filesystem, which the earlier measurement already pins; the files themselves "
-                    "were not rebuilt from source, so their hashes are the operator's output, checked for "
-                    "consistency rather than reproduced.")
+            rest = ("The root-filesystem measurement — the operating system's programs, libraries and "
+                    "configuration — was recomputed from the file list the operator bakes into the initial RAM "
+                    "filesystem, which the earlier measurement already pins; the files themselves were not "
+                    "rebuilt from source, so their hashes are the operator's output, checked for consistency "
+                    "rather than reproduced.")
         else:
             rest = ("What is not recomputed is the measurement over the root filesystem, which is encrypted in "
                     "the published image.")

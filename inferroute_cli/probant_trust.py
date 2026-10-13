@@ -113,8 +113,10 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         # the limitation underneath said the measurements cover firmware, boot chain and a short list of
         # configuration files, NOT the filesystem the model runs from. Both were written by us and they
         # do not agree; the tick was claiming the room.
-        points.append("Genuine sealed hardware. The parts of its software that are measured — firmware "
-                      "and start-up — match a build InferRoute has on record.")
+        # 2026-10-13: the accepted builds (guest 1.4.x) measure the operating system too, not only firmware and
+        # start-up; what stays unmeasured is what the machine loads after starting. Same facts as build-review.
+        points.append("Genuine sealed hardware. The parts of its software that are measured — firmware, "
+                      "start-up and the operating system — match a build InferRoute has on record.")
     if _ok(receipt, "e2e_key_bound"):
         # THE CONDITION IS ON THE PAGE, which is this module's own rule and the one this sentence broke.
         # It read "only that machine can open it" — singular, unconditional. A session re-pins whenever
@@ -327,7 +329,8 @@ def limits(search_state: str, search_is_ours: bool = False, surface: str = "term
     out = ["These checks establish hardware and key bindings, not end-to-end confidentiality. "
            "They do not prove that software inside a machine cannot retain or disclose plaintext. "
            "Cloud platform components inside that boundary remain part of the trust set.",
-           "The AI check measures firmware and start-up, not its whole filesystem.",
+           "The AI check measures firmware, start-up and the operating system, not the model-serving "
+           "software the machine loads after it starts.",
            "The network carries encrypted text, but timing and message sizes remain visible."]
     if search_state in (OK, WARN):
         out.append("The search deployment fingerprint "

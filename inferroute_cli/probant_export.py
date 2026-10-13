@@ -1612,8 +1612,8 @@ What it may and may not say:
     "sealed to one recipient", "no second copy", or a claim that another disclosure channel did not exist;
     this comparison does not prove those things or independently prove how the key was created or used.
   - Do NOT say the invention "was never exposed", "could not have been read", or "remained confidential".
-    No attestation establishes what software did with a text after decrypting it. The operator holds the
-    disk key; the receipt's own limitations say so.
+    No attestation establishes what software did with a text after decrypting it, and the model-serving
+    software the machine loads after it starts is not measured; the receipt's own limitations say so.
   - If claim 3 is not VERIFIED, you may not call the machine InferRoute's. You may say it was a genuine
     sealed machine of the stated kind — which is what the hardware evidence supports on its own.
   - If the record is an evidence-only pack, say that you did not see the queries or results, and that the

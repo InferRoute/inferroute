@@ -869,3 +869,22 @@ def test_a_past_sessions_searches_fold_and_use_their_own_columns():
     assert 'el("li", "doc past"' in home_js
     assert ".doc.past { grid-template-columns: 26px minmax(0, 1fr) auto; }" in css
     assert "details.card > summary.card-head" in css
+
+
+def test_inside_the_probant_app_the_banner_does_not_tell_the_person_to_keep_a_terminal_open(tmp_path, monkeypatch, capsys):
+    """The app shows the page in its own window and hides the service's output: "Keep this terminal open" would
+    refer to a terminal the person never sees. In a terminal, the old wording stays."""
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    import uvicorn
+    monkeypatch.setattr(uvicorn.Server, "run", lambda *a, **k: None)
+
+    monkeypatch.setenv("IR_PROBANT_NO_BROWSER", "1")
+    assert H.run(open_browser=False) == 0
+    out = capsys.readouterr().out
+    assert "Probant home:" in out and "terminal" not in out.lower() and "Quitting Probant" in out
+
+    monkeypatch.delenv("IR_PROBANT_NO_BROWSER")
+    assert H.run(open_browser=False) == 0
+    assert "Keep this terminal open" in capsys.readouterr().out

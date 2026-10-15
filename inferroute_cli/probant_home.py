@@ -1311,8 +1311,11 @@ def run(open_browser: bool = True) -> int:
     # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
     # full buffer, and the link is the one thing it needs.
     print(f"\n  Probant home:  {url}", flush=True)
-    print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
-    print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
+    if os.environ.get("IR_PROBANT_NO_BROWSER") == "1":      # inside the Probant app: quitting the app ends the service
+        print("  The link works on this computer only; don't share it. Quitting Probant also ends any session started from the page.\n", flush=True)
+    else:
+        print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
+        print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)
     # SAY IT HERE, NOT AT THE CLICK. Started from inside a coding assistant, the page comes up, hands out a
     # working link and looks healthy — and then refuses the one action it exists for, because every session it
     # launches inherits CLAUDECODE=1 and `ir` will not nest agent sessions. Henry hit exactly that on 1 Oct

@@ -111,7 +111,12 @@
   }
   function input(type, placeholder) {
     const i = document.createElement(type === "textarea" ? "textarea" : "input");
-    if (type !== "textarea") i.type = type;
+    if (type !== "textarea") {
+      i.type = type;
+      // Names, matter names, keys and paths are identifiers: the system must not "fix" them (macOS capitalised
+      // the name typed to confirm a delete, so it never matched).
+      i.setAttribute("autocapitalize", "off"); i.setAttribute("autocorrect", "off"); i.spellcheck = false;
+    }
     if (placeholder) i.placeholder = placeholder;
     return i;
   }

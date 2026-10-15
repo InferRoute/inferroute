@@ -70,9 +70,25 @@ def test_app_shell_passes_no_credentials_and_can_be_quit():
     env_line = swift.split("var env = [")[1].split("]")[0]
     names = re.findall(r'"([A-Z_]+)=', env_line)
     assert set(names) == {"HOME", "PATH", "IR_ATTESTED_CONFINE", "PYTHONNOUSERSITE", "PYTHONSAFEPATH",
-                          "PYTHONDONTWRITEBYTECODE"}
+                          "PYTHONDONTWRITEBYTECODE", "IR_PROBANT_NO_BROWSER"}
     assert "setActivationPolicy(.regular)" in swift and "Quit Probant" in swift
     assert "applicationShouldHandleReopen" in swift and "kill(-pid, SIGINT)" in swift
+
+
+def test_app_window_shows_only_the_service_and_keeps_nothing_on_disk():
+    swift = (MAC / "AppMain.swift").read_text()
+    assert "import WebKit" in swift and "WKWebView(" in swift
+    assert ".nonPersistent()" in swift and "websiteDataStore" in swift
+    # the main frame may show the service's own address only; anything else goes to the default browser
+    guard = swift.split("private func isHome(")[1].split("\n    }\n")[0]
+    assert '"127.0.0.1"' in guard and "home.port" in guard and '"http"' in guard
+    assert "decisionHandler(.cancel)" in swift and "NSWorkspace.shared.open(u)" in swift
+    # closing the last window must not end the service; reopening must not start a second one
+    assert "applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }" in swift
+    show = swift.split("@objc func showWindow(")[1].split("\n    }\n")[0]
+    assert "start(" not in show and "posix_spawn" not in show
+    # without an Edit menu, copy and paste do nothing in a web view
+    assert "NSText.copy(_:)" in swift and "NSText.paste(_:)" in swift
 
 
 def test_dmg_readme_has_both_languages_and_only_the_version_placeholder():

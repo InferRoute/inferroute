@@ -1,13 +1,19 @@
-// Small signed application shell; the existing browser remains the UI.
+// Small signed application shell: the bundled Python service draws the page, and this app shows it in a
+// window of its own.
 //
-// It starts the bundled Python service (`probant home`, which opens the page in the default browser once it
-// listens), shows a Dock icon while that runs, and gives the person two things a shell with no window must
-// still give: a way back to the page (click the Dock icon, or File > Open Probant in Browser) and a way to
-// quit (Probant > Quit, Cmd-Q, or the Dock menu). Quitting does what Ctrl-C does in a terminal: the service
-// and every session it started get SIGINT (they share one process group, made here), and the app waits for
-// them to end before it exits.
+// It starts the bundled Python service (`probant home`, told not to open a browser) and, once the service prints
+// its page address, shows that page in a Probant window (WebKit, the engine Safari uses). Closing the window
+// keeps the service running; the Dock icon or File > New Window brings it back, never a second service. The
+// page may load nothing but the service's own address: any other link opens in the default browser. WebKit
+// keeps nothing on disk (a non-persistent data store): the person's notes and matter text never reach a cache.
+// File > Open Probant in Browser stays for people who prefer a browser tab.
+//
+// Quitting (Probant > Quit, Cmd-Q, or the Dock menu) does what Ctrl-C does in a terminal: the service and every
+// session it started get SIGINT (they share one process group, made here), and the app waits for them to end
+// before it exits.
 import AppKit
 import Foundation
+import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pid: pid_t = 0
@@ -19,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var exitWatch: DispatchSourceProcess?
 
     private var termWatch: DispatchSourceSignal?
+    private var windows: [PageWindow] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
@@ -36,9 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let entry = resources.appendingPathComponent("app_entry.py").path
         // Host credentials remain with the trusted host service. No Pi discovery. -B and
         // PYTHONDONTWRITEBYTECODE: nothing is written inside the signed bundle (it would break its seal).
+        // IR_PROBANT_NO_BROWSER: the page is shown in this app's window, not in a browser tab.
         var env = ["HOME=" + NSHomeDirectory(), "PATH=/usr/bin:/bin",
                    "IR_ATTESTED_CONFINE=require", "PYTHONNOUSERSITE=1",
-                   "PYTHONSAFEPATH=1", "PYTHONDONTWRITEBYTECODE=1"]
+                   "PYTHONSAFEPATH=1", "PYTHONDONTWRITEBYTECODE=1", "IR_PROBANT_NO_BROWSER=1"]
         // The per-user temporary folder launchd gives every app; without it Python falls back to /tmp.
         if let tmp = ProcessInfo.processInfo.environment["TMPDIR"], tmp.hasPrefix("/") {
             env.append("TMPDIR=" + tmp)
@@ -96,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // The service prints its page address once ("Probant home:  http://127.0.0.1:PORT/#k=TOKEN"). It is kept
-    // in memory only, to reopen the page; the service itself opens it the first time.
+    // in memory only; the window loads it.
     private func read(_ data: Data) {
         pending.append(data)
         while let nl = pending.firstIndex(of: 0x0A) {
@@ -104,7 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pending.removeSubrange(pending.startIndex...nl)
             if homeURL == nil, let r = line.range(of: "Probant home:") {
                 let text = line[r.upperBound...].trimmingCharacters(in: .whitespaces)
-                if text.hasPrefix("http://127.0.0.1:"), let url = URL(string: text) { homeURL = url }
+                if text.hasPrefix("http://127.0.0.1:"), let url = URL(string: text) {
+                    homeURL = url
+                    showWindow(nil)
+                }
             }
         }
         if pending.count > 65536 { pending.removeAll() }
@@ -143,10 +154,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let url = homeURL { NSWorkspace.shared.open(url) }
     }
 
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openHome(nil)
-        return false
+    // The Dock icon and File > New Window: bring back a window on the running service (never start another).
+    @objc func showWindow(_ sender: Any?) {
+        guard let url = homeURL, !quitting else { return }
+        if let open = windows.first {
+            if open.window.isMiniaturized { open.window.deminiaturize(nil) }
+            open.window.makeKeyAndOrderFront(nil)
+        } else {
+            let w = PageWindow(home: url, app: self, configuration: nil)
+            w.webView.load(URLRequest(url: url))
+            windows.append(w)
+        }
+        NSApp.activate(ignoringOtherApps: true)
     }
+
+    // A page asked for a window (window.open): same service, same WebKit process, so it shares the opener's
+    // session storage (and with it the per-launch key).
+    func openChild(configuration: WKWebViewConfiguration, home: URL) -> WKWebView {
+        let w = PageWindow(home: home, app: self, configuration: configuration)
+        windows.append(w)
+        return w.webView
+    }
+
+    func closed(_ w: PageWindow) { windows.removeAll { $0 === w } }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { showWindow(nil) }
+        return flag
+    }
+
+    // The service keeps running with no window, as it did with no browser tab: Quit is how it ends.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard pid > 0, !quitting, groupAlive() else { return .terminateNow }
@@ -178,19 +216,169 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installMenu() {
         let main = NSMenu()
-        let appItem = NSMenuItem(), fileItem = NSMenuItem()
-        main.addItem(appItem); main.addItem(fileItem)
-        let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Probant", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        appItem.submenu = appMenu
-        let fileMenu = NSMenu(title: "File")
-        let open = NSMenuItem(title: "Open Probant in Browser", action: #selector(openHome(_:)), keyEquivalent: "o")
-        open.target = self
-        fileMenu.addItem(open)
-        fileItem.submenu = fileMenu
+        func top(_ title: String, _ items: [NSMenuItem]) -> NSMenu {
+            let holder = NSMenuItem(), menu = NSMenu(title: title)
+            items.forEach { menu.addItem($0) }
+            holder.submenu = menu; main.addItem(holder)
+            return menu
+        }
+        func item(_ title: String, _ action: Selector, _ key: String, _ mods: NSEvent.ModifierFlags = .command,
+                  target: AnyObject? = nil) -> NSMenuItem {
+            let i = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            i.keyEquivalentModifierMask = mods; i.target = target
+            return i
+        }
+        _ = top("Probant", [
+            item("Hide Probant", #selector(NSApplication.hide(_:)), "h"),
+            item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
+            item("Show All", #selector(NSApplication.unhideAllApplications(_:)), ""),
+            .separator(),
+            item("Quit Probant", #selector(NSApplication.terminate(_:)), "q")])
+        _ = top("File", [
+            item("New Window", #selector(showWindow(_:)), "n", target: self),
+            item("Open Probant in Browser", #selector(openHome(_:)), "o", target: self),
+            .separator(),
+            item("Close Window", #selector(NSWindow.performClose(_:)), "w")])
+        // Without an Edit menu, Cmd-C / Cmd-V / Cmd-A do nothing inside a web view.
+        _ = top("Edit", [
+            item("Undo", Selector(("undo:")), "z"),
+            item("Redo", Selector(("redo:")), "z", [.command, .shift]),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
+            item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Select All", #selector(NSText.selectAll(_:)), "a")])
+        _ = top("View", [
+            item("Reload Page", #selector(WKWebView.reload(_:)), "r"),
+            .separator(),
+            item("Actual Size", #selector(PageWindow.actualSize(_:)), "0"),
+            item("Zoom In", #selector(PageWindow.zoomIn(_:)), "="),
+            item("Zoom Out", #selector(PageWindow.zoomOut(_:)), "-")])
+        let windowMenu = top("Window", [
+            item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+            item("Zoom", #selector(NSWindow.performZoom(_:)), "")])
+        NSApplication.shared.windowsMenu = windowMenu
         NSApplication.shared.mainMenu = main
     }
 }
+
+// One Probant window: a web view that may show the service's own pages and nothing else.
+final class PageWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
+    let window: NSWindow
+    let webView: WKWebView
+    private let home: URL
+    private weak var app: AppDelegate?
+
+    init(home: URL, app: AppDelegate, configuration: WKWebViewConfiguration?) {
+        self.home = home; self.app = app
+        let config: WKWebViewConfiguration
+        if let given = configuration {
+            config = given                         // from window.open: WebKit requires this exact configuration
+        } else {
+            config = WKWebViewConfiguration()
+            config.websiteDataStore = .nonPersistent()   // nothing the person types reaches a disk cache
+        }
+        webView = WKWebView(frame: .zero, configuration: config)
+        let size = NSScreen.main.map { NSSize(width: min(1280, $0.visibleFrame.width * 0.85),
+                                              height: min(900, $0.visibleFrame.height * 0.9)) }
+                   ?? NSSize(width: 1180, height: 820)
+        window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                          backing: .buffered, defer: false)
+        super.init()
+        window.title = "Probant"
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 720, height: 480)
+        window.contentView = webView
+        window.delegate = self
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        window.center()
+        window.setFrameAutosaveName("ProbantWindow")
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    // The service's own address: same scheme, host and port as the page address it printed.
+    private func isHome(_ url: URL?) -> Bool {
+        guard let u = url else { return false }
+        return u.scheme == "http" && u.host == "127.0.0.1" && u.port == home.port
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let url = action.request.url
+        if isHome(url) || url?.absoluteString == "about:blank" { decisionHandler(.allow); return }
+        decisionHandler(.cancel)
+        // A link the person followed (or a page's window.open) to anywhere else: the default browser.
+        if let u = url, ["http", "https", "mailto"].contains(u.scheme ?? ""),
+           action.targetFrame?.isMainFrame ?? true {
+            NSWorkspace.shared.open(u)
+        }
+    }
+
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                 for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard isHome(action.request.url), let app = app else {
+            if let u = action.request.url, ["http", "https", "mailto"].contains(u.scheme ?? "") {
+                NSWorkspace.shared.open(u)
+            }
+            return nil
+        }
+        return app.openChild(configuration: configuration, home: home)
+    }
+
+    func webViewDidClose(_ webView: WKWebView) { window.close() }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if let t = webView.title, !t.isEmpty { window.title = t }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
+
+    // window.alert / confirm / prompt, as sheets on this window.
+    func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+        let a = NSAlert(); a.messageText = message; a.addButton(withTitle: "OK")
+        a.beginSheetModal(for: window) { _ in completionHandler() }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        let a = NSAlert(); a.messageText = message
+        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        a.beginSheetModal(for: window) { r in completionHandler(r == .alertFirstButtonReturn) }
+    }
+
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String,
+                 defaultText: String?, initiatedByFrame frame: WKFrameInfo,
+                 completionHandler: @escaping (String?) -> Void) {
+        let a = NSAlert(); a.messageText = prompt
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.stringValue = defaultText ?? ""; a.accessoryView = field
+        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        a.beginSheetModal(for: window) { r in completionHandler(r == .alertFirstButtonReturn ? field.stringValue : nil) }
+    }
+
+    // <input type="file">
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = parameters.allowsDirectories
+        panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+        panel.beginSheetModal(for: window) { r in completionHandler(r == .OK ? panel.urls : nil) }
+    }
+
+    @objc func actualSize(_ sender: Any?) { webView.pageZoom = 1.0 }
+    @objc func zoomIn(_ sender: Any?) { webView.pageZoom = min(3.0, webView.pageZoom + 0.1) }
+    @objc func zoomOut(_ sender: Any?) { webView.pageZoom = max(0.5, webView.pageZoom - 0.1) }
+
+    func windowWillClose(_ notification: Notification) {
+        webView.navigationDelegate = nil; webView.uiDelegate = nil
+        app?.closed(self)
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

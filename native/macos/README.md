@@ -89,3 +89,10 @@ downloaded copy and the person must use System Settings > Privacy & Security > O
 nothing about who built it; trust rests on the vendor-signed runtime manifest and the hash-pinned inputs.
 The bundle is not reproducible byte for byte (the dmg differs on each build) and only arm64 is built.
 `assemble_app.py` and `install.sh.in` are the separate Developer-ID path and are not used here.
+
+## Installer .pkg (no Developer ID)
+
+`build_pkg_from_dmg.sh Probant-<V>.dmg OUTDIR` (on a Mac) wraps the ad-hoc `Probant.app` from the .dmg, bytes unchanged, into an
+unsigned `.pkg`. A copy out of a quarantined .dmg also quarantines the bundled `python3`, which Gatekeeper then kills; files the
+Installer places carry no quarantine. Measured on a second Mac by sealed-research (2026-10-15, CLI install only): python3 runs at once,
+codesign valid, service check passes. The GUI path (Open Anyway on the pkg, then Installer.app) is not yet measured.

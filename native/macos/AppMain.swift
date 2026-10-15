@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var termWatch: DispatchSourceSignal?
     private var windows: [PageWindow] = []
+    private var home: PageWindow?           // the window showing the home page; nil once closed
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
@@ -154,29 +155,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let url = homeURL { NSWorkspace.shared.open(url) }
     }
 
-    // The Dock icon and File > New Window: bring back a window on the running service (never start another).
+    // The Dock icon and File > New Window: bring back the home window on the running service (never start
+    // another). A record window (opened by the page) is not the home window and does not stand in for it.
     @objc func showWindow(_ sender: Any?) {
         guard let url = homeURL, !quitting else { return }
-        if let open = windows.first {
+        if let open = home {
             if open.window.isMiniaturized { open.window.deminiaturize(nil) }
             open.window.makeKeyAndOrderFront(nil)
         } else {
-            let w = PageWindow(home: url, app: self, configuration: nil)
+            let w = PageWindow(home: url, app: self, configuration: nil, main: true)
             w.webView.load(URLRequest(url: url))
-            windows.append(w)
+            windows.append(w); home = w
         }
         NSApp.activate(ignoringOtherApps: true)
     }
 
     // A page asked for a window (window.open): same service, same WebKit process, so it shares the opener's
     // session storage (and with it the per-launch key).
-    func openChild(configuration: WKWebViewConfiguration, home: URL) -> WKWebView {
-        let w = PageWindow(home: home, app: self, configuration: configuration)
+    func openChild(configuration: WKWebViewConfiguration, home url: URL) -> WKWebView {
+        let w = PageWindow(home: url, app: self, configuration: configuration, main: false)
         windows.append(w)
         return w.webView
     }
 
-    func closed(_ w: PageWindow) { windows.removeAll { $0 === w } }
+    func closed(_ w: PageWindow) {
+        windows.removeAll { $0 === w }
+        if home === w { home = nil }
+    }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { showWindow(nil) }
@@ -269,7 +274,7 @@ final class PageWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
     private let home: URL
     private weak var app: AppDelegate?
 
-    init(home: URL, app: AppDelegate, configuration: WKWebViewConfiguration?) {
+    init(home: URL, app: AppDelegate, configuration: WKWebViewConfiguration?, main: Bool) {
         self.home = home; self.app = app
         let config: WKWebViewConfiguration
         if let given = configuration {
@@ -293,8 +298,13 @@ final class PageWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
         window.delegate = self
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        window.center()
-        window.setFrameAutosaveName("ProbantWindow")
+        // Only the home window remembers its place; a record window opens offset from the window in front.
+        if main {
+            window.center()
+            window.setFrameAutosaveName("ProbantWindow")
+        } else if let front = NSApp.keyWindow ?? NSApp.mainWindow {
+            window.setFrameTopLeftPoint(front.cascadeTopLeft(from: NSPoint(x: front.frame.minX, y: front.frame.maxY)))
+        }
         window.makeKeyAndOrderFront(nil)
     }
 

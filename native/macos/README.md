@@ -60,3 +60,32 @@ Development test drivers may construct an explicit Runtime object in a separate
 synthetic harness. They must not add a production verification bypass. An inner
 boot manifest's `development_only:false` is not authentication: production also
 requires the independent signed outer manifest and Developer ID check.
+
+## Ad-hoc app (`build_app_adhoc.sh`): a .dmg for a stock Mac, without an Apple Developer ID
+
+    sh native/macos/build_app_adhoc.sh INPUTS OUT        # on an Apple-silicon Mac; Command Line Tools only
+
+`INPUTS` holds the four files named in `pins.json`, each refused unless its sha256 matches: a
+python-build-standalone CPython 3.12 (arm64, install_only), and the signed release's client wheel, runtime
+wheel and hash lock (the lock `install-probant.sh` pins). Output: `Probant.app` and `Probant-<V>.dmg`
+(the app, an Applications link, and a French/English `README.txt` about the Gatekeeper warning).
+
+* The runtime wheel goes in unchanged. Its runner, kernel, initrd and `runtime.json` are never re-signed or
+  modified; the build checks the runner's sha256 against the pin before and after signing, and runs
+  `runtime.locate()` on the bundled copy, so the signed manifest verifies in place.
+* Libraries: `pip install --require-hashes --only-binary=:all:` from the lock, then the two wheels by hash,
+  `--no-deps`. pip is removed afterwards; nothing is installed at run time. Bytecode is compiled at build
+  time and the app never writes inside its own bundle (`-B`, `PYTHONDONTWRITEBYTECODE`): a new file there
+  would break the bundle's seal.
+* Signatures, all ad-hoc: every Mach-O in the bundled Python except the runner; `python3.12` with the
+  hardened runtime and ONE entitlement, `disable-library-validation` (ad-hoc libraries have no Team ID, and
+  library validation refuses them otherwise); the outer app with the hardened runtime and none.
+* `AppMain.swift` starts `probant home` (which opens the page in the browser), shows a Dock icon, reopens
+  the page on a Dock click, and on Quit / Cmd-Q / SIGTERM sends SIGINT to the service's process group, which
+  is what Ctrl-C does in a terminal, then waits (up to 90 s) for the sessions to end.
+
+What this does NOT give: Apple has not notarized the app, so Gatekeeper blocks the first open of a
+downloaded copy and the person must use System Settings > Privacy & Security > Open Anyway. That says
+nothing about who built it; trust rests on the vendor-signed runtime manifest and the hash-pinned inputs.
+The bundle is not reproducible byte for byte (the dmg differs on each build) and only arm64 is built.
+`assemble_app.py` and `install.sh.in` are the separate Developer-ID path and are not used here.

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The bundled python3.12 runs with the hardened runtime. Its extension modules (cffi, cryptography,
+     pydantic-core, uvloop, ...) are ad-hoc signed and have no Team ID, so library validation refuses them
+     ("mapping process and mapped file (non-platform) have different Team IDs", measured 2026-10-15).
+     This is the one exemption needed; JIT / unsigned-executable-memory were not (ctypes and cffi callbacks
+     ran without them). With a Developer ID every library would carry the same Team ID and this would go. -->
+<plist version="1.0"><dict>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict></plist>

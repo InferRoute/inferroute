@@ -459,7 +459,12 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A("</table>")
 
     A("<h2>Disclosure</h2>")
-    A("<p class=note>The workspace file <code>disclosure.md</code> as it stood at export time — an agent-writable "
+    if rec.get("surface") == "hosted-page":                          # HOSTED
+        A("<p class=note>The matter text as typed into the page, at export time. "
+          "The text each sealed search actually received is shown per search below and is bound into that search's "
+          "signed statement.</p>")
+    else:
+      A("<p class=note>The workspace file <code>disclosure.md</code> as it stood at export time — an agent-writable "
       "file, not a sealed record. Its content-hash and modification time are given so a later change is detectable. "
       "The text each sealed search actually received is shown per search below and is bound into that search's "
       "signed statement.</p>")
@@ -502,6 +507,19 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
         A(f"<h3>Session <span class=mono>{_e(s['session_id'])}</span></h3><table>")
         A(f"<tr><th>Started</th><td>{_e(r.get('started_at'))}</td></tr>")
         A(f"<tr><th>Confinement</th><td class={conf_cls}>{_e(conf)} <span class=note>(this device's self-report)</span></td></tr>")
+        if _is_hosted(r):                                       # HOSTED: no agent, no contract, no model lane
+            A(f"<tr><th>Where it ran</th><td>A web page in the person's browser. No AI assistant and no model took part. "
+              f"<span class=note>(the page's self-report)</span></td></tr>")
+            if r.get("page_sha256"):
+                ph = r["page_sha256"]
+                A(f"<tr><th>Page bundle</th><td><span class=mono>{_e(ph.get('value'))}</span> "
+                  f"<span class=note>{_e(ph.get('what_this_is'))}</span></td></tr>")
+            surf = r.get("which_surface_saw_what") or {}
+            if surf:
+                srows = "".join(f"<tr><td>{_e(k.replace('_', ' '))}</td><td>{_e(v)}</td></tr>" for k, v in surf.items())
+                A(f"<tr><th>Which surface saw what</th><td><table>{srows}</table></td></tr>")
+            A("</table>")
+            continue
         A(f"<tr><th>Contract governing this session</th><td>contract <span class=mono>{_e((contract.get('contract_sha') or '?')[:16])}</span>, "
           f"preamble <span class=mono>{_e((contract.get('preamble_sha') or '?')[:16])}</span>"
           f"{' <span class=warn>— modified from the pinned version</span>' if contract.get('modified') else ''}</td></tr>")
@@ -603,9 +621,15 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root pins plus "
       "signature links: no revocation checking, no certificate-path constraints. The MANIFEST is an unsigned index; the "
       "enclave-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
-    A("<p class=note><b>This device's own attestation only</b>: that its agent ran confined (per session above), that the "
+    if sessions and all(_is_hosted(s.get("record")) for s in sessions):     # HOSTED
+        A("<p class=note><b>What only the page reports</b>: that no AI assistant took part, which text each search was "
+          "given before it was sealed, and the date bound it gave each search (the search machine signs the bound it was "
+          "given). The page's code is served by InferRoute, so these lines rest on that page having been the published "
+          "one; the signed statements and the hardware evidence above do not depend on it.</p>")
+    else:
+        A("<p class=note><b>This device's own attestation only</b>: that its agent ran confined (per session above), that the "
       "date bound and marks were held outside the agent's reach, and that the model-lane checks passed as listed. "
-      "A reader who does not trust this device should weigh those lines accordingly.</p>")
+          "A reader who does not trust this device should weigh those lines accordingly.</p>")
     A("<p class=note><b>Not claimed</b>: novelty, patentability, or the absence of prior art. A sealed search lists what a "
       "bounded corpus surfaced under a stated date bound; the corpus is named by its index manifest hash in each statement.</p>")
     # THE LANE, AND THE TRADE. The attested search is not our best search: an enclave with no route to the
@@ -635,7 +659,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
       "document itself, identified by its source, and not our summary, paraphrase or opinion of that document.</p>")
     # Derived from the signed statements, not asserted: see _coverage_note.
     A(_coverage_note(sessions))
-    reach = [f"{s['session_id']}: {_reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
+    reach = [f"{s['session_id']}: {'no agent ran; the page assembled these records in the browser' if _is_hosted(s['record']) else _reach_note(str((s['record'] or {}).get('confinement') or ''))}" for s in sessions]
     if reach:
         A("<p class=note>Per session: " + "; ".join(_e(x) for x in reach) + ".</p>")
     A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the machine that made this record.</p>")
@@ -646,6 +670,12 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
             # quotes that receipt; without the file beside it, the record's claims about the conversation
             # rest on this device's word alone.
             "sessions": sessions}
+
+
+def _is_hosted(r) -> bool:
+    """HOSTED (probant-hosted, not upstream yet): a session run by the hosted web page, with no agent and no model.
+    Its record lines must not borrow the agent flow's words (confinement, model lane, contract)."""
+    return isinstance(r, dict) and r.get("surface") == "hosted-page"
 
 
 def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
@@ -664,7 +694,13 @@ def _glance(sessions: list, n_searches: int, marks: dict, rec: dict) -> str:
         items.append("<li><b>Whether the search machine was InferRoute's</b> is checked against InferRoute's signed "
                      "reference, which you hold separately (see <i>How to check</i>). This page does not assert it on its own."
                      "</li>")
-    if sessions:
+    hosted = [s for s in sessions if _is_hosted(s.get("record"))]     # HOSTED: see _is_hosted
+    if hosted and len(hosted) == len(sessions):
+        items.append("<li><b>No AI assistant took part</b>: each search was typed by the person in a web page, which "
+                     "checked the search machine and sealed each search in the browser before sending it. "
+                     "<span class=who>As reported by that page, whose code InferRoute serves; see the sessions below."
+                     "</span></li>")
+    elif sessions:
         if all(models):
             when = "the session" if len(sessions) == 1 else f"each of the {len(sessions)} sessions"
             items.append("<li><b>The AI assistant ran in a sealed machine</b> that this computer verified at the start of "

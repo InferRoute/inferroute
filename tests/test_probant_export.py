@@ -306,3 +306,15 @@ def test_a_record_with_no_search_reads_as_nothing_to_check_not_as_a_failure():
     # A genuine failure is untouched.
     bad = C.parse("  FAIL signer key: wrong\nRESULT: FAILED — a check did not pass\n", 1)
     assert bad["verdict"] == "failed" and bad["failed"] == ["signer key"]
+
+
+def test_hosted_page_session_uses_hosted_words_and_the_agent_flow_is_unchanged():
+    from inferroute_cli import probant_export as X
+    hosted = {"record": {"surface": "hosted-page"}}
+    html = X._glance([hosted], 1, {}, {"date_bound": "2020-01-01"})
+    assert "No AI assistant took part" in html and "whose code InferRoute serves" in html
+    assert "ran in a sealed machine" not in html and "closed box" not in html
+    # a mixed set falls back to the agent wording, never claiming the hosted words for an agent session
+    mixed = X._glance([hosted, _sess()], 1, {}, {"date_bound": "2020-01-01"})
+    assert "No AI assistant took part" not in mixed
+    assert X._is_hosted(None) is False and X._is_hosted({"surface": "cli"}) is False

@@ -73,7 +73,7 @@ def identity(create: bool = True) -> Dict[str, Any]:
         held = json.loads(path.read_text())
         return {**held, "mlkem_pub_raw": _unb64(held["mlkem_pub"]), "ed_pub_raw": _unb64(held["ed_pub"])}
     if not create:
-        raise S.ProbantError("this installation has no Probant identity yet: run `ir probant identity`")
+        raise S.ProbantError("this installation has no Anteriora identity yet: run `ir probant identity`")
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
     # How the secret is STORED depends on the backend, because only one of them can reload what it made:
@@ -130,11 +130,11 @@ def read_card(card: Dict[str, str]) -> str:
     here: a preview that computed the fingerprint its own way could show a number the add step would not
     agree with, and the one being confirmed aloud would be the weaker of the two."""
     if not isinstance(card, dict) or card.get("schema", "inferroute.probant-contact/1") != "inferroute.probant-contact/1":
-        raise S.ProbantError("that is not a supported Probant public key card")
+        raise S.ProbantError("that is not a supported Anteriora public key card")
     try:
         mlkem_pub, ed_pub = _unb64(card["mlkem_pub"]), _unb64(card["ed_pub"])
     except (KeyError, ValueError, TypeError, AttributeError):
-        raise S.ProbantError("that is not a Probant public key: it needs mlkem_pub and ed_pub")
+        raise S.ProbantError("that is not an Anteriora public key: it needs mlkem_pub and ed_pub")
     if len(mlkem_pub) != 1184 or len(ed_pub) != 32:
         raise S.ProbantError("the public keys have the wrong size: expected ML-KEM-768 and Ed25519 keys")
     got = fingerprint(mlkem_pub, ed_pub)
@@ -221,7 +221,7 @@ def open_sealed(blob: bytes, me: Optional[Dict[str, Any]] = None) -> Dict[str, A
         nonce, body = _unb64(outer["nonce"]), _unb64(outer["body"])
         recipients = outer.get("recipients") or []
     except (ValueError, KeyError, TypeError):
-        raise S.ProbantError("that file is not a Probant share")
+        raise S.ProbantError("that file is not an Anteriora share")
     mine = next((r for r in recipients if r.get("fingerprint") == me["fingerprint"]), None)
     if mine is None:
         addressed = ", ".join(str(r.get("fingerprint")) for r in recipients) or "nobody"
@@ -285,7 +285,7 @@ def matter_payload(client: str, matter: str, *, include_marks: bool = False) -> 
     """
     rec = S.load_record(client, matter)
     if rec.get("needs_review"):
-        raise S.ProbantError(f"review draft {client}/{matter} in Probant home before sharing its disclosure and date")
+        raise S.ProbantError(f"review draft {client}/{matter} in Anteriora home before sharing its disclosure and date")
     doc = S.workspace_path(client, matter) / "disclosure.md"
     marks: Dict[str, str] = {}
     if include_marks:
@@ -356,7 +356,7 @@ def build_share(matters: List[Dict[str, Any]], note: str = "", files: Optional[L
     return {"schema": SCHEMA, "matters": matters, "corpus": corpus, "note": note[:2000],
             "made_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "evidence": ("Each claim carries a verbatim quote and the sha256 of the document it came from. "
-                         "Those documents are NOT in this share, so the Probant that opens it cannot "
+                         "Those documents are NOT in this share, so the Anteriora that opens it cannot "
                          "re-check a quote against its source; the sender's signature covers the claims as "
                          "written, and nothing here proves a quote is in the document it names.")}
 

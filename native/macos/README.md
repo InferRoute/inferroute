@@ -1,4 +1,4 @@
-A Mac Probant session runs its agent inside a small Linux virtual machine. This directory holds what
+A Mac Anteriora session runs its agent inside a small Linux virtual machine. This directory holds what
 builds it. Missing or unauthenticated runtime means refusal before Pi or any model session starts; no
 environment variable enables an unsigned payload.
 
@@ -67,8 +67,14 @@ requires the independent signed outer manifest and Developer ID check.
 
 `INPUTS` holds the four files named in `pins.json`, each refused unless its sha256 matches: a
 python-build-standalone CPython 3.12 (arm64, install_only), and the signed release's client wheel, runtime
-wheel and hash lock (the lock `install-probant.sh` pins). Output: `Probant.app` and `Probant-<V>.dmg`
+wheel and hash lock (the lock `install-probant.sh` pins). Output: `Anteriora.app` and `Anteriora-<V>.dmg`
 (the app, an Applications link, and a French/English `README.txt` about the Gatekeeper warning).
+
+Names: a person sees **Anteriora** (app folder, menu, window, dmg/pkg file and volume names). The technical
+identifiers keep the earlier name on purpose, because installed copies, the signed runtime and existing matters
+depend on them: bundle identifier `ai.inferroute.probant`, pkg identifier `ai.inferroute.probant.pkg`, runner
+`ProbantVM`, data folder `~/Probant`, the `probant` / `ir probant` commands and `IR_PROBANT_*` variables. An
+earlier `/Applications/Probant.app` is not removed by installing `Anteriora.app`; delete it by hand.
 
 * The runtime wheel goes in unchanged. Its runner, kernel, initrd and `runtime.json` are never re-signed or
   modified; the build checks the runner's sha256 against the pin before and after signing, and runs
@@ -92,7 +98,7 @@ The bundle is not reproducible byte for byte (the dmg differs on each build) and
 
 ## Installer .pkg (no Developer ID)
 
-`build_pkg_from_dmg.sh Probant-<V>.dmg OUTDIR` (on a Mac) wraps the ad-hoc `Probant.app` from the .dmg, bytes unchanged, into an
+`build_pkg_from_dmg.sh Anteriora-<V>.dmg OUTDIR` (on a Mac) wraps the ad-hoc `Anteriora.app` from the .dmg, bytes unchanged, into an
 unsigned `.pkg`. A copy out of a quarantined .dmg also quarantines the bundled `python3`, which Gatekeeper then kills; files the
 Installer places carry no quarantine. Measured on a second Mac by sealed-research (2026-10-15, CLI install only): python3 runs at once,
 codesign valid, service check passes. The GUI path (Open Anyway on the pkg, then Installer.app) is not yet measured.

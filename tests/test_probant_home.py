@@ -273,7 +273,7 @@ def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made(
 
 def test_the_help_page_covers_the_whole_path_and_the_limits():
     js = (STATIC / "home.js").read_text()
-    for heading in ("How Probant works", "Create a matter", "Start a session", "Research with the assistant",
+    for heading in ("How Anteriora works", "Create a matter", "Start a session", "Research with the assistant",
                     "Mark what matters", "Keep the record", "What stays private", "What it can't prove", "Limits right now"):
         assert heading in js, heading
     html = (STATIC / "home.html").read_text()
@@ -371,7 +371,7 @@ def test_the_page_is_the_version_the_server_started_with_and_says_when_a_newer_o
     (static / "home.js").write_text("// a newer page, with a button this server has no route for\n")
     assert c.get("/home.js").content == before                    # still the page the server started with
     assert c.get("/api/overview").json()["update_waiting"] is True
-    assert b"A newer version of Probant is installed." in before
+    assert b"A newer version of Anteriora is installed." in before
 
 
 def test_a_session_starts_from_a_page_whose_PATH_never_saw_node(monkeypatch, tmp_path):
@@ -883,7 +883,7 @@ def test_inside_the_probant_app_the_banner_does_not_tell_the_person_to_keep_a_te
     monkeypatch.setenv("IR_PROBANT_NO_BROWSER", "1")
     assert H.run(open_browser=False) == 0
     out = capsys.readouterr().out
-    assert "Probant home:" in out and "terminal" not in out.lower() and "Quitting Probant" in out
+    assert "Probant home:" in out and "terminal" not in out.lower() and "Quitting Anteriora" in out
 
     monkeypatch.delenv("IR_PROBANT_NO_BROWSER")
     assert H.run(open_browser=False) == 0

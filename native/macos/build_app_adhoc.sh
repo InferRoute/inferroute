@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the AD-HOC signed Probant.app and its .dmg on an Apple-silicon Mac. Prepare-only: it publishes nothing,
+# Build the AD-HOC signed Anteriora.app and its .dmg on an Apple-silicon Mac. Prepare-only: it publishes nothing,
 # reads no private key, and installs nothing outside OUT.
 #
 #   sh native/macos/build_app_adhoc.sh INPUTS OUT
@@ -35,7 +35,7 @@ VERSION=$(pin app.version); BUNDLE_ID=$(pin app.bundle_id); MINOS=$(pin app.mini
 RUNNER_SHA=$(pin runner_sha256)
 
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
-APP="$OUT/Probant.app"; RES="$APP/Contents/Resources"
+APP="$OUT/Anteriora.app"; RES="$APP/Contents/Resources"
 mkdir -p "$APP/Contents/MacOS" "$RES"
 echo "== bundled Python =="
 /usr/bin/tar -xzf "$IN/$(pin python.file)" -C "$RES"          # -> Resources/python
@@ -54,7 +54,7 @@ printf '%s\n' \
 "$PY" -I -m pip freeze --all > "$OUT/bundled-packages.txt"
 "$PY" -I -m pip uninstall -y pip > /dev/null                   # the app installs nothing at run time
 # The client keeps state under ~/.inferroute (even `--version` refreshes a cached model catalog there): every
-# client run in this build gets a throwaway home, so the builder's own Probant state is never read or written.
+# client run in this build gets a throwaway home, so the builder's own Anteriora state is never read or written.
 CLIENT_HOME="$OUT/client-home"; mkdir -m 700 "$CLIENT_HOME"
 GOT=$(HOME="$CLIENT_HOME" INFERROUTE_HOME="$CLIENT_HOME/.inferroute" "$PY" -I -m inferroute_cli --version | awk '{print $NF}')
 [ "$GOT" = "$VERSION" ] || { echo "REFUSED: bundled client reports $GOT, not $VERSION" >&2; exit 65; }
@@ -78,16 +78,16 @@ rm -f "$SITE"/inferroute-*.dist-info/direct_url.json "$SITE"/inferroute_macos_vm
 # bundle is copied, whatever the file times. -s/-p: the file names inside the bytecode say where the app is
 # installed, not the build folder. A few stdlib files are not meant to compile (lib2to3 grammar tests).
 "$PY" -I -m compileall -q -f -j 0 --invalidation-mode unchecked-hash -s "$RES/python" \
-  -p "/Applications/Probant.app/Contents/Resources/python" "$RES/python/lib/python3.12" > "$OUT/compileall.log" 2>&1 || true
+  -p "/Applications/Anteriora.app/Contents/Resources/python" "$RES/python/lib/python3.12" > "$OUT/compileall.log" 2>&1 || true
 HOME="$CLIENT_HOME" INFERROUTE_HOME="$CLIENT_HOME/.inferroute" "$PY" -I -c "from inferroute_local.macos_vm import runtime; r = runtime.locate(); print('runtime verifies in place:', runtime.signing_tier(runtime.trusted_policy())); r.close()"
 
 echo "== app shell =="
 cp "$HERE/app_entry.py" "$RES/app_entry.py"
 [ "$(sha "$HERE/$(pin icon.file)")" = "$(pin icon.sha256)" ] || { echo "REFUSED: the icon is not the pinned one" >&2; exit 65; }
 cp "$HERE/$(pin icon.file)" "$RES/$(pin icon.file)"
-/usr/bin/swiftc -O -target "arm64-apple-macos$MINOS" -o "$APP/Contents/MacOS/Probant" "$HERE/AppMain.swift"
+/usr/bin/swiftc -O -target "arm64-apple-macos$MINOS" -o "$APP/Contents/MacOS/Anteriora" "$HERE/AppMain.swift"
 /usr/bin/plutil -create xml1 "$APP/Contents/Info.plist"
-for kv in CFBundleExecutable=Probant CFBundleIdentifier="$BUNDLE_ID" CFBundleName=Probant CFBundleDisplayName=Probant \
+for kv in CFBundleExecutable=Anteriora CFBundleIdentifier="$BUNDLE_ID" CFBundleName=Anteriora CFBundleDisplayName=Anteriora \
           CFBundlePackageType=APPL CFBundleIconFile=Anteriora CFBundleShortVersionString="$VERSION" CFBundleVersion="$VERSION" \
           LSMinimumSystemVersion="$MINOS" CFBundleInfoDictionaryVersion=6.0; do
   /usr/bin/plutil -insert "${kv%%=*}" -string "${kv#*=}" "$APP/Contents/Info.plist"
@@ -118,12 +118,12 @@ echo "Mach-O files in the bundled Python: $(find "$RES/python" -type f -exec /us
 ! grep -rIlx -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$APP" || { echo "REFUSED: a PEM private key is in the bundle" >&2; exit 65; }
 
 echo "== disk image =="
-DMG="$OUT/Probant-$VERSION.dmg"; STAGE="$OUT/dmg-stage"
+DMG="$OUT/Anteriora-$VERSION.dmg"; STAGE="$OUT/dmg-stage"
 mkdir "$STAGE"
-/usr/bin/ditto "$APP" "$STAGE/Probant.app"
+/usr/bin/ditto "$APP" "$STAGE/Anteriora.app"
 ln -s /Applications "$STAGE/Applications"
 sed "s/@VERSION@/$VERSION/g" "$HERE/dmg-README.txt" > "$STAGE/README.txt"
-/usr/bin/hdiutil create -quiet -fs HFS+ -format UDZO -volname "Probant $VERSION" -srcfolder "$STAGE" "$DMG"
+/usr/bin/hdiutil create -quiet -fs HFS+ -format UDZO -volname "Anteriora $VERSION" -srcfolder "$STAGE" "$DMG"
 rm -rf "$STAGE"
 /usr/bin/hdiutil verify -quiet "$DMG"
 (cd "$OUT" && /usr/bin/shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256" && cat "$(basename "$DMG").sha256")

@@ -1,23 +1,23 @@
 #!/bin/sh
-# Probant installer — @VERSION@
+# Anteriora installer — @VERSION@
 #
 #   curl -LsSf https://inferroute.ai/install-probant.sh | sh
 #
 # What it does, and all it does:
 #   1. installs `uv` if there is none (it brings its own Python; your system Python is not touched);
 #   2. makes a private environment in ~/probant;
-#   3. downloads Probant @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — together with
+#   3. downloads Anteriora @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — together with
 #      the exact list of every library it needs, checks each file against the fingerprint written into this
 #      script, and installs them there. Libraries are installed ONLY if they match that list byte for byte, so
 #      two installs of this version are the same program, today and in a year;
-#   4. sets up patent search from InferRoute's published, signed files (re-checked each time Probant starts);
+#   4. sets up patent search from InferRoute's published, signed files (re-checked each time Anteriora starts);
 #   5. prints the next command.
 # It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv, and a link
 # named `probant`) and uv's own Python folder. To remove it all:
 #   rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant
 #
 # The fingerprints below are what make this script fetch exactly the files we released. What makes the
-# virtual machine trustworthy is separate: Probant itself refuses to start it unless its files carry
+# virtual machine trustworthy is separate: Anteriora itself refuses to start it unless its files carry
 # InferRoute's signature.
 set -eu
 
@@ -39,13 +39,13 @@ machine_line() {
   if command -v sw_vers >/dev/null 2>&1; then V="macOS $(sw_vers -productVersion 2>/dev/null)"; else V=$(uname -sr 2>/dev/null); fi
   printf '%s · %s' "$M" "$V"
 }
-stop() { printf '\n  Probant was not installed: %s\n  This computer: %s\n\n' "$*" "$(machine_line)" >&2; exit 1; }
+stop() { printf '\n  Anteriora was not installed: %s\n  This computer: %s\n\n' "$*" "$(machine_line)" >&2; exit 1; }
 
 OS=$(uname -s); ARCH=$(uname -m)
 NEEDS_VM=no
 case "$OS" in
   Darwin)
-    [ "$ARCH" = "arm64" ] || stop "this Mac has an Intel processor. Probant on a Mac needs Apple silicon (M1 or later)."
+    [ "$ARCH" = "arm64" ] || stop "this Mac has an Intel processor. Anteriora on a Mac needs Apple silicon (M1 or later)."
     NEEDS_VM=yes ;;
   Linux) ;;
   *) stop "this installer supports macOS (Apple silicon) and Linux. For Windows, ask InferRoute." ;;
@@ -88,11 +88,11 @@ fetch "$LOCK_FILE" "$LOCK_SHA256"
 
 # ── the environment ──────────────────────────────────────────────────────────────────────────────────────────
 if [ -e "$TARGET" ] && [ ! -x "$TARGET/bin/python" ]; then
-  stop "$TARGET exists and is not a Probant environment. Move it aside, or set PROBANT_HOME to another folder."
+  stop "$TARGET exists and is not an Anteriora environment. Move it aside, or set PROBANT_HOME to another folder."
 fi
 say "Setting up $TARGET ..."
 "$UV" venv --quiet --allow-existing --python 3.12 "$TARGET" || stop "could not create the environment."
-# 1. every library, from the pinned list, each refused unless its hash matches. 2. Probant itself and, on a Mac,
+# 1. every library, from the pinned list, each refused unless its hash matches. 2. Anteriora itself and, on a Mac,
 # its virtual machine, WITHOUT letting the installer choose anything: they were fingerprinted above.
 "$UV" pip install --quiet --python "$TARGET/bin/python" --require-hashes -r "$WORK/$LOCK_FILE" \
   || stop "a library did not match its pinned fingerprint, or could not be fetched. Nothing was installed. The messages above say which."
@@ -108,18 +108,18 @@ GOT=$("$TARGET/bin/ir" --version 2>/dev/null | awk '{print $NF}')
 [ "$GOT" = "$VERSION" ] || stop "the installed program reports version '${GOT:-nothing}', not $VERSION."
 
 # Patent search: fetch InferRoute's signed reference and where the search machine is, and write the
-# configuration. Probant checks the reference's signature against a key built into the program. If this
-# fails (no connection, say) the install is still good: Probant tries again every time it starts.
+# configuration. Anteriora checks the reference's signature against a key built into the program. If this
+# fails (no connection, say) the install is still good: Anteriora tries again every time it starts.
 say "Setting up patent search ..."
 "$TARGET/bin/ir" probant setup-search 2>&1 | sed 's/^/  /' || true
 
-# Another `ir` earlier on PATH is common (an older install). Probant never uses it — it runs its own — but a person
+# Another `ir` earlier on PATH is common (an older install). Anteriora never uses it — it runs its own — but a person
 # typing `ir` would, so say so rather than let two versions answer to one name.
 OTHER=$(command -v ir 2>/dev/null || true)
 if [ -n "$OTHER" ] && [ "$OTHER" != "$TARGET/bin/ir" ]; then
   say ""
   say "  Note: typing just  ir  here runs a different program ($OTHER, $("$OTHER" --version 2>/dev/null | awk '{print $NF}')),"
-  say "        not this one. Use the full path shown below; Probant itself always uses its own."
+  say "        not this one. Use the full path shown below; Anteriora itself always uses its own."
 fi
 
 # A bare `probant` command: a link in ~/.local/bin, where uv already lives. It is made only when nothing else is
@@ -133,7 +133,7 @@ if [ -x "$TARGET/bin/probant" ] && mkdir -p "$LINK_DIR" 2>/dev/null; then
 fi
 
 say ""
-say "Probant $VERSION is installed."
+say "Anteriora $VERSION is installed."
 say ""
 say "  This computer:       $(machine_line)"
 say "                       (copy this line and send it back with your public key)"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fabrique votre clé Probant, et affiche la partie publique.
+"""Fabrique votre clé Anteriora, et affiche la partie publique.
 
 Ce fichier ne fait que cela. Il n'installe rien, ne contacte aucun serveur, et n'ouvre aucun réseau :
 vous pouvez le lire en entier avant de l'exécuter — c'est la raison de sa taille.
@@ -81,7 +81,7 @@ def main() -> int:
     if path.is_file():
         # Ne JAMAIS écraser une clé existante : ce qui lui a été adressé deviendrait illisible.
         held = json.loads(path.read_text())
-        print(f"\n  Vous avez déjà une clé Probant — empreinte {held['fingerprint']}")
+        print(f"\n  Vous avez déjà une clé Anteriora — empreinte {held['fingerprint']}")
         print(f"  ({path})\n  Rien n'a été modifié. Voici votre partie publique :\n")
     else:
         d.mkdir(parents=True, exist_ok=True)
@@ -109,7 +109,7 @@ def main() -> int:
                 "fingerprint": fingerprint(bytes(mlkem_pub), ed_pub)}
         path.write_text(json.dumps(held, indent=1))
         os.chmod(path, 0o600)
-        print(f"\n  Votre clé Probant a été créée — empreinte {held['fingerprint']}")
+        print(f"\n  Votre clé Anteriora a été créée — empreinte {held['fingerprint']}")
         print(f"  (partie secrète : {path}, lisible par vous seul)\n")
 
     card = {"schema": SCHEMA_CARD, "mlkem_pub": held["mlkem_pub"], "ed_pub": held["ed_pub"],

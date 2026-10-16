@@ -55,7 +55,7 @@ def pinned_key() -> str:
             continue
         if isinstance(key, str) and re.fullmatch(r"[0-9a-f]{64}", key):
             return key
-    raise SetupError("this copy of Probant does not carry InferRoute's publication key; reinstall it")
+    raise SetupError("this copy of Anteriora does not carry InferRoute's publication key; reinstall it")
 
 
 def _get(url: str) -> bytes:
@@ -138,7 +138,7 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     except (OSError, ValueError):
         pass
     if existing and existing.get("provisioned_by") != MARK and not force:
-        return "kept", "A search configuration that Probant did not write is already here, so it was left alone."
+        return "kept", "A search configuration that Anteriora did not write is already here, so it was left alone."
 
     key = pinned_key()
     # The reference is kept BYTE FOR BYTE as published. Its OpenTimestamps proof (below) is over those exact
@@ -188,7 +188,7 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     _atomic(cfg_path, json.dumps(wanted, indent=1).encode() + b"\n")
     if unchanged:
         return "unchanged", "Patent search was already set up and is up to date."
-    return "configured", "Patent search is set up. Probant checks the search machine against InferRoute's signed reference before any text is sent."
+    return "configured", "Patent search is set up. Anteriora checks the search machine against InferRoute's signed reference before any text is sent."
 
 
 def ensure_quietly() -> None:

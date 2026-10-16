@@ -296,7 +296,7 @@ def goose_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: 
 # Descriptions for the picker. Kept here beside AGENTS so a new agent cannot be added without one.
 _AGENT_DESC = {
     "claude": "Anthropic's Claude Code — the default",
-    "pi": "Pi — attested tool use, used by Probant",
+    "pi": "Pi — attested tool use, used by Anteriora",
     "opencode": "OpenCode — open-source terminal agent",
     "goose": "Goose — Block's agent (CLI here; `ir goose-cowork` for the desktop app)",
     "openhands": "OpenHands — autonomous multi-step agent",

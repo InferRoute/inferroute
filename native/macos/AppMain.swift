@@ -2,13 +2,13 @@
 // window of its own.
 //
 // It starts the bundled Python service (`probant home`, told not to open a browser) and, once the service prints
-// its page address, shows that page in a Probant window (WebKit, the engine Safari uses). Closing the window
+// its page address, shows that page in an Anteriora window (WebKit, the engine Safari uses). Closing the window
 // keeps the service running; the Dock icon or File > New Window brings it back, never a second service. The
 // page may load nothing but the service's own address: any other link opens in the default browser. WebKit
 // keeps nothing on disk (a non-persistent data store): the person's notes and matter text never reach a cache.
-// File > Open Probant in Browser stays for people who prefer a browser tab.
+// File > Open Anteriora in Browser stays for people who prefer a browser tab.
 //
-// Quitting (Probant > Quit, Cmd-Q, or the Dock menu) does what Ctrl-C does in a terminal: the service and every
+// Quitting (Anteriora > Quit, Cmd-Q, or the Dock menu) does what Ctrl-C does in a terminal: the service and every
 // session it started get SIGINT (they share one process group, made here), and the app waits for them to end
 // before it exits.
 import AppKit
@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
-        // SIGTERM (`kill`, `killall Probant`) takes the same path as Quit instead of leaving the service and
+        // SIGTERM (`kill`, `killall Anteriora`) takes the same path as Quit instead of leaving the service and
         // its sessions running with no app. The child gets the default disposition back (POSIX_SPAWN_SETSIGDEF).
         signal(SIGTERM, SIG_IGN)
         let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard start(argv: [python, "-I", "-B", entry], env: env) else {
             let alert = NSAlert()
-            alert.messageText = "Probant could not start its bundled runtime."
+            alert.messageText = "Anteriora could not start its bundled runtime."
             alert.informativeText = "No agent session was started."
             alert.runModal(); NSApplication.shared.terminate(nil); return
         }
@@ -129,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppDelegate.later { [weak self] in
             if self?.homeURL == nil {
                 let alert = NSAlert()
-                alert.messageText = "Probant stopped before its page was ready."
+                alert.messageText = "Anteriora stopped before its page was ready."
                 alert.informativeText = "No agent session was started."
                 alert.runModal()
             }
@@ -233,15 +233,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             i.keyEquivalentModifierMask = mods; i.target = target
             return i
         }
-        _ = top("Probant", [
-            item("Hide Probant", #selector(NSApplication.hide(_:)), "h"),
+        _ = top("Anteriora", [
+            item("Hide Anteriora", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
             item("Show All", #selector(NSApplication.unhideAllApplications(_:)), ""),
             .separator(),
-            item("Quit Probant", #selector(NSApplication.terminate(_:)), "q")])
+            item("Quit Anteriora", #selector(NSApplication.terminate(_:)), "q")])
         _ = top("File", [
             item("New Window", #selector(showWindow(_:)), "n", target: self),
-            item("Open Probant in Browser", #selector(openHome(_:)), "o", target: self),
+            item("Open Anteriora in Browser", #selector(openHome(_:)), "o", target: self),
             .separator(),
             item("Close Window", #selector(NSWindow.performClose(_:)), "w")])
         // Without an Edit menu, Cmd-C / Cmd-V / Cmd-A do nothing inside a web view.
@@ -267,7 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// One Probant window: a web view that may show the service's own pages and nothing else.
+// One Anteriora window: a web view that may show the service's own pages and nothing else.
 final class PageWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate {
     let window: NSWindow
     let webView: WKWebView
@@ -291,7 +291,7 @@ final class PageWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDe
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
         super.init()
-        window.title = "Probant"
+        window.title = "Anteriora"
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 720, height: 480)
         window.contentView = webView

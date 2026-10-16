@@ -1,4 +1,4 @@
-// Probant home page. Served by `ir probant home` on 127.0.0.1; talks only to it.
+// Anteriora home page. Served by `ir probant home` on 127.0.0.1; talks only to it.
 //
 // Same rule as the session page: TEXT NODES only. The one place this page leaves itself is openLocal(), and
 // it only opens addresses this computer produced: a session page on 127.0.0.1 with its key, or a record link
@@ -31,14 +31,14 @@
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer",
     }); } catch (_) {
-      throw new Error("Could not reach Probant. Check that its Terminal is still running, then try again.");
+      throw new Error("Could not reach Anteriora. Check that its Terminal is still running, then try again.");
     }
     let data = {};
     try { data = await res.json(); } catch (_) { data = {}; }
     if (res.status === 401) { showNoKey(); throw new Error("no key"); }
     if (!res.ok) {
       const error = new Error(data.error || (res.status >= 500
-        ? "Probant could not finish this action. Try again; if it repeats, check the Terminal for details."
+        ? "Anteriora could not finish this action. Try again; if it repeats, check the Terminal for details."
         : "This action could not be completed. Refresh the page and try again."));
       error.fields = data.fields || {};
       throw error;
@@ -360,7 +360,7 @@
     keyInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save.click(); });
     return el("div", "card key-card",
       el("h2", "", "Add your InferRoute key"),
-      el("p", "", "Probant needs the key InferRoute sent you before it can run a session. Paste it here once; it "
+      el("p", "", "Anteriora needs the key InferRoute sent you before it can run a session. Paste it here once; it "
         + "is kept on this computer only, in a file only you can read. Sharing and Help work without it."),
       field("Your key", keyInput, "It starts with inf_. Nothing is sent anywhere until you press the button, and then only to InferRoute, to check it."),
       err, el("div", "dialog-actions", save));
@@ -507,8 +507,8 @@
     // This page is the version the server started with. When a newer one is installed, say so rather than let
     // the difference show up as a button that fails.
     if (data.update_waiting) {
-      p.append(el("div", "update-note", el("b", "", "A newer version of Probant is installed. "),
-        "To use it, restart Probant home: press Ctrl+C in the terminal it runs in, then run ir probant home again. "
+      p.append(el("div", "update-note", el("b", "", "A newer version of Anteriora is installed. "),
+        "To use it, restart Anteriora home: press Ctrl+C in the terminal it runs in, then run ir probant home again. "
         + "Sessions started from this page end with it, so finish them first."));
     }
     for (const l of data.running || []) {
@@ -670,14 +670,14 @@
         const r = await api("/api/matter/delete", { id: m.id, confirm: typed.value });
         closeDialog();
         toast(`${m.client} / ${m.matter} deleted. Restore it from Recently deleted within ${r.days} days.`, "info");
-        for (const left of r.left_in_place || []) toast(`Left in place, outside the Probant folder: ${left}`, "info");
+        for (const left of r.left_in_place || []) toast(`Left in place, outside the Anteriora folder: ${left}`, "info");
         location.hash = "#/";
       } catch (e) { err.textContent = e.message; } finally { go.disabled = false; }
     });
     go.disabled = true;
     typed.addEventListener("input", () => { go.disabled = typed.value.trim() !== m.matter; });
     dialog(`Delete ${m.client} / ${m.matter}?`, [
-      el("p", "", "This moves the matter's disclosure, sessions, marks and exported records out of Probant. "
+      el("p", "", "This moves the matter's disclosure, sessions, marks and exported records out of Anteriora. "
         + "They stay in Recently deleted for 30 days, where you can restore them, then they are erased."),
       field("Type the matter's name to confirm", typed),
       err,
@@ -809,7 +809,7 @@
     const sec = (title, ...nodes) => el("section", "help-section", el("h2", "", title), ...nodes);
     const para = (t) => el("p", "", t);
     const list = (...items) => el("ul", "", ...items.map((t) => el("li", "", t)));
-    p.append(el("div", "page-head", el("h1", "", "How Probant works"),
+    p.append(el("div", "page-head", el("h1", "", "How Anteriora works"),
       el("p", "sub", "A private assistant for prior-art research: it surveys published patents with you, and every search leaves a record anyone can check.")));
     p.append(
       sec("1. Create a matter",
@@ -1021,7 +1021,7 @@
     setTimeout(() => client.focus(), 0);
   }
 
-  // ── sharing a corpus of matters with another Probant user ──
+  // ── sharing a corpus of matters with another Anteriora user ──
   //
   // Nothing secret is ever shown or sent: what leaves this page is a card of PUBLIC keys, and what the
   // other person receives is sealed to their key alone. The one thing a person must do off-screen is read
@@ -1032,7 +1032,7 @@
     try { d = await api("/api/sharing"); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Sharing"),
-      el("p", "sub", "Send a corpus of matters to another Probant user — your lawyer, your co-counsel. "
+      el("p", "sub", "Send a corpus of matters to another Anteriora user — your lawyer, your co-counsel. "
         + "They open it as matters of their own and run their own searches, on their own account.")));
 
     // The public key used to be a wall of JSON sitting open on the page, with the button that actually does
@@ -1168,7 +1168,7 @@
           el("p", "sub", r.marks_shared ? `${plural(r.marks_shared, "mark", "marks")} included as your judgments.` : "No marks included."),
           el("span", "mono", r.path),
           el("p", "", "Saved on this computer; it has not been sent. Send this file by email, a shared folder or USB. "
-            + "They save it, then choose Sharing → Open a delivery sent to you in Probant."),
+            + "They save it, then choose Sharing → Open a delivery sent to you in Anteriora."),
           el("p", "sub", "Encrypted to their key, with a copy sealed to you so you can reopen what you sent."),
           button("Copy the path", "ghost small", () => navigator.clipboard.writeText(r.path)
             .then(() => toast("Copied.", "info")).catch(() => {})));
@@ -1254,7 +1254,7 @@
     });
 
     dialog("Add someone to share with", [
-      el("p", "", "They sent you a public key — a block of text, or a small file. Put it here and Probant "
+      el("p", "", "They sent you a public key — a block of text, or a small file. Put it here and Anteriora "
         + "will tell you whose it is."),
       el("div", "row",
         button("Paste from clipboard", "ghost small", async () => {

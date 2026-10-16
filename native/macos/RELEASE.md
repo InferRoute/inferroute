@@ -1,4 +1,4 @@
-# Releasing Probant for a Mac — the runbook
+# Releasing Anteriora for a Mac — the runbook
 
 State on 2026-10-03, evening. Steps 1, 2, 3 and 5 have been done once, on ADE (Apple M1, macOS 26.5,
 Swift 6.3.2), with nothing published:

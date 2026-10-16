@@ -69,10 +69,10 @@ new attestation of the sharing operation or proof of timely delivery.
 ## Email notification
 
 - Notification is optional and uses the recipient's verified address and preference.
-- Generic subject/body: A new encrypted delivery is available in Probant.
+- Generic subject/body: A new encrypted delivery is available in Anteriora.
 - No matter names, notes, sender-provided text, documents, keys, decryption links,
   bearer tokens or encrypted attachments in the email.
-- A fixed InferRoute link may explain how to open Probant. Receiving does not depend
+- A fixed InferRoute link may explain how to open Anteriora. Receiving does not depend
   on clicking the email, and email does not prove sender identity.
 - Queue notification only after durable mailbox storage; retry with an idempotent
   outbox and suppress repeated notifications for the same pending delivery.

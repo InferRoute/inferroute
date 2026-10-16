@@ -442,7 +442,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A("<h1>Prior-art research record</h1>")
     # The record is the one thing here that leaves the firm — opposing counsel, a client's CTO, an examiner
     # may read it — so it carries the full product name and who stands behind it, not the in-product short one.
-    A(f"<div class=sub>{_e(client)} / {_e(matter)} · made with InferRoute Probant</div>")
+    A(f"<div class=sub>{_e(client)} / {_e(matter)} · made with InferRoute Anteriora</div>")
     glance_at = len(out)
     A("")                                  # "At a glance", filled in once the searches below are known
     A("<p class=note>Every statement below is a fact this device checked or recorded, not a promise. What a stranger "

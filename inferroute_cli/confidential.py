@@ -764,7 +764,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
         from inferroute_local.macos_vm import runtime as vm_runtime
         from inferroute_local.macos_vm.backend import Backend
         if not pi_attested.confine_required() or pi_attested.confine_disabled():
-            sys.stderr.write("\n  ir: macOS Probant sessions require VM confinement.\n\n")
+            sys.stderr.write("\n  ir: macOS Anteriora sessions require VM confinement.\n\n")
             return 2
         if os.environ.get("IR_CLUSTER_OUT") or (probant or {}).get("oneshot"):
             sys.stderr.write("\n  ir: this macOS VM backend does not support cluster sessions yet.\n\n")

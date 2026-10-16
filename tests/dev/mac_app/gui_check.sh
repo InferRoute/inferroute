@@ -1,5 +1,5 @@
 #!/bin/sh
-# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Probant.app (see native/macos/README.md, ad-hoc app).
+# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Anteriora.app (see native/macos/README.md, ad-hoc app).
 # Launch the real app through LaunchServices (`open`), with its home redirected to a throwaway folder
 # (CFFIXED_USER_HOME, which NSHomeDirectory() honours; the app passes that to the service as HOME).
 # The browser DOES open (that is what is being checked). Then optionally reopen, then quit with SIGTERM.
@@ -10,7 +10,7 @@ CAT0=$(stat -f %m ~/.inferroute/catalog.json)
 open -g -n --env CFFIXED_USER_HOME="$TH" "$APP" || { echo "open failed"; exit 1; }
 APID=""; CPID=""
 for i in $(seq 1 40); do
-  APID=$(pgrep -f "^$APP/Contents/MacOS/Probant" | head -1)
+  APID=$(pgrep -f "^$APP/Contents/MacOS/Anteriora" | head -1)
   [ -n "$APID" ] && CPID=$(pgrep -P "$APID" | head -1)
   [ -n "$CPID" ] && break; sleep 0.25
 done
@@ -31,7 +31,7 @@ if [ "$REOPEN" = reopen ]; then
   N0=$(lsof -nP -iTCP@127.0.0.1:"$PORT" 2>/dev/null | wc -l)
   open -g "$APP"; sleep 4
   N1=$(lsof -nP -iTCP@127.0.0.1:"$PORT" 2>/dev/null | wc -l)
-  echo "second open of the running app: app pids now: $(pgrep -f "^$APP/Contents/MacOS/Probant" | tr '\n' ' '); sockets on the port before/after: $N0/$N1"
+  echo "second open of the running app: app pids now: $(pgrep -f "^$APP/Contents/MacOS/Anteriora" | tr '\n' ' '); sockets on the port before/after: $N0/$N1"
 fi
 T0=$(date +%s)
 kill -TERM "$APID"

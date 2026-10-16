@@ -403,7 +403,7 @@ def render_card(summary: Dict[str, Any], console: Any = None) -> None:
     lim.add_column(overflow="fold", style="grey58")
     for line in summary["limits"]:
         lim.add_row(Text("○", style="grey58"), Text(line))
-    title = "🔒 " + (summary.get("matter") or "Probant session").replace("/", " / ")
+    title = "🔒 " + (summary.get("matter") or "Anteriora session").replace("/", " / ")
     body = Group(Text(summary["headline"], style=f"bold {colour}"), Text(summary["explainer"], style="grey58"), Text(""), t,
                  Text("  " + summary.get("control_note", ""), style="grey58"), Text(""),
                  Text("What this can't prove", style="bold"), lim, Text(""),

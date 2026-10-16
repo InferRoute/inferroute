@@ -90,7 +90,7 @@ def test_an_occupied_folder_is_never_written_into(tmp_path):
     target.mkdir()
     (target / "precious.txt").write_text("mine")
     done = _run(tmp_path, site, target)
-    assert done.returncode != 0 and "not a Probant environment" in done.stderr
+    assert done.returncode != 0 and "not an Anteriora environment" in done.stderr
     assert sorted(p.name for p in target.iterdir()) == ["precious.txt"]
 
 

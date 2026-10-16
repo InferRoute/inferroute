@@ -1,5 +1,5 @@
 #!/bin/sh
-# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Probant.app (see native/macos/README.md, ad-hoc app).
+# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Anteriora.app (see native/macos/README.md, ad-hoc app).
 # 1. The bundle's own client authenticates the signed runtime IN PLACE (runtime.locate(), the product path)
 #    and stages its private copy. 2. The repo's synthetic e2e harness (tests/dev/run_linux_vm_e2e.py, no
 #    model, no network) boots THAT verified copy with the real Virtualization.framework runner, importing

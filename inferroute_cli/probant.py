@@ -335,7 +335,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     client, matter = _split_matter(spec)
     rec = load_record(client, matter)
     if rec.get("needs_review"):
-        raise ProbantError("this draft needs your review: open it in Probant home and check its disclosure and date before starting a session")
+        raise ProbantError("this draft needs your review: open it in Anteriora home and check its disclosure and date before starting a session")
     ws = Path(rec["workspace"])
     if not ws.is_dir():
         raise ProbantError(f"the matter workspace is missing: {ws}")
@@ -415,7 +415,7 @@ def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals
         return rc
     if not proposals_only:
         drafts = I.created_drafts(meta["id"])
-        print(f"  {len(drafts)} draft matter(s) created; review disclosures and dates in Probant home.")
+        print(f"  {len(drafts)} draft matter(s) created; review disclosures and dates in Anteriora home.")
         for draft in drafts:
             print(f"      {draft['id']}")
         return 0
@@ -538,7 +538,7 @@ def main(argv: list[str] | None = None) -> int:
     # true, useless, and the first thing a patent professional would see. Say what to do instead.
     if not argv and len(sys.argv) <= 2:
         sys.stderr.write(
-            "\n  Probant — prior-art research, one matter at a time, on this computer.\n\n"
+            "\n  Anteriora — prior-art research, one matter at a time, on this computer.\n\n"
             "  Start here:      ir probant home        opens the page where everything happens\n\n"
             "  Or from here:    ir probant new <client> <matter> --priority-date YYYY-MM-DD\n"
             "                   ir probant list\n"
@@ -566,7 +566,7 @@ def main(argv: list[str] | None = None) -> int:
     idy.add_argument("--card", dest="card_file", default="", help="their contact card file")
     idy.add_argument("--show", action="store_true",
                      help="print your public key again (it is printed automatically the first time)")
-    sh = sub.add_parser("share", help="seal a corpus of claims to another Probant user")
+    sh = sub.add_parser("share", help="seal a corpus of claims to another Anteriora user")
     sh.add_argument("to")
     sh.add_argument("--matter", action="append", default=[], help="a matter to include (repeatable)")
     sh.add_argument("--cluster", action="append", default=[], help="a cluster run's claims (repeatable)")
@@ -609,12 +609,12 @@ def main(argv: list[str] | None = None) -> int:
     fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
     fp.add_argument("id"); fp.add_argument("index", type=int); fp.add_argument("client"); fp.add_argument("matter")
     fp.add_argument("--priority-date", default=None)
-    dl = sub.add_parser("delete", help="delete a matter: restorable from Probant home for 30 days, then erased")
+    dl = sub.add_parser("delete", help="delete a matter: restorable from Anteriora home for 30 days, then erased")
     dl.add_argument("matter"); dl.add_argument("--yes", action="store_true", help="do not ask to type the matter name")
     hm = sub.add_parser("home", help="the home page in your browser: every matter, past sessions, new matters and sessions, help")
     hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
     ss = sub.add_parser("setup-search", help="set up patent search on this computer from InferRoute's published files")
-    ss.add_argument("--force", action="store_true", help="replace a search configuration Probant did not write")
+    ss.add_argument("--force", action="store_true", help="replace a search configuration Anteriora did not write")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
     pf.add_argument("matter")
     ca = sub.add_parser("audit-client", help="a brief your OWN AI can use to audit this software itself, "
@@ -696,7 +696,7 @@ def main(argv: list[str] | None = None) -> int:
         # for exactly this reason; this is the same treatment for the rest.
         missing = getattr(e, "name", "") or "a dependency"
         sys.stderr.write(
-            f"\n  Probant needs {missing}, which is not installed.\n\n"
+            f"\n  Anteriora needs {missing}, which is not installed.\n\n"
             "      pip install 'inferroute[confidential]'\n\n"
             "  That brings the sealed lane, the key handling and the local page. Nothing was changed.\n\n")
         return 2
@@ -721,7 +721,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
     # later run they want the fingerprint, and 1.7 KB of JSON on screen is noise.
     first = not (SH.identity_dir() / "identity.json").exists()
     me = SH.identity()
-    print(f"\n  Your Probant fingerprint:  {me['fingerprint']}")
+    print(f"\n  Your Anteriora fingerprint:  {me['fingerprint']}")
     print("  Read it to whoever shares with you, and check theirs the same way.\n")
     card = SH.public_card(me)
     out = Path.home() / f"probant-contact-{me['fingerprint']}.json"

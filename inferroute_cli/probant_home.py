@@ -575,27 +575,27 @@ def failure_message(tail: List[str]) -> str:
     if "no inferroute key" in low or "run `ir login`" in low:
         return "No InferRoute key is saved on this computer. Add it in the box at the top of the Matters page, then try again. Nothing was sent."
     if "nested agent session" in low:
-        return "This was started from inside another assistant session. Start Probant home from a normal terminal."
+        return "This was started from inside another assistant session. Start Anteriora home from a normal terminal."
     # BEFORE the general "refused" below. On a Mac the agent runs in a virtual machine, and every way that
     # machine can fail to start says "refused" or "Refusing" — which the next branch would report as the AI
     # machine failing its check, with "try again in a minute". Neither is true, and waiting fixes none of them.
     if "vm runtime" in low or "vm confinement" in low or "macos vm" in low or "vm executable" in low or "runtime artifact" in low:
         if "is not installed" in low:
-            return ("This Mac is missing the part of Probant that runs the assistant in a protected virtual machine, "
+            return ("This Mac is missing the part of Anteriora that runs the assistant in a protected virtual machine, "
                     "so no session can start. Install it with the Mac instructions you were sent (the package "
                     "inferroute-macos-vm-runtime), then try again. Nothing was sent.")
         if "not provisioned" in low:
-            return ("This version of Probant cannot run sessions on a Mac yet. Nothing was sent. "
+            return ("This version of Anteriora cannot run sessions on a Mac yet. Nothing was sent. "
                     "Ask InferRoute for the Mac version.")
         if "architecture" in low:
-            return ("Probant on a Mac needs Apple silicon (an M1 or later). This Mac has an Intel processor, "
+            return ("Anteriora on a Mac needs Apple silicon (an M1 or later). This Mac has an Intel processor, "
                     "so no session can start. Nothing was sent.")
         if "older than" in low:
-            return ("This version of macOS is too old for the protected virtual machine Probant runs the assistant in, "
+            return ("This version of macOS is too old for the protected virtual machine Anteriora runs the assistant in, "
                     "so no session can start. Nothing was sent.")
         if "signature" in low or "integrity" in low or "signing requirement" in low:
             return ("The protected virtual machine's files did not pass their check, so it was not started and nothing "
-                    "was sent. Reinstall Probant with the Mac instructions; if it happens again, tell InferRoute — "
+                    "was sent. Reinstall Anteriora with the Mac instructions; if it happens again, tell InferRoute — "
                     "these files should never differ from the ones we signed.")
         return ("The protected virtual machine the assistant runs in could not be started, so the session was not "
                 "opened and nothing was sent. Try once more; if it fails again, send InferRoute this line: "
@@ -1311,8 +1311,8 @@ def run(open_browser: bool = True) -> int:
     # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
     # full buffer, and the link is the one thing it needs.
     print(f"\n  Probant home:  {url}", flush=True)
-    if os.environ.get("IR_PROBANT_NO_BROWSER") == "1":      # inside the Probant app: quitting the app ends the service
-        print("  The link works on this computer only; don't share it. Quitting Probant also ends any session started from the page.\n", flush=True)
+    if os.environ.get("IR_PROBANT_NO_BROWSER") == "1":      # inside the Anteriora app: quitting the app ends the service
+        print("  The link works on this computer only; don't share it. Quitting Anteriora also ends any session started from the page.\n", flush=True)
     else:
         print("  The link works on this computer only; don't share it. Keep this terminal open while you work:", flush=True)
         print("  closing it (Ctrl+C) also ends any session started from the page.\n", flush=True)

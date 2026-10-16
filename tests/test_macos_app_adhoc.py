@@ -1,4 +1,4 @@
-"""The ad-hoc Probant.app recipe (native/macos/build_app_adhoc.sh): checks that need no Mac.
+"""The ad-hoc Anteriora.app recipe (native/macos/build_app_adhoc.sh): checks that need no Mac.
 
 The build itself runs only on a Mac; what can be held here is that every input is pinned, that the pins agree
 with the signed release when its files are on this machine, and that the recipe keeps the properties it
@@ -71,7 +71,7 @@ def test_app_shell_passes_no_credentials_and_can_be_quit():
     names = re.findall(r'"([A-Z_]+)=', env_line)
     assert set(names) == {"HOME", "PATH", "IR_ATTESTED_CONFINE", "PYTHONNOUSERSITE", "PYTHONSAFEPATH",
                           "PYTHONDONTWRITEBYTECODE", "IR_PROBANT_NO_BROWSER"}
-    assert "setActivationPolicy(.regular)" in swift and "Quit Probant" in swift
+    assert "setActivationPolicy(.regular)" in swift and "Quit Anteriora" in swift
     assert "applicationShouldHandleReopen" in swift and "kill(-pid, SIGINT)" in swift
 
 
@@ -89,6 +89,27 @@ def test_app_window_shows_only_the_service_and_keeps_nothing_on_disk():
     assert "start(" not in show and "posix_spawn" not in show
     # without an Edit menu, copy and paste do nothing in a web view
     assert "NSText.copy(_:)" in swift and "NSText.paste(_:)" in swift
+
+
+def test_the_product_is_named_anteriora_where_a_person_sees_it():
+    # Display names only. The bundle identifier, the runner ProbantVM and the data folder ~/Probant keep their
+    # names: installed copies, the signed runtime and existing matters depend on them.
+    script = (MAC / "build_app_adhoc.sh").read_text()
+    assert 'APP="$OUT/Anteriora.app"' in script
+    for kv in ("CFBundleExecutable=Anteriora", "CFBundleName=Anteriora", "CFBundleDisplayName=Anteriora"):
+        assert kv in script
+    assert '-o "$APP/Contents/MacOS/Anteriora"' in script
+    # the bytecode's recorded paths must name the folder the app is installed under
+    assert '-p "/Applications/Anteriora.app/Contents/Resources/python"' in script
+    assert 'DMG="$OUT/Anteriora-$VERSION.dmg"' in script and '-volname "Anteriora $VERSION"' in script
+    assert PINS["app"]["bundle_id"] == "ai.inferroute.probant"
+    swift = (MAC / "AppMain.swift").read_text()
+    for shown in ('"Hide Anteriora"', '"Quit Anteriora"', '"Open Anteriora in Browser"', 'window.title = "Anteriora"'):
+        assert shown in swift
+    assert "Probant" not in (MAC / "dmg-README.txt").read_text()
+    pkg = (MAC / "build_pkg_from_dmg.sh").read_text()
+    assert '"$OUT/Anteriora-$V.pkg"' in pkg and "Applications/Anteriora.app" in pkg
+    assert "--identifier ai.inferroute.probant.pkg" in pkg
 
 
 def test_dmg_readme_has_both_languages_and_only_the_version_placeholder():

@@ -66,8 +66,8 @@ def main():
     resources = contents / "Resources"
     resources.mkdir(parents=True)
     (contents / "MacOS").mkdir()
-    shutil.copy2(args.shell, contents / "MacOS/Probant")
-    (contents / "MacOS/Probant").chmod(0o755)
+    shutil.copy2(args.shell, contents / "MacOS/Anteriora")
+    (contents / "MacOS/Anteriora").chmod(0o755)
     shutil.copytree(python_root, resources / "python", symlinks=True)
     packaged_client = resources / "python" / relative_site
     packaged_client.mkdir(parents=True, exist_ok=True)
@@ -83,9 +83,9 @@ def main():
     shutil.copytree(args.vm_runtime, packaged_client / "inferroute_macos_vm_runtime")
     shutil.copy2(Path(__file__).with_name("app_entry.py"), resources / "app_entry.py")
     info = {
-        "CFBundleExecutable": "Probant",
+        "CFBundleExecutable": "Anteriora",
         "CFBundleIdentifier": policy["runner_identifier"] + ".app",
-        "CFBundleName": "Probant",
+        "CFBundleName": "Anteriora",
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": args.version,
         "CFBundleVersion": args.version,

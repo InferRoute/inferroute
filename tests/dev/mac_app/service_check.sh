@@ -1,5 +1,5 @@
 #!/bin/sh
-# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Probant.app (see native/macos/README.md, ad-hoc app).
+# DEVELOPMENT ONLY: a check run by hand on a Mac against a built Anteriora.app (see native/macos/README.md, ad-hoc app).
 # Start the bundled service exactly as AppMain does (same argv, same environment), but with the browser
 # suppressed and HOME a throwaway folder; check the page answers on loopback; stop it with SIGINT.
 set -u

@@ -1,4 +1,4 @@
-// Shared by the Probant pages (the live session page and the home page). Builds TEXT NODES only: nothing
+// Shared by the Anteriora pages (the live session page and the home page). Builds TEXT NODES only: nothing
 // received is parsed as markup, made a link, or used as a resource address. tests/test_probant_web.py and
 // tests/test_probant_home.py grep this file for the constructs that would break that rule.
 "use strict";

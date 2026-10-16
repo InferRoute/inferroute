@@ -1,4 +1,4 @@
-// Probant, local browser page. Served by the session's own bridge on 127.0.0.1; talks only to it.
+// Anteriora, local browser page. Served by the session's own bridge on 127.0.0.1; talks only to it.
 //
 // One rule governs this file: it builds TEXT NODES. Nothing received — the assistant's words, a patent
 // title, a dialog — is ever parsed as markup, turned into a link, or used as a resource address. The agent
@@ -80,7 +80,7 @@
     } catch (_) {
       panel.hidden = false;
       error.hidden = false;
-      error.textContent = "Could not refresh the draft list. Reopen this document reading from Probant home.";
+      error.textContent = "Could not refresh the draft list. Reopen this document reading from Anteriora home.";
     }
   }
   // `route`: open the home page straight at a page of it (its own address, with its own key).
@@ -98,7 +98,7 @@
     const row = el("div", "row ended-actions");
     if (HOME_LINK.test(homeUrl)) {
       const again = el("button", "primary", readingSession ? "Review created matters" : "Start another session on this matter");
-      const home = el("button", "ghost", "Probant home");
+      const home = el("button", "ghost", "Anteriora home");
       again.type = home.type = "button";
       again.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : matterRoute(matterId)));
       home.addEventListener("click", () => goHome(""));
@@ -2187,7 +2187,7 @@
     readingSession = s.mode === "intake";
     intakeId = String(s.intake_id || "");
     $("layout").hidden = false;
-    document.title = `Probant · ${s.matter}`;
+    document.title = `Anteriora · ${s.matter}`;
     $("matter").textContent = String(s.matter || "").replace("/", " / ");
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);

@@ -238,7 +238,7 @@ def cmd_delete(spec: str, yes: bool = False) -> int:
             print("  Not deleted.")
             return 1
     out = delete(client, matter)
-    print(f"  Deleted {client}/{matter}. Restore it from Probant home within {RETENTION_DAYS} days.")
+    print(f"  Deleted {client}/{matter}. Restore it from Anteriora home within {RETENTION_DAYS} days.")
     for p in out["left_in_place"]:
-        print(f"  Left in place (outside the Probant folder, so not Probant's to move): {p}")
+        print(f"  Left in place (outside the Anteriora folder, so not Anteriora's to move): {p}")
     return 0

@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "about": "Every input of the ad-hoc Probant.app (build_app_adhoc.sh). The build refuses any file whose sha256 differs. The client wheel, runtime wheel and lock are the signed 0.9.114 release files, byte for byte; the lock is the one install-probant.sh pins.",
+  "about": "Every input of the ad-hoc Anteriora.app (build_app_adhoc.sh). The build refuses any file whose sha256 differs. The client wheel, runtime wheel and lock are the signed 0.9.114 release files, byte for byte; the lock is the one install-probant.sh pins.",
   "app": {
     "bundle_id": "ai.inferroute.probant",
     "version": "0.9.114",

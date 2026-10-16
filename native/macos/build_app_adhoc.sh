@@ -83,10 +83,12 @@ HOME="$CLIENT_HOME" INFERROUTE_HOME="$CLIENT_HOME/.inferroute" "$PY" -I -c "from
 
 echo "== app shell =="
 cp "$HERE/app_entry.py" "$RES/app_entry.py"
+[ "$(sha "$HERE/$(pin icon.file)")" = "$(pin icon.sha256)" ] || { echo "REFUSED: the icon is not the pinned one" >&2; exit 65; }
+cp "$HERE/$(pin icon.file)" "$RES/$(pin icon.file)"
 /usr/bin/swiftc -O -target "arm64-apple-macos$MINOS" -o "$APP/Contents/MacOS/Probant" "$HERE/AppMain.swift"
 /usr/bin/plutil -create xml1 "$APP/Contents/Info.plist"
 for kv in CFBundleExecutable=Probant CFBundleIdentifier="$BUNDLE_ID" CFBundleName=Probant CFBundleDisplayName=Probant \
-          CFBundlePackageType=APPL CFBundleShortVersionString="$VERSION" CFBundleVersion="$VERSION" \
+          CFBundlePackageType=APPL CFBundleIconFile=Anteriora CFBundleShortVersionString="$VERSION" CFBundleVersion="$VERSION" \
           LSMinimumSystemVersion="$MINOS" CFBundleInfoDictionaryVersion=6.0; do
   /usr/bin/plutil -insert "${kv%%=*}" -string "${kv#*=}" "$APP/Contents/Info.plist"
 done

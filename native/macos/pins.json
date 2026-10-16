@@ -26,5 +26,10 @@
     "file": "inferroute-0.9.114-lock.txt",
     "sha256": "7c092043908ce61fba8f8c891fa8d063ac9ddeddf5d779e381fcb731e0b41200"
   },
-  "runner_sha256": "e2021618fc7f3eff0c8c407538d7bd0bf78559c115737266fc9051412960d80e"
+  "runner_sha256": "e2021618fc7f3eff0c8c407538d7bd0bf78559c115737266fc9051412960d80e",
+  "icon": {
+    "file": "Anteriora.icns",
+    "sha256": "cd7b04281744a315cbec09f17de651107e6505af624da07833fd0b3d2c684c15",
+    "about": "The app icon (mark C), kept beside this script in the repo. It shows no name."
+  }
 }

@@ -111,3 +111,12 @@ def test_pins_match_the_signed_release_files():
         manifest = json.loads(z.read("inferroute_macos_vm_runtime/runtime.json"))
     assert manifest["artifacts"]["ProbantVM"]["sha256"] == PINS["runner_sha256"]
     assert manifest["minimum_macos"] == PINS["app"]["minimum_macos"]
+
+
+def test_the_app_icon_is_pinned_and_wired_into_the_bundle():
+    import hashlib, json, pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "native" / "macos"
+    pins = json.loads((root / "pins.json").read_text())["icon"]
+    assert hashlib.sha256((root / pins["file"]).read_bytes()).hexdigest() == pins["sha256"]
+    script = (root / "build_app_adhoc.sh").read_text()
+    assert "CFBundleIconFile=Anteriora" in script and 'pin icon.sha256' in script

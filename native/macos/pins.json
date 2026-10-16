@@ -1,9 +1,9 @@
 {
   "schema": 1,
-  "about": "Every input of the ad-hoc Anteriora.app (build_app_adhoc.sh). The build refuses any file whose sha256 differs. The client wheel, runtime wheel and lock are the signed 0.9.114 release files, byte for byte; the lock is the one install-probant.sh pins.",
+  "about": "Every input of the ad-hoc Anteriora.app (build_app_adhoc.sh). The build refuses any file whose sha256 differs. The client wheel, runtime wheel and lock are the signed 0.9.117 release files, byte for byte; the lock is the one install-probant.sh pins.",
   "app": {
     "bundle_id": "ai.inferroute.probant",
-    "version": "0.9.114",
+    "version": "0.9.117",
     "minimum_macos": "12.0"
   },
   "python": {
@@ -15,16 +15,16 @@
     "checked_against": "the release's SHA256SUMS and GitHub's asset digest (both de6b8f94...), 2026-10-15"
   },
   "client_wheel": {
-    "file": "inferroute-0.9.114-py3-none-any.whl",
-    "sha256": "7222878bd085956183677c09c13c08311820ec41bcac780e23475c83eaebf16d"
+    "file": "inferroute-0.9.117-py3-none-any.whl",
+    "sha256": "7506c37c691d6659ef2ceb2dfa946c1f30ba340e6bf9b783b6a28278cf731e6e"
   },
   "runtime_wheel": {
-    "file": "inferroute_macos_vm_runtime-0.9.114-py3-none-macosx_11_0_arm64.whl",
-    "sha256": "df8e6d5947dc31e0321b8fb6e46db46c592273a2b2b7cea19f676b3d44349810"
+    "file": "inferroute_macos_vm_runtime-0.9.117-py3-none-macosx_11_0_arm64.whl",
+    "sha256": "231f1f8d758e826b5b8d1efa19782a00258a340fcaeff97f3854c5e2c65ce025"
   },
   "lock": {
-    "file": "inferroute-0.9.114-lock.txt",
-    "sha256": "7c092043908ce61fba8f8c891fa8d063ac9ddeddf5d779e381fcb731e0b41200"
+    "file": "inferroute-0.9.117-lock.txt",
+    "sha256": "1485f0cee52a97850d9b22469c19e0b12903a8aac47d020f2723f979caf7cf5d"
   },
   "runner_sha256": "e2021618fc7f3eff0c8c407538d7bd0bf78559c115737266fc9051412960d80e",
   "icon": {

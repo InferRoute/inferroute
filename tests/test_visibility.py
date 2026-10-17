@@ -118,12 +118,10 @@ def test_forward_keeps_the_per_request_model_pins():
         "x-inferroute-no-hedge": "1",
         "x-inferroute-no-model-fallback": "1",
         "x-inferroute-no-compress": "1",
-        "x-inferroute-something-else": "still dropped",
     })
     assert out["x-inferroute-no-hedge"] == "1"
     assert out["x-inferroute-no-model-fallback"] == "1"
     assert out["x-inferroute-no-compress"] == "1"
-    assert "x-inferroute-something-else" not in out
 
 
 def test_forward_merges_visibility_headers_over_allowlist(tmp_path):
@@ -136,3 +134,18 @@ def test_forward_merges_visibility_headers_over_allowlist(tmp_path):
     assert base["x-inferroute-recording"] == "full"
     assert base["x-inferroute-content-hash"] == new_user_block_hash(_BODY)
     assert base["authorization"] == "Bearer k"  # didn't clobber auth
+
+
+def test_forward_keeps_x_steward_version_and_any_future_prefixed_header():
+    from inferroute_local.proxy import DAEMON_OWNED_HEADERS, FORWARD_PREFIXES, _forward_headers
+    caller = {
+        "x-inferroute-run-id": "r", "x-steward-version": "v-123", "x-inferroute-no-hedge": "1",
+        "x-inferroute-no-model-fallback": "1", "x-inferroute-brand-new-header": "n", "x-steward-other": "o",
+    }
+    out = _forward_headers({"authorization": "Bearer k", **caller})
+    # EQUALITY with the caller's lines, minus an explicitly NAMED drop list (empty for these names)
+    assert {k: v for k, v in out.items() if k.startswith(FORWARD_PREFIXES)} == caller
+    assert DAEMON_OWNED_HEADERS == {"x-inferroute-recording", "x-inferroute-content-hash",
+                                    "x-inferroute-hash-v", "x-inferroute-turn-seq"}, "the drop list is named; change it on purpose"
+    owned = _forward_headers({d: "spoof" for d in DAEMON_OWNED_HEADERS} | {"x-unrelated": "x", "host": "h"})
+    assert not (set(owned) & DAEMON_OWNED_HEADERS) and "x-unrelated" not in owned and "host" not in owned

@@ -417,6 +417,17 @@ def _extract_json(raw: bytes) -> tuple[dict, Optional[str], Optional[str]]:
     return usage, obj.get("stop_reason"), obj.get("model")
 
 
+# Everything a caller sets for the cloud under these prefixes goes through: the session tag, the run-id,
+# the no-hedge / no-model-fallback / no-compress pins, x-steward-version and whatever is added next. A
+# NAMED list was eaten twice (the 10-04 pins, then x-steward-version, which left usage_records.steward_version
+# NULL for every daemon-routed run), so the rule is by prefix and the only exceptions are named below.
+FORWARD_PREFIXES = ("x-inferroute-", "x-steward-")
+# Headers the daemon sets itself (_visibility_headers): a caller's copy must not reach the cloud.
+DAEMON_OWNED_HEADERS = frozenset({
+    "x-inferroute-recording", "x-inferroute-content-hash", "x-inferroute-hash-v", "x-inferroute-turn-seq",
+})
+
+
 def _forward_headers(incoming: dict[str, str]) -> dict[str, str]:
     """Headers to forward upstream: auth, anthropic version/beta, content-type,
     the per-launch session id, and the Steward's run id so the cloud can tag usage.
@@ -430,16 +441,10 @@ def _forward_headers(incoming: dict[str, str]) -> dict[str, str]:
     The two `x-inferroute-no-*` pins belong here for the same reason: the cloud honours them, the daemon
     must not eat them.
     """
-    keep = {
-        "authorization", "x-api-key", "anthropic-version", "anthropic-beta",
-        "content-type", "x-inferroute-session", "x-inferroute-session-id",
-        "x-inferroute-run-id",
-        # Per-request pins a caller sets through ANTHROPIC_CUSTOM_HEADERS: no latency-hedge race, no model
-        # substitution. Found 2026-10-04: with this daemon in the path both were silently stripped, so a run
-        # that asked to stay on ONE model was answered by another and nothing said so.
-        "x-inferroute-no-hedge", "x-inferroute-no-model-fallback", "x-inferroute-no-compress",
-    }
-    headers = {k.lower(): v for k, v in incoming.items() if k.lower() in keep}
+    keep = {"authorization", "x-api-key", "anthropic-version", "anthropic-beta", "content-type"}
+    headers = {k.lower(): v for k, v in incoming.items()
+               if k.lower() in keep
+               or (k.lower().startswith(FORWARD_PREFIXES) and k.lower() not in DAEMON_OWNED_HEADERS)}
     headers.setdefault("content-type", "application/json")
     headers.setdefault("anthropic-version", "2023-06-01")
     return headers

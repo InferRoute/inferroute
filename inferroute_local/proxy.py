@@ -417,11 +417,12 @@ def _extract_json(raw: bytes) -> tuple[dict, Optional[str], Optional[str]]:
     return usage, obj.get("stop_reason"), obj.get("model")
 
 
-# Everything a caller sets for the cloud under these prefixes goes through: the session tag, the run-id,
+# Everything a caller sets for the cloud under these prefixes goes through (ir-* are the economy admission
+# tags ir-lane / ir-grant / ir-mode that cc-proxy-prod reads): the session tag, the run-id,
 # the no-hedge / no-model-fallback / no-compress pins, x-steward-version and whatever is added next. A
 # NAMED list was eaten twice (the 10-04 pins, then x-steward-version, which left usage_records.steward_version
 # NULL for every daemon-routed run), so the rule is by prefix and the only exceptions are named below.
-FORWARD_PREFIXES = ("x-inferroute-", "x-steward-")
+FORWARD_PREFIXES = ("x-inferroute-", "x-steward-", "ir-")
 # Headers the daemon sets itself (_visibility_headers): a caller's copy must not reach the cloud.
 DAEMON_OWNED_HEADERS = frozenset({
     "x-inferroute-recording", "x-inferroute-content-hash", "x-inferroute-hash-v", "x-inferroute-turn-seq",

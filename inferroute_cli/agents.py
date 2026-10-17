@@ -207,20 +207,37 @@ def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, heade
     return doc
 
 
-def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None) -> Path:
-    """The PI_CODING_AGENT_DIR for an `ir pi` launch: a STABLE ir-owned dir (~/.inferroute/pi-agent)
-    re-populated on every launch with symlinks to the user's ~/.pi/agent entries (settings, auth,
-    extensions, skills, themes, prompts, sessions — all theirs, untouched) plus a merged
-    models.json. Stable so Pi's own downloads (its `bin/` with fd and ripgrep) persist across
-    launches instead of being fetched every time (Henry saw that on each `ir pi`)."""
+def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
+                  run_id: str | None = None) -> Path:
+    """The PI_CODING_AGENT_DIR for an `ir pi` launch: a PER-RUN ir-owned dir
+    (~/.inferroute/pi-agent/runs/<run_id>) holding symlinks to the user's ~/.pi/agent entries
+    (settings, auth, extensions, skills, themes, prompts, sessions — all theirs, untouched) plus a
+    merged models.json. Per run, so two `ir pi` launches at once each read only their own
+    models.json instead of one rewriting the other's. Pi's own downloads (its `bin/` with fd and
+    ripgrep) live in the SHARED ~/.inferroute/pi-agent/bin, which each run dir links to, so they
+    persist across launches instead of being fetched every time."""
+    import time
+    import uuid
     user_dir = Path(os.environ.get("PI_CODING_AGENT_DIR") or (Path.home() / ".pi" / "agent"))
-    d = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "pi-agent"
-    d.mkdir(parents=True, exist_ok=True)
-    for entry in d.iterdir():                      # drop last launch's links; keep real dirs (bin/)
-        if entry.is_symlink() or entry.name == "models.json":
-            entry.unlink()
+    root = Path(os.environ.get("INFERROUTE_HOME") or (Path.home() / ".inferroute")) / "pi-agent"
+    shared_bin = root / "bin"
+    runs = root / "runs"
+    shared_bin.mkdir(parents=True, exist_ok=True)
+    runs.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    for old in runs.iterdir():                     # run dirs hold links + a key-bearing models.json: don't let them pile up
+        try:
+            if old.is_dir() and now - old.stat().st_mtime > 86400:
+                shutil.rmtree(old)
+        except OSError:
+            pass
+    run = runs / (run_id or uuid.uuid4().hex)
+    if run.exists():
+        shutil.rmtree(run)
+    run.mkdir(mode=0o700)
+    os.symlink(shared_bin, run / "bin")
     existing = None
-    if user_dir.is_dir() and user_dir.resolve() != d.resolve():
+    if user_dir.is_dir() and user_dir.resolve() != root.resolve() and user_dir.resolve() != run.resolve():
         for entry in user_dir.iterdir():
             if entry.name == "models.json":
                 try:
@@ -228,21 +245,22 @@ def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, header
                 except (OSError, ValueError):
                     existing = None
                 continue
-            if (d / entry.name).exists():
-                continue                            # e.g. our persistent bin/ when the user has none
+            if (run / entry.name).exists() or os.path.lexists(run / entry.name):
+                continue                            # our shared bin/ wins over a user's
             try:
-                os.symlink(entry, d / entry.name)
+                os.symlink(entry, run / entry.name)
             except OSError:
                 pass
-    (d / "models.json").write_text(json.dumps(pi_models_json(base_url, api_key, alias, upstream_name, headers, existing), indent=1))
-    (d / "sessions").mkdir(exist_ok=True)
-    (d / "bin").mkdir(exist_ok=True)
-    return d
+    mj = run / "models.json"
+    mj.write_text(json.dumps(pi_models_json(base_url, api_key, alias, upstream_name, headers, existing), indent=1))
+    mj.chmod(0o600)
+    (run / "sessions").mkdir(exist_ok=True)
+    return run
 
 
 def pi_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-                headers: dict | None = None) -> list[str]:
-    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers)
+                headers: dict | None = None, run_id: str | None = None) -> list[str]:
+    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers, run_id)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env.setdefault("PI_TELEMETRY", "0")
     return [binary, "--provider", "inferroute", "--model", alias.short, *passthrough]

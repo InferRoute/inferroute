@@ -77,7 +77,7 @@ def test_opencode_adapter_uses_the_openai_compatible_sdk_and_disables_sharing_wh
     assert argv == ["/bin/opencode", "run", "hi"] and json.loads(env["OPENCODE_CONFIG_CONTENT"])["model"] == "inferroute/kimi-k2.6"
 
 
-def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it_and_is_stable(tmp_path, monkeypatch):
+def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it_and_is_per_run(tmp_path, monkeypatch):
     user = tmp_path / "agent"
     user.mkdir()
     (user / "settings.json").write_text("{}")
@@ -86,22 +86,63 @@ def test_pi_config_dir_mirrors_the_users_agent_dir_without_touching_it_and_is_st
     monkeypatch.setenv("PI_CODING_AGENT_DIR", str(user))
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
     env = {}
-    argv = agents.pi_env_argv("/bin/pi", env, ["-p", "hi"], base_url="http://127.0.0.1:5", api_key="k", alias=_Alias(), upstream_name="n")
+    argv = agents.pi_env_argv("/bin/pi", env, ["-p", "hi"], base_url="http://127.0.0.1:5", api_key="k", alias=_Alias(), upstream_name="n", run_id="r1")
     assert argv == ["/bin/pi", "--provider", "inferroute", "--model", "kimi-k2.6", "-p", "hi"]
     d = env["PI_CODING_AGENT_DIR"]
-    assert d == str(tmp_path / "irhome" / "pi-agent"), "stable, ir-owned"
+    assert d == str(tmp_path / "irhome" / "pi-agent" / "runs" / "r1"), "per run, ir-owned"
     assert (user / "models.json").read_text() == json.dumps({"providers": {"mine": {"baseUrl": "x"}}}), "the user's file is untouched"
     merged = json.loads(open(d + "/models.json").read())
     assert set(merged["providers"]) == {"mine", "inferroute"}
     import os
     assert os.path.islink(d + "/settings.json") and os.path.realpath(d + "/sessions") == str(user / "sessions")
-    # Pi's own downloads (bin/) survive the next launch; the links are rebuilt
+    # Pi's own downloads live in the SHARED bin/ and survive the next launch
+    shared = tmp_path / "irhome" / "pi-agent" / "bin"
     (pathlib.Path(d) / "bin" / "rg").write_text("tool")
+    assert (shared / "rg").read_text() == "tool"
     (user / "settings.json").unlink()
-    agents.pi_env_argv("/bin/pi", {}, [], base_url="http://127.0.0.1:6", api_key="k", alias=_Alias(), upstream_name="n")
-    assert (pathlib.Path(d) / "bin" / "rg").read_text() == "tool" and not os.path.lexists(d + "/settings.json")
-    assert json.loads(open(d + "/models.json").read())["providers"]["inferroute"]["baseUrl"] == "http://127.0.0.1:6/v1"
+    env2 = {}
+    agents.pi_env_argv("/bin/pi", env2, [], base_url="http://127.0.0.1:6", api_key="k", alias=_Alias(), upstream_name="n", run_id="r2")
+    d2 = env2["PI_CODING_AGENT_DIR"]
+    assert (pathlib.Path(d2) / "bin" / "rg").read_text() == "tool" and not os.path.lexists(d2 + "/settings.json")
+    assert json.loads(open(d2 + "/models.json").read())["providers"]["inferroute"]["baseUrl"] == "http://127.0.0.1:6/v1"
     assert models.get("kimi-k2.6") is not None
+
+
+def test_two_simultaneous_pi_launches_each_read_only_their_own_models_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "nouser"))
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
+    import concurrent.futures as cf
+    def launch(i):
+        env = {}
+        agents.pi_env_argv("/bin/pi", env, [], base_url=f"http://127.0.0.1:{i}", api_key=f"k{i}", alias=_Alias(), upstream_name="n",
+                           headers={"x-inferroute-run-id": f"run-{i}"}, run_id=f"r{i}")
+        return i, env["PI_CODING_AGENT_DIR"]
+    with cf.ThreadPoolExecutor(8) as ex:
+        out = list(ex.map(launch, range(8)))
+    assert len({d for _, d in out}) == 8
+    for i, d in out:                       # every launch still sees ITS config after all 8 have started
+        prov = json.loads(open(d + "/models.json").read())["providers"]["inferroute"]
+        assert prov["baseUrl"] == f"http://127.0.0.1:{i}/v1" and prov["apiKey"] == f"k{i}" and prov["headers"]["x-inferroute-run-id"] == f"run-{i}"
+
+
+def test_pi_launch_forwards_the_harness_header_pins_and_keeps_its_session_tag(tmp_path, monkeypatch):
+    from inferroute_cli import launch
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "nouser"))
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "x-inferroute-run-id: R9\nx-inferroute-no-hedge: 1\nx-inferroute-no-model-fallback: 1\nx-inferroute-session: spoof")
+    monkeypatch.setattr("inferroute_cli.agents.binary_for", lambda a: "/bin/pi")
+    monkeypatch.setattr("inferroute_cli.launch._persist_session_link", lambda *a, **k: None)
+    monkeypatch.setattr("inferroute_cli.launch._persist_last_model", lambda *a, **k: None)
+    monkeypatch.setattr("inferroute_cli.launch._record_launch", lambda *a, **k: None)
+    monkeypatch.setattr("inferroute_cli.lane.announce", lambda *a, **k: None)
+    seen = {}
+    monkeypatch.setattr("os.execve", lambda b, argv, env: seen.update(env=env))
+    creds = type("C", (), {"is_valid": True, "api_url": "https://api.inferroute.ai", "api_key": "k"})()
+    launch.launch_agent_plain("pi", "kimi-k2.6", creds, why="t")
+    h = json.loads(open(seen["env"]["PI_CODING_AGENT_DIR"] + "/models.json").read())["providers"]["inferroute"]["headers"]
+    assert h["x-inferroute-run-id"] == "R9" and h["x-inferroute-no-hedge"] == "1" and h["x-inferroute-no-model-fallback"] == "1"
+    assert h["x-inferroute-session"] != "spoof" and len(h["x-inferroute-session"]) == 36
 
 
 def test_goose_adapter_points_its_openai_provider_at_the_endpoint_and_honours_run(monkeypatch, tmp_path):

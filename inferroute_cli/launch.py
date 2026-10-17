@@ -993,10 +993,19 @@ def launch_agent_plain(agent: str, model_id: str, creds: Credentials, extra_args
         sys.exit(2)
     session_id = _new_session_id()
     env = os.environ.copy()
-    headers = {"x-inferroute-session": session_id}
+    # The Claude Code path forwards whatever the caller put in ANTHROPIC_CUSTOM_HEADERS (a harness's
+    # run-id, version, no-hedge and no-model-fallback pins) on every request. Pi and OpenCode take a
+    # header map instead, so carry the same lines across; otherwise this arm could be hedged or fall
+    # back to another model while the Claude Code arm is pinned. Our session tag always wins.
+    headers = {}
+    for line in env.get("ANTHROPIC_CUSTOM_HEADERS", "").splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip():
+            headers[name.strip()] = value.strip()
+    headers["x-inferroute-session"] = session_id
     kw = dict(base_url=creds.api_url, api_key=creds.api_key, alias=alias, upstream_name=alias.model_id, headers=headers)
     if agent == "pi":
-        argv = agents_mod.pi_env_argv(binary, env, list(extra_args), **kw)
+        argv = agents_mod.pi_env_argv(binary, env, list(extra_args), run_id=session_id, **kw)
     else:
         argv = agents_mod.opencode_env_argv(binary, env, list(extra_args), confidential=False, **kw)
     _persist_session_link(creds.api_url, session_id)

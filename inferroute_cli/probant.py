@@ -380,10 +380,29 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     return confidential_mod.launch([], agent="pi", probant=probant)
 
 
-def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals_only: bool = False) -> int:
-    """Read a document and create draft matters under the selected client, or record proposals only."""
+def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals_only: bool = False,
+               repo: bool = False, ref: str = "HEAD", yes: bool = False, only: Optional[List[str]] = None) -> int:
+    """Read a document (or, with `repo`, one commit of a git repository) and create draft matters under the
+    selected client, or record proposals only."""
     from . import probant_intake as I
     client = sanitize(client, "client")
+    if repo:
+        from . import probant_repo as R
+        text, info = R.snapshot(path, ref, only)
+        for line in R.describe(info, text):
+            print(line)
+        if not info["files"]:
+            raise ProbantError("nothing in this commit can be read: every file was left out")
+        if not yes:
+            try:
+                answer = input("Read these files in a sealed session? [y/N] ").strip().lower()
+            except EOFError:
+                answer = ""
+            if answer not in ("y", "yes"):
+                print("nothing was staged")
+                return 1
+        meta = I.stage(text, f"{info['repo_name']}@{info['commit'][:12]}", extra=info)
+        path = str(I.path_of(meta["id"]))
     # Either a document to stage, or one already staged (the home page stages what it was given, then
     # starts this): both name the same run, so the page and the terminal cannot drift apart.
     src = Path(path).expanduser()
@@ -585,6 +604,12 @@ def main(argv: list[str] | None = None) -> int:
     ik.add_argument("--web", action="store_true", help="read it in a local browser page instead of the terminal")
     ik.add_argument("--client", default="Personal", help="client to create draft matters under (default Personal)")
     ik.add_argument("--proposals-only", action="store_true", help="record proposals without creating draft matters")
+    ik.add_argument("--repo", action="store_true",
+                    help="the argument is a git repository: read one commit of it (tracked files, secrets left out)")
+    ik.add_argument("--commit", default="HEAD", help="with --repo: the commit to read (default HEAD)")
+    ik.add_argument("--yes", action="store_true", help="with --repo: do not ask before staging the listed files")
+    ik.add_argument("--only", action="append", default=[], metavar="PATH",
+                    help="with --repo: read only this folder or file (repeatable), for a large repository")
     pf = sub.add_parser("cluster", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
@@ -648,7 +673,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "intake":
-            return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only)
+            return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only,
+                              repo=a.repo, ref=a.commit, yes=a.yes, only=a.only)
         if a.cmd == "cluster":
             return cmd_cluster(a.folder, max_docs=a.max_docs, budget=a.budget, only=a.only,
                                  reader=a.reader, thinker=a.thinker, resume=a.resume,

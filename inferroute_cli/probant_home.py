@@ -976,6 +976,39 @@ class Home:
             it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])), draft_client=client)
             return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
 
+        @app.post("/api/intake/repo")
+        async def intake_repo(request: Request):
+            """A git repository: first a preview of exactly which files would be read and which are left out,
+            then, with `confirm`, the same snapshot staged and a reading started. The preview stages nothing."""
+            import asyncio
+            from . import probant_intake as I
+            from . import probant_repo as R
+            d = await body(request)
+            if not key_status()["present"]:
+                return problem(NEEDS_KEY_WORDS, 409, extra={"needs_key": True})
+            only = [str(x) for x in (d.get("only") or []) if str(x).strip()][:20]
+            try:
+                client = S.sanitize(str(d.get("client") or "Personal"), "client")
+                text, info = await asyncio.to_thread(R.snapshot, str(d.get("path") or ""),
+                                                     str(d.get("commit") or "HEAD"), only)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            lines = R.describe(info, text)
+            if not d.get("confirm"):
+                return {"ok": True, "preview": lines, "files": len(info["files"]), "chars": len(text),
+                        "commit": info["commit"], "too_large": len(text) > I.MAX_CHARS}
+            if str(d.get("commit_seen") or "") != info["commit"]:
+                return problem("The repository changed since the preview. Preview it again.", 409)
+            if not info["files"]:
+                return problem("Nothing in this commit can be read: every file was left out.", 400)
+            try:
+                meta = await asyncio.to_thread(I.stage, text, f"{info['repo_name']}@{info['commit'][:12]}", info)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+            it = home.launches.start(f"repository · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])),
+                                     draft_client=client)
+            return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
+
         @app.get("/api/intake")
         async def intake_view(id: str = ""):
             from . import probant_intake as I

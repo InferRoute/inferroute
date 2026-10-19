@@ -105,8 +105,11 @@ def _slug(name: str) -> str:
     return out or "document"
 
 
-def stage(text: str, source_name: str = "") -> Dict[str, Any]:
-    """Write the document where a sealed session can read it and nothing else can. Returns its meta."""
+def stage(text: str, source_name: str = "", extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Write the document where a sealed session can read it and nothing else can. Returns its meta.
+
+    `extra` carries what a non-document source knows about itself (probant_repo: the commit, the file map);
+    it can add keys but never replace the ones this function computes."""
     body = (text or "").replace("\r\n", "\n")
     if not body.strip():
         raise S.ProbantError("that document is empty — nothing to read")
@@ -128,6 +131,8 @@ def stage(text: str, source_name: str = "") -> Dict[str, Any]:
             "staged_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "chars": len(body), "lines": body.count("\n") + 1,
             "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()}
+    if extra:
+        meta = {**{k: v for k, v in extra.items() if k not in meta}, **meta}
     (d / "meta.json").write_text(json.dumps(meta, indent=1))
     os.chmod(d / "meta.json", 0o600)
     # Preserve the source before any agent starts. Its working directory is writable;
@@ -319,6 +324,15 @@ class DraftCreator:
                       "source_sha256": self.meta["sha256"], "quote": quote, "where": match.start(),
                       "suggested_priority_date": date, "title": title,
                       "title_key": title_key, "quote_key": quote_key, "summary_key": summary_key}
+            source_lines = f"Source: {self.meta['source_name']}\nSHA-256: {self.meta['sha256']}\n"
+            if self.meta.get("kind") == "repo":
+                # Located and dated by git on this computer, from the staged commit; never the model's words.
+                from . import probant_repo as R
+                located = R.quote_dates(self.meta, self.body, match.start(), match.end())
+                if located:
+                    origin["repo"] = located
+                    source_lines += "\n" + R.date_note(located) + "\n"
+                source_lines += "\n" + " ".join(R.public_notice(self.meta)) + "\n"
             rec = {"schema": "inferroute.probant.matter/1", "client": self.client, "matter": name,
                    "date_bound": S._today(), "pre_filing_default": True,
                    "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -326,7 +340,7 @@ class DraftCreator:
                    "intake_origin": origin}
             disclosure = (f"# {title}\n\n{summary}\n\n## From the source document\n\n"
                           + "\n".join("> " + line for line in quote.splitlines())
-                          + f"\n\nSource: {self.meta['source_name']}\nSHA-256: {self.meta['sha256']}\n")
+                          + "\n\n" + source_lines)
             row = {"id": f"{self.client}/{name}", "client": self.client,
                    "title": title, "summary": summary, "quote": quote,
                    "suggested_priority_date": date, "title_key": title_key, "quote_key": quote_key, "summary_key": summary_key,

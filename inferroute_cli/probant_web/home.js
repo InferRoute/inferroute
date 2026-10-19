@@ -924,6 +924,62 @@
     ], [button("Cancel", "ghost", closeDialog), go]);
   }
 
+  function readRepoDialog() {
+    const client = input("text", "e.g. Personal or Acme");
+    client.value = "Personal";
+    const path = input("text", "e.g. ~/code/my-product");
+    const only = input("text", "optional, e.g. src firmware");
+    const commit = input("text", "HEAD");
+    commit.value = "HEAD";
+    const err = el("p", "form-error");
+    const preview = el("div", "sub");
+    let seen = "";
+    const reset = () => { seen = ""; clear(preview); go.textContent = "Preview files"; };
+    for (const f of [path, only, commit]) f.addEventListener("input", () => { err.textContent = ""; reset(); });
+    const go = button("Preview files", "primary", async () => {
+      err.textContent = "";
+      if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(client.value.trim())) {
+        err.textContent = "Enter a client name, for example Personal. Use letters, numbers, spaces, dots, dashes or underscores (up to 64 characters).";
+        client.focus(); return;
+      }
+      if (!path.value.trim()) { err.textContent = "Enter the folder of a git repository on this computer."; path.focus(); return; }
+      const req = { path: path.value.trim(), commit: commit.value.trim() || "HEAD", client: client.value.trim(),
+                    only: only.value.trim() ? only.value.trim().split(/\s+/) : [] };
+      go.disabled = true;
+      try {
+        if (!seen) {
+          go.textContent = "Checking…";
+          const r = await api("/api/intake/repo", req);
+          clear(preview);
+          for (const line of r.preview) preview.append(el("p", "", line));
+          if (r.too_large || !r.files) { go.textContent = "Preview files"; go.disabled = false; return; }
+          seen = r.commit;
+          go.textContent = "Read these files";
+        } else {
+          go.textContent = "Staging…";
+          const r = await api("/api/intake/repo", { ...req, confirm: true, commit_seen: seen });
+          closeDialog();
+          location.hash = `#/document/${enc(r.id)}`;
+          return;
+        }
+      } catch (e) {
+        if (/InferRoute key/.test(e.message)) { closeDialog(); toast(e.message, "error"); location.hash = "#/"; return; }
+        err.textContent = e.message; reset();
+      }
+      go.disabled = false;
+    });
+    dialog("Read a repository", [
+      el("p", "", "The AI reads one commit of your code and creates one draft matter per technical idea it finds, with a summary and the passage it came from. "
+        + "Each draft is located in your code and dated from your git history on this computer. You review every draft before searching."),
+      field("Create drafts under this client", client, "Use Personal for your own work."),
+      field("Repository folder", path, "Only files tracked in git are read. Environment files, keys, credential files, dependencies, build output and anything that looks like a secret are left out."),
+      field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository."),
+      field("Commit", commit, "HEAD is the latest commit. Uncommitted changes are never read."),
+      preview,
+      err,
+    ], [button("Cancel", "ghost", closeDialog), go]);
+  }
+
   // Proposals arrive WHILE the session reads, so this view refreshes itself until the reading ends. Keyed in
   // the same map the launch poller uses, so leaving the page stops it (route() clears them all).
   function watchDocument(id) {
@@ -1387,6 +1443,7 @@
     $("nav").hidden = true;
     $("new-matter").hidden = true;
     $("read-document").hidden = true;
+    $("read-repo").hidden = true;
   }
 
   if (!key) { showNoKey(); return; }
@@ -1396,6 +1453,8 @@
   $("new-matter").addEventListener("click", newMatterDialog);
   $("read-document").hidden = false;
   $("read-document").addEventListener("click", readDocumentDialog);
+  $("read-repo").hidden = false;
+  $("read-repo").addEventListener("click", readRepoDialog);
   for (const b of document.querySelectorAll("#nav button")) b.addEventListener("click", () => { location.hash = b.dataset.route; });
   window.addEventListener("hashchange", route);
   route();

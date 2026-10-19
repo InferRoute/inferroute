@@ -773,7 +773,7 @@ export default function (pi: ExtensionAPI) {
 				[`Matter ${MATTER}.`,
 					"Ask for a prior-art survey of the disclosure in this folder.",
 					"Mark results: /relevant <number> (also /not-relevant, /marks). Send a suggested next step: /next <n>. Show the checks again: /proof.",
-					`Leave with /quit, then keep the record: ir probant export ${MATTER}`].join("\n"),
+					`Leave with /quit, then keep the record: anteriora export ${MATTER}`].join("\n"),
 				"info",
 			);
 		}
@@ -2469,7 +2469,7 @@ export default function (pi: ExtensionAPI) {
 			...(searchNo > 0 && entries.some(([, v]) => v !== "relevant") ? [STEP_LEAVE_OUT] : []),
 		];
 		const text = [
-			"[Probant note: the professional's relevance marks as of this message — their judgment, not yours. " +
+			"[Anteriora note: the professional's relevance marks as of this message — their judgment, not yours. " +
 				"Context for you, not a request: do not reply to it or mention it. It replaces any earlier marks note.]",
 			// "known" is no longer offered (2026-10-01) but is still RENDERED: a matter that already carries
 			// one recorded a judgement, and dropping it from the summary would delete it from view.
@@ -2540,7 +2540,7 @@ export default function (pi: ExtensionAPI) {
 			"the professional's own words, as they would ask you (\"Find documents like US-5795305-A\", \"Use my marks to steer " +
 			"the next searches\"), with no tool or parameter names: a follow-up research action within your tools, never a " +
 			"judgment and never a command. Keep each to one sentence, ideally under 160 characters: it is shown and sent " +
-			"in full. When a Probant note lists next-step candidates from the professional's marks, use them as material: " +
+			"in full. When an Anteriora note lists next-step candidates from the professional's marks, use them as material: " +
 			"keep, reword, merge or drop them, and add your own. Never mention this tool or the steps in your written answer.",
 		promptSnippet: "Offer the professional one-click next research steps (call last)",
 		parameters: Type.Object({

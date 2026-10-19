@@ -1,4 +1,4 @@
-"""`ir probant home` — the Probant home page: every matter and its past sessions, a new matter, a new session,
+"""`anteriora home` — the Anteriora home page: every matter and its past sessions, a new matter, a new session,
 and a plain guide.
 
 It is a small web server on 127.0.0.1 with the same rules as a session's page (probant_web.install_guard):
@@ -7,7 +7,7 @@ build text nodes only. It reads what Probant already keeps host-side — the mat
 record and searches, the marks, the exported records — and writes only three things, each on the
 professional's click: a new matter, the disclosure text, an export.
 
-Starting a session runs exactly `ir probant open <matter> --web` as a child process: the same verification,
+Starting a session runs exactly `anteriora open <matter> --web` as a child process: the same verification,
 the same sandbox, its own page and key. The home page shows progress while the sealed machines are checked,
 then offers the session's link. Sessions end with the home page's process (PR_SET_PDEATHSIG), because the
 child is started from the server's main thread.
@@ -902,7 +902,7 @@ class Home:
                 return problem(f"export failed: {e}", 500)
             mid = f"{client}/{matter}"
             return {"ok": True, "folder": str(path), "view": home.record_link(mid, path.name),
-                    "verify_here": f"ir probant verify-export {path}", "verify_anyone": "python3 verify_record.py ."}
+                    "verify_here": f"anteriora verify-export {path}", "verify_anyone": "python3 verify_record.py ."}
 
         @app.post("/api/check")
         async def check(request: Request):
@@ -1263,7 +1263,7 @@ class Home:
                 cards = [known[to]] + ([SH.public_card(me)] if d.get("keep_copy", True) else [])
                 blob = SH.seal_to(cards, payload, me)
                 stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-                dest = S.probant_root() / f"probant-corpus-for-{to}-{stamp}{SH.SUFFIX}"
+                dest = S.probant_root() / f"anteriora-corpus-for-{to}-{stamp}{SH.SUFFIX}"
                 dest.write_bytes(blob)
                 os.chmod(dest, 0o600)
                 # The SENDER's own trace of an outbound disclosure: what went, to whom, when, with which
@@ -1366,7 +1366,7 @@ def run(open_browser: bool = True) -> int:
     home.launches.home_url = url
     # flush: a terminal shows these at once, but anything reading this output through a pipe would wait for a
     # full buffer, and the link is the one thing it needs.
-    print(f"\n  Probant home:  {url}", flush=True)
+    print(f"\n  Anteriora home:  {url}", flush=True)
     if os.environ.get("IR_PROBANT_NO_BROWSER") == "1":      # inside the Anteriora app: quitting the app ends the service
         print("  The link works on this computer only; don't share it. Quitting Anteriora also ends any session started from the page.\n", flush=True)
     else:
@@ -1381,7 +1381,7 @@ def run(open_browser: bool = True) -> int:
     if os.environ.get("CLAUDECODE") == "1" and os.environ.get("IR_ALLOW_NESTED") != "1":
         print("  ⚠ Started from inside a coding assistant (CLAUDECODE=1). You can read matters and records,", flush=True)
         print("    but STARTING A SESSION FROM THIS PAGE WILL BE REFUSED: sessions must not nest. Stop this", flush=True)
-        print("    and run `ir probant home` in an ordinary terminal window instead.\n", flush=True)
+        print("    and run `anteriora home` in an ordinary terminal window instead.\n", flush=True)
     class HomeServer(uvicorn.Server):
         async def startup(self, sockets=None):
             await super().startup(sockets=sockets)

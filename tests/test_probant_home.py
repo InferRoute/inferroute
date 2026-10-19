@@ -664,9 +664,9 @@ def test_starting_home_inside_a_coding_assistant_says_so_before_handing_out_the_
 
     assert H.run(open_browser=False) == 0
     out = capsys.readouterr().out
-    assert "Probant home:" in out                                   # the link is still given
+    assert "Anteriora home:" in out                                   # the link is still given
     assert "CLAUDECODE=1" in out and "WILL BE REFUSED" in out
-    assert "ir probant home` in an ordinary terminal" in out
+    assert "anteriora home` in an ordinary terminal" in out
     # The warning and the click-time refusal must agree, or the page tells two stories about one cause.
     assert "nest" in out.lower()
     assert "normal terminal" in H.failure_message(["ir: refusing to launch a nested agent session"])
@@ -675,7 +675,7 @@ def test_starting_home_inside_a_coding_assistant_says_so_before_handing_out_the_
     monkeypatch.delenv("CLAUDECODE")
     assert H.run(open_browser=False) == 0
     out = capsys.readouterr().out
-    assert "Probant home:" in out and "WILL BE REFUSED" not in out
+    assert "Anteriora home:" in out and "WILL BE REFUSED" not in out
 
     # And the escape hatch the refusal itself documents silences it.
     monkeypatch.setenv("CLAUDECODE", "1")
@@ -887,7 +887,7 @@ def test_inside_the_probant_app_the_banner_does_not_tell_the_person_to_keep_a_te
     monkeypatch.setenv("IR_PROBANT_NO_BROWSER", "1")
     assert H.run(open_browser=False) == 0
     out = capsys.readouterr().out
-    assert "Probant home:" in out and "terminal" not in out.lower() and "Quitting Anteriora" in out
+    assert "Anteriora home:" in out and "terminal" not in out.lower() and "Quitting Anteriora" in out
 
     monkeypatch.delenv("IR_PROBANT_NO_BROWSER")
     assert H.run(open_browser=False) == 0

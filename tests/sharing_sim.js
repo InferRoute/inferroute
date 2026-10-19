@@ -64,7 +64,7 @@ async function api(path, body) {
   // public card and nothing else, so that a change on the server side cannot quietly put a key on screen.
   if (path === "/api/sharing") return { ...SECRETS, fingerprint: CARD.fingerprint, card: CARD, contacts: [{ name: "betrancourt", fingerprint: "9f8e-7d6c-5b4a-3928", added_at: "2026-09-20T09:00:00Z" }] };
   if (path === "/api/overview") return { matters: [{ id: "Acme/battery-0", date_bound: "2021-03-01", marks: 2 }, { id: "Acme/battery-1", date_bound: "", marks: 0 }] };
-  if (path === "/api/sharing/share") { sent = body; return { matters: body.matters.length, to_fingerprint: "9f8e-7d6c-5b4a-3928", from_fingerprint: CARD.fingerprint, path: "/home/henry/Probant/probant-corpus-for-betrancourt-x.probant-share" }; }
+  if (path === "/api/sharing/share") { sent = body; return { matters: body.matters.length, to_fingerprint: "9f8e-7d6c-5b4a-3928", from_fingerprint: CARD.fingerprint, path: "/home/henry/Anteriora/anteriora-corpus-for-betrancourt-x.probant-share" }; }
   if (path === "/api/sharing/open") {
     return body.client ? { opened: ["FromHenry/battery-0"] }
       : { from: "9f8e-7d6c-5b4a-3928", from_name: "", known: false, note: "for review",
@@ -101,7 +101,7 @@ const textOf = (n) => walk(n).map((x) => `${x.textContent} ${x.value} ${x.placeh
     listsBothMatters: shown.includes("Acme/battery-0") && shown.includes("Acme/battery-1"),
     sent,
     confirmed: after.includes("1 matter(s) ready to send to betrancourt"),   // wording changed in 0.9.94
-    pathShown: after.includes("probant-corpus-for-betrancourt"),
+    pathShown: after.includes("anteriora-corpus-for-betrancourt"),
     unknownWarned: textOf(el("div", "", ...open.body)).includes("not one of your contacts"),
   }));
 })().catch((e) => { console.error(e.stack || String(e)); process.exit(1); });

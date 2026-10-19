@@ -104,14 +104,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    // The service prints its page address once ("Probant home:  http://127.0.0.1:PORT/#k=TOKEN"). It is kept
-    // in memory only; the window loads it.
+    // The service prints its page address once ("Anteriora home:  http://127.0.0.1:PORT/#k=TOKEN"; releases
+    // up to 0.9.120 printed "Probant home:", which is still accepted). It is kept in memory only; the window
+    // loads it.
     private func read(_ data: Data) {
         pending.append(data)
         while let nl = pending.firstIndex(of: 0x0A) {
             let line = String(decoding: pending[pending.startIndex..<nl], as: UTF8.self)
             pending.removeSubrange(pending.startIndex...nl)
-            if homeURL == nil, let r = line.range(of: "Probant home:") {
+            if homeURL == nil, let r = line.range(of: "Anteriora home:") ?? line.range(of: "Probant home:") {
                 let text = line[r.upperBound...].trimmingCharacters(in: .whitespaces)
                 if text.hasPrefix("http://127.0.0.1:"), let url = URL(string: text) {
                     homeURL = url

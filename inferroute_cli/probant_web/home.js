@@ -1,4 +1,4 @@
-// Anteriora home page. Served by `ir probant home` on 127.0.0.1; talks only to it.
+// Anteriora home page. Served by `anteriora home` on 127.0.0.1; talks only to it.
 //
 // Same rule as the session page: TEXT NODES only. The one place this page leaves itself is openLocal(), and
 // it only opens addresses this computer produced: a session page on 127.0.0.1 with its key, or a record link
@@ -523,7 +523,7 @@
     // the difference show up as a button that fails.
     if (data.update_waiting) {
       p.append(el("div", "update-note", el("b", "", "A newer version of Anteriora is installed. "),
-        "To use it, restart Anteriora home: press Ctrl+C in the terminal it runs in, then run ir probant home again. "
+        "To use it, restart Anteriora home: press Ctrl+C in the terminal it runs in, then run anteriora home again. "
         + "Sessions started from this page end with it, so finish them first."));
     }
     for (const l of data.running || []) {
@@ -882,10 +882,10 @@
           "Record checks currently show one known failure, completeness, until the next update of the search machine.")),
       sec("In the terminal",
         para("Everything here also works in a terminal:"),
-        list("ir probant new <client> <matter> --priority-date YYYY-MM-DD",
-          "ir probant open <client>/<matter>   (add --web for the browser)",
+        list("anteriora new <client> <matter> --priority-date YYYY-MM-DD",
+          "anteriora open <client>/<matter>   (add --web for the browser)",
           "In a session: /relevant <number>, /not-relevant, /known, /marks, /next <n>, /proof, /quit",
-          "ir probant export <client>/<matter>, and ir probant proof <client>/<matter> for the technical detail")));
+          "anteriora export <client>/<matter>, and anteriora proof <client>/<matter> for the technical detail")));
   }
 
   // ── reading a document: the professional gives it, a sealed session reads it, they open what it proposes ──
@@ -1362,7 +1362,7 @@
   function openShareDialog() {
     // The file is chosen with the system's file chooser and read HERE: a page is never given a file's path, so the bytes
     // travel instead. Typing a path remains for anyone who prefers it.
-    const path = input("text", "…or type its path, e.g. /home/you/probant-corpus-for-you-….probant-share");
+    const path = input("text", "…or type its path, e.g. /home/you/anteriora-corpus-for-you-….probant-share");
     const client = input("text", "e.g. Henry");
     const err = el("p", "form-error");
     const preview = el("div", "share-result");

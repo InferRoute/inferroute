@@ -13,7 +13,7 @@ env -i HOME="$TH" PATH=/usr/bin:/bin IR_ATTESTED_CONFINE=require PYTHONNOUSERSIT
 PID=$!
 URL=""
 for i in $(seq 1 60); do
-  URL=$(sed -n 's/.*Probant home:  *\(http:\/\/127\.0\.0\.1:[0-9]*\/[^ ]*\).*/\1/p' "$LOG" | head -1)
+  URL=$(sed -En 's/.*(Anteriora|Probant) home: +(http:\/\/127\.0\.0\.1:[0-9]+\/[^ ]*).*/\2/p' "$LOG" | head -1)
   [ -n "$URL" ] && break; sleep 0.5
 done
 echo "service pid $PID, started after ~$((i/2)) s, url: ${URL%%#*}#k=<token>"

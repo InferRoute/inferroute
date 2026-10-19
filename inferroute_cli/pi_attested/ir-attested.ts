@@ -920,6 +920,52 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// ── name check (a name matter) ──
+	// Registered only for a name matter. The search runs on the host against the local trademark index; the
+	// host route is behind this session's key, and nothing about the name goes to a register or a website.
+	if (process.env.IR_TM_SEARCH === "1") {
+		type TmHit = { register: string; number: string; text: string; status: string; classes: string[];
+			filed: string; reasons: string[]; overlapping_classes: string[] };
+		pi.registerTool({
+			name: "trademark_search",
+			label: "Trademark search",
+			description: "Search registered trademarks close to ONE name, on this computer, in the local copy of public " +
+				"registers. Give the name and, when known, the Nice classes the product falls in. Returns marks close in " +
+				"spelling, sound or words, each with the reasons it resembles the name and whether its classes overlap. " +
+				"Search each variant of a name separately. The result lists marks; it is not an opinion on availability.",
+			promptSnippet: "Search registered trademarks close to one name (locally)",
+			parameters: Type.Object({ name: Type.String(), classes: Type.Optional(Type.Array(Type.String())),
+				limit: Type.Optional(Type.Number()) }),
+			async execute(_toolCallId, params, signal) {
+				const response = await fetch(`${ENDPOINT}/probant/tm/search`, {
+					method: "POST", signal,
+					headers: { "content-type": "application/json", authorization: `Bearer ${ENDPOINT_KEY}` },
+					body: JSON.stringify(params),
+				});
+				const result = await response.json() as { error?: string; name?: string; classes?: string[];
+					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number };
+				if (!response.ok || !result.hits) throw new Error(result.error ?? "The trademark search did not answer.");
+				const head = `Searched ${result.sources} (${(result.marks_searched ?? 0).toLocaleString("en")} live word marks, ` +
+					`data as of ${result.data_date}) for "${result.name}"` +
+					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer.";
+				const lines = result.hits.map((h) => `- ${h.text.length > 120 ? `${h.text.slice(0, 119)}…` : h.text} ` +
+					`(${h.register} ${h.number}, ${h.status}, classes ${h.classes.join(", ") || "none recorded"}` +
+					`${h.overlapping_classes.length ? `; overlaps ${h.overlapping_classes.join(", ")}` : ""}): ${h.reasons.join("; ")}`);
+				const text = [head, ...(lines.length ? lines : ["No close registered word marks found in this data."]),
+					...(result.more ? [`(${result.more} more, less close)`] : [])].join("\n");
+				return { content: [{ type: "text", text }],
+					details: { name: result.name, hits: result.hits.length, more: result.more ?? 0 } };
+			},
+			renderResult(result, _options, theme) {
+				const d = result.details as { name?: string; hits?: number; more?: number } | undefined;
+				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+				box.addChild(new Text(theme.bold("Trademark search") + `  “${d?.name ?? ""}” · ${d?.hits ?? 0} close mark(s)` +
+					(d?.more ? ` (+${d.more})` : "") + " · on this computer", 0, 0));
+				return box;
+			},
+		});
+	}
+
 	// ── reading a document and proposing matters (intake) ──
 	// Registered only when the launcher staged a document. The agent PROPOSES; the professional creates the
 	// matter from the page. Each proposal must quote the document, and the host drops any quote it cannot

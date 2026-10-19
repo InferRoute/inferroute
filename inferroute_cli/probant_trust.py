@@ -189,6 +189,12 @@ def search_is_inferroutes(search: Optional[dict]) -> bool:
 
 
 def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matter") -> Dict[str, Any]:
+    if search is None and mode == "names":
+        return {"key": "search", "state": INFO, "title": "Trademark search",
+                "summary": "Runs on this computer, against a local copy of public trademark registers.",
+                "points": ["A name the assistant searches is not sent to any register, search engine or website."],
+                "more": ["Patent search is not used for a name check."],
+                "technical": []}
     if search is None and mode == "intake":
         # Reading a document is not searching, and saying "not set up" here would be false as well as
         # alarming: no search tool is offered in this mode, so none can be used.
@@ -362,7 +368,10 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
         # The same reasoning is already written into search_item()'s intake branch; this path contradicted it.
         # What changes is the COUNT of sealed machines, which must not claim two when one was checked.
         verdict = "private"
-        if states["search"] == OK:
+        if mode == "names":
+            headline = ("Sealed hardware checked for this session: the AI model. Text is encrypted before it leaves "
+                        "this computer, and the trademark search runs on this computer.")
+        elif states["search"] == OK:
             headline = ("Sealed hardware checked for this session: the AI model and the patent search service. "
                         "Text is encrypted before it leaves this computer.")
         else:

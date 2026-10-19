@@ -860,7 +860,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 # this launch, not one promised for later.
                 # Reading a document offers no search tool, so no search verifier is started for it: nothing
                 # about a whole document in context can leave for a search machine.
-                search_endpoint = None if (os.environ.get("IR_INTAKE_DIR") or probant is None) else (
+                search_endpoint = None if (os.environ.get("IR_INTAKE_DIR") or probant is None
+                                           or probant.get("mode") == "names") else (
                     pi_attested.start_search_proxy(confinement=mac_backend.label, trusted_vm=mac_backend.ready)
                     if mac_backend is not None else pi_attested.start_search_proxy())
             if probant is not None and receipt.is_confidential:
@@ -896,6 +897,9 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 from . import probant_intake
                 creator = probant_intake.DraftCreator(str(probant["intake"]), str(probant["draft_client"]))
                 probant_intake.install_creation_route(local_app, creator)
+            if probant and probant.get("mode") == "names":
+                from . import tm_search, probant as probant_mod
+                tm_search.install_route(local_app, probant_mod.tm_index_path())
             server = uvicorn.Server(uvicorn.Config(local_app, host="127.0.0.1",
                                                    port=port, log_level="critical",
                                                    timeout_keep_alive=SEALED_KEEPALIVE_S))
@@ -906,6 +910,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 await asyncio.sleep(0.05)
             env = os.environ.copy()
             env.pop("IR_INTAKE_CREATE_DRAFTS", None)
+            env.pop("IR_TM_SEARCH", None)
             # Before anything else about this child: a competing provider route would send the session
             # somewhere the panel has not verified, while the panel renders all-green. See
             # strip_provider_route.
@@ -928,6 +933,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 env["IR_PROBANT_SURFACE"] = "browser" if web else "terminal"
                 if probant.get("mode") == "intake" and probant.get("draft_client"):
                     env["IR_INTAKE_CREATE_DRAFTS"] = "1"
+                if probant.get("mode") == "names":
+                    env["IR_TM_SEARCH"] = "1"
             local = f"http://127.0.0.1:{port}"
             session.shown_model = shown_model if agent == "claude" else alias.short
             if agent == "claude":
@@ -962,12 +969,12 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 if mac_backend is not None:
                     from inferroute_local.macos_vm.plan import build_plan
                     labels = {k: env[k] for k in ("IR_REPORT_FIRM", "IR_REPORT_MATTER") if env.get(k)}
-                    if probant.get("mode") == "intake": labels = {}
+                    if probant.get("mode") in ("intake", "names"): labels = {}
                     plan = build_plan(alias=alias, passthrough=passthrough,
                                       mode=probant.get("mode", "matter"),
                                       create_drafts=bool(probant.get("draft_client")),
                                       surface_browser_only=web, host_env=labels,
-                                      documents={} if probant.get("mode") == "intake" else pi_attested.matter_titles(env.get("IR_MATTER_RECORD_DIR")))
+                                      documents={} if probant.get("mode") in ("intake", "names") else pi_attested.matter_titles(env.get("IR_MATTER_RECORD_DIR")))
                     request = plan.request
                     if not search_endpoint: request["env"].pop("IR_SEARCH_ENDPOINT", None)
                     mac_backend.configure(request, model_url=local, model_key=local_key,

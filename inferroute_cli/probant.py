@@ -34,6 +34,10 @@ SYNC_MARKERS = ("OneDrive", "iCloud", "Library/Mobile Documents", "Dropbox", "Go
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 TEMPLATE_DISCLOSURE = ("# Disclosure\n\nDescribe the invention here, then open the matter and ask for a "
                        "prior-art survey.\n")
+TEMPLATE_NAMES = ("# Names to check\n\n## The product\n\nWhat it is and what it does, in a few sentences.\n\n"
+                  "## Names being considered\n\n- \n\n## Markets\n\nWhere you will sell it (for example France, "
+                  "the EU, the US).\n")
+KINDS = ("invention", "name")
 
 
 class ProbantError(ValueError):
@@ -169,12 +173,15 @@ def matter_creation_lock():
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def cmd_new(client: str, matter: str, priority_date: str | None, from_corpus: str = "") -> int:
+def cmd_new(client: str, matter: str, priority_date: str | None, from_corpus: str = "", kind: str = "invention") -> int:
     with matter_creation_lock():
-        return _create_matter(client, matter, priority_date, from_corpus)
+        return _create_matter(client, matter, priority_date, from_corpus, kind)
 
 
-def _create_matter(client: str, matter: str, priority_date: str | None, from_corpus: str) -> int:
+def _create_matter(client: str, matter: str, priority_date: str | None, from_corpus: str,
+                   kind: str = "invention") -> int:
+    if kind not in KINDS:
+        raise ProbantError(f"a matter is one of: {', '.join(KINDS)}")
     client, matter = sanitize(client, "client"), sanitize(matter, "matter")
     if record_path(client, matter).exists():
         raise ProbantError(f"matter {client}/{matter} already exists")
@@ -190,8 +197,9 @@ def _create_matter(client: str, matter: str, priority_date: str | None, from_cor
     make_private(client, matter)
     disclosure = ws / "disclosure.md"
     if not disclosure.exists():
-        disclosure.write_text(TEMPLATE_DISCLOSURE)
+        disclosure.write_text(TEMPLATE_NAMES if kind == "name" else TEMPLATE_DISCLOSURE)
     rec = {"schema": "inferroute.probant.matter/1", "client": client, "matter": matter,
+           **({"kind": "name"} if kind == "name" else {}),
            "date_bound": bound, "pre_filing_default": priority_date is None,
            "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "workspace": str(ws.resolve()), "changes": []}
@@ -372,8 +380,17 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     else:
         os.environ["IR_ATTESTED_CONFINE"] = "require"
     os.chdir(ws)
-    print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     from . import confidential as confidential_mod
+    if rec.get("kind") == "name":
+        if not tm_index_path().is_file():
+            raise ProbantError(f"no trademark index is installed on this computer ({tm_index_path()}); "
+                               "a name check needs one")
+        print(f"opening {client}/{matter} — name check, searched on this computer")
+        probant = {"matter": f"{client}/{matter}", "mode": "names"}
+        if web:
+            probant["web"] = True
+        return confidential_mod.launch([], agent="pi", probant=probant)
+    print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
     probant = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
     if web:
         probant["web"] = True
@@ -594,6 +611,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
     n.add_argument("--from-corpus", default="", help="tie this matter to a corpus you received, without making it part of it")
+    n.add_argument("--kind", choices=KINDS, default="invention",
+                   help="invention (prior-art search, the default) or name (trademark name check)")
     d = sub.add_parser("set-date"); d.add_argument("matter"); d.add_argument("date")
     o = sub.add_parser("open"); o.add_argument("matter")
     o.add_argument("--dev-unconfined", action="store_true",
@@ -683,7 +702,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
-            return cmd_new(a.client, a.matter, a.priority_date, a.from_corpus)
+            return cmd_new(a.client, a.matter, a.priority_date, a.from_corpus, a.kind)
         if a.cmd == "set-date":
             return cmd_set_date(a.matter, a.date)
         if a.cmd == "open":

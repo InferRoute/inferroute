@@ -21,6 +21,7 @@ ROUTES = {
     "model.chat": ("model", "POST", "/v1/chat/completions"),
     "model.receipt": ("model", "GET", "/confidential/receipt"),
     "intake.create": ("model", "POST", "/probant/intake/create-draft"),
+    "tm.search": ("model", "POST", "/probant/tm/search"),
     "search.verify": ("search", "GET", "/enclave"),
     "search.query": ("search", "POST", "/search"),
     "search.document": ("search", "POST", "/document"),
@@ -112,6 +113,9 @@ class Broker:
         role, method, path = ROUTES[operation]
         if role not in self.targets or (
             operation == "intake.create" and not self.create_drafts
+        ) or (
+            # The trademark search exists only in a name session; any other plan never reaches it.
+            operation == "tm.search" and (self.plan or {}).get("mode") != "names"
         ):
             raise ValueError("operation unavailable")
         if method == "POST" and not isinstance(body, dict):

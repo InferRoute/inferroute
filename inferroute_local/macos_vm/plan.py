@@ -191,7 +191,7 @@ def build_plan(
         raise PlanRefused(
             "the VM gate supports browser-only sessions; terminal launch is refused"
         )
-    if mode not in ("matter", "intake"):
+    if mode not in ("matter", "intake", "names"):
         raise PlanRefused("unsupported VM session mode")
     if not isinstance(create_drafts, bool):
         raise PlanRefused("create_drafts must be a boolean")
@@ -217,6 +217,9 @@ def build_plan(
                 pi_attested.BATCH_TOOL,
             )
             contract = pi_attested.load_intake_prompt(False)
+    elif mode == "names":
+        tools = pi_attested.MATTER_TOOLS + (pi_attested.TM_TOOL,)
+        contract = pi_attested.load_names_prompt()
     else:
         tools = pi_attested.MATTER_TOOLS + (
             pi_attested.SEARCH_TOOL,
@@ -309,6 +312,8 @@ def build_plan(
         env["IR_INTAKE_DIR"] = "/matter"
         env["IR_INTAKE_OUT"] = "/matter/proposals.jsonl"
         env["IR_INTAKE_CREATE_DRAFTS"] = "1" if create_drafts else "0"
+    elif mode == "names":
+        env["IR_TM_SEARCH"] = "1"          # served by the host through the model broker; no search machine
     else:
         env["IR_SEARCH_ENDPOINT"] = f"http://127.0.0.1:{SEARCH_PORT}"
         if docs:

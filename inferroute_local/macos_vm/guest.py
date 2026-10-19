@@ -37,6 +37,7 @@ MODEL_ROUTES = {
     ("POST", "/v1/chat/completions"): "model.chat",
     ("GET", "/confidential/receipt"): "model.receipt",
     ("POST", "/probant/intake/create-draft"): "intake.create",
+    ("POST", "/probant/tm/search"): "tm.search",
 }
 SEARCH_ROUTES = {
     ("GET", "/enclave"): "search.verify",

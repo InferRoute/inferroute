@@ -99,6 +99,13 @@ def load_general_prompt() -> dict:
     return {"text": text, "preamble_sha": "", "contract_sha": sha, "modified": False}
 
 
+def load_names_prompt() -> dict:
+    """The system prompt for a name matter (trademark name check), in the same shape as load_contract()."""
+    text = _strip_comments(INTAKE_FILE.with_name("names.md").read_text())
+    sha = hashlib.sha256(text.encode()).hexdigest()
+    return {"text": text, "preamble_sha": "", "contract_sha": sha, "modified": False}
+
+
 def load_intake_prompt(create_drafts: bool = False) -> dict:
     """The whole system prompt for document intake, in the shape load_contract() returns so the session
     record pins WHICH prompt ran (its sha), not merely that one did."""
@@ -404,7 +411,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
         intake = cluster_out = ""
         search_endpoint = None
         for k in ("IR_INTAKE_OUT", "IR_INTAKE_DIR", "IR_CLUSTER_OUT", "IR_MATTER_RECORD_DIR",
-                  "IR_REPORT_MATTER", "IR_REPORT_FIRM"):
+                  "IR_REPORT_MATTER", "IR_REPORT_FIRM", "IR_TM_SEARCH"):
             env.pop(k, None)
         tools = GENERAL_TOOLS
         env["IR_GENERAL"] = "1"
@@ -414,6 +421,11 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
                  TOOLS + ((PROPOSE_TOOL, BATCH_TOOL) if intake else ()) + ((CLUSTER_TOOL,) if cluster_out else ()))
         if intake:
             env["IR_INTAKE_OUT"] = env.get("IR_INTAKE_OUT") or str(Path(intake) / "proposals.jsonl")
+    elif env.get("IR_TM_SEARCH") == "1":
+        # A name matter: the trademark search runs on the host against the local index. No patent search.
+        search_endpoint = None
+        tools = MATTER_TOOLS + (TM_TOOL,)
+        env.pop("IR_INTAKE_OUT", None)
     else:
         tools = MATTER_TOOLS + ((SEARCH_TOOL, DEEP_TOOL, OPEN_TOOL, MARKS_TOOL, NEXT_TOOL) if search_endpoint else ())
         env.pop("IR_INTAKE_OUT", None)
@@ -436,7 +448,8 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
     # The mission contract as the whole system prompt (replaces Pi's persona). Written to the ir-owned
     # config dir; its stamps go to the extension for the panel and the session record.
     contract = (load_general_prompt() if general else
-                load_intake_prompt(env.get("IR_INTAKE_CREATE_DRAFTS") == "1") if intake else load_contract())
+                load_intake_prompt(env.get("IR_INTAKE_CREATE_DRAFTS") == "1") if intake else
+                load_names_prompt() if env.get("IR_TM_SEARCH") == "1" else load_contract())
     # The documents this matter's searching has returned in EARLIER sessions, so "find documents like X" works for
     # them too. It searched only this session's results, while the marks note and the page offered "like" for
     # marks made in earlier sessions — ten refused requests in a row on 19 Sep. Written after config_dir's scrub,
@@ -498,6 +511,7 @@ LAST_SESSION_ID: str | None = None
 MARKS_TOOL = "matter_marks"
 NEXT_TOOL = "suggest_next_steps"
 PROPOSE_TOOL = "propose_matter"          # intake only: reading a document and proposing matters from it
+TM_TOOL = "trademark_search"             # name matters only: registered marks close to a name, searched locally
 CLUSTER_TOOL = "propose_cluster"         # cluster only: grouping candidates, round after round
 BATCH_TOOL = "record_findings"           # many findings in one call: a round trip per finding is the cost
 _SEARCH_PROXIES: list = []

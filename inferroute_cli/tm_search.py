@@ -278,3 +278,40 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
     if result["more"]:
         out.append(f"\n…and {result['more']} more, less close.")
     return out
+
+
+def install_route(app, index_path: Path) -> None:
+    """The trademark search as a host capability for a name session, behind the sealed proxy's per-session
+    authentication. The index is opened on the host; the agent sends a name and classes and gets marks back.
+    Nothing here makes a network request."""
+    import asyncio
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+
+    state: Dict[str, Any] = {}
+
+    def run(body: Dict[str, Any]) -> Dict[str, Any]:
+        if "index" not in state:
+            state["index"] = Index(index_path)
+        name = str(body.get("name") or "").strip()
+        if not name or len(name) > 120:
+            raise ValueError("give one name of 1 to 120 characters")
+        classes = [str(c) for c in (body.get("classes") or [])][:45]
+        limit = max(1, min(int(body.get("limit") or 25), 100))
+        return state["index"].search(name, classes, limit=limit)
+
+    async def tm_search(request):
+        raw = await request.body()
+        if len(raw) > 8_000:
+            return JSONResponse({"error": "the request is too large"}, status_code=413)
+        try:
+            import json as _json
+            result = await asyncio.to_thread(run, _json.loads(raw or b"{}"))
+        except FileNotFoundError:
+            return JSONResponse({"error": "no trademark index is installed on this computer"}, status_code=503)
+        except (ValueError, TypeError) as error:
+            return JSONResponse({"error": str(error)}, status_code=400)
+        return result
+
+    tm_search.__annotations__["request"] = Request
+    app.add_api_route("/probant/tm/search", tm_search, methods=["POST"])

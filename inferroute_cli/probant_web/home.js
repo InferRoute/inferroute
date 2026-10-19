@@ -974,6 +974,7 @@
     let mode = "folder", chosen = "";
     const reset = () => { seen = ""; clear(preview); go.textContent = "Preview files"; };
     for (const f of [path, url, only, commit]) f.addEventListener("input", () => { err.textContent = ""; reset(); });
+    for (const f of [path, url, commit]) f.addEventListener("input", () => clear(choicesBox));
 
     const picked = el("p", "picked");
     const listing = el("div", "picker");
@@ -993,7 +994,7 @@
       if (r.truncated) listing.append(el("p", "sub", "Only the first 500 folders are shown."));
     }
     function choose(p) {
-      chosen = p; reset(); err.textContent = "";
+      chosen = p; reset(); clear(choicesBox); only.value = ""; err.textContent = "";
       clear(picked); picked.append(el("strong", "", "Repository: "), p, " ",
         button("Change", "link", () => { chosen = ""; clear(picked); folderBox.hidden = false; browse(p); }));
       folderBox.hidden = true;
@@ -1010,7 +1011,7 @@
     const segUrl = button("Paste a git link", "seg", () => setMode("url"));
     const typeLink = button("or type a folder path", "link small", () => setMode("path"));
     function setMode(m) {
-      mode = m; reset(); err.textContent = "";
+      mode = m; reset(); clear(choicesBox); err.textContent = "";
       folderPane.hidden = m !== "folder"; urlPane.hidden = m !== "url"; pathPane.hidden = m !== "path";
       segFolder.classList.toggle("on", m === "folder"); segUrl.classList.toggle("on", m === "url");
       typeLink.hidden = m === "path";
@@ -1019,12 +1020,41 @@
       if (m === "path") path.focus();
     }
 
+    // Too large for one reading: each folder with its size, ticked into "Only these folders" with a running
+    // total against the limit, instead of a message that names a terminal option.
+    const choicesBox = el("div", "choices");
+    function showChoices(choices, limit) {
+      clear(choicesBox);
+      const total = el("p", "choices-total");
+      const boxes = [];
+      const update = () => {
+        const on = boxes.filter((b) => b.box.checked);
+        const n = on.reduce((a, b) => a + b.c.chars, 0);
+        total.textContent = `Chosen: ${n.toLocaleString()} of ${limit.toLocaleString()} characters`;
+        total.classList.toggle("over", n > limit);
+        only.value = on.flatMap((b) => b.c.paths).join(" ");
+        seen = ""; go.textContent = on.length ? "Preview these folders" : "Preview files";
+      };
+      for (const c of choices) {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.addEventListener("change", update);
+        boxes.push({ box, c });
+        choicesBox.append(el("label", "choice", box, el("span", "", c.label),
+          el("span", "sub", `${c.chars.toLocaleString()} characters · ${c.files} file${c.files === 1 ? "" : "s"}`)));
+      }
+      choicesBox.prepend(el("p", "field-label", "Choose what to read"));
+      choicesBox.append(total);
+      update();
+    }
+
     const go = button("Preview files", "primary", async () => {
       err.textContent = "";
       if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(client.value.trim())) {
         err.textContent = "Enter a client name, for example Personal. Use letters, numbers, spaces, dots, dashes or underscores (up to 64 characters).";
         client.focus(); return;
       }
+      if (choicesBox.firstChild && !only.value.trim()) { err.textContent = "Tick at least one folder to read."; return; }
       const source = mode === "folder" ? { path: chosen } : mode === "url" ? { url: url.value.trim() } : { path: path.value.trim() };
       if (mode === "folder" && !chosen) { err.textContent = "Choose the folder of a git repository."; return; }
       if (mode === "url" && !source.url) { err.textContent = "Paste the git link of the repository."; url.focus(); return; }
@@ -1038,6 +1068,7 @@
           const r = await api("/api/intake/repo", req);
           clear(preview);
           for (const line of r.preview) preview.append(el("p", "", line));
+          if (r.choices && r.choices.length) showChoices(r.choices, r.limit);
           if (r.too_large || !r.files) { go.textContent = "Preview files"; go.disabled = false; return; }
           seen = r.commit;
           go.textContent = "Read these files";
@@ -1060,9 +1091,10 @@
       field("Create drafts under this client", client, "Use Personal for your own work."),
       el("div", "segs", segFolder, segUrl),
       folderPane, urlPane, pathPane, typeLink,
-      field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository."),
+      field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository. Test code is left out unless you name its folder here."),
       field("Commit", commit, "HEAD is the latest commit. Uncommitted changes are never read."),
       preview,
+      choicesBox,
       err,
     ], [button("Cancel", "ghost", closeDialog), go]);
     setMode("folder");

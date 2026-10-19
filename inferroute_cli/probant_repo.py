@@ -99,6 +99,18 @@ def repo_root(path: str) -> Path:
     return Path(top)
 
 
+# Test code is rarely where an idea is described, and in a large repository it can be a quarter of the text
+# (unified-aggregators, 19 Oct: 1.6M of 6.5M characters). Left out unless the person names it in `only`.
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "specs", "fixtures", "testdata", "test_data"}
+TEST_NAMES = ["test_*.py", "*_test.py", "*_test.go", "*.test.js", "*.test.ts", "*.test.tsx", "*.test.jsx",
+              "*.spec.js", "*.spec.ts", "*.spec.tsx", "*Test.java", "*Tests.swift", "conftest.py"]
+
+
+def is_test(path: str) -> bool:
+    parts = path.split("/")
+    return any(p in TEST_DIRS for p in parts[:-1]) or any(fnmatch.fnmatch(parts[-1], t) for t in TEST_NAMES)
+
+
 def deny_reason(path: str) -> Optional[str]:
     """Why a tracked path is left out by name alone, or None. Content checks come later."""
     parts = path.split("/")
@@ -243,6 +255,9 @@ def snapshot(path: str, ref: str = "HEAD", only: Optional[List[str]] = None) -> 
         if prefixes and not any(fpath == p or fpath.startswith(p + "/") for p in prefixes):
             continue
         why = deny_reason(fpath)
+        if why is None and is_test(fpath) and not any(fpath == p or fpath.startswith(p + "/") for p in prefixes
+                                                      if is_test(p + "/x") or is_test(p)):
+            why = "test code"
         if why is None and size != "-" and int(size) > MAX_FILE_BYTES:
             why = "larger than 600 kB"
         if why:
@@ -267,13 +282,43 @@ def snapshot(path: str, ref: str = "HEAD", only: Optional[List[str]] = None) -> 
         included.append({"path": fpath, "start": start, "end": start + len(body), "chars": len(body)})
         offset += len(mark) + len(body) + 1
     text = "".join(pieces)
+    sizes: Dict[str, Dict[str, int]] = {}
+    for f in included:
+        bits = f["path"].split("/")
+        for depth in (1, 2):
+            if len(bits) > depth:
+                row = sizes.setdefault("/".join(bits[:depth]), {"chars": 0, "files": 0})
+                row["chars"] += f["chars"]; row["files"] += 1
     info = {"kind": "repo", "repo_path": str(repo), "repo_name": repo.name, "commit": commit, "tree": tree,
             "first_commit": first[0] if first else "", "remotes": remotes,
-            "files": included, "excluded": excluded, "only": prefixes}
+            "files": included, "excluded": excluded, "only": prefixes, "folders": sizes}
     return text, info
 
 
-def describe(info: Dict[str, Any], text: str) -> List[str]:
+def folder_choices(info: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
+    """What the page offers to tick when the repository is too large: each top-level folder, except that a
+    folder too large on its own is offered as its sub-folders. Files at the top level are one choice."""
+    folders = info.get("folders") or {}
+    out: List[Dict[str, Any]] = []
+    for top, row in sorted(((k, v) for k, v in folders.items() if "/" not in k), key=lambda kv: -kv[1]["chars"]):
+        subs = {k: v for k, v in folders.items() if k.startswith(top + "/")}
+        if row["chars"] > limit and subs:
+            for k, v in sorted(subs.items(), key=lambda kv: -kv[1]["chars"]):
+                out.append({"paths": [k], "label": k, **v})
+            loose = [f for f in info["files"] if f["path"].startswith(top + "/") and f["path"].count("/") == 1]
+            if loose:
+                out.append({"paths": [f["path"] for f in loose], "label": f"{top} (files directly in it)",
+                            "chars": sum(f["chars"] for f in loose), "files": len(loose)})
+        else:
+            out.append({"paths": [top], "label": top, **row})
+    root = [f for f in info["files"] if "/" not in f["path"]]
+    if root:
+        out.append({"paths": [f["path"] for f in root], "label": "files at the top level",
+                    "chars": sum(f["chars"] for f in root), "files": len(root)})
+    return out
+
+
+def describe(info: Dict[str, Any], text: str, surface: str = "terminal") -> List[str]:
     """What the person approves: plain lines, no file contents."""
     lines = [f"{info['repo_name']} at commit {info['commit'][:12]}: {len(info['files'])} file(s) to read, "
              f"{len(text):,} characters."]
@@ -281,7 +326,8 @@ def describe(info: Dict[str, Any], text: str) -> List[str]:
         lines.append(f"Only: {', '.join(info['only'])}")
     from .probant_intake import MAX_CHARS
     if len(text) > MAX_CHARS:
-        lines.append(f"That is more than one reading holds ({MAX_CHARS:,} characters). Choose folders with --only.")
+        how = "Tick the folders to read below." if surface == "page" else "Choose folders with --only."
+        lines.append(f"That is more than one reading holds ({MAX_CHARS:,} characters). {how}")
     by_reason: Dict[str, List[str]] = {}
     for row in info["excluded"]:
         by_reason.setdefault(row["reason"], []).append(row["path"])

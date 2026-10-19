@@ -224,3 +224,34 @@ def test_a_git_link_git_cannot_reach_says_how_to_sign_in(home, monkeypatch):
     monkeypatch.setenv("GIT_SSH_COMMAND", "false")
     with pytest.raises(S.ProbantError, match="signed in"):
         R.fetch("git@example.invalid:me/private.git")
+
+
+def test_test_code_is_left_out_unless_its_folder_is_named(repo):
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_engine.py").write_text("def test_x():\n    assert True\n")
+    (repo / "src" / "engine_test.py").write_text("X = 1\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "tests", date="2025-07-01T09:00:00Z")
+    _, info = R.snapshot(str(repo))
+    taken = {f["path"] for f in info["files"]}
+    left = {row["path"]: row["reason"] for row in info["excluded"]}
+    assert "src/engine.py" in taken
+    assert left["tests/test_engine.py"] == "test code" and left["src/engine_test.py"] == "test code"
+    _, named = R.snapshot(str(repo), only=["tests"])
+    assert {f["path"] for f in named["files"]} == {"tests/test_engine.py"}
+
+
+def test_a_repository_too_large_offers_its_folders_and_splits_one_too_large_alone(repo):
+    _, info = R.snapshot(str(repo))
+    whole = R.folder_choices(info, 10_000_000)
+    assert [c["label"] for c in whole][:1] == ["src"] and whole[-1]["label"] == "files at the top level"
+    assert whole[-1]["paths"] == ["README.md"]
+    (repo / "src" / "deep").mkdir()
+    (repo / "src" / "deep" / "a.py").write_text("A = 1\n" * 50)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "deep", date="2025-07-02T09:00:00Z")
+    _, info = R.snapshot(str(repo))
+    split = {c["label"]: c["paths"] for c in R.folder_choices(info, 100)}
+    assert split["src/deep"] == ["src/deep"] and split["src (files directly in it)"] == ["src/engine.py"]
+    text = "x" * 4_000_001
+    assert "Tick the folders" in R.describe(info, text, "page")[1] and "--only" in R.describe(info, text)[1]

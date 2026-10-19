@@ -1019,7 +1019,7 @@ class Home:
             d = await body(request)
             if not key_status()["present"]:
                 return problem(NEEDS_KEY_WORDS, 409, extra={"needs_key": True})
-            only = [str(x) for x in (d.get("only") or []) if str(x).strip()][:20]
+            only = [str(x) for x in (d.get("only") or []) if str(x).strip()][:400]
             try:
                 client = S.sanitize(str(d.get("client") or "Personal"), "client")
                 path = str(d.get("path") or "")
@@ -1029,10 +1029,11 @@ class Home:
                 text, info = await asyncio.to_thread(R.snapshot, path, str(d.get("commit") or "HEAD"), only)
             except S.ProbantError as e:
                 return problem(str(e), 400)
-            lines = R.describe(info, text)
+            lines = R.describe(info, text, surface="page")
             if not d.get("confirm"):
                 return {"ok": True, "preview": lines, "files": len(info["files"]), "chars": len(text),
-                        "commit": info["commit"], "too_large": len(text) > I.MAX_CHARS}
+                        "commit": info["commit"], "too_large": len(text) > I.MAX_CHARS, "limit": I.MAX_CHARS,
+                        "choices": R.folder_choices(info, I.MAX_CHARS) if not only and len(text) > I.MAX_CHARS else []}
             if str(d.get("commit_seen") or "") != info["commit"]:
                 return problem("The repository changed since the preview. Preview it again.", 409)
             if not info["files"]:

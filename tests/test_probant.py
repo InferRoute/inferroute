@@ -7,6 +7,7 @@ in the workspace or a cloud-sync root is refused rather than opened (S4 / sync-r
 `open` is exercised only up to the point it would launch Pi: launch is monkeypatched to capture the env
 the launcher hands it, so the test sees IR_MATTER_* without starting an agent.
 """
+import re
 import json
 import os
 from pathlib import Path
@@ -112,6 +113,9 @@ def test_open_passes_per_matter_env_and_never_touches_search_json(home, monkeypa
     assert S.main(["open", "Acme/m7"]) == 0
     assert captured["agent"] == "pi" and captured["args"] == []
     # The plain-language card is drawn for THIS matter: its name and host-held date bound, never the model's.
+    # The session is named before launch (19 Oct) so an Anteriora permit can be tied to it.
+    session_id = captured["probant"].pop("session_id")
+    assert re.fullmatch(r"[0-9a-f-]{36}", session_id)
     assert captured["probant"] == {"matter": "Acme/m7", "date_bound": "2021-07-08"}
     env = captured["env"]
     # S2: the cutoff/state/record are per-matter env from the host record, and all live under confidential/.

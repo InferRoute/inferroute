@@ -789,7 +789,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
         if mode == "continue" and not resuming:
             sys.stderr.write("\n  ir: nothing to continue in this directory.\n\n")
             return 1
-    session_id = resuming or launch_mod._new_session_id()
+    # A Probant caller may name the session in advance: its permit (anteriora_billing) is tied to it.
+    session_id = resuming or str((probant or {}).get("session_id") or "") or launch_mod._new_session_id()
     # What Claude Code shows as the model name — the one persistent on-screen reminder
     # of the lane. The local endpoint answers to this id; the enclave sees the carrier's `sealed_model`.
     shown_model = f"{alias.short} [confidential]"

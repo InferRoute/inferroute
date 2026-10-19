@@ -387,14 +387,36 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
                                "a name check needs one")
         print(f"opening {client}/{matter} — name check, searched on this computer")
         probant = {"matter": f"{client}/{matter}", "mode": "names"}
-        if web:
-            probant["web"] = True
-        return confidential_mod.launch([], agent="pi", probant=probant)
-    print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
-    probant = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
+    else:
+        print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
+        probant = {"matter": f"{client}/{matter}", "date_bound": rec["date_bound"]}
     if web:
         probant["web"] = True
-    return confidential_mod.launch([], agent="pi", probant=probant)
+    return _launch_with_permit(client, matter, rec, ws, probant)
+
+
+def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: dict) -> int:
+    """Launch, with the matter covered by an Anteriora unit when billing is on (see anteriora_billing)."""
+    import time
+    from . import anteriora_billing as B, confidential as confidential_mod
+    from .launch import _new_session_id
+    session_id = _new_session_id()
+    try:
+        if B.before_session(rec, session_id) is not None:
+            _write_record(client, matter, rec)
+    except B.BillingError as e:
+        raise ProbantError(str(e))
+    probant["session_id"] = session_id
+    rdir = records_dir(client, matter)
+    before = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
+    started = time.time()
+    rc = confidential_mod.launch([], agent="pi", probant=probant)
+    if B.enabled():
+        after = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
+        fresh = load_record(client, matter)
+        if B.after_session(fresh, session_id, B.delivered(fresh, ws, before, after, started)):
+            _write_record(client, matter, fresh)
+    return rc
 
 
 def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals_only: bool = False,

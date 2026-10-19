@@ -53,10 +53,11 @@ EPOCH = 1759449600                                  # 2025-10-03T00:00:00Z — o
 APK_STATIC = ("apk-tools-static-3.0.8-r0.apk", "c8e2c88c13ba12a12269b79a3543e1190ff8c0ab0beb32b58cadfd5881c619e3")
 ALPINE_KEYS = ("alpine-keys-2.6-r0.apk", "dd211936d544f4050924ce8aec078d24e7b1b036ae70b30bd07867349587c708")
 
+# 2026-10-19: 6.18.56-r0 -> 6.18.57-r0 (the mirror no longer serves 6.18.56; apk verify against alpine-keys 2.6 aarch64 OK before pinning).
 # 2026-10-15: 6.18.55-r0 -> 6.18.56-r0 (the mirror no longer serves 6.18.55; apk verify against alpine-keys 2.6 aarch64 OK before pinning).
 # 2026-10-08: 6.18.54-r0 -> 6.18.55-r0 (aports 52fae6d7, 2026-10-05, a stable point release); the mirror no longer
 # serves 6.18.54. The new package's Alpine signature was verified (apk verify) before its sha256 was pinned here.
-KERNEL = {"aarch64": ("linux-virt-6.18.56-r0.apk", "e3839bfd751ff0a4421484f712b9b29efb514024523736a0ef62521521571b12")}
+KERNEL = {"aarch64": ("linux-virt-6.18.57-r0.apk", "b3820fee22e0366a15f7c139e5bc00348e333f3e7f77802271df7ded795aee4f")}
 MODULES = ("net/vmw_vsock/vsock", "net/vmw_vsock/vmw_vsock_virtio_transport_common",
            "net/vmw_vsock/vmw_vsock_virtio_transport", "drivers/char/hw_random/rng-core",
            "drivers/char/hw_random/virtio-rng")

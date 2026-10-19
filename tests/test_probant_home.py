@@ -70,7 +70,7 @@ def test_no_route_beyond_what_the_page_needs(home):
                      "/api/fs/dirs",
                      # A repository chosen from GitHub through the read-only Anteriora App (19 Oct).
                      "/api/github", "/api/github/connect", "/api/github/poll", "/api/github/repos",
-                     "/api/github/open", "/api/github/disconnect",
+                     "/api/github/disconnect",
                      "/api/disclosure", "/api/sessions",
                      # Ending a session FROM HERE (1 Oct): without it a session could only be stopped from
                      # inside its own tab, so one whose page was unreachable left its matter undeletable
@@ -278,6 +278,10 @@ def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made(
     assert code.count("window.open(") == 1
     opener = code[code.index("function openLocal"):code.index("function toast")]
     assert "window.open(" in opener and "SESSION_LINK.test(url)" in opener and "RECORD_LINK.test(url)" in opener
+    # Besides this computer's own links, exactly two GitHub pages, fixed in the code (20 Oct).
+    pages = re.search(r"GITHUB_PAGES = new Set\(\[([^\]]*)\]\)", js).group(1)
+    assert sorted(re.findall(r'"([^"]+)"', pages)) == ["https://github.com/apps/anteriora/installations/new",
+                                                        "https://github.com/login/device"]
 
 
 def test_the_help_page_covers_the_whole_path_and_the_limits():

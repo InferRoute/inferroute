@@ -49,15 +49,23 @@
   // The only way this page opens anything: addresses this computer made for this page.
   const SESSION_LINK = /^http:\/\/127\.0\.0\.1:\d{2,5}\/#k=[A-Za-z0-9_-]{20,}$/;
   const RECORD_LINK = /^\/record\?id=[^#]*&name=[A-Za-z0-9._%-]+&v=[0-9a-f]{32}$/;
+  // And two fixed GitHub pages, written here (never received): where the person types the sign-in code, and where
+  // they choose which repositories the Anteriora App may read. Opened from the click itself, so the browser
+  // allows the new tab (a server opening a browser reaches nobody on another screen — Henry, 20 Oct).
+  const GITHUB_PAGES = new Set(["https://github.com/login/device", "https://github.com/apps/anteriora/installations/new"]);
   function openLocal(url) {
-    if (!SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
+    const github = GITHUB_PAGES.has(url);
+    if (!github && !SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
     // Where it opens decides how many tabs a day of work leaves behind. A SESSION replaces this tab (its page
     // has a way back, and the session itself lives in a process, not in the tab). A RECORD goes to one named
     // tab that every later record reuses. "_blank" made a new tab per click, which is what Henry hit on 3 Oct.
     // No "noopener" on the named record tab, on purpose: it forces a NEW tab every time, defeating the reuse.
     // It is safe for this one target — a record is our own page on our own origin, served with a policy that
     // allows no scripts, so nothing in it could use the reference back to this page.
-    window.open(url, SESSION_LINK.test(url) ? "_self" : "probant-record");
+    // GitHub gets one named tab of its own, reused like the record tab. Without "noopener" (which would force a
+    // new tab each click) the opened page can reach this one through window.opener; the only pages opened this
+    // way are GitHub's own, at the two addresses fixed above (no opener policy on them, measured 20 Oct).
+    window.open(url, github ? "anteriora-github" : SESSION_LINK.test(url) ? "_self" : "probant-record");
   }
 
   function toast(message, level) {
@@ -1013,10 +1021,8 @@
     const ghPane = el("div", "");
     let ghPoll = null;
     const stopPoll = () => { if (ghPoll) { clearTimeout(ghPoll); ghPoll = null; } };
-    const openOnGitHub = async (page, shown) => {
-      try { await api("/api/github/open", { page }); } catch (_) { /* the address is shown as text too */ }
-      if (shown) toast(`If no browser opened, go to ${shown}`, "info");
-    };
+    const GH_PAGE = { device: "https://github.com/login/device", install: "https://github.com/apps/anteriora/installations/new" };
+    const openOnGitHub = (page) => openLocal(GH_PAGE[page]);
     async function ghRender() {
       stopPoll(); clear(ghPane);
       let st;
@@ -1043,11 +1049,11 @@
       let r;
       try { r = await api("/api/github/repos"); } catch (e) { clear(ghList); ghList.append(el("p", "form-error", e.message)); return; }
       clear(ghList);
-      const more = el("div", "row", button("Add or remove repositories on GitHub", "link small", () => openOnGitHub("install", "")),
+      const more = el("div", "row", button("Add or remove repositories on GitHub", "link small", () => openOnGitHub("install")),
         button("Refresh the list", "link small", ghLoad));
       if (!r.repos.length) {
         ghList.append(el("p", "", "Anteriora cannot see any of your repositories yet. Choose which ones it may read on GitHub, then come back here."),
-          el("div", "row actions", button("Choose repositories on GitHub", "primary", () => openOnGitHub("install", "")),
+          el("div", "row actions", button("Choose repositories on GitHub", "primary", () => openOnGitHub("install")),
             button("Refresh the list", "ghost", ghLoad)));
         return;
       }
@@ -1085,7 +1091,7 @@
           button("Copy the code", "ghost", async () => {
             try { await navigator.clipboard.writeText(c.user_code); toast("Code copied", "info"); } catch (_) { /* shown above */ }
           }),
-          button("Open GitHub", "primary", () => openOnGitHub("device", c.device_page))),
+          button("Open GitHub", "primary", () => openOnGitHub("device"))),
         el("p", "field-hint", `The page is ${c.device_page}. You can also open it on another device. This window carries on by itself once you approve.`),
         button("Cancel", "link small", () => { stopPoll(); ghRender(); }));
       const tick = async () => {

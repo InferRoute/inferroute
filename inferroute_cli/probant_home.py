@@ -1032,19 +1032,6 @@ class Home:
             except S.ProbantError as e:
                 return problem(str(e), 400)
 
-        @app.post("/api/github/open")
-        async def github_open(request: Request):
-            """Open GitHub's code page or the App's repository page in this computer's browser. The page may
-            not open addresses itself, and these are the only two it can ask for."""
-            import webbrowser
-            from . import github_link as G
-            d = await body(request)
-            url = {"device": G.DEVICE_PAGE, "install": G.install_page()}.get(str(d.get("page") or ""))
-            if not url:
-                return problem("unknown page", 400)
-            opened = webbrowser.open(url)
-            return {"ok": True, "opened": bool(opened), "url": url}
-
         @app.post("/api/github/disconnect")
         async def github_disconnect():
             from . import github_link as G

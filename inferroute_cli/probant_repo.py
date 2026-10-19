@@ -189,7 +189,7 @@ def clone_dir(url: str) -> Path:
     return S._irhome() / "repos" / hashlib.sha256(bare.encode()).hexdigest()[:16] / name
 
 
-def fetch(url: str, refresh: bool = True) -> Path:
+def fetch(url: str, refresh: bool = True, extra_env: Optional[Dict[str, str]] = None) -> Path:
     """A local copy of the repository at `url`, made with this computer's own git and its sign-in (an SSH key,
     or a credential helper such as the one `gh auth setup-git` installs). Kept under ~/.inferroute/repos and
     brought up to date on the next preview. Nothing is checked out: the reading uses git's own objects."""
@@ -199,7 +199,7 @@ def fetch(url: str, refresh: bool = True) -> Path:
         raise S.ProbantError("Enter a git link such as https://github.com/you/project or git@github.com:you/project.git")
     dest = clone_dir(url)
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "",
-           "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")}
+           "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes"), **(extra_env or {})}
     if (dest / ".git").is_dir():
         if not refresh:
             return dest

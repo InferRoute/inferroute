@@ -969,9 +969,10 @@
     const err = el("p", "form-error");
     const preview = el("div", "sub");
     let seen = "";
-    // Three ways to name the repository. Choosing a folder and pasting a git link come first; typing a path is
-    // the quiet third (Henry, 19 Oct: "manually typing ... at most it should be a third option less highlighted").
-    let mode = "folder", chosen = "";
+    // Ways to name the repository, most convenient first (Henry, 19 Oct): choose it from GitHub (when this
+    // version has the App), or choose a folder on this computer; pasting a git link and typing a path are the
+    // quiet ones ("manually typing ... at most it should be a third option less highlighted").
+    let mode = "folder", chosen = "", ghChosen = "";
     const reset = () => { seen = ""; clear(preview); go.textContent = "Preview files"; };
     for (const f of [path, url, only, commit]) f.addEventListener("input", () => { err.textContent = ""; reset(); });
     for (const f of [path, url, commit]) f.addEventListener("input", () => clear(choicesBox));
@@ -1007,14 +1008,110 @@
       "Private repositories work when git on this computer is already signed in to them (an SSH key, or GitHub's gh auth login). "
       + "The repository is copied to this computer and read here, the same way as a folder."));
     const pathPane = el("div", "", field("Folder path", path, "The folder of a git repository on this computer."));
-    const segFolder = button("Choose a folder", "seg", () => setMode("folder"));
-    const segUrl = button("Paste a git link", "seg", () => setMode("url"));
+
+    // ── from GitHub: sign in with a short code, then pick from the repositories the App was given ──
+    const ghPane = el("div", "");
+    let ghPoll = null;
+    const stopPoll = () => { if (ghPoll) { clearTimeout(ghPoll); ghPoll = null; } };
+    const openOnGitHub = async (page, shown) => {
+      try { await api("/api/github/open", { page }); } catch (_) { /* the address is shown as text too */ }
+      if (shown) toast(`If no browser opened, go to ${shown}`, "info");
+    };
+    async function ghRender() {
+      stopPoll(); clear(ghPane);
+      let st;
+      try { st = await api("/api/github"); } catch (e) { ghPane.append(el("p", "form-error", e.message)); return; }
+      if (!st.connected) {
+        ghPane.append(
+          el("p", "", "Connect your GitHub account to choose one of your repositories, private ones included."),
+          el("p", "field-hint", "Anteriora gets read-only access, and only to the repositories you choose on GitHub. "
+            + "The repository is copied to this computer and read here."),
+          el("div", "row actions", button("Connect GitHub", "primary", ghConnect)));
+        return;
+      }
+      ghPane.append(el("p", "sub", `Signed in to GitHub as ${st.login}. `,
+        button("Disconnect", "link", async () => { await api("/api/github/disconnect", {}); ghChosen = ""; ghRender(); })));
+      ghPicked.hidden = !ghChosen;
+      ghPane.append(ghPicked, ghList);
+      if (!ghChosen) ghLoad();
+    }
+    const ghPicked = el("p", "picked");
+    const ghList = el("div", "");
+    async function ghLoad() {
+      clear(ghList);
+      ghList.append(el("p", "sub", "Loading your repositories…"));
+      let r;
+      try { r = await api("/api/github/repos"); } catch (e) { clear(ghList); ghList.append(el("p", "form-error", e.message)); return; }
+      clear(ghList);
+      const more = el("div", "row", button("Add or remove repositories on GitHub", "link small", () => openOnGitHub("install", "")),
+        button("Refresh the list", "link small", ghLoad));
+      if (!r.repos.length) {
+        ghList.append(el("p", "", "Anteriora cannot see any of your repositories yet. Choose which ones it may read on GitHub, then come back here."),
+          el("div", "row actions", button("Choose repositories on GitHub", "primary", () => openOnGitHub("install", "")),
+            button("Refresh the list", "ghost", ghLoad)));
+        return;
+      }
+      const filter = input("text", "Filter by name");
+      const box = el("div", "picker");
+      const draw = () => {
+        clear(box);
+        const q = filter.value.trim().toLowerCase();
+        for (const repo of r.repos.filter((x) => !q || x.full_name.toLowerCase().includes(q))) {
+          const when = repo.pushed_at ? ` · last push ${repo.pushed_at.slice(0, 10)}` : "";
+          box.append(button(`${repo.full_name}${repo.private ? " · private" : ""}${when}`, "pick repo", () => ghChoose(repo.full_name)));
+        }
+        if (!box.firstChild) box.append(el("p", "sub", "No repository matches."));
+      };
+      filter.addEventListener("input", draw);
+      if (r.repos.length > 8) ghList.append(filter);
+      ghList.append(box, more);
+      draw();
+    }
+    function ghChoose(name) {
+      ghChosen = name; reset(); clear(choicesBox); only.value = ""; err.textContent = "";
+      clear(ghPicked);
+      ghPicked.append(el("strong", "", "Repository: "), name, " ",
+        button("Change", "link", () => { ghChosen = ""; ghPicked.hidden = true; ghLoad(); }));
+      ghPicked.hidden = false; clear(ghList);
+    }
+    async function ghConnect() {
+      let c;
+      try { c = await api("/api/github/connect", {}); } catch (e) { err.textContent = e.message; return; }
+      clear(ghPane);
+      const code = el("p", "code-big", c.user_code);
+      ghPane.append(
+        el("p", "", "On GitHub, enter this code:"), code,
+        el("div", "row actions",
+          button("Copy the code", "ghost", async () => {
+            try { await navigator.clipboard.writeText(c.user_code); toast("Code copied", "info"); } catch (_) { /* shown above */ }
+          }),
+          button("Open GitHub", "primary", () => openOnGitHub("device", c.device_page))),
+        el("p", "field-hint", `The page is ${c.device_page}. You can also open it on another device. This window carries on by itself once you approve.`),
+        button("Cancel", "link small", () => { stopPoll(); ghRender(); }));
+      const tick = async () => {
+        if ($("dialog").hidden || mode !== "github") { stopPoll(); return; }
+        let r;
+        try { r = await api("/api/github/poll", {}); } catch (e) { err.textContent = e.message; return; }
+        if (r.status === "connected") { toast(`Connected to GitHub as ${r.login}`, "info"); ghRender(); return; }
+        if (r.status === "pending") { ghPoll = setTimeout(tick, Math.max(3, c.interval) * 1000); return; }
+        err.textContent = r.status === "denied" ? "GitHub sign-in was declined." : "The code expired. Connect again.";
+        ghRender();
+      };
+      ghPoll = setTimeout(tick, Math.max(3, c.interval) * 1000);
+    }
+
+    const segGh = button("From GitHub", "seg", () => setMode("github"));
+    segGh.hidden = true;
+    const segFolder = button("Folder on this computer", "seg", () => setMode("folder"));
+    const urlLink = button("or paste a git link", "link small", () => setMode("url"));
     const typeLink = button("or type a folder path", "link small", () => setMode("path"));
     function setMode(m) {
       mode = m; reset(); clear(choicesBox); err.textContent = "";
+      ghPane.hidden = m !== "github";
       folderPane.hidden = m !== "folder"; urlPane.hidden = m !== "url"; pathPane.hidden = m !== "path";
-      segFolder.classList.toggle("on", m === "folder"); segUrl.classList.toggle("on", m === "url");
-      typeLink.hidden = m === "path";
+      segGh.classList.toggle("on", m === "github"); segFolder.classList.toggle("on", m === "folder");
+      urlLink.hidden = m === "url"; typeLink.hidden = m === "path";
+      if (m === "github") ghRender(); else stopPoll();
       if (m === "folder" && !chosen && !listing.firstChild) browse("");
       if (m === "url") url.focus();
       if (m === "path") path.focus();
@@ -1055,7 +1152,9 @@
         client.focus(); return;
       }
       if (choicesBox.firstChild && !only.value.trim()) { err.textContent = "Tick at least one folder to read."; return; }
-      const source = mode === "folder" ? { path: chosen } : mode === "url" ? { url: url.value.trim() } : { path: path.value.trim() };
+      const source = mode === "github" ? { github: ghChosen } : mode === "folder" ? { path: chosen }
+        : mode === "url" ? { url: url.value.trim() } : { path: path.value.trim() };
+      if (mode === "github" && !ghChosen) { err.textContent = "Choose a repository from the list, or connect GitHub first."; return; }
       if (mode === "folder" && !chosen) { err.textContent = "Choose the folder of a git repository."; return; }
       if (mode === "url" && !source.url) { err.textContent = "Paste the git link of the repository."; url.focus(); return; }
       if (mode === "path" && !source.path) { err.textContent = "Enter the folder of a git repository on this computer."; path.focus(); return; }
@@ -1064,7 +1163,7 @@
       go.disabled = true;
       try {
         if (!seen) {
-          go.textContent = mode === "url" ? "Getting the repository…" : "Checking…";
+          go.textContent = mode === "url" || mode === "github" ? "Getting the repository…" : "Checking…";
           const r = await api("/api/intake/repo", req);
           clear(preview);
           for (const line of r.preview) preview.append(el("p", "", line));
@@ -1089,8 +1188,8 @@
       el("p", "", "The AI reads one commit of your code and creates one draft matter per technical idea it finds, with a summary and the passage it came from. "
         + "Each draft is located in your code and dated from your git history on this computer. You review every draft before searching."),
       field("Create drafts under this client", client, "Use Personal for your own work."),
-      el("div", "segs", segFolder, segUrl),
-      folderPane, urlPane, pathPane, typeLink,
+      el("div", "segs", segGh, segFolder),
+      ghPane, folderPane, urlPane, pathPane, el("div", "row", urlLink, typeLink),
       field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository. Test code is left out unless you name its folder here."),
       field("Commit", commit, "HEAD is the latest commit. Uncommitted changes are never read."),
       preview,
@@ -1098,6 +1197,8 @@
       err,
     ], [button("Cancel", "ghost", closeDialog), go]);
     setMode("folder");
+    // GitHub first when this version has the App; otherwise the folder picker is the first way.
+    api("/api/github").then((st) => { if (st.configured) { segGh.hidden = false; setMode("github"); } }).catch(() => {});
   }
 
   // Proposals arrive WHILE the session reads, so this view refreshes itself until the reading ends. Keyed in

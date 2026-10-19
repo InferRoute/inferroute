@@ -999,6 +999,58 @@ class Home:
             it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])), draft_client=client)
             return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
 
+        # ── choosing a repository from GitHub (the Anteriora GitHub App, read-only; see github_link) ──
+        @app.get("/api/github")
+        async def github_status():
+            from . import github_link as G
+            return G.status()
+
+        @app.post("/api/github/connect")
+        async def github_connect():
+            import asyncio
+            from . import github_link as G
+            try:
+                return await asyncio.to_thread(G.connect)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/github/poll")
+        async def github_poll():
+            import asyncio
+            from . import github_link as G
+            try:
+                return await asyncio.to_thread(G.poll)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.get("/api/github/repos")
+        async def github_repos():
+            import asyncio
+            from . import github_link as G
+            try:
+                return await asyncio.to_thread(G.repos)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
+        @app.post("/api/github/open")
+        async def github_open(request: Request):
+            """Open GitHub's code page or the App's repository page in this computer's browser. The page may
+            not open addresses itself, and these are the only two it can ask for."""
+            import webbrowser
+            from . import github_link as G
+            d = await body(request)
+            url = {"device": G.DEVICE_PAGE, "install": G.install_page()}.get(str(d.get("page") or ""))
+            if not url:
+                return problem("unknown page", 400)
+            opened = webbrowser.open(url)
+            return {"ok": True, "opened": bool(opened), "url": url}
+
+        @app.post("/api/github/disconnect")
+        async def github_disconnect():
+            from . import github_link as G
+            G.disconnect()
+            return {"ok": True}
+
         @app.get("/api/fs/dirs")
         async def fs_dirs(path: str = ""):
             """Folder names for the repository picker: the page cannot see this disk, so it asks here."""
@@ -1023,7 +1075,13 @@ class Home:
             try:
                 client = S.sanitize(str(d.get("client") or "Personal"), "client")
                 path = str(d.get("path") or "")
-                if str(d.get("url") or "").strip():
+                if str(d.get("github") or "").strip():
+                    # A repository chosen from GitHub: copied with the App's read-only token, passed to git
+                    # through the environment only.
+                    from . import github_link as G
+                    path = str(await asyncio.to_thread(R.fetch, G.clone_url(str(d["github"]).strip()),
+                                                       not d.get("confirm"), G.git_env()))
+                elif str(d.get("url") or "").strip():
                     # A git link: fetched on the preview, and the same copy read on confirm (commit_seen guards it).
                     path = str(await asyncio.to_thread(R.fetch, str(d["url"]), not d.get("confirm")))
                 text, info = await asyncio.to_thread(R.snapshot, path, str(d.get("commit") or "HEAD"), only)

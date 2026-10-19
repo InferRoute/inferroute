@@ -741,3 +741,4 @@ button.link.small { font-size: 12px; color: var(--faint); margin: 2px 0 6px; }
 .choices label.choice .sub { grid-column: 2; }
 .choices-total { font-weight: 600; margin-top: 6px; }
 .choices-total.over { color: var(--bad); }
+.code-big { font: 600 28px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; margin: 6px 0; }

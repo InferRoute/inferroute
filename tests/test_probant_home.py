@@ -68,6 +68,9 @@ def test_no_route_beyond_what_the_page_needs(home):
     assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
                      # Folder NAMES for the read-a-repository picker (19 Oct): the page cannot see the disk.
                      "/api/fs/dirs",
+                     # A repository chosen from GitHub through the read-only Anteriora App (19 Oct).
+                     "/api/github", "/api/github/connect", "/api/github/poll", "/api/github/repos",
+                     "/api/github/open", "/api/github/disconnect",
                      "/api/disclosure", "/api/sessions",
                      # Ending a session FROM HERE (1 Oct): without it a session could only be stopped from
                      # inside its own tab, so one whose page was unreachable left its matter undeletable

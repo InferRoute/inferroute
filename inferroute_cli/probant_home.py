@@ -999,6 +999,16 @@ class Home:
             it = home.launches.start(f"document · {meta['source_name']}", intake_dir=str(I.path_of(meta["id"])), draft_client=client)
             return {"ok": True, "id": meta["id"], "chars": meta["chars"], "launch": home.launches.view(it)}
 
+        @app.get("/api/fs/dirs")
+        async def fs_dirs(path: str = ""):
+            """Folder names for the repository picker: the page cannot see this disk, so it asks here."""
+            import asyncio
+            from . import probant_repo as R
+            try:
+                return await asyncio.to_thread(R.list_dirs, path)
+            except S.ProbantError as e:
+                return problem(str(e), 400)
+
         @app.post("/api/intake/repo")
         async def intake_repo(request: Request):
             """A git repository: first a preview of exactly which files would be read and which are left out,
@@ -1012,8 +1022,11 @@ class Home:
             only = [str(x) for x in (d.get("only") or []) if str(x).strip()][:20]
             try:
                 client = S.sanitize(str(d.get("client") or "Personal"), "client")
-                text, info = await asyncio.to_thread(R.snapshot, str(d.get("path") or ""),
-                                                     str(d.get("commit") or "HEAD"), only)
+                path = str(d.get("path") or "")
+                if str(d.get("url") or "").strip():
+                    # A git link: fetched on the preview, and the same copy read on confirm (commit_seen guards it).
+                    path = str(await asyncio.to_thread(R.fetch, str(d["url"]), not d.get("confirm")))
+                text, info = await asyncio.to_thread(R.snapshot, path, str(d.get("commit") or "HEAD"), only)
             except S.ProbantError as e:
                 return problem(str(e), 400)
             lines = R.describe(info, text)

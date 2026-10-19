@@ -962,27 +962,79 @@
     const client = input("text", "e.g. Personal or Acme");
     client.value = "Personal";
     const path = input("text", "e.g. ~/code/my-product");
+    const url = input("text", "https://github.com/you/project");
     const only = input("text", "optional, e.g. src firmware");
     const commit = input("text", "HEAD");
     commit.value = "HEAD";
     const err = el("p", "form-error");
     const preview = el("div", "sub");
     let seen = "";
+    // Three ways to name the repository. Choosing a folder and pasting a git link come first; typing a path is
+    // the quiet third (Henry, 19 Oct: "manually typing ... at most it should be a third option less highlighted").
+    let mode = "folder", chosen = "";
     const reset = () => { seen = ""; clear(preview); go.textContent = "Preview files"; };
-    for (const f of [path, only, commit]) f.addEventListener("input", () => { err.textContent = ""; reset(); });
+    for (const f of [path, url, only, commit]) f.addEventListener("input", () => { err.textContent = ""; reset(); });
+
+    const picked = el("p", "picked");
+    const listing = el("div", "picker");
+    const where = el("p", "sub");
+    async function browse(dir) {
+      clear(listing); err.textContent = "";
+      let r;
+      try { r = await api(`/api/fs/dirs?path=${enc(dir || "")}`); } catch (e) { err.textContent = e.message; return; }
+      where.textContent = r.path;
+      if (r.parent) listing.append(button("↑ Up one folder", "pick up", () => browse(r.parent)));
+      if (r.git) listing.append(button("✓ Choose this folder (a git repository)", "pick repo", () => choose(r.path)));
+      for (const d of r.dirs) {
+        listing.append(d.git ? button(`${d.name} — git repository, choose it`, "pick repo", () => choose(d.path))
+                             : button(`${d.name} ›`, "pick", () => browse(d.path)));
+      }
+      if (!r.dirs.length) listing.append(el("p", "sub", "No folders here."));
+      if (r.truncated) listing.append(el("p", "sub", "Only the first 500 folders are shown."));
+    }
+    function choose(p) {
+      chosen = p; reset(); err.textContent = "";
+      clear(picked); picked.append(el("strong", "", "Repository: "), p, " ",
+        button("Change", "link", () => { chosen = ""; clear(picked); folderBox.hidden = false; browse(p); }));
+      folderBox.hidden = true;
+    }
+    const folderBox = el("div", "", where, listing);
+    const folderPane = el("div", "", picked, folderBox,
+      el("p", "field-hint", "Folders marked git repository can be chosen. Only files tracked in git are read. Environment files, keys, "
+        + "credential files, dependencies, build output and anything that looks like a secret are left out."));
+    const urlPane = el("div", "", field("Git link", url,
+      "Private repositories work when git on this computer is already signed in to them (an SSH key, or GitHub's gh auth login). "
+      + "The repository is copied to this computer and read here, the same way as a folder."));
+    const pathPane = el("div", "", field("Folder path", path, "The folder of a git repository on this computer."));
+    const segFolder = button("Choose a folder", "seg", () => setMode("folder"));
+    const segUrl = button("Paste a git link", "seg", () => setMode("url"));
+    const typeLink = button("or type a folder path", "link small", () => setMode("path"));
+    function setMode(m) {
+      mode = m; reset(); err.textContent = "";
+      folderPane.hidden = m !== "folder"; urlPane.hidden = m !== "url"; pathPane.hidden = m !== "path";
+      segFolder.classList.toggle("on", m === "folder"); segUrl.classList.toggle("on", m === "url");
+      typeLink.hidden = m === "path";
+      if (m === "folder" && !chosen && !listing.firstChild) browse("");
+      if (m === "url") url.focus();
+      if (m === "path") path.focus();
+    }
+
     const go = button("Preview files", "primary", async () => {
       err.textContent = "";
       if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(client.value.trim())) {
         err.textContent = "Enter a client name, for example Personal. Use letters, numbers, spaces, dots, dashes or underscores (up to 64 characters).";
         client.focus(); return;
       }
-      if (!path.value.trim()) { err.textContent = "Enter the folder of a git repository on this computer."; path.focus(); return; }
-      const req = { path: path.value.trim(), commit: commit.value.trim() || "HEAD", client: client.value.trim(),
+      const source = mode === "folder" ? { path: chosen } : mode === "url" ? { url: url.value.trim() } : { path: path.value.trim() };
+      if (mode === "folder" && !chosen) { err.textContent = "Choose the folder of a git repository."; return; }
+      if (mode === "url" && !source.url) { err.textContent = "Paste the git link of the repository."; url.focus(); return; }
+      if (mode === "path" && !source.path) { err.textContent = "Enter the folder of a git repository on this computer."; path.focus(); return; }
+      const req = { ...source, commit: commit.value.trim() || "HEAD", client: client.value.trim(),
                     only: only.value.trim() ? only.value.trim().split(/\s+/) : [] };
       go.disabled = true;
       try {
         if (!seen) {
-          go.textContent = "Checking…";
+          go.textContent = mode === "url" ? "Getting the repository…" : "Checking…";
           const r = await api("/api/intake/repo", req);
           clear(preview);
           for (const line of r.preview) preview.append(el("p", "", line));
@@ -1006,12 +1058,14 @@
       el("p", "", "The AI reads one commit of your code and creates one draft matter per technical idea it finds, with a summary and the passage it came from. "
         + "Each draft is located in your code and dated from your git history on this computer. You review every draft before searching."),
       field("Create drafts under this client", client, "Use Personal for your own work."),
-      field("Repository folder", path, "Only files tracked in git are read. Environment files, keys, credential files, dependencies, build output and anything that looks like a secret are left out."),
+      el("div", "segs", segFolder, segUrl),
+      folderPane, urlPane, pathPane, typeLink,
       field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository."),
       field("Commit", commit, "HEAD is the latest commit. Uncommitted changes are never read."),
       preview,
       err,
     ], [button("Cancel", "ghost", closeDialog), go]);
+    setMode("folder");
   }
 
   // Proposals arrive WHILE the session reads, so this view refreshes itself until the reading ends. Keyed in

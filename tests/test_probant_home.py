@@ -66,6 +66,8 @@ def test_no_route_beyond_what_the_page_needs(home):
     h, c, _ = home
     paths = {r.path for r in h.app().routes}
     assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
+                     # Folder NAMES for the read-a-repository picker (19 Oct): the page cannot see the disk.
+                     "/api/fs/dirs",
                      "/api/disclosure", "/api/sessions",
                      # Ending a session FROM HERE (1 Oct): without it a session could only be stopped from
                      # inside its own tab, so one whose page was unreachable left its matter undeletable

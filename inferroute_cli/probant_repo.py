@@ -133,6 +133,87 @@ def _remotes(repo: Path) -> List[str]:
     return out
 
 
+def list_dirs(path: str = "") -> Dict[str, Any]:
+    """The sub-folders of `path` (default: the home folder), for the page's folder picker. Names only — no
+    file is opened — and each says whether it is a git repository, so the picker can lead to one. Hidden
+    folders are left out; a repository's own folders are not listed (it is the thing to choose)."""
+    home = Path.home()
+    p = Path(path).expanduser() if path else home
+    try:
+        p = p.resolve()
+        if not p.is_dir():
+            raise S.ProbantError(f"{p} is not a folder")
+        names = sorted((c for c in p.iterdir() if not c.name.startswith(".")), key=lambda c: c.name.lower())
+    except PermissionError:
+        raise S.ProbantError(f"{p} cannot be opened")
+    except OSError as e:
+        raise S.ProbantError(f"{p} cannot be opened: {e.strerror or e}")
+    dirs = []
+    for c in names:
+        try:
+            if c.is_dir():
+                dirs.append({"name": c.name, "path": str(c), "git": (c / ".git").exists()})
+        except OSError:
+            continue
+        if len(dirs) >= 500:
+            break
+    return {"path": str(p), "parent": str(p.parent) if p != p.parent else "", "home": str(home),
+            "git": (p / ".git").exists(), "dirs": dirs, "truncated": len(dirs) >= 500}
+
+
+# What a git link may look like: https or ssh, or the scp-like user@host:path form. Anything else (file://,
+# ext::, a local path, an option) is refused — a "link" must not be a way to run a program or read this disk.
+_URL = re.compile(r"^(?:https://[^\s]+|ssh://[^\s]+|[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+)$")
+CLONE_SAFE = ["-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.ssh.allow=always",
+              "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+CLONE_TIMEOUT = 900
+
+
+def clone_dir(url: str) -> Path:
+    import hashlib
+    bare = re.sub(r"://[^@/]+@", "://", url.strip())          # the same repository, whoever signed in
+    name = re.sub(r"\.git$", "", re.split(r"[/:]", bare.rstrip("/"))[-1]) or "repository"
+    name = re.sub(r"[^A-Za-z0-9._-]", "-", name)[:64]
+    return S._irhome() / "repos" / hashlib.sha256(bare.encode()).hexdigest()[:16] / name
+
+
+def fetch(url: str, refresh: bool = True) -> Path:
+    """A local copy of the repository at `url`, made with this computer's own git and its sign-in (an SSH key,
+    or a credential helper such as the one `gh auth setup-git` installs). Kept under ~/.inferroute/repos and
+    brought up to date on the next preview. Nothing is checked out: the reading uses git's own objects."""
+    import os
+    url = url.strip()
+    if not _URL.match(url) or url.startswith("-"):
+        raise S.ProbantError("Enter a git link such as https://github.com/you/project or git@github.com:you/project.git")
+    dest = clone_dir(url)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "",
+           "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")}
+    if (dest / ".git").is_dir():
+        if not refresh:
+            return dest
+        cmd = ["git", *CLONE_SAFE, "-C", str(dest), "fetch", "--quiet", "--prune", "origin",
+               "+refs/heads/*:refs/remotes/origin/*", "+HEAD:refs/anteriora/fetched-head"]
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cmd = ["git", *CLONE_SAFE, "clone", "--quiet", "--no-checkout", "--", url, str(dest)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=CLONE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise S.ProbantError("Getting the repository took more than 15 minutes. Clone it yourself and choose its folder.")
+    if r.returncode != 0:
+        err = re.sub(r"://[^@/\s]+@", "://", r.stderr.strip())[-300:]
+        raise S.ProbantError("This computer's git could not get the repository. For a private repository, git on "
+                             "this computer must already be signed in to it (try `git clone` with the same link "
+                             f"in a terminal). git said: {err or 'nothing'}")
+    if "fetch" in cmd:
+        # Without a checkout, HEAD (the local default branch) is moved to the remote's head as just fetched.
+        sha = subprocess.run(["git", "-C", str(dest), "rev-parse", "--verify", "refs/anteriora/fetched-head^{commit}"],
+                             capture_output=True, text=True, env=env).stdout.strip()
+        if sha:
+            subprocess.run(["git", "-C", str(dest), "update-ref", "HEAD", sha], capture_output=True, env=env)
+    return dest
+
+
 def snapshot(path: str, ref: str = "HEAD", only: Optional[List[str]] = None) -> Tuple[str, Dict[str, Any]]:
     """The commit as one text, and what was taken and left out. Stages nothing.
 

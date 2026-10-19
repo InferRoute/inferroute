@@ -177,3 +177,50 @@ def test_the_home_page_previews_before_it_stages_and_refuses_a_moved_commit(home
     assert moved.status_code == 409 and not started
     ok = c.post("/api/intake/repo", json={"path": str(repo), "confirm": True, "commit_seen": r["commit"]}).json()
     assert ok["ok"] and len(started) == 1 and I.meta_of(ok["id"])["kind"] == "repo"
+
+
+# ── choosing the repository: a folder picker and a git link (Henry, 19 Oct) ──
+
+def test_the_folder_picker_lists_folder_names_and_marks_repositories(repo, tmp_path):
+    (tmp_path / "plain").mkdir()
+    (tmp_path / ".hidden").mkdir()
+    (tmp_path / "a-file.txt").write_text("x")
+    r = R.list_dirs(str(tmp_path))
+    names = {d["name"]: d["git"] for d in r["dirs"]}
+    assert names.get("gadget") is True and names.get("plain") is False
+    assert ".hidden" not in names and "a-file.txt" not in names
+    assert r["parent"] == str(tmp_path.parent)
+    assert R.list_dirs(str(repo))["git"] is True
+    with pytest.raises(S.ProbantError):
+        R.list_dirs(str(tmp_path / "a-file.txt"))
+
+
+@pytest.mark.parametrize("bad", ["file:///etc", "/home/me/repo", "ext::sh -c touch% /tmp/pwned",
+                                 "--upload-pack=touch /tmp/pwned", "https://", "ftp://example.com/r.git"])
+def test_a_git_link_that_is_not_https_or_ssh_is_refused_before_git_runs(home, bad):
+    with pytest.raises(S.ProbantError, match="git link"):
+        R.fetch(bad)
+    assert not (home / "ir" / "repos").exists()
+
+
+def test_a_git_link_is_copied_once_refreshed_on_preview_and_read_like_a_folder(home, repo, monkeypatch):
+    # The real fetch allows only https and ssh; a local clone stands in for the server here.
+    monkeypatch.setattr(R, "_URL", __import__("re").compile(r".+"))
+    monkeypatch.setattr(R, "CLONE_SAFE", ["-c", "protocol.file.allow=always"])
+    url = f"file://{repo}"
+    dest = R.fetch(url)
+    assert dest.name == "gadget" and str(dest).startswith(str(home / "ir" / "repos"))
+    text, info = R.snapshot(str(dest))
+    assert "INVENTION-MARKER" in text and "WORKTREE-ONLY" not in text and info["repo_name"] == "gadget"
+    first = info["commit"]
+    (repo / "src" / "more.py").write_text("NEW = 1\n")
+    git(repo, "add", "src/more.py")
+    git(repo, "commit", "-q", "-m", "third", date="2025-07-01T09:00:00Z")
+    assert R.snapshot(str(R.fetch(url, refresh=False)))[1]["commit"] == first     # confirm reads what was previewed
+    assert R.snapshot(str(R.fetch(url)))[1]["commit"] != first                    # a new preview sees the new commit
+
+
+def test_a_git_link_git_cannot_reach_says_how_to_sign_in(home, monkeypatch):
+    monkeypatch.setenv("GIT_SSH_COMMAND", "false")
+    with pytest.raises(S.ProbantError, match="signed in"):
+        R.fetch("git@example.invalid:me/private.git")

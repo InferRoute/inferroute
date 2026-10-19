@@ -83,13 +83,20 @@ def test_a_permit_older_than_its_window_is_not_reused(service):
     assert B.before_session(rec, "s9")["id"] != "x"
 
 
-def test_nothing_about_the_matter_is_sent(service):
+def test_the_device_id_is_random_stable_and_private(home):
+    import stat
+    first = B.device_id()
+    assert len(first) == 32 and B.device_id() == first
+    assert stat.S_IMODE((home / "ir" / "device-id").stat().st_mode) == 0o600
+
+
+def test_nothing_about_the_matter_is_sent(service, home):
     calls, _ = service
     rec = {"kind": "name", "client": "Acme", "matter": "secret-brand", "workspace": "/x"}
     B.before_session(rec, "s1")
     B.after_session(rec, "s1", True)
     for _, body in calls:
-        assert set(body) <= {"unit", "sessionId", "permit", "outcome"}
+        assert set(body) <= {"unit", "sessionId", "permit", "outcome", "deviceId"}
         assert "secret" not in json.dumps(body) and "Acme" not in json.dumps(body)
 
 

@@ -57,11 +57,32 @@ def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
             detail = json.loads(e.read() or b"{}")
         except ValueError:
             detail = {}
-        if e.code == 402:
-            raise BillingError(detail.get("error") or "No searches left on this account.")
+        if e.code in (402, 403):
+            raise BillingError(detail.get("error") or "Nothing left on this account for this.")
         raise BillingError(detail.get("error") or f"the account service answered {e.code}")
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise BillingError(f"could not reach the account service ({getattr(e, 'reason', e)}); try again")
+
+
+def device_id() -> str:
+    """A random id for this installation, made once and kept owner-only. It identifies nothing about the
+    machine; it only lets a subscription count its devices."""
+    import secrets
+    from . import probant as S
+    path = S._irhome() / "device-id"
+    try:
+        value = path.read_text().strip()
+        if len(value) == 32:
+            return value
+    except OSError:
+        pass
+    value = secrets.token_hex(16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(value)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    return value
 
 
 def unit_for(rec: Dict[str, Any]) -> str:
@@ -92,7 +113,7 @@ def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, A
     held = current_permit(rec)
     if held:
         return held
-    got = _post("/api/anteriora/permit", {"unit": unit_for(rec), "sessionId": session_id})
+    got = _post("/api/anteriora/permit", {"unit": unit_for(rec), "sessionId": session_id, "deviceId": device_id()})
     permit = {"id": str(got["permit"]), "unit": unit_for(rec), "state": "issued",
               "at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "first_session": session_id}
     rec["permit"] = permit

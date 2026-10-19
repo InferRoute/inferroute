@@ -384,7 +384,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     if rec.get("kind") == "name":
         if not tm_index_path().is_file():
             raise ProbantError(f"no trademark index is installed on this computer ({tm_index_path()}); "
-                               "a name check needs one")
+                               "install it with: ir probant names --install")
         print(f"opening {client}/{matter} — name check, searched on this computer")
         probant = {"matter": f"{client}/{matter}", "mode": "names"}
     else:
@@ -492,7 +492,7 @@ def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, a
     try:
         ix = T.Index(path)
     except FileNotFoundError:
-        raise ProbantError(f"no trademark index is installed ({path}). Install one, or pass --index FILE.")
+        raise ProbantError(f"no trademark index is installed ({path}). Install it with: ir probant names --install")
     except ValueError as e:
         raise ProbantError(str(e))
     try:
@@ -678,7 +678,9 @@ def main(argv: list[str] | None = None) -> int:
     ik.add_argument("--only", action="append", default=[], metavar="PATH",
                     help="with --repo: read only this folder or file (repeatable), for a large repository")
     nm = sub.add_parser("names", help="registered trademarks close to a name, searched on this computer")
-    nm.add_argument("name", help="the name to check, in quotes if it has spaces")
+    nm.add_argument("name", nargs="?", default="", help="the name to check, in quotes if it has spaces")
+    nm.add_argument("--install", action="store_true",
+                    help="download and install the trademark index this release names (checked against its pinned hash)")
     nm.add_argument("--class", dest="classes", action="append", default=[], metavar="N",
                     help="a Nice class your product falls in (repeatable), e.g. --class 9 --class 42")
     nm.add_argument("--index", default="", help="the trademark index file (default: the installed one)")
@@ -747,6 +749,11 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
         if a.cmd == "names":
+            if a.install:
+                from . import tm_install
+                return tm_install.main_install(tm_index_path(a.index))
+            if not a.name:
+                raise ProbantError("give a name to check, or --install to install the trademark index")
             return cmd_names(a.name, a.classes, a.index, a.limit, a.json)
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only,

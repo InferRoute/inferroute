@@ -138,7 +138,7 @@ def write_wheel(out: Path, version: str, members: dict) -> Path:
     """A wheel by hand: fixed order, fixed timestamps, so the same inputs give the same bytes."""
     info = f"{DIST}-{version}.dist-info"
     meta = (f"Metadata-Version: 2.1\nName: inferroute-macos-vm-runtime\nVersion: {version}\n"
-            "Summary: The signed Linux VM runtime a Probant session's agent runs in on an arm64 Mac.\n"
+            "Summary: The signed Linux VM runtime an Anteriora session's agent runs in on an arm64 Mac.\n"
             "Requires-Python: >=3.10\n")
     wheel = f"Wheel-Version: 1.0\nGenerator: sign_macos_runtime.py\nRoot-Is-Purelib: false\nTag: {TAG}\n"
     entries = [(f"{PACKAGE}/{name}", data, 0o755 if name == "ProbantVM" else 0o644) for name, data in members.items()]

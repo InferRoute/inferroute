@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Fill scripts/install_probant.sh.in with a release's version and the two wheel fingerprints.
+"""Fill scripts/install_anteriora.sh.in with a release's version and the two wheel fingerprints.
 
-    render_install_script.py --client WHEEL --runtime WHEEL --lock LOCKFILE --out install-probant.sh
+    render_install_script.py --client WHEEL --runtime WHEEL --lock LOCKFILE --out install-anteriora.sh
 
 The version is read from the wheel file names, which must agree, and the lock must be named for it; the
 fingerprints are computed here from the files that will be published, so the script cannot name a file other
@@ -35,7 +35,7 @@ def render(client: Path, runtime: Path, lock: Path) -> str:
         raise SystemExit(f"the client is {v1} and the runtime is {v2}: a release ships one version of each")
     if lock.name != f"inferroute-{v1}-lock.txt":
         raise SystemExit(f"the lock is {lock.name}; for {v1} it must be inferroute-{v1}-lock.txt")
-    text = (HERE / "install_probant.sh.in").read_text()
+    text = (HERE / "install_anteriora.sh.in").read_text()
     for key, value in (("@VERSION@", v1), ("@CLIENT_SHA256@", sha256(client)), ("@RUNTIME_SHA256@", sha256(runtime)),
                        ("@LOCK_SHA256@", sha256(lock))):
         text = text.replace(key, value)
@@ -53,9 +53,17 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     out = Path(a.out)
-    out.write_text(render(Path(a.client), Path(a.runtime), Path(a.lock)))
-    out.chmod(out.stat().st_mode | stat.S_IXUSR)
-    print(f"wrote {out}")
+    text = render(Path(a.client), Path(a.runtime), Path(a.lock))
+    outs = [out]
+    # The product was called Probant until 0.9.120, and the signer (outside this repo) still asks for
+    # install-probant.sh. Stage the same script under its new name beside it, so a release carries both:
+    # install-anteriora.sh for new instructions, install-probant.sh for every link already given out.
+    if out.name == "install-probant.sh":
+        outs.append(out.with_name("install-anteriora.sh"))
+    for o in outs:
+        o.write_text(text)
+        o.chmod(o.stat().st_mode | stat.S_IXUSR)
+        print(f"wrote {o}")
     return 0
 
 

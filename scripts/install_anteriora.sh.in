@@ -1,20 +1,21 @@
 #!/bin/sh
 # Anteriora installer — @VERSION@
 #
-#   curl -LsSf https://inferroute.ai/install-probant.sh | sh
+#   curl -LsSf https://inferroute.ai/install-anteriora.sh | sh
 #
 # What it does, and all it does:
 #   1. installs `uv` if there is none (it brings its own Python; your system Python is not touched);
-#   2. makes a private environment in ~/probant;
+#   2. makes a private environment in ~/anteriora (or keeps using ~/probant, from an install made before the
+#      product was renamed);
 #   3. downloads Anteriora @VERSION@ — and on an Apple-silicon Mac its protected virtual machine — together with
 #      the exact list of every library it needs, checks each file against the fingerprint written into this
 #      script, and installs them there. Libraries are installed ONLY if they match that list byte for byte, so
 #      two installs of this version are the same program, today and in a year;
 #   4. sets up patent search from InferRoute's published, signed files (re-checked each time Anteriora starts);
 #   5. prints the next command.
-# It does not use sudo, edit your shell profile, or install anything outside ~/probant, ~/.local/bin (uv, and a link
-# named `probant`) and uv's own Python folder. To remove it all:
-#   rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant
+# It does not use sudo, edit your shell profile, or install anything outside ~/anteriora, ~/.local/bin (uv, and a
+# link named `anteriora`) and uv's own Python folder. To remove it all:
+#   rm -rf ~/anteriora ~/Anteriora ~/.inferroute ~/.local/bin/anteriora
 #
 # The fingerprints below are what make this script fetch exactly the files we released. What makes the
 # virtual machine trustworthy is separate: Anteriora itself refuses to start it unless its files carry
@@ -29,7 +30,13 @@ RUNTIME_FILE="inferroute_macos_vm_runtime-@VERSION@-py3-none-macosx_11_0_arm64.w
 RUNTIME_SHA256="@RUNTIME_SHA256@"
 LOCK_FILE="inferroute-@VERSION@-lock.txt"
 LOCK_SHA256="@LOCK_SHA256@"
-TARGET="${PROBANT_HOME:-$HOME/probant}"
+# ~/anteriora for a new install. An environment made by an earlier installer, when the product was called Probant,
+# is in ~/probant: keep using it (and updating it) rather than leave a second copy behind.
+if [ -n "${ANTERIORA_HOME:-}" ]; then TARGET="$ANTERIORA_HOME"
+elif [ -n "${PROBANT_HOME:-}" ]; then TARGET="$PROBANT_HOME"
+elif [ ! -e "$HOME/anteriora" ] && [ -x "$HOME/probant/bin/python" ] && [ -x "$HOME/probant/bin/probant" ]; then TARGET="$HOME/probant"
+else TARGET="$HOME/anteriora"
+fi
 
 say()  { printf '%s\n' "$*"; }
 # What this computer is, in one line: the processor (uname -m) and the system version. It is printed when the install ends
@@ -65,7 +72,7 @@ if [ -z "$UV" ]; then
 fi
 
 # ── the files, checked before they are used ──────────────────────────────────────────────────────────────────
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/probant-install.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/anteriora-install.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT INT TERM
 sha() { if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1; else sha256sum "$1" | cut -d' ' -f1; fi; }
 fetch() {   # name expected-sha256
@@ -88,7 +95,7 @@ fetch "$LOCK_FILE" "$LOCK_SHA256"
 
 # ── the environment ──────────────────────────────────────────────────────────────────────────────────────────
 if [ -e "$TARGET" ] && [ ! -x "$TARGET/bin/python" ]; then
-  stop "$TARGET exists and is not an Anteriora environment. Move it aside, or set PROBANT_HOME to another folder."
+  stop "$TARGET exists and is not an Anteriora environment. Move it aside, or set ANTERIORA_HOME to another folder."
 fi
 say "Setting up $TARGET ..."
 "$UV" venv --quiet --allow-existing --python 3.12 "$TARGET" || stop "could not create the environment."
@@ -122,13 +129,18 @@ if [ -n "$OTHER" ] && [ "$OTHER" != "$TARGET/bin/ir" ]; then
   say "        not this one. Use the full path shown below; Anteriora itself always uses its own."
 fi
 
-# A bare `probant` command: a link in ~/.local/bin, where uv already lives. It is made only when nothing else is
+# A bare `anteriora` command: a link in ~/.local/bin, where uv already lives. It is made only when nothing else is
 # there (or what is there is already a link), so a program of the same name is never overwritten.
 LINK_DIR="$HOME/.local/bin"
 LINKED=no
-if [ -x "$TARGET/bin/probant" ] && mkdir -p "$LINK_DIR" 2>/dev/null; then
-  if [ ! -e "$LINK_DIR/probant" ] || [ -L "$LINK_DIR/probant" ]; then
-    ln -sf "$TARGET/bin/probant" "$LINK_DIR/probant" 2>/dev/null && LINKED=yes
+if [ -x "$TARGET/bin/anteriora" ] && mkdir -p "$LINK_DIR" 2>/dev/null; then
+  if [ ! -e "$LINK_DIR/anteriora" ] || [ -L "$LINK_DIR/anteriora" ]; then
+    ln -sf "$TARGET/bin/anteriora" "$LINK_DIR/anteriora" 2>/dev/null && LINKED=yes
+  fi
+  # `probant`, the earlier name, keeps working for people who learned it — but it is only ever ADDED where
+  # nothing of that name exists. A `probant` link to some other install is left alone.
+  if [ -x "$TARGET/bin/probant" ] && [ ! -e "$LINK_DIR/probant" ] && [ ! -L "$LINK_DIR/probant" ]; then
+    ln -s "$TARGET/bin/probant" "$LINK_DIR/probant" 2>/dev/null || true
   fi
 fi
 
@@ -139,11 +151,11 @@ say "  This computer:       $(machine_line)"
 say "                       (copy this line and send it back with your public key)"
 say ""
 if [ "$LINKED" = "yes" ]; then
-  say "  Start it:            probant            (in a new Terminal window; it will ask for your InferRoute key first)"
-  say "                       If your Terminal says 'command not found', run $TARGET/bin/probant"
-  say "  Your public key:     probant identity"
+  say "  Start it:            anteriora          (in a new Terminal window; it will ask for your InferRoute key first)"
+  say "                       If your Terminal says 'command not found', run $TARGET/bin/anteriora"
+  say "  Your public key:     anteriora identity"
 else
-  say "  Start it:            $TARGET/bin/probant   (it will ask for your InferRoute key first)"
-  say "  Your public key:     $TARGET/bin/probant identity"
+  say "  Start it:            $TARGET/bin/anteriora   (it will ask for your InferRoute key first)"
+  say "  Your public key:     $TARGET/bin/anteriora identity"
 fi
 say ""

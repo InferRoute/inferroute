@@ -45,7 +45,7 @@ def test_a_release_ships_one_version_of_each(tmp_path):
 
 
 def test_the_template_never_reaches_for_privilege_or_the_shell_profile():
-    text = (REPO / "scripts/install_probant.sh.in").read_text()
+    text = (REPO / "scripts/install_anteriora.sh.in").read_text()
     for forbidden in ("sudo", ".zshrc", ".bashrc", ".profile", "chmod 777", "eval "):
         assert forbidden not in text.replace("It does not use sudo, edit your shell profile", "")
 
@@ -61,12 +61,14 @@ def _run(tmp_path, base, home, extra_env=None):
     uv.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> {tmp_path}/uv.calls
-        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant";; esac
+        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant"; cp "$last/bin/probant" "$last/bin/anteriora";; esac
         exit 0
         """))
     uv.chmod(0o755)
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", IR_INSTALL_BASE=f"file://{base}", PROBANT_HOME=str(home),
-               HOME=str(tmp_path / "home"), **(extra_env or {}))
+               HOME=str(tmp_path / "home"))
+    env.pop("ANTERIORA_HOME", None)
+    env.update(extra_env or {})
     (tmp_path / "home").mkdir(exist_ok=True)
     return subprocess.run(["sh", str(script)], env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
@@ -121,7 +123,7 @@ def test_the_installer_sets_up_search_and_survives_that_failing(tmp_path):
     assert done.returncode == 0, done.stderr
     assert "Setting up patent search" in done.stdout
     # the stand-in `ir` exits 0; one that fails must not fail the install
-    text = (REPO / "scripts/install_probant.sh.in").read_text()
+    text = (REPO / "scripts/install_anteriora.sh.in").read_text()
     assert 'probant setup-search 2>&1 | sed' in text and "|| true" in text.split("setup-search")[1].split("\n")[0]
 
 
@@ -134,7 +136,7 @@ def test_the_lock_must_be_named_for_the_version_it_pins(tmp_path):
 
 
 def test_libraries_are_installed_only_from_the_hash_pinned_list_and_our_wheels_without_resolution():
-    text = (REPO / "scripts/install_probant.sh.in").read_text()
+    text = (REPO / "scripts/install_anteriora.sh.in").read_text()
     assert '--require-hashes -r "$WORK/$LOCK_FILE"' in text
     assert text.count("--no-deps") == 2                      # with and without the VM runtime
     # nothing may let the installer pick versions on the day: no unpinned install line
@@ -189,33 +191,91 @@ def test_a_dropped_download_resumes_instead_of_failing_the_install(tmp_path):
     assert calls and all(c.startswith("resume=1") for c in calls)
 
 
-def test_the_installer_links_a_bare_probant_command_and_says_how_to_start_it(tmp_path):
-    """4 Oct: the first client should type `probant`, not a path into a private environment. The link goes in ~/.local/bin."""
+def test_the_installer_links_a_bare_anteriora_command_and_says_how_to_start_it(tmp_path):
+    """4 Oct: the first client should type one word, not a path into a private environment. The link goes in
+    ~/.local/bin. 19 Oct: the word is `anteriora`; `probant`, its earlier name, is linked too where nothing is."""
     site = tmp_path / "site"
     site.mkdir()
     wheels(site)
     target = tmp_path / "home-target"
     done = _run(tmp_path, site, target)
     assert done.returncode == 0, done.stderr
-    link = tmp_path / "home" / ".local" / "bin" / "probant"
-    assert link.is_symlink() and link.resolve() == (target / "bin" / "probant").resolve()
-    assert "Start it:            probant" in done.stdout and "command not found" in done.stdout
-    assert "rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant" in (site.parent / "install.sh").read_text()
+    bindir = tmp_path / "home" / ".local" / "bin"
+    for name in ("anteriora", "probant"):
+        link = bindir / name
+        assert link.is_symlink() and link.resolve() == (target / "bin" / name).resolve()
+    assert "Start it:            anteriora" in done.stdout and "command not found" in done.stdout
+    assert "rm -rf ~/anteriora ~/Anteriora ~/.inferroute ~/.local/bin/anteriora" in (site.parent / "install.sh").read_text()
 
 
-def test_a_program_already_named_probant_is_never_overwritten_and_the_message_gives_the_full_path(tmp_path):
+def test_a_program_already_named_anteriora_is_never_overwritten_and_the_message_gives_the_full_path(tmp_path):
     site = tmp_path / "site"
     site.mkdir()
     wheels(site)
     other = tmp_path / "home" / ".local" / "bin"
     other.mkdir(parents=True)
-    (other / "probant").write_text("#!/bin/sh\necho someone else's program\n")
-    (other / "probant").chmod(0o755)
+    (other / "anteriora").write_text("#!/bin/sh\necho someone else's program\n")
+    (other / "anteriora").chmod(0o755)
     target = tmp_path / "home-target"
     done = _run(tmp_path, site, target)
     assert done.returncode == 0, done.stderr
-    assert not (other / "probant").is_symlink() and "someone else" in (other / "probant").read_text()
-    assert f"{target}/bin/probant" in done.stdout and "Start it:            probant " not in done.stdout
+    assert not (other / "anteriora").is_symlink() and "someone else" in (other / "anteriora").read_text()
+    assert f"{target}/bin/anteriora" in done.stdout and "Start it:            anteriora " not in done.stdout
+
+
+def test_a_probant_link_to_another_install_is_left_alone(tmp_path):
+    """19 Oct, on a machine with an older `probant` (a pipx install) linked in ~/.local/bin: the old installer
+    re-pointed ANY link of that name. The earlier name is only added where nothing of that name exists."""
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    bindir = tmp_path / "home" / ".local" / "bin"
+    bindir.mkdir(parents=True)
+    elsewhere = tmp_path / "pipx-probant"
+    elsewhere.write_text("#!/bin/sh\n")
+    (bindir / "probant").symlink_to(elsewhere)
+    done = _run(tmp_path, site, tmp_path / "home-target")
+    assert done.returncode == 0, done.stderr
+    assert os.readlink(bindir / "probant") == str(elsewhere)
+    assert (bindir / "anteriora").is_symlink()
+
+
+def test_a_new_install_goes_in_anteriora_and_an_earlier_probant_environment_is_kept(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    home = tmp_path / "home"
+    done = _run(tmp_path, site, tmp_path / "unused", extra_env={"PROBANT_HOME": ""})
+    assert done.returncode == 0, done.stderr
+    assert (home / "anteriora" / "bin" / "anteriora").exists() and not (home / "probant").exists()
+    # A machine installed before the rename: its ~/probant environment is updated in place, not duplicated.
+    import shutil
+    shutil.rmtree(home / "anteriora")
+    old = home / "probant" / "bin"
+    old.mkdir(parents=True)
+    for n in ("python", "probant"):
+        (old / n).write_text("#!/bin/sh\nexit 0\n")
+        (old / n).chmod(0o755)
+    done = _run(tmp_path, site, tmp_path / "unused", extra_env={"PROBANT_HOME": ""})
+    assert done.returncode == 0, done.stderr
+    assert f"Setting up {home / 'probant'}" in done.stdout and not (home / "anteriora").exists()
+
+
+def test_the_signer_asking_for_install_probant_also_stages_install_anteriora(tmp_path):
+    """The signer (outside this repo) still names install-probant.sh; a release must carry both names."""
+    c, r = wheels(tmp_path)
+    out = tmp_path / "staged" / "install-probant.sh"
+    out.parent.mkdir()
+    subprocess.run([sys.executable, str(REPO / "scripts/render_install_script.py"), "--client", str(c), "--runtime", str(r),
+                    "--lock", str(lock_of(c)), "--out", str(out)], check=True, capture_output=True)
+    twin = out.with_name("install-anteriora.sh")
+    assert twin.read_text() == out.read_text() and os.access(twin, os.X_OK)
+
+
+def test_both_command_names_are_installed():
+    text = (REPO / "pyproject.toml").read_text()
+    assert 'anteriora = "inferroute_cli.probant:cli_main"' in text
+    assert 'probant = "inferroute_cli.probant:cli_main"' in text
 
 
 def test_the_probant_command_alone_opens_home_and_with_arguments_is_ir_probant(monkeypatch):

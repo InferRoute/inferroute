@@ -441,6 +441,32 @@ def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals
     return cmd_proposals(meta["id"])
 
 
+def tm_index_path(given: str = "") -> Path:
+    """The trademark index: given, or IR_TM_INDEX, or the one installed under ~/.inferroute/tm/."""
+    return Path(given or os.environ.get("IR_TM_INDEX") or (_irhome() / "tm" / "index.sqlite")).expanduser()
+
+
+def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, as_json: bool = False) -> int:
+    """Similar registered marks, searched locally. Nothing about the name leaves this computer."""
+    from . import tm_search as T
+    path = tm_index_path(index)
+    try:
+        ix = T.Index(path)
+    except FileNotFoundError:
+        raise ProbantError(f"no trademark index is installed ({path}). Install one, or pass --index FILE.")
+    except ValueError as e:
+        raise ProbantError(str(e))
+    try:
+        result = ix.search(name, classes, limit=max(1, min(limit, 500)))
+    except ValueError as e:
+        raise ProbantError(str(e))
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=1))
+    else:
+        print("\n".join(T.report_lines(result)))
+    return 0
+
+
 def cmd_proposals(ident: str) -> int:
     """What a reading session proposed, and how to turn one into a matter."""
     from . import probant_intake as I
@@ -610,6 +636,13 @@ def main(argv: list[str] | None = None) -> int:
     ik.add_argument("--yes", action="store_true", help="with --repo: do not ask before staging the listed files")
     ik.add_argument("--only", action="append", default=[], metavar="PATH",
                     help="with --repo: read only this folder or file (repeatable), for a large repository")
+    nm = sub.add_parser("names", help="registered trademarks close to a name, searched on this computer")
+    nm.add_argument("name", help="the name to check, in quotes if it has spaces")
+    nm.add_argument("--class", dest="classes", action="append", default=[], metavar="N",
+                    help="a Nice class your product falls in (repeatable), e.g. --class 9 --class 42")
+    nm.add_argument("--index", default="", help="the trademark index file (default: the installed one)")
+    nm.add_argument("--limit", type=int, default=30)
+    nm.add_argument("--json", action="store_true", help="the result as JSON")
     pf = sub.add_parser("cluster", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
@@ -672,6 +705,8 @@ def main(argv: list[str] | None = None) -> int:
                              corpus_name=a.corpus_name, include_marks=a.include_marks)
         if a.cmd == "open-share":
             return cmd_open_share(a.file, a.client)
+        if a.cmd == "names":
+            return cmd_names(a.name, a.classes, a.index, a.limit, a.json)
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only,
                               repo=a.repo, ref=a.commit, yes=a.yes, only=a.only)

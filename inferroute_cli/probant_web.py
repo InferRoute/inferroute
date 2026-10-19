@@ -1,4 +1,4 @@
-"""`ir probant open <matter> --web` — the same confined session, shown in a local browser page.
+"""`anteriora open <matter> --web` — the same confined session, shown in a local browser page.
 
 Nothing about the session changes: the AI machine is verified and pinned, the search verifier runs beside
 Pi, and Pi runs in the same address-level sandbox. Only the screen differs. Pi runs in RPC mode, and this
@@ -938,7 +938,7 @@ class Bridge:
         c = dict(getattr(r, "counters", None) or {})
         end = {"requests": c.get("requests", 0), "sealed_bytes": c.get("plaintext_bytes_sealed_here", 0),
                "opened_bytes": c.get("response_bytes_opened_here", 0), "plaintext_left": 0,
-               "export_command": f"ir probant export {self.matter}"}
+               "export_command": f"anteriora export {self.matter}"}
         if self.dropped:
             # Names of event types only, never their content. A turn that ends in an event the page has no
             # word for is exactly the shape of the 17 Sep hang; this is the trail that names it next time.
@@ -1195,7 +1195,7 @@ class Bridge:
                 path = await asyncio.to_thread(bridge._export)
             except Exception as e:                              # noqa: BLE001
                 return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
-            return {"ok": True, "path": str(path), "verify_here": f"ir probant verify-export {path}",
+            return {"ok": True, "path": str(path), "verify_here": f"anteriora verify-export {path}",
                     "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
                                       "--reference-key <its key>")}
 

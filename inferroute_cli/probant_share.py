@@ -73,7 +73,7 @@ def identity(create: bool = True) -> Dict[str, Any]:
         held = json.loads(path.read_text())
         return {**held, "mlkem_pub_raw": _unb64(held["mlkem_pub"]), "ed_pub_raw": _unb64(held["ed_pub"])}
     if not create:
-        raise S.ProbantError("this installation has no Anteriora identity yet: run `ir probant identity`")
+        raise S.ProbantError("this installation has no Anteriora identity yet: run `anteriora identity`")
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
     # How the secret is STORED depends on the backend, because only one of them can reload what it made:

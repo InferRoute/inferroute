@@ -1,4 +1,4 @@
-"""`ir probant export` — the one-directory record a user hands a client, built so that its claims can
+"""`anteriora export` — the one-directory record a user hands a client, built so that its claims can
 be RE-DERIVED by a stranger from the bundle alone, with no InferRoute code and no trust in this machine.
 
     <matter>-prior-art-record-<stamp>/
@@ -913,7 +913,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
 
     print(f"wrote {dest}")
     print(f"  {len(b['searches'])} sealed search(es), {len(b['evidence'])} evidence bundle(s)")
-    print(f"  check it here:        ir probant verify-export {dest}")
+    print(f"  check it here:        anteriora verify-export {dest}")
     # THE COMMAND THAT ANSWERS THE QUESTION, not the shortest one that runs. Printed without a reference, a
     # bare `verify_record.py .` exits 1 with one FAIL per search saying the identity could not be
     # established — a true answer to a question nobody asked, and the first thing anyone handed this record
@@ -929,7 +929,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     if anchor:
         _anchor(dest / "MANIFEST.json")
     else:
-        print("  to timestamp this record (open source, publishes only a hash): ir probant export ... --anchor, or `ots stamp MANIFEST.json`")
+        print("  to timestamp this record (open source, publishes only a hash): anteriora export ... --anchor, or `ots stamp MANIFEST.json`")
     return dest
 
 

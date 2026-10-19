@@ -1,13 +1,13 @@
-"""`ir probant` — the user's entry to the attested prior-art assistant. One matter at a time, in a
+"""`anteriora` — the user's entry to the attested prior-art assistant. One matter at a time, in a
 folder confined to that matter, with the date bound and approvals held where the agent cannot reach them.
 
-    ir probant new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
-    ir probant set-date <client>/<matter> YYYY-MM-DD                 change the date bound (human, out of session)
-    ir probant open <client>/<matter>                               open the attested session on the matter
-    ir probant list                                                 list matters
+    anteriora new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
+    anteriora set-date <client>/<matter> YYYY-MM-DD                 change the date bound (human, out of session)
+    anteriora open <client>/<matter>                               open the attested session on the matter
+    anteriora list                                                 list matters
 
 The split that keeps it safe (decision record S1/S2):
-  WORKSPACE  ~/Probant/<client>/<matter>/  — disclosure.md and working files. Writable in-session; the
+  WORKSPACE  ~/Anteriora/<client>/<matter>/  — disclosure.md and working files. Writable in-session; the
              launcher trusts NOTHING read from it.
   RECORD     ~/.inferroute/confidential/matters/<client>/<matter>.json — client, ref, date bound, created,
              workspace path. Under confidential/, where the filesystem confinement denies the agent writes.
@@ -53,15 +53,22 @@ def _irhome() -> Path:
 
 
 def probant_root() -> Path:
-    """Where matters live. `~/Probant` for a new install — but an existing `~/Surveyor` KEEPS BEING USED:
-    the matter records hold absolute workspace paths, so renaming the folder without rewriting them would
-    strand every matter already on this machine. Migration is a deliberate act, not a side effect of a
-    product being renamed."""
-    named = os.environ.get("IR_PROBANT_ROOT") or os.environ.get("IR_SURVEYOR_ROOT")
+    """Where matters live. `~/Anteriora` for a new install — but an existing `~/Probant` or `~/Surveyor` (the
+    product's earlier names) KEEPS BEING USED: the matter records hold absolute workspace paths, so renaming
+    the folder without rewriting them would strand every matter already on this machine. Migration is a
+    deliberate act, not a side effect of a product being renamed. (The function keeps its old name: it is
+    internal.)"""
+    named = (os.environ.get("IR_ANTERIORA_ROOT") or os.environ.get("IR_PROBANT_ROOT")
+             or os.environ.get("IR_SURVEYOR_ROOT"))
     if named:
         return Path(named)
-    new, old = _home() / "Probant", _home() / "Surveyor"
-    return old if old.is_dir() and not new.is_dir() else new
+    new = _home() / "Anteriora"
+    if new.is_dir():
+        return new
+    for old in (_home() / "Probant", _home() / "Surveyor"):
+        if old.is_dir():
+            return old
+    return new
 
 
 def matters_dir() -> Path:
@@ -119,7 +126,7 @@ def _to_yyyymmdd(iso: str) -> int:
 def load_record(client: str, matter: str) -> dict:
     p = record_path(client, matter)
     if not p.exists():
-        raise ProbantError(f"no such matter {client}/{matter}. Create it: ir probant new {client} {matter}")
+        raise ProbantError(f"no such matter {client}/{matter}. Create it: anteriora new {client} {matter}")
     return json.loads(p.read_text())
 
 
@@ -189,8 +196,8 @@ def _create_matter(client: str, matter: str, priority_date: str | None, from_cor
     sync = _under_sync_root(ws)
     if sync:
         raise ProbantError(f"refusing to create the matter under a cloud-sync folder ({sync}): a backup daemon "
-                            "outside the confinement would copy the disclosure. Put ~/Probant on local disk "
-                            "(or set IR_PROBANT_ROOT).")
+                            f"outside the confinement would copy the disclosure. Put {probant_root()} on local "
+                            "disk (or set IR_ANTERIORA_ROOT).")
     bound = priority_date or _today()
     _to_yyyymmdd(bound)                                      # validate
     ws.mkdir(parents=True, exist_ok=True)
@@ -213,8 +220,8 @@ def _create_matter(client: str, matter: str, priority_date: str | None, from_cor
     print(f"created matter {client}/{matter}")
     print(f"  workspace   {ws}")
     print(f"  date bound  {bound}" + (" (pre-filing default = today; set the real priority date with "
-                                      "`ir probant set-date`)" if priority_date is None else ""))
-    print(f"  open it:    ir probant open {client}/{matter}")
+                                      "`anteriora set-date`)" if priority_date is None else ""))
+    print(f"  open it:    anteriora open {client}/{matter}")
     return 0
 
 
@@ -253,7 +260,7 @@ def cmd_list() -> int:
             shown += 1
     if not shown:
         # An emptied directory used to print nothing at all, which reads as a broken command.
-        print("no matters yet — create one: ir probant new <client> <matter> --priority-date YYYY-MM-DD")
+        print("no matters yet — create one: anteriora new <client> <matter> --priority-date YYYY-MM-DD")
     _print_corpora()
     return 0
 
@@ -280,18 +287,18 @@ def _print_corpora() -> None:
             # A sent corpus has no local shared-corpus directory — those documents live inside the sealed
             # file, on the recipient's side once opened. Naming one here printed "Probant/None/…".
             where = f"  (sealed in {c['sealed_to']})" if sent and c.get("sealed_to") \
-                else f"  (in Probant/{c.get('client')}/shared-corpus)" if c.get("client") else ""
+                else f"  (in {probant_root().name}/{c.get('client')}/shared-corpus)" if c.get("client") else ""
             print(f"      documents: {', '.join(c['files'])}{where}")
         if c.get("matters"):
             print(f"      matters:   {', '.join(c['matters'])}")
         if not sent:
             print(f"      a matter of your own, tied to it but not part of it:\n"
-                  f"        ir probant new <client> <matter> --from-corpus {c.get('id')}")
+                  f"        anteriora new <client> <matter> --from-corpus {c.get('id')}")
 
 
 def disclosure_has_content(workspace: Path) -> bool:
     """True if the matter's disclosure.md holds a real invention description, not just the template stub
-    `ir probant new` writes. The enclave prewarms on session-open only when this is true (L3); otherwise it
+    `anteriora new` writes. The enclave prewarms on session-open only when this is true (L3); otherwise it
     waits for the first search, so a firm never pays for a container while the workspace is still empty."""
     p = Path(workspace) / "disclosure.md"
     try:
@@ -384,7 +391,7 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     if rec.get("kind") == "name":
         if not tm_index_path().is_file():
             raise ProbantError(f"no trademark index is installed on this computer ({tm_index_path()}); "
-                               "install it with: ir probant names --install")
+                               "install it with: anteriora names --install")
         print(f"opening {client}/{matter} — name check, searched on this computer")
         probant = {"matter": f"{client}/{matter}", "mode": "names"}
     else:
@@ -492,7 +499,7 @@ def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, a
     try:
         ix = T.Index(path)
     except FileNotFoundError:
-        raise ProbantError(f"no trademark index is installed ({path}). Install it with: ir probant names --install")
+        raise ProbantError(f"no trademark index is installed ({path}). Install it with: anteriora names --install")
     except ValueError as e:
         raise ProbantError(str(e))
     try:
@@ -523,7 +530,7 @@ def cmd_proposals(ident: str) -> int:
         print(f"      from the document: “{r['quote'][:160]}{'…' if len(r['quote']) > 160 else ''}”\n")
     if dropped:
         print(f"  ({dropped} further proposal(s) discarded: the quote was not in the document)\n")
-    print(f"  open one:  ir probant from-proposal {ident} 0 <client> <matter>")
+    print(f"  open one:  anteriora from-proposal {ident} 0 <client> <matter>")
     return 0
 
 
@@ -531,7 +538,7 @@ def cmd_from_proposal(ident: str, index: int, client: str, matter: str, date: st
     from . import probant_intake as I
     made = I.create_matter(ident, client, matter, index, date)
     print(f"  opened {made} from proposal {index}; its disclosure is the proposal, with the passage it came from.")
-    print(f"  open it:    ir probant open {made}")
+    print(f"  open it:    anteriora open {made}")
     return 0
 
 
@@ -606,8 +613,8 @@ def _this_computer() -> str:
 
 
 def cli_main() -> int:
-    """The `probant` command. Typed alone it opens the home page, which is what every new user wants first; with
-    arguments it is exactly `ir probant ...`."""
+    """The `anteriora` command (and `probant`, its earlier name). Typed alone it opens the home page, which is
+    what every new user wants first; with arguments it is exactly `ir anteriora ...`."""
     args = sys.argv[1:]
     return main(args if args else ["home"])
 
@@ -617,19 +624,19 @@ def main(argv: list[str] | None = None) -> int:
     # owner-only: records hold search text and results, receipts and state hold the matter's history. A
     # common default umask (0002 or 0022) would leave them readable by every other account on this computer.
     os.umask(0o077)
-    # `ir probant` with no subcommand is what a new user types first. argparse answers it with
+    # `anteriora` with no subcommand is what a new user types first. argparse answers it with
     # "error: the following arguments are required: cmd" above a wall of nineteen subcommand names —
     # true, useless, and the first thing a patent professional would see. Say what to do instead.
     if not argv and len(sys.argv) <= 2:
         sys.stderr.write(
             "\n  Anteriora — prior-art research, one matter at a time, on this computer.\n\n"
-            "  Start here:      ir probant home        opens the page where everything happens\n\n"
-            "  Or from here:    ir probant new <client> <matter> --priority-date YYYY-MM-DD\n"
-            "                   ir probant list\n"
-            "                   ir probant identity    your key card, to receive sealed matters\n\n"
-            "  Every command:   ir probant --help\n\n")
+            "  Start here:      anteriora home         opens the page where everything happens\n\n"
+            "  Or from here:    anteriora new <client> <matter> --priority-date YYYY-MM-DD\n"
+            "                   anteriora list\n"
+            "                   anteriora identity     your key card, to receive sealed matters\n\n"
+            "  Every command:   anteriora --help\n\n")
         return 2
-    p = argparse.ArgumentParser(prog="ir probant", description=__doc__.split("\n\n")[0])
+    p = argparse.ArgumentParser(prog="anteriora", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
     n.add_argument("--from-corpus", default="", help="tie this matter to a corpus you received, without making it part of it")
@@ -799,7 +806,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except ImportError as e:
         # Probant's own dependencies live in the `confidential` extra, so a base install crashes on the
-        # FIRST command a new user runs — `ir probant identity`, the one that makes the key card they have
+        # FIRST command a new user runs — `anteriora identity`, the one that makes the key card they have
         # to send before anyone can share anything with them. A traceback there is the worst possible first
         # impression of a product whose subject is careful handling. The package already keeps `click` core
         # for exactly this reason; this is the same treatment for the rest.
@@ -833,7 +840,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
     print(f"\n  Your Anteriora fingerprint:  {me['fingerprint']}")
     print("  Read it to whoever shares with you, and check theirs the same way.\n")
     card = SH.public_card(me)
-    out = Path.home() / f"probant-contact-{me['fingerprint']}.json"
+    out = Path.home() / f"anteriora-contact-{me['fingerprint']}.json"
     out.write_text(json.dumps(card, indent=1))
     print(f"  Your contact card (public keys only, safe to send): {out}")
     if first or show:
@@ -848,7 +855,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
         for name, c in known.items():
             print(f"      {name:20s} {c['fingerprint']}   added {c.get('added_at', '')[:10]}")
     else:
-        print("\n  No contacts yet. Add one:  ir probant identity --add <name> --card <their-card.json>")
+        print("\n  No contacts yet. Add one:  anteriora identity --add <name> --card <their-card.json>")
     return 0
 
 
@@ -859,7 +866,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clust
     from . import probant_share as SH
     known = SH.contacts()
     if to not in known:
-        raise ProbantError(f"no contact called {to!r}. Add them: ir probant identity --add {to} --card <file>")
+        raise ProbantError(f"no contact called {to!r}. Add them: anteriora identity --add {to} --card <file>")
     me = SH.identity()
     entries = []
     for spec in (matters or []):
@@ -884,7 +891,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clust
               f"{', '.join(f['name'] for f in extra)} ({sum(f['bytes'] for f in extra) // 1000} KB)")
     cards = [known[to]] + ([SH.public_card(me)] if keep_copy else [])
     blob = SH.seal_to(cards, payload, me)
-    dest = Path(out).expanduser() if out else Path.home() / f"probant-corpus-for-{to}-{_stamp()}{SH.SUFFIX}"
+    dest = Path(out).expanduser() if out else Path.home() / f"anteriora-corpus-for-{to}-{_stamp()}{SH.SUFFIX}"
     dest.write_bytes(blob)
     os.chmod(dest, 0o600)
     claims = sum(len(e.get("claims") or []) for e in entries)
@@ -944,14 +951,14 @@ def cmd_open_share(path: str, client: str) -> int:
     written = SH.write_corpus(payload, client)
     print(f"\n  opened {len(made)} matter(s) under {client}:")
     for m in made:
-        print(f"      ir probant open {m}")
+        print(f"      anteriora open {m}")
     if written.get("written"):
         print(f"\n  corpus documents written to {written['dir']}:")
         for n in written["written"]:
             print(f"      {n}")
         print(f"\n  This delivery is corpus {written['id']}. A matter you create yourself while reading it")
         print(f"  can be tied to it without becoming part of it:")
-        print(f"      ir probant new <client> <matter> --from-corpus {written['id']}")
+        print(f"      anteriora new <client> <matter> --from-corpus {written['id']}")
     return 0
 
 
@@ -1076,7 +1083,7 @@ def cmd_cluster(path: str, max_docs: int = 0, budget: int = 0, only: str = "", r
         if PF.last_round_blocked(meta["id"]):
             print(f"\n  STOPPED: the account refused every attempt over {waited / 60:.0f} minutes.\n"
                   f"  {len(PF.candidates(meta['id']))} finding(s) are kept; resume with\n"
-                  f"    ir probant cluster <folder> --resume {meta['id']}", flush=True)
+                  f"    anteriora cluster <folder> --resume {meta['id']}", flush=True)
             return 3
         if got == 0 and not PF.last_round_worked(meta["id"]):
             time.sleep(20)

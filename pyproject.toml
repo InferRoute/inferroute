@@ -66,7 +66,9 @@ local = [
 
 [project.scripts]
 ir = "inferroute_cli.main:main"
-# `probant` alone opens Probant's home page; `probant <anything>` is `ir probant <anything>`.
+# `anteriora` alone opens Anteriora's home page; `anteriora <anything>` is `ir anteriora <anything>`.
+# `probant` is its earlier name and stays as an alias, so installs and notes that use it keep working.
+anteriora = "inferroute_cli.probant:cli_main"
 probant = "inferroute_cli.probant:cli_main"
 # Internal entry point used by the systemd user unit installed via
 # `ir add recording`. Not surfaced in `ir help`; power users and

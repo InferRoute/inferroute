@@ -710,7 +710,7 @@ def _attach_counter(status_args: list[str], receipt_path: str, *, live: bool = F
 # ───────────────────────── ir --confidential ─────────────────────────
 
 def launch(args: list[str], agent: str = "claude", *, probant: dict | None = None) -> int:
-    """`probant`: set by `ir probant open` ({"matter", "date_bound"}). The pre-launch screen is then the
+    """`probant`: set by `anteriora open` ({"matter", "date_bound"}). The pre-launch screen is then the
     plain-language Probant card (probant_trust) instead of the technical panel, and `summary` is filled in."""
     _need_extra()
     from . import launch as launch_mod, agents as agents_mod
@@ -723,7 +723,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
     from . import resume as resume_mod
     passthrough = [a for a in args if a != "--confidential"]
     user_model, passthrough = _extract_model_override(passthrough)
-    # `ir probant open --web`: the same session, with Pi in RPC mode behind a local page (probant_web).
+    # `anteriora open --web`: the same session, with Pi in RPC mode behind a local page (probant_web).
     from inferroute_local import macos_vm
     use_mac_vm = macos_vm.required_for(agent, probant)
     # macOS uses the existing browser UI; no host Pi or terminal runtime is needed.
@@ -1105,7 +1105,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 console.print("[grey58]for us, if anything looked stuck: the assistant sent "
                               + ", ".join(f"{k}×{v}" for k, v in unknown.items()) + " — events this page has no word for.[/]")
             if probant is not None and not web:
-                console.print(f"\n  Keep the record of this matter:  [bold]ir probant export {probant.get('matter', '')}[/]\n")
+                console.print(f"\n  Keep the record of this matter:  [bold]anteriora export {probant.get('matter', '')}[/]\n")
             if page is not None:
                 await page.linger(console)                     # the page stays up so the record can be exported
             return rc

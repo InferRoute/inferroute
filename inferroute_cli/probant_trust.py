@@ -1,7 +1,7 @@
 """What the user is told about a Probant session's protection — in plain words, derived from checks.
 
-One summary, rendered twice: as the terminal card `ir probant open` shows before the agent starts, and as
-the trust panel of the local browser page (`ir probant open --web`). Both read the dict `build()` returns,
+One summary, rendered twice: as the terminal card `anteriora open` shows before the agent starts, and as
+the trust panel of the local browser page (`anteriora open --web`). Both read the dict `build()` returns,
 so the two surfaces cannot say different things.
 
 The rules this module keeps:
@@ -12,7 +12,7 @@ The rules this module keeps:
   machine's software; what any machine does with data it holds), the condition is on the page, not in a
   footnote the reader must go looking for.
 - The operator of the AI machine is "its operator". The page never names a provider or prints a host.
-- The technical detail is kept, one level down (`technical` rows, `ir probant proof`), for the reader who
+- The technical detail is kept, one level down (`technical` rows, `anteriora proof`), for the reader who
   wants it. It is never the first thing a reader meets.
 """
 from __future__ import annotations
@@ -416,7 +416,7 @@ def render_card(summary: Dict[str, Any], console: Any = None) -> None:
     body = Group(Text(summary["headline"], style=f"bold {colour}"), Text(summary["explainer"], style="grey58"), Text(""), t,
                  Text("  " + summary.get("control_note", ""), style="grey58"), Text(""),
                  Text("What this can't prove", style="bold"), lim, Text(""),
-                 Text(f"Full technical proof: ir probant proof {summary.get('matter') or ''}".rstrip(), style="grey58"))
+                 Text(f"Full technical proof: anteriora proof {summary.get('matter') or ''}".rstrip(), style="grey58"))
     width = min(console.width, 88)
     console.print(Panel(body, title=f"[bold]{title}[/]", subtitle=f"[grey58]checked {_local_stamp(summary['checked_at'])}[/]",
                         border_style=colour, box=box.ROUNDED, width=width, padding=(1, 2)))
@@ -430,7 +430,7 @@ def render_howto(matter: str, console: Any = None) -> None:
             ("", "/relevant US-1234567-B2  mark a result (also /not-relevant, /known, /marks)"),
             ("", "/next 2  send the assistant's suggested next step number 2"),
             ("", "/proof  show the checks again · /quit  leave"),
-            ("Afterwards", f"ir probant export {matter}   the record to keep")]
+            ("Afterwards", f"anteriora export {matter}   the record to keep")]
     for head, text in rows:
         console.print(Text.assemble((f"  {head:<16}", "bold"), (text, "grey70")), soft_wrap=True)
     console.print("")

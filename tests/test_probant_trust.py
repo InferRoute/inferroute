@@ -201,4 +201,4 @@ def test_the_card_renders_every_state_without_error():
                     T.build(_receipt(), _search(ok=False, refusal="x"), "best-effort (port-level; not required)")):
         T.render_card(summary, c)
     out = c.export_text()
-    assert "What this can't prove" in out and "ir probant proof A/b" in out
+    assert "What this can't prove" in out and "anteriora proof A/b" in out

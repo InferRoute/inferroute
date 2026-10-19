@@ -308,8 +308,9 @@ def main(argv: list[str] | None = None) -> int:
         from . import cowork as cowork_mod
         return cowork_mod.cmd_cowork(rest)
 
-    if cmd in ("probant", "surveyor"):
-        # `ir probant new|set-date|open|list` — the user's entry to the attested prior-art assistant.
+    if cmd in ("anteriora", "probant", "surveyor"):
+        # `ir anteriora new|set-date|open|list` (the same as the `anteriora` command) — the user's entry to the
+        # attested prior-art assistant. `probant` was its name until 2026-10-19 and still answers.
         # `surveyor` was its name until 2026-09-18 and still answers, silently: the rehearsal notes, the
         # wrapper script and a home page already running all say `surveyor`, and a command that stops
         # working mid-rehearsal is a worse introduction to the new name than one that quietly still does.

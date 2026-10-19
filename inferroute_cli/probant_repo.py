@@ -10,7 +10,7 @@ this module adds is everything that is specific to code, and all of it runs on t
 * **What is left out, and why, is listed.** A deny-list (keys, credential files, environment files, vendored
   dependencies, lock files, build output, binaries, very large files) and a secret scan. A file with a secret
   is left out whole, and the listing names the rule, never the secret.
-* **The person approves the file list** before anything is staged (`ir probant intake --repo`).
+* **The person approves the file list** before anything is staged (`anteriora intake --repo`).
 * **Dates come from git on this computer, never from the model.** For a draft's quoted lines: when the file
   first appeared at its path, and the range of dates on which those lines took their present form (`git
   blame`). Commit dates are written by whoever made the commit and can be set to anything, so these are shown

@@ -208,16 +208,22 @@ def test_the_old_command_name_still_reaches_the_same_place(monkeypatch):
 
 
 def test_matters_already_on_this_machine_are_not_stranded_by_the_rename(tmp_path, monkeypatch):
-    monkeypatch.delenv("IR_PROBANT_ROOT", raising=False)
-    monkeypatch.delenv("IR_SURVEYOR_ROOT", raising=False)
+    for v in ("IR_ANTERIORA_ROOT", "IR_PROBANT_ROOT", "IR_SURVEYOR_ROOT"):
+        monkeypatch.delenv(v, raising=False)
     monkeypatch.setattr(S, "_home", lambda: tmp_path)
-    assert S.probant_root() == tmp_path / "Probant"          # a fresh install gets the new name
+    assert S.probant_root() == tmp_path / "Anteriora"        # a fresh install gets the new name
     (tmp_path / "Surveyor").mkdir()
     assert S.probant_root() == tmp_path / "Surveyor"         # an existing tree keeps being used
     (tmp_path / "Probant").mkdir()
-    assert S.probant_root() == tmp_path / "Probant"          # once both exist, the new one wins
+    assert S.probant_root() == tmp_path / "Probant"          # the later of the two earlier names wins
+    (tmp_path / "Anteriora").mkdir()
+    assert S.probant_root() == tmp_path / "Anteriora"        # once the new one exists, it wins
     monkeypatch.setenv("IR_SURVEYOR_ROOT", str(tmp_path / "named"))
-    assert S.probant_root() == tmp_path / "named"            # the old setting still names a root
+    assert S.probant_root() == tmp_path / "named"            # the old settings still name a root
+    monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "named2"))
+    assert S.probant_root() == tmp_path / "named2"
+    monkeypatch.setenv("IR_ANTERIORA_ROOT", str(tmp_path / "named3"))
+    assert S.probant_root() == tmp_path / "named3"           # and the new setting beats both
 
 
 def test_a_setting_answers_to_both_spellings(monkeypatch):

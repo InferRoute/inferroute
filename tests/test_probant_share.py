@@ -270,7 +270,7 @@ def test_bare_ir_probant_says_where_to_start(monkeypatch, capsys):
     rc = CLI.main([])
     err = capsys.readouterr().err
     assert rc == 2
-    assert "ir probant home" in err and "opens the page" in err
+    assert "anteriora home" in err and "opens the page" in err
     assert "the following arguments are required" not in err
     assert "identity" in err                       # the command he needs to be sent a sealed corpus
     # A real subcommand is untouched by the guard.

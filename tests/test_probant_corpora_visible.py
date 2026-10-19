@@ -171,7 +171,7 @@ def test_the_share_COMMAND_records_the_delivery(tmp_path, monkeypatch):
     when that call was removed, every test still went green."""
     monkeypatch.chdir(tmp_path)
     assert S.main(["identity"]) == 0
-    card = next(tmp_path.glob("probant-contact-*.json"))
+    card = next(tmp_path.glob("anteriora-contact-*.json"))
     assert S.main(["identity", "--add", "them", "--card", str(card)]) == 0
     assert S.main(["new", "Acme", "battery"]) == 0
     doc = tmp_path / "MATTERS.txt"

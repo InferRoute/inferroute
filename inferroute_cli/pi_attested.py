@@ -398,7 +398,7 @@ def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, a
              headers: dict | None = None, search_endpoint: str | None = None, general: bool = False) -> list[str]:
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`.
     `general`: a plain `ir pi` launch, not a Probant matter — Pi's ordinary file tools and a general system
-    prompt, with none of the matter or search machinery. Only `ir probant open` gets the prior-art assistant."""
+    prompt, with none of the matter or search machinery. Only `anteriora open` gets the prior-art assistant."""
     check_passthrough(passthrough, general=general)
     cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
     # Document readings have no search tools. New readings get a host-bound draft
@@ -579,7 +579,7 @@ def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None,
     python, venv_env, venv_cwd = verifier_command(cfg)
     argv = [python, "-m", "sealedresearch.search_verifier", "serve", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg), "--port", "0"]
-    # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `ir probant open` sets
+    # The cutoff/state/record for THIS matter come as per-matter arguments (S2): `anteriora open` sets
     # them in the env from the host-held matter record, so the shared search.json is never mutated per
     # launch (no race, no writable date bound). Fall back to search.json only when no matter is open.
     cutoff = os.environ.get("IR_MATTER_CUTOFF") or cfg.get("cutoff_date")
@@ -661,7 +661,7 @@ def _search_pin_args(cfg: dict) -> list[str]:
 
 
 def verify_search_once(timeout: float = 120.0) -> dict | None:
-    """One live check of the configured search enclave, outside any session (`ir probant proof`). Same
+    """One live check of the configured search enclave, outside any session (`anteriora proof`). Same
     verifier, same pins as a session's proxy. None when search is not configured on this computer."""
     import subprocess
     try:

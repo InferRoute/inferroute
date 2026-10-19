@@ -24,10 +24,11 @@ from typing import Any, Dict, List, Optional
 
 from . import probant as S
 
-# Public identifiers of the Anteriora GitHub App (a client id is not a secret: the device flow is built for apps
-# that cannot keep one). Empty until the App is registered; the option is then simply not offered.
-CLIENT_ID = os.environ.get("IR_GITHUB_APP_CLIENT_ID", "")
-SLUG = os.environ.get("IR_GITHUB_APP_SLUG", "")
+# Public identifiers of the Anteriora GitHub App, registered 20 Oct 2026 under the InferRoute organization (app id
+# 5388584). A client id is not a secret: the device flow is built for apps that cannot keep one. The environment
+# may override both for testing; an empty client id means the option is not offered.
+CLIENT_ID = os.environ.get("IR_GITHUB_APP_CLIENT_ID", "Iv23likDCihz10aAgxka")
+SLUG = os.environ.get("IR_GITHUB_APP_SLUG", "anteriora")
 DEVICE_PAGE = "https://github.com/login/device"
 API = "https://api.github.com"
 UA = "Anteriora"

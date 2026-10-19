@@ -178,6 +178,13 @@
     const date = input("date");
     const text = input("textarea", "Describe the invention in plain technical terms. You can also add it later.");
     text.rows = 9;
+    // What the matter is for: an invention (prior-art search) or names (registered trademarks).
+    const kind = document.createElement("select");
+    kind.id = "matter-kind";
+    for (const [v, label] of [["invention", "An invention: search prior art"], ["name", "Names: check registered trademarks"]]) {
+      const o = document.createElement("option"); o.value = v; o.textContent = label; kind.append(o);
+    }
+    const NAME_TEMPLATE = "The product: what it is and what it does, in a few sentences.\n\nNames being considered:\n- \n\nMarkets: where you will sell it (for example France, the EU, the US).";
     const validation = formErrors({ client, matter, priority_date: date, disclosure: text });
     const err = el("p", "form-error");
     const create = button("Create matter", "primary", async () => {
@@ -185,7 +192,8 @@
       if (!validation.validate()) return;
       create.disabled = true;
       try {
-        const r = await api("/api/matters", { client: client.value, matter: matter.value, priority_date: date.value, disclosure: text.value });
+        const r = await api("/api/matters", { client: client.value, matter: matter.value, kind: kind.value,
+                                             priority_date: kind.value === "name" ? "" : date.value, disclosure: text.value });
         closeDialog();
         toast(`Matter ${r.id} created.`, "info");
         location.hash = `#/matter/${enc(r.id)}`;
@@ -195,13 +203,20 @@
       } finally { create.disabled = false; }
     });
     dialog("New matter", [
-      el("p", "", "A matter is one invention you research: its folder, its date bound, its sessions and its records."),
+      el("p", "", "A matter is one thing you research: an invention, or the names you are considering. It keeps its folder, its sessions and its records."),
+      field("What are you checking?", kind, "Names are searched on this computer against registered trademarks in France and the US."),
       validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
-      validation.field("matter", "Matter", "Required. A short name for this invention."),
+      validation.field("matter", "Matter", "Required. A short name for this matter."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
       validation.field("disclosure", "Disclosure", "Saved as written. The AI reads it when you start a session."),
       err,
     ], [button("Cancel", "ghost", closeDialog), create]);
+    kind.addEventListener("change", () => {
+      const names = kind.value === "name";
+      const dateRow = date.closest(".field"); if (dateRow) dateRow.hidden = names;
+      if (names && !text.value.trim()) text.value = NAME_TEMPLATE;
+      if (!names && text.value === NAME_TEMPLATE) text.value = "";
+    });
     setTimeout(() => client.focus(), 0);
   }
 
@@ -596,15 +611,31 @@
     const refresh = () => renderMatter(matterId);
     p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
     const words = m.disclosure.disclosure_words;
+    const isName = m.kind === "name";
     p.append(el("div", "page-head",
       el("h1", "", `${m.client} / ${m.matter}`),
-      el("p", "sub", `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
+      el("p", "sub", isName ? `Name check · created ${localTime(m.created_at)}`
+        : `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
+    if (isName) {
+      let ix = null;
+      try { ix = await api("/api/tm-index"); } catch (e) { /* shown below as not installed */ }
+      if (!ix || !ix.installed) {
+        const install = button(`Install the trademark index (${ix ? ix.download_mb : 250} MB download)`, "primary", async (ev) => {
+          const b = ev.currentTarget; b.disabled = true; b.textContent = "Downloading and checking…";
+          try { await api("/api/tm-index/install", {}); toast("Trademark index installed.", "info"); refresh(); }
+          catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Try the install again"; }
+        });
+        p.append(el("div", "card key-card", el("p", "", "A name check searches a copy of the trademark registers kept on this computer, so the names you check are never sent anywhere. Install it once; it is checked against this release before it is used."), install));
+        return;
+      }
+      p.append(el("p", "sub", `Trademark data: ${ix.data}. Searched on this computer.`));
+    }
     p.append(el("div", "row actions",
       m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
         : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
         : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
         : button("Start a session", "primary", () => startSession(m.id, refresh)),
-      button(words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
+      button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;
         b.disabled = true;
@@ -620,15 +651,18 @@
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
 
     p.append(el("h2", "section", "Sessions"));
-    if (!m.sessions.length) p.append(el("p", "sub", "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
+    if (!m.sessions.length) p.append(el("p", "sub", isName
+      ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
+      : "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
     else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false, liveMap(m.running ? [m.running] : [])));
 
     // A cleared mark is a row in the store's history, not a mark: the professional asked for NO opinion on
     // that document. Counted here it would show as a fourth kind ("US-X · cleared") and inflate the total,
     // which is the shape of bug where an unknown value is treated as a judgement.
     const markEntries = Object.entries(m.marks || {}).filter(([, v]) => v && v !== "cleared");
-    p.append(el("h2", "section", "Your marks"));
-    if (!markEntries.length) p.append(el("p", "sub", "No marks yet. Mark documents in a session as relevant, not relevant, or known."));
+    if (!isName) p.append(el("h2", "section", "Your marks"));
+    if (isName) { /* relevance marks are for patent documents */ }
+    else if (!markEntries.length) p.append(el("p", "sub", "No marks yet. Mark documents in a session as relevant, not relevant, or known."));
     else {
       const counts = { relevant: 0, "not-relevant": 0, known: 0 };
       for (const [, v] of markEntries) counts[v] = (counts[v] || 0) + 1;

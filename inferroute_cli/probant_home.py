@@ -261,7 +261,7 @@ def list_matters() -> List[Dict[str, Any]]:
             ws = Path(str(rec.get("workspace") or ""))
             out.append({"id": f"{client}/{matter}", "client": client, "matter": matter,
                         "date_bound": rec.get("date_bound"), "created_at": rec.get("created_at"),
-                        "needs_review": bool(rec.get("needs_review")),
+                        "needs_review": bool(rec.get("needs_review")), "kind": rec.get("kind") or "invention",
                         "sessions": len(sessions), "searches": sum(s["searches"] for s in sessions),
                         "marks": len(marks), "last_activity": sessions[0]["started_at"] if sessions else rec.get("created_at"),
                         "disclosure_words": disclosure_info(ws)["disclosure_words"] if ws.is_dir() else 0})
@@ -734,18 +734,40 @@ class Home:
             if errors:
                 return problem("Check the highlighted fields.", extra={"fields": errors})
             date = str(d.get("priority_date") or "").strip()
+            kind = "name" if d.get("kind") == "name" else "invention"
             try:
                 client, matter = S.sanitize(str(d.get("client") or ""), "client"), S.sanitize(str(d.get("matter") or ""), "matter")
                 import contextlib
                 import io
                 with contextlib.redirect_stdout(io.StringIO()):
-                    S.cmd_new(client, matter, date or None)
+                    S.cmd_new(client, matter, None if kind == "name" else (date or None), kind=kind)
             except S.ProbantError as e:
                 return problem(str(e))
             text = str(d.get("disclosure") or "")
             if text.strip():
-                (S.workspace_path(client, matter) / "disclosure.md").write_text(f"# Disclosure\n\n{text.strip()}\n", encoding="utf-8")
+                head = "# Names to check" if kind == "name" else "# Disclosure"
+                (S.workspace_path(client, matter) / "disclosure.md").write_text(f"{head}\n\n{text.strip()}\n", encoding="utf-8")
             return {"ok": True, "id": f"{client}/{matter}"}
+
+        # ── the trademark index a name matter searches: whether it is installed, and installing it ──
+        @app.get("/api/tm-index")
+        async def tm_index_status():
+            import asyncio
+            from . import tm_install
+            path = S.tm_index_path()
+            ok = await asyncio.to_thread(tm_install.installed, path)
+            return {"installed": ok, "present": path.is_file(), "data": tm_install.INDEX["data"],
+                    "download_mb": round(tm_install.INDEX["xz_bytes"] / 1e6)}
+
+        @app.post("/api/tm-index/install")
+        async def tm_index_install():
+            import asyncio
+            from . import tm_install
+            try:
+                await asyncio.to_thread(tm_install.install, S.tm_index_path())
+            except tm_install.InstallError as e:
+                return problem(str(e), 502)
+            return {"ok": True}
 
         @app.get("/api/matter")
         async def matter_view(id: str = ""):
@@ -759,6 +781,7 @@ class Home:
                        for e in list_exports(client, matter)]
             running = home.launches.running_for(mid)
             return {"id": mid, "client": client, "matter": matter, "date_bound": rec.get("date_bound"),
+                    "kind": rec.get("kind") or "invention",
                     "needs_review": bool(rec.get("needs_review")), "intake_origin": rec.get("intake_origin"),
                     "pre_filing_default": bool(rec.get("pre_filing_default")), "created_at": rec.get("created_at"),
                     "disclosure": disclosure_info(ws) if ws.is_dir() else {"folder": str(ws), "files": [], "disclosure_words": 0},

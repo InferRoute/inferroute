@@ -119,3 +119,23 @@ def test_the_vm_broker_lets_a_name_session_reach_the_trademark_search():
         assert "operation unavailable" not in str(e)
     except Exception:
         pass
+
+
+def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
+    from fastapi.testclient import TestClient
+    from inferroute_cli import probant_home as H
+    h = H.Home()
+    h.port = 45678
+    c = TestClient(h.app(), base_url="http://127.0.0.1:45678")
+    c.headers.update({"authorization": f"Bearer {h.token}"})
+    r = c.post("/api/matters", json={"client": "Acme", "matter": "brand", "kind": "name",
+                                     "priority_date": "2020-01-01", "disclosure": "Names: Zebrafy"}).json()
+    assert r == {"ok": True, "id": "Acme/brand"}
+    m = c.get("/api/matter?id=Acme/brand").json()
+    assert m["kind"] == "name"
+    assert (S.workspace_path("Acme", "brand") / "disclosure.md").read_text().startswith("# Names to check")
+    assert c.get("/api/overview").json()["matters"][0]["kind"] == "name"
+    status = c.get("/api/tm-index").json()
+    assert status["installed"] is False and status["download_mb"] > 0
+    c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
+    assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"

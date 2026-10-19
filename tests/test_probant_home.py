@@ -79,6 +79,8 @@ def test_no_route_beyond_what_the_page_needs(home):
                      "/api/intake", "/api/intakes", "/api/intake/create", "/api/intake/review",
                      # reading one commit of a git repository: preview the file list, then stage it (19 Oct)
                      "/api/intake/repo",
+                     # the trademark index a name matter searches: status and install (19 Oct)
+                     "/api/tm-index", "/api/tm-index/install",
                      # Folders (1 Oct): organising matters, and the unit a corpus is sealed from. The
                      # sharing a corpus of matters with another Probant user (20 Sep)
                      "/api/sharing", "/api/sharing/contact", "/api/sharing/share", "/api/sharing/open",

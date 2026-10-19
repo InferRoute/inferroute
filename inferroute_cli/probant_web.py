@@ -188,6 +188,12 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         d = ev.get("assistantMessageEvent") or {}
         if d.get("type") == "text_delta":
             return [{"kind": "assistant_delta", "text": str(d.get("delta", ""))}]
+        # Reasoning, and a tool call still being written (a draft matter with a full description can take the
+        # model minutes): only that it is happening and how much, as an INTEGER — never the content, which
+        # stays as private as before. Without it the page sat still for ten minutes (Henry, 20 Oct).
+        if d.get("type") in ("thinking_delta", "toolcall_delta"):
+            return [{"kind": "assistant_progress", "what": "thinking" if d["type"] == "thinking_delta" else "tool",
+                     "n": len(str(d.get("delta", "")))}]
         return []
     if t == "message_end":
         msg = ev.get("message") or {}

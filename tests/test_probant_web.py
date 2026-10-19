@@ -267,7 +267,10 @@ def test_an_empty_template_disclosure_counts_as_empty(tmp_path):
 def test_unknown_or_dangerous_rpc_events_are_dropped_not_passed_through():
     assert W.normalize({"type": "bash_execution_update", "delta": "secret"}) == []
     assert W.normalize({"type": "session_switched", "path": "/x"}) == []
-    assert W.normalize({"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "t"}}) == []
+    # Reasoning and half-written tool calls cross as a COUNT only, never their text (20 Oct).
+    for kind, what in (("thinking_delta", "thinking"), ("toolcall_delta", "tool")):
+        ev = W.normalize({"type": "message_update", "assistantMessageEvent": {"type": kind, "delta": "secret plan"}})
+        assert ev == [{"kind": "assistant_progress", "what": what, "n": 11}] and "secret" not in repr(ev)
 
 
 def test_status_and_dialog_text_arrive_without_terminal_colour_codes():

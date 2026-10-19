@@ -381,6 +381,25 @@
     current.text += text;
     if (!renderQueued) { renderQueued = true; requestAnimationFrame(renderCurrent); }
   }
+  // While the model reasons or writes a tool call there are no words to show, only how much it has produced:
+  // an integer per event, composed into words here. Replaced by the first real words.
+  function assistantProgress(what, n) {
+    if (!current) assistantStart();
+    if (current.text) return;
+    hideThinking();
+    const p = current.progress || (current.progress = { thinking: 0, tool: 0, node: null, label: null });
+    p[what === "tool" ? "tool" : "thinking"] += Math.max(0, Number(n) || 0);
+    if (!p.node || !p.node.isConnected) {
+      p.label = el("span", "progress-label", "");
+      p.node = el("div", "thinking", el("span", "dot"), el("span", "dot"), el("span", "dot"), p.label);
+      const s = stick();
+      current.node.append(p.node);
+      s();
+    }
+    p.label.textContent = p.tool
+      ? `Preparing the next step · ${p.tool.toLocaleString()} characters written`
+      : `Thinking · ${p.thinking.toLocaleString()} characters`;
+  }
   function assistantEnd(ev) {
     if (!current) assistantStart();
     current.text = ev.text || "";
@@ -2053,6 +2072,7 @@
       case "conversation_kept": $("kept-note").hidden = false; break;
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
+      case "assistant_progress": assistantProgress(ev.what, ev.n); break;
       case "assistant_end":
         assistantEnd(ev);
         // The assistant's words about a document are attached when the turn ends, so a popup opened after

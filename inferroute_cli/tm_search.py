@@ -24,6 +24,7 @@ registers are not in it).
 from __future__ import annotations
 
 import array
+import math
 import datetime as dt
 import re
 import sqlite3
@@ -34,7 +35,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 SCHEMA = "anteriora.tm-index/1"
 GRAM = 3
-STOP_POSTING = 400_000        # a fragment shared by more marks than this retrieves nothing useful on its own
 MAX_CANDIDATES = 12000      # scored in full; ties are broken by id so a search always returns the same list
 
 _DIGITS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
@@ -197,13 +197,21 @@ class Index:
         if len(flat) >= 4:                                 # a name typed as one word may be a word inside a mark
             for i in self._ids("w:" + flat):
                 votes[i] += 40
+        # Every fragment votes, weighted by how rare it is (log of marks / marks holding it): a mark sharing the
+        # rare fragments of the name ranks above one sharing only "ant" and "ara". (An earlier version skipped
+        # common fragments outright and counted them in the threshold anyway, so on the 5.7M-mark index
+        # "Anteriora" returned nothing; counting every list costs about 0.3 s.)
+        total = max(1, int(self.meta.get("marks", 1)))
+        weights = []
         for g in sorted(set(grams(key))):
             ids = self._ids("g:" + g)
-            if len(ids) > STOP_POSTING:
+            if not ids:
                 continue
+            w = math.log(1 + total / len(ids))
+            weights.append(w)
             for i in ids:
-                votes[i] += 1
-        need = max(2, int(len(grams(key)) * 0.5))
+                votes[i] += w
+        need = 0.3 * sum(weights) if weights else 1.0       # a floor; the weighted ranking and the cap do the rest
         cand = [i for i, v in votes.items() if v >= need]
         cand.sort(key=lambda i: (-votes[i], i))
         cand = cand[:MAX_CANDIDATES]
@@ -234,7 +242,9 @@ class Index:
             reasons.append("sounds alike")
         elif spell >= 0.75 and len(flat) >= 4:
             reasons.append("spelled closely")
-        elif hear >= 0.8 and len(key) >= 3:
+        elif hear >= 0.85 and spell >= 0.5 and len(key) >= 3:
+            # Vowels are collapsed in the sound key, so a close key alone is weak evidence; the spelling has
+            # to be at least half the same too ("Annuaire Ehret" is not close to "Antériorité").
             reasons.append("sounds close")
         if len(flat) >= 4 and flat != mflat and flat in mflat:
             reasons.append("contains your name")

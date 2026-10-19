@@ -102,3 +102,22 @@ def test_the_command_prints_the_report_and_refuses_without_an_index(index, tmp_p
     monkeypatch.delenv("IR_TM_INDEX", raising=False)
     rc = S.main(["names", "Anteriora"])
     assert rc != 0 and "no trademark index is installed" in capsys.readouterr().err
+
+
+def test_a_name_made_of_common_fragments_is_still_found(tmp_path, monkeypatch):
+    # On the 5.7M-mark index "ant", "ara" and friends are held by hundreds of thousands of marks. A version that
+    # skipped such fragments, and still counted them in its threshold, returned nothing for "Anteriora".
+    filler = [("US", str(100 + i), f"ANTARA{i:03d}X", "registered", ["1"], "") for i in range(60)]
+    path = tmp_path / "busy.sqlite"
+    T.build(iter(ROWS + filler), path, "2026-09-30", ["test"])
+    monkeypatch.setattr(T, "MAX_CANDIDATES", 10)                 # the cap must keep the closest, not the first
+    hits = {h["number"] for h in T.Index(path).search("Anteriora")["hits"]}
+    assert {"3", "4"} <= hits                                        # ANTERIOR, ANTERION
+
+
+def test_a_close_sound_key_alone_is_not_called_close():
+    path_rows = [("FR", "1", "Annuaire EHRET", "registered", ["42"], "")]
+    import tempfile, pathlib
+    p = pathlib.Path(tempfile.mkdtemp()) / "x.sqlite"
+    T.build(iter(path_rows), p, "d", ["t"])
+    assert not T.Index(p).search("Antériorité")["hits"]

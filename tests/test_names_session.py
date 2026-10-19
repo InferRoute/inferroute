@@ -139,3 +139,18 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     assert status["installed"] is False and status["download_mb"] > 0
     c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
     assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"
+
+
+def test_a_name_session_that_searched_but_wrote_no_report_is_reminded_once():
+    """Measured on a Mac, 19 Oct (0.9.119): seven searches, then "Now writing the report…" and the turn ended with
+    no name-check.md. The extension asks for the report once (tests/tm_report_reminder_sim.js runs the real block)."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "tm_report_reminder_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "no loop" in r.stdout, r.stdout

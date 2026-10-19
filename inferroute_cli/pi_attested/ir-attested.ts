@@ -964,6 +964,39 @@ export default function (pi: ExtensionAPI) {
 				return box;
 			},
 		});
+
+		// ── report reminder ──
+		// Measured 19 Oct on a Mac (0.9.119, sealed model): seven searches, then "Now writing the report to
+		// name-check.md." and the turn ENDED with nothing written. The person sees a promise and an idle screen.
+		// So once per question: if this round searched and did not write name-check.md, ask for it, as the
+		// person would. Once, so a model that will not write cannot loop the session.
+		const TM_REMIND = "(Anteriora) The searches are done but name-check.md has not been written yet. Please write it " +
+			"now in the matter folder, from the searches you ran, with the structure your instructions give; then " +
+			"summarise it in two or three sentences.";
+		let tmSearched = 0, tmWrote = false, tmReminded = false;
+		pi.on("input", async (event) => {
+			if (event.text === TM_REMIND) return;
+			tmSearched = 0; tmWrote = false; tmReminded = false;
+		});
+		pi.on("tool_call", async (event) => {
+			if (event.toolName === "trademark_search") tmSearched += 1;
+			const target = String((event.input ?? {}).path ?? "");
+			if ((event.toolName === "write" || event.toolName === "edit") && /(^|[\\/])name-check\.md$/.test(target)) {
+				tmWrote = true;
+			}
+		});
+		// agent_settled, not agent_end: it fires only once no retry, compaction or queued message will run, so a
+		// round that is about to retry is not mistaken for one that stopped.
+		pi.on("agent_settled", async () => {
+			if (!tmSearched || tmWrote || tmReminded) return;
+			tmReminded = true;
+			try {
+				pi.sendUserMessage(TM_REMIND);
+			} catch {
+				pi.sendUserMessage(TM_REMIND, { deliverAs: "followUp" });
+			}
+		});
+		// ── end report reminder ──
 	}
 
 	// ── reading a document and proposing matters (intake) ──

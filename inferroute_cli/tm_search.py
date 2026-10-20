@@ -416,7 +416,9 @@ def log_search(log_dir: Path, result: Dict[str, Any]) -> None:
 
 
 def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
-    """The searches of a matter, the latest for each name and set of classes, in the order they were run."""
+    """The searches of a matter, the latest for each name and set of classes, in the order they were run. The
+    name is kept as it was typed: keyed on its compact form, "Setaside" and "Set aside" were one entry, and the
+    report cited a count for a search the page no longer listed."""
     import json as _json
     try:
         lines = (log_dir / SEARCH_LOG).read_text(encoding="utf-8").splitlines()
@@ -428,7 +430,7 @@ def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
             e = _json.loads(line)
         except ValueError:
             continue
-        latest[(compact(str(e.get("name") or "")), tuple(e.get("classes") or []))] = e
+        latest[(str(e.get("name") or "").strip(), tuple(e.get("classes") or []))] = e
     return list(latest.values())                       # file order is search order; a repeat keeps its first place
 
 

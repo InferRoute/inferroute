@@ -206,6 +206,10 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         # from scratch, and nothing on this computer could say so afterwards.
         if msg.get("stopReason"):
             out["stop"] = str(msg.get("stopReason"))[:20]
+        # The model the agent asked for. If the backup lane moved the session, the receipt names the model that
+        # answered; this line is what the cost of a reply is read against.
+        if isinstance(msg.get("model"), str):
+            out["model"] = msg["model"][:40]
         usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
         counts = {k: usage[k] for k in ("input", "output", "cacheRead") if isinstance(usage.get(k), int)
                   and not isinstance(usage.get(k), bool)}
@@ -752,7 +756,7 @@ class Bridge:
         if self.turn_log is None:
             return
         line = {"at": dt.datetime.fromtimestamp(event["at"] / 1000, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "mode": self.mode, "reply": self.turns + 1,
+                "mode": self.mode, "reply": self.turns + 1, "model": event.get("model", ""),
                 "ms": (event["at"] - r["began"]) if r else None,
                 "stop": event.get("stop") or event.get("stopped") or "", "usage": event.get("usage") or {},
                 "chars": {k: r[k] for k in ("thinking", "tool", "text")} if r else {}}

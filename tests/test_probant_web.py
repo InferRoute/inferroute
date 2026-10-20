@@ -280,7 +280,7 @@ def test_each_model_reply_leaves_a_line_of_counts_and_never_its_content(tmp_path
     b = _bridge(tmp_path)
     b.turn_log = tmp_path / "turns" / "s.jsonl"
     ev = W.normalize({"type": "message_end", "message": {
-        "role": "assistant", "stopReason": "toolUse", "content": [{"type": "text", "text": "secret words"}],
+        "role": "assistant", "stopReason": "toolUse", "model": "kimi-k3", "content": [{"type": "text", "text": "secret words"}],
         "usage": {"input": 22016, "output": 25469, "cacheRead": 0, "cost": {"total": 0.2}, "note": "secret"}}})
     assert ev[0]["stop"] == "toolUse" and ev[0]["usage"] == {"input": 22016, "output": 25469, "cacheRead": 0}
 
@@ -293,7 +293,7 @@ def test_each_model_reply_leaves_a_line_of_counts_and_never_its_content(tmp_path
 
     lines = [json.loads(x) for x in b.turn_log.read_text().splitlines()]
     assert len(lines) == 2
-    assert lines[0]["stop"] == "toolUse" and lines[0]["usage"]["output"] == 25469
+    assert lines[0]["stop"] == "toolUse" and lines[0]["usage"]["output"] == 25469 and lines[0]["model"] == "kimi-k3"
     assert lines[0]["chars"] == {"thinking": 300, "tool": 40, "text": 12} and isinstance(lines[0]["ms"], int)
     assert lines[1]["stop"] == "error" and lines[1]["error"] == "Connection error." and lines[1]["ms"] is None
     assert "secret" not in b.turn_log.read_text()

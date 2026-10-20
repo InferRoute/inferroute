@@ -38,7 +38,8 @@ PROBANT_MODEL = "kimi-k3"
 # would send a client's disclosure to a machine nobody attested, which is the one thing the product
 # exists to prevent. And it is never silent — the model that actually answered is announced, because a
 # record whose reader assumes the preferred model ran is a record that misleads.
-FALLBACK_MODELS = ("kimi-k3", "kimi-k2.6", "glm-5.2", "glm-5.1", "deepseek-v4-flash")
+# glm-5.2 before kimi-k2.6 (20 Oct): measured more accurate on drafting from code; see _CAPABILITY_FALLBACK.
+FALLBACK_MODELS = ("kimi-k3", "glm-5.2", "kimi-k2.6", "glm-5.1", "deepseek-v4-flash")
 
 
 # ── competing provider routes ─────────────────────────────────────────────────────────────────────

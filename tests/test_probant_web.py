@@ -2808,3 +2808,71 @@ def test_a_reading_shows_what_is_read_not_the_staging_file_and_the_model_still_g
     assert sent == [{"type": "prompt", "message": W.DRAFT_OPENING_INSTRUCTION}]
     js = (STATIC / "app.js").read_text()
     assert 'case "reading": readingLabel' in js and 'name === "document.txt"' in js
+
+
+def test_a_reading_cut_off_by_a_failed_reply_continues_with_the_next_invention(tmp_path):
+    """20 Oct: a reading stopped at 7 of the 10 inventions it had listed, on "the connection to the enclave
+    dropped mid-reply", and nothing said the rest were never written. It now asks for the next one itself — at
+    most three times, and never after a reply the person stopped."""
+    async def scenario():
+        b = _bridge(tmp_path)
+        b.mode, b.opening = "intake", W.DRAFT_OPENING_INSTRUCTION
+        sent = []
+        async def send(obj):
+            sent.append(obj)
+        b.send = send
+
+        async def failed_turn(stopped="error"):
+            b.publish({"kind": "busy", "value": True})
+            b.publish({"kind": "assistant_start"})
+            b.publish({"kind": "assistant_end", "stopped": stopped, "error": "the connection to the enclave dropped"})
+            b.publish({"kind": "busy", "value": False})
+            await asyncio.sleep(2.3)
+
+        for _ in range(5):
+            await failed_turn()
+        assert [m["message"] for m in sent] == [W.Bridge.CONTINUE_PROMPT] * 3, "bounded: a repeating fault is not cured by asking again"
+        assert any(e["kind"] == "notify" and "cut off" in e["message"] for e in b.history)
+
+        b2 = _bridge(tmp_path)
+        b2.mode, b2.send = "intake", send
+        sent.clear()
+        b, b2 = b2, None
+        b.publish({"kind": "busy", "value": True})
+        b.publish({"kind": "assistant_end", "stopped": "aborted"})
+        b.publish({"kind": "busy", "value": False})
+        await asyncio.sleep(2.3)
+        assert sent == [], "the person stopped it: that is not a fault to recover from"
+
+        m = _bridge(tmp_path)                    # a matter session is a conversation, not a list to finish
+        m.send = send
+        m.publish({"kind": "busy", "value": True})
+        m.publish({"kind": "assistant_end", "stopped": "error", "error": "x"})
+        m.publish({"kind": "busy", "value": False})
+        await asyncio.sleep(2.3)
+        assert sent == []
+    asyncio.run(scenario())
+
+
+def test_the_reading_instruction_asks_for_a_list_then_one_draft_per_reply_and_counts_drafts(tmp_path):
+    """Measured 20 Oct: all drafts in one reply took 21-28k tokens of a 32,768 cap and 25-35 minutes with nothing
+    shown; one per reply took 1-5 minutes each. The list goes in the same reply as the first draft, because a
+    reply that is only a list ends the turn and the session waits."""
+    i = W.DRAFT_OPENING_INSTRUCTION
+    assert "ONE PER REPLY" in i and "in that same reply create the draft matter for the first one" in i
+    b = _bridge(tmp_path)
+    b.publish({"kind": "tool_end", "tool": "create_draft_matter", "call": "c1"})
+    assert b.recorded == 1, "a reading that created drafts has recorded something"
+    src = (Path(W.__file__)).read_text()
+    body = src[src.index("    async def _end_round"):src.index("    async def open_with")]
+    assert "create_draft_matter" in body, "the reminder names the tool a reading actually has"
+
+
+def test_fallback_puts_the_more_accurate_model_before_the_faster_one():
+    """20 Oct, scored against the source by an independent reviewer: accuracy glm-5.2 5, kimi-k3 4.5, kimi-k2.6 2.
+    kimi-k2.6 was ten times faster, which is why speed must not decide the order."""
+    from inferroute_cli import confidential as C
+    from inferroute_local.confidential import availability as A
+    order = list(C.FALLBACK_MODELS)
+    assert order.index("glm-5.2") < order.index("kimi-k2.6")
+    assert A.capability_of("kimi-k3") > A.capability_of("glm-5.2") > A.capability_of("kimi-k2.6")

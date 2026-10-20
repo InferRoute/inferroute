@@ -190,8 +190,14 @@ RANK_PREFERENCE = "preference"         # exactly the order the caller listed
 # The server should own it. When /confidential/models grows `capability` (or context_length and
 # parameter count to derive it from), `capability_of` uses that and this table stops being consulted —
 # which is the setting Henry asked for, in the place he asked for it.
+#
+# glm-5.2 ABOVE kimi-k2.6 since 2026-10-20, on a measurement rather than size: the same 74k-character repository
+# read into draft disclosures, scored by an independent reviewer against the source. Accuracy out of 5: glm-5.2 5,
+# kimi-k3 4.5, kimi-k2.6 2 (it merged seven distinct mechanisms into one draft, invented an incident the source
+# says did not happen, and cited the wrong file as evidence). kimi-k2.6 was ten times FASTER — 6 minutes against
+# 32-44 — and that is exactly why the ranking must not be read off speed.
 _CAPABILITY_FALLBACK = {
-    "kimi-k3": 100, "kimi-k2.6": 90, "glm-5.2": 80, "glm-5.1": 70, "deepseek-v4-flash": 40,
+    "kimi-k3": 100, "glm-5.2": 95, "kimi-k2.6": 80, "glm-5.1": 70, "deepseek-v4-flash": 40,
 }
 
 

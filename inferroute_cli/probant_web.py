@@ -501,6 +501,8 @@ class Bridge:
         # in memory and died with the session, so that was found only from the gateway's side. Set by start().
         self.turn_log: Optional[Path] = None
         self._reply: Dict[str, Any] = {}
+        self._reply_failed = False
+        self.continued = 0                  # automatic continuations of a reading after a failed reply
         # The conversation, kept with the matter's records (under confidential/, outside the agent's reach,
         # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
         self.conversation_file = conversation_file
@@ -529,7 +531,9 @@ class Bridge:
             # Pi had the message and was not going to act on it until something else woke it.
             if was and not self.busy and self.pending_prompts:
                 asyncio.ensure_future(self._drain_pending())
-            if self.oneshot and was and not self.busy and not self.dialogs:
+            elif was and not self.busy and self._should_continue_reading():
+                asyncio.ensure_future(self._continue_reading())
+            elif self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
         if event["kind"] == "tool_start":
             name = str(event.get("tool") or "")
@@ -568,6 +572,8 @@ class Bridge:
                 self._read_this_turn = []
             # A turn that stopped on an error is the commonest reason a round records nothing, and it is
             # invisible in the text: 62 of 76 empty rounds made no tool call and said nothing at all.
+            # A reply that FAILED (not one the person stopped) in the middle of a reading: see _continue_reading.
+            self._reply_failed = event.get("stopped") == "error"
             if event.get("error") or event.get("stopped"):
                 self.last_error = f"{event.get('stopped') or 'error'}: {str(event.get('error') or '')[:300]}"
                 self.faults.append({"at": event["at"], "turn": self.turns,
@@ -581,7 +587,7 @@ class Bridge:
                                     # fingerprint: a timer shows up as the same number every time.
                                     "ms_quiet": (event["at"] - self._quiet_since) if self._quiet_since else None})
                 del self.faults[:-40]
-        if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_")):
+        if event["kind"] == "tool_end" and str(event.get("tool") or "").startswith(("record_", "propose_", "create_draft")):
             self.recorded += 1
         if event["kind"] == "dialog":
             self.dialogs[str(event["id"])] = event
@@ -790,6 +796,34 @@ class Bridge:
         except OSError:
             pass
 
+    # A READING IS A LIST OF DRAFTS, ONE PER REPLY, and a reply that fails mid-stream (the enclave connection
+    # dropped, the provider refused) ended it there: on 20 Oct a reading stopped at 7 of the 10 inventions it had
+    # listed, on "the connection to the enclave dropped mid-reply", and nobody was told the rest were never
+    # written. The list is in the conversation, so the next item is known; ask for it. Bounded, because a fault
+    # that repeats is not one that continuing will cure, and never after a reply the person stopped.
+    CONTINUE_LIMIT = 3
+    CONTINUE_PROMPT = ("Your last reply was cut off by a connection problem, so it may not have created its draft. "
+                       "Continue with the first invention on your list that has no draft matter yet, one per reply, "
+                       "until every item has a draft; then give the short summary.")
+
+    def _should_continue_reading(self) -> bool:
+        return (self.mode == "intake" and self._reply_failed and self.continued < self.CONTINUE_LIMIT
+                and not self.dialogs)
+
+    async def _continue_reading(self) -> None:
+        await asyncio.sleep(2.0)
+        if self.busy or not self._should_continue_reading():
+            return
+        self.continued += 1
+        self._reply_failed = False
+        self.publish({"kind": "notify", "level": "warning",
+                      "message": "A reply was cut off; continuing the reading with the next invention…"})
+        try:
+            await self.send({"type": "prompt", "message": self.CONTINUE_PROMPT})
+        except RuntimeError:
+            if self.oneshot:
+                await self._end_round()
+
     async def _end_round(self) -> None:
         """Close a one-shot round — but a turn ending is NOT the work being done.
 
@@ -803,11 +837,14 @@ class Bridge:
             return
         if not self.recorded and not self.nudged:
             self.nudged = True
+            # The reminder names the tool THIS session has: a reading creates drafts, it never had record_findings.
+            tool = ("create_draft_matter" if self.mode == "intake" and "create_draft" in self.opening
+                    else "propose_matter" if self.mode == "intake" else "record_findings")
             try:
                 await self.send({"type": "prompt", "message":
-                                 "You have recorded nothing yet. If you have finished reading, record your "
-                                 "findings now with record_findings. If there is genuinely nothing to record "
-                                 "in what you read, say so in one line and stop."})
+                                 f"You have recorded nothing yet. If you have finished reading, record your "
+                                 f"findings now with {tool}. If there is genuinely nothing to record "
+                                 f"in what you read, say so in one line and stop."})
             except RuntimeError:
                 pass
             return
@@ -1380,10 +1417,21 @@ class Bridge:
 
 OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it, and propose each invention you find "
                        "with propose_matter. Then write your short answer for the professional.")
-DRAFT_OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it. Create a draft matter for each distinct "
-                             "invention with create_draft_matter, preserving its full technical description and "
-                             "supporting it with a passage from the source. Then give the professional a short summary "
-                             "of the drafts actually created and anything that needs review.")
+# ONE DRAFT PER REPLY, after a list. Measured 20 Oct on the same 74k-character repository: asked for every draft at
+# once, the model planned and wrote all of them in ONE reply of 21-28k tokens against a 32,768 cap — 25-35 minutes
+# with nothing on the page, and a reply that hit the cap (or dropped mid-stream) lost every draft in it at once.
+# Asked for a list and then one draft per reply, each reply was 1-5 minutes and 1.4-3k tokens: the first draft
+# lands in minutes, a failure costs one draft, and no reply comes near the cap. The list goes in the SAME reply as
+# the first draft, because a reply that is only a list ends the turn and the session sits there waiting.
+DRAFT_OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it. Count every distinct invention separately: "
+                             "two mechanisms that solve different problems, or could be claimed independently, are two "
+                             "inventions even in the same file. Begin your next reply with a short numbered list of them, "
+                             "one line each, and in that same reply create the draft matter for the first one with "
+                             "create_draft_matter. Then create the rest ONE PER REPLY, in the order of your list, until "
+                             "every item has a draft. Each draft preserves the invention's full technical description, "
+                             "with the exact names, flags and values the source uses, is supported by a passage from the "
+                             "source, and states nothing the source does not say. Then give the professional a short "
+                             "summary of the drafts actually created and anything that needs review.")
 
 
 class Page:

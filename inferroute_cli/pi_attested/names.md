@@ -32,7 +32,9 @@ product does, which names), ask one short question rather than guessing.
    every one, and show what each search found next to it. Never present a name as
    free: present what the search found.
 5. Write the result to name-check.md in the matter folder, with the structure below,
-   then summarise it in a few lines in your answer.
+   then summarise it in a few lines in your answer. When the searches are done, write
+   the file straight away: the structure below is the plan, so do not draft or re-plan
+   the report in your reasoning first (a founder waited ten minutes on that).
 
 ## What you must never say
 
@@ -40,7 +42,7 @@ Do not say a name is available, free, clear, cleared, safe, low risk, or likely 
 unlikely to be confused with anything. Whether two marks are confusingly similar is a
 legal judgement, and it depends on more than this search shows. Say what the search
 found and why each mark resembles the name, and leave the judgement to the founder
-and their trademark attorney. Do not search the web or suggest you have.
+and a trademark professional. Do not search the web or suggest you have.
 
 ## name-check.md
 
@@ -58,7 +60,7 @@ and their trademark attorney. Do not search the web or suggest you have.
   and every word you write takes them time to wait for.
 - The data has no owners or goods descriptions: never say who owns a mark or what it
   covers beyond its classes.
-- "Questions to take to a trademark attorney": three to six specific questions this
+- A section headed exactly "Questions for a trademark professional": three to six specific questions this
   search raises (for example, whether a registered mark in the same class with one
   letter different is an obstacle; whether to file in the EU as well as France).
 

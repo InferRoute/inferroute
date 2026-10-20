@@ -117,8 +117,12 @@
   // A name-check report is Markdown written by the assistant. Shown as text it read "## 1. Kwench" and
   // "**QUENCH**". This renders the few forms the report uses (headings, lists, bold, rules) as DOM nodes built
   // from text: nothing in the file is ever parsed as HTML, so the file cannot put markup or script on the page.
+  // The file opens with what was searched and what was not, so it stands on its own when read or shared
+  // outside the app. On the matter page the coverage card above says the same from the host, so those
+  // opening lines (before the first section heading) are not shown a second time.
   function renderReport(text) {
     const box = el("div", "report-text");
+    let opening = true;
     const inline = (line) => {
       const out = document.createElement("span");
       String(line).split(/(\*\*[^*]+\*\*)/).forEach((part) => {
@@ -138,6 +142,8 @@
         continue;
       }
       list = null;
+      if (h && h[1].length > 1) opening = false;
+      if (opening && /^[*_\s]*(not searched|searched|registers searched)\b/i.test(line)) continue;
       if (h) box.append(el(h[1].length <= 1 ? "h3" : "h4", "", inline(h[2])));
       else if (/^(-{3,}|\*{3,})$/.test(line)) box.append(document.createElement("hr"));
       else if (line.trim()) { const para = document.createElement("p"); para.append(inline(line)); box.append(para); }
@@ -747,7 +753,8 @@
       }
     }
     p.append(el("h2", "section", "Sessions"));
-    if (!m.sessions.length) p.append(el("p", "sub", isName
+    if (!m.sessions.length && m.running) p.append(el("p", "sub", "The open session above is listed here when it ends."));
+    else if (!m.sessions.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
       : "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
     else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false, liveMap(m.running ? [m.running] : [])));

@@ -273,6 +273,34 @@ def test_unknown_or_dangerous_rpc_events_are_dropped_not_passed_through():
         assert ev == [{"kind": "assistant_progress", "what": what, "n": 11}] and "secret" not in repr(ev)
 
 
+def test_each_model_reply_leaves_a_line_of_counts_and_never_its_content(tmp_path):
+    """Henry's reading on 20 Oct took 72 minutes: one 35-minute reply produced nothing usable and was redone,
+    and only the gateway's records could show it. The bridge now keeps one line per reply, under confidential/
+    and not in the matter folder, with timing, stop reason, token counts and character counts. Nothing else."""
+    b = _bridge(tmp_path)
+    b.turn_log = tmp_path / "turns" / "s.jsonl"
+    ev = W.normalize({"type": "message_end", "message": {
+        "role": "assistant", "stopReason": "toolUse", "content": [{"type": "text", "text": "secret words"}],
+        "usage": {"input": 22016, "output": 25469, "cacheRead": 0, "cost": {"total": 0.2}, "note": "secret"}}})
+    assert ev[0]["stop"] == "toolUse" and ev[0]["usage"] == {"input": 22016, "output": 25469, "cacheRead": 0}
+
+    b.publish({"kind": "assistant_start"})
+    b.publish({"kind": "assistant_progress", "what": "thinking", "n": 300})
+    b.publish({"kind": "assistant_progress", "what": "tool", "n": 40})
+    b.publish({"kind": "assistant_delta", "text": "secret words"})
+    b.publish(ev[0])
+    b.publish({"kind": "assistant_end", "stopped": "error", "error": "Connection error."})   # no start: still logged
+
+    lines = [json.loads(x) for x in b.turn_log.read_text().splitlines()]
+    assert len(lines) == 2
+    assert lines[0]["stop"] == "toolUse" and lines[0]["usage"]["output"] == 25469
+    assert lines[0]["chars"] == {"thinking": 300, "tool": 40, "text": 12} and isinstance(lines[0]["ms"], int)
+    assert lines[1]["stop"] == "error" and lines[1]["error"] == "Connection error." and lines[1]["ms"] is None
+    assert "secret" not in b.turn_log.read_text()
+    assert oct(b.turn_log.stat().st_mode & 0o777) == "0o600"
+    assert not (tmp_path / "turns.jsonl").exists() and "s.jsonl" not in repr(W.disclosure_info(tmp_path))
+
+
 def test_status_and_dialog_text_arrive_without_terminal_colour_codes():
     ev = W.normalize({"type": "extension_ui_request", "id": "s", "method": "setStatus", "statusKey": "k",
                       "statusText": "\x1b[38;2;181;189;104m🔒 AI: sealed machine\x1b[39m"})

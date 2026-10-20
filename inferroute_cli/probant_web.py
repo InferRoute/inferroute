@@ -201,6 +201,16 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
             return []
         text = "".join(str(c.get("text", "")) for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "text")
         out: Dict[str, Any] = {"kind": "assistant_end", "text": text}
+        # How the reply ended and what it cost, as a word and INTEGERS only: what the turn log needs to tell a
+        # slow reply from a wasted one. A 35-minute reply on 20 Oct ended with no usable output and was redone
+        # from scratch, and nothing on this computer could say so afterwards.
+        if msg.get("stopReason"):
+            out["stop"] = str(msg.get("stopReason"))[:20]
+        usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
+        counts = {k: usage[k] for k in ("input", "output", "cacheRead") if isinstance(usage.get(k), int)
+                  and not isinstance(usage.get(k), bool)}
+        if counts:
+            out["usage"] = counts
         if msg.get("stopReason") in ("error", "aborted"):
             out["stopped"] = msg.get("stopReason")
             if msg.get("errorMessage"):
@@ -485,6 +495,12 @@ class Bridge:
         # Event types Pi sent that the page has no vocabulary for. Counted by name only — never content —
         # so that a turn that ends in an event we don't understand leaves a trail instead of a mystery.
         self.dropped: Dict[str, int] = {}
+        # ONE LINE PER MODEL REPLY: when it started, how long it took, how it ended, how many tokens and how many
+        # characters of reasoning, tool call and text. Counts only, never content. Henry's reading on 20 Oct took
+        # 72 minutes because one 35-minute reply produced nothing usable and was redone; the faults above live
+        # in memory and died with the session, so that was found only from the gateway's side. Set by start().
+        self.turn_log: Optional[Path] = None
+        self._reply: Dict[str, Any] = {}
         # The conversation, kept with the matter's records (under confidential/, outside the agent's reach,
         # owner-only) so the home page can show it later. Announced on the page; None keeps nothing.
         self.conversation_file = conversation_file
@@ -522,7 +538,15 @@ class Bridge:
                 key = str(((event.get("args") or {}) if isinstance(event.get("args"), dict) else {}).get("key") or "").upper()
                 if key:
                     self._read_this_turn.append(key)
+        if event["kind"] == "assistant_start":
+            self._reply = {"began": event["at"], "thinking": 0, "tool": 0, "text": 0}
+        elif event["kind"] == "assistant_progress" and self._reply:
+            key = "thinking" if event.get("what") == "thinking" else "tool"
+            self._reply[key] += int(event.get("n") or 0)
+        elif event["kind"] == "assistant_delta" and self._reply:
+            self._reply["text"] += len(str(event.get("text") or ""))
         if event["kind"] == "assistant_end":
+            self._log_reply(event)
             self.turns += 1
             if str(event.get("text") or "").strip():
                 self.last_assistant = str(event.get("text"))
@@ -716,6 +740,25 @@ class Bridge:
             os.replace(tmp, path)
         except OSError:
             pass
+
+    def _log_reply(self, event: Dict[str, Any]) -> None:
+        r, self._reply = self._reply, {}
+        if self.turn_log is None:
+            return
+        line = {"at": dt.datetime.fromtimestamp(event["at"] / 1000, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "mode": self.mode, "reply": self.turns + 1,
+                "ms": (event["at"] - r["began"]) if r else None,
+                "stop": event.get("stop") or event.get("stopped") or "", "usage": event.get("usage") or {},
+                "chars": {k: r[k] for k in ("thinking", "tool", "text")} if r else {}}
+        if event.get("error"):
+            line["error"] = str(event["error"])[:200]
+        try:
+            self.turn_log.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd = os.open(self.turn_log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(line) + "\n")
+        except OSError:
+            pass                                    # a log must never fail the turn it describes
 
     def _write_round_log(self, why: str) -> None:
         """Why a round ended, beside what it produced — written to the run directory, never to a console.
@@ -1410,6 +1453,9 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
                     conversation_file=kept,
                     records_dir=records_dir(client, name) if client else None,
                     mode=mode, intake_id=str(probant.get("intake") or ""))
+    from .probant import _irhome
+    bridge.turn_log = (_irhome() / "confidential" / "turns" /
+                       f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}.jsonl")
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:

@@ -444,6 +444,7 @@ class Bridge:
         # toolCallId → tool name, for calls that started and have not ended.
         self.running_tools: Dict[str, str] = {}
         self.opening = ""                   # a reading session's first instruction; empty for a matter session
+        self.reading = ""                   # what that reading is, in the person's words ("the code of x (8 files)")
         self.oneshot = False                # a round of a cluster run: end the session when its work is done
         self.recorded = 0                   # findings this session has actually written
         self.turns = 0                      # assistant turns, so "barely started" is distinguishable
@@ -817,7 +818,14 @@ class Bridge:
         text, self.opening = self.opening, ""
         if not text:
             return
-        self.publish({"kind": "user", "text": text})
+        # The instruction is for the model ("Read document.txt …"); the person sees what they asked for, and the
+        # name of what is being read, never the staging file's name (Henry, 20 Oct).
+        if self.reading:
+            self.publish({"kind": "reading", "label": self.reading})
+            self.publish({"kind": "user", "text": f"Read {self.reading} and draft a matter for each invention in it."
+                          if "create_draft_matter" in text else f"Read {self.reading} and propose each invention in it."})
+        else:
+            self.publish({"kind": "user", "text": text})
         try:
             await self.send({"type": "prompt", "message": text})
         except RuntimeError:
@@ -1422,12 +1430,27 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
         # A round of a cluster run has nobody at the keyboard: when its turn ends, the round is over, and
         # a session left open would hold the next round behind it.
         bridge.oneshot = bool(probant.get("oneshot"))
+        bridge.reading = reading_label(workspace)
     url = open_url(bridge)
     opened = launch_browser(url)
     console.print(f"\n[bold]Open this session in your browser:[/]  {url}")
     console.print("[grey58]" + ("Opened it for you. " if opened else "") +
                   "The link works on this computer only and belongs to this session alone; don't share it.[/]\n")
     return Page(bridge, server, task)
+
+
+def reading_label(workspace: Path) -> str:
+    """What a reading session reads, as the person would name it: the repository and how many of its files,
+    or the document's name. Empty when the staged meta cannot be read (the page then shows the instruction)."""
+    try:
+        meta = json.loads((workspace / "meta.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if meta.get("kind") == "repo":
+        n = len(meta.get("files") or [])
+        return f"the code of {meta.get('repo_name') or 'the repository'} ({n} file{'s' if n != 1 else ''})"
+    name = str(meta.get("source_name") or "").strip()
+    return f"“{name}”" if name and name != "pasted document" else "your document"
 
 
 def open_url(bridge: Bridge) -> str:

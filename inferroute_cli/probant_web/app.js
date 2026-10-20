@@ -653,9 +653,15 @@
     lastError = { plain, node, counter, count: 1 };
   }
 
+  // A reading session names what it reads ("the code of x (8 files)"); its staging file is not the person's word.
+  let readingLabel = "";
   const STEP_TEXT = {
     create_draft_matter: (a) => `Create draft: ${a.title || "invention"}`,
-    read: (a) => `Read ${String(a.path || "").split("/").pop() || "a file"}`,
+    read: (a) => {
+      const name = String(a.path || "").split("/").pop();
+      if (readingLabel && name === "document.txt") return a.offset ? `Read further into ${readingLabel}` : `Read ${readingLabel}`;
+      return `Read ${name || "a file"}`;
+    },
     ls: () => "Looked at the matter folder",
     find: () => "Searched the matter folder for files",
     grep: (a) => `Searched the matter folder for “${a.pattern || ""}”`,
@@ -2073,6 +2079,7 @@
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
       case "assistant_progress": assistantProgress(ev.what, ev.n); break;
+      case "reading": readingLabel = String(ev.label || ""); break;
       case "assistant_end":
         assistantEnd(ev);
         // The assistant's words about a document are attached when the turn ends, so a popup opened after

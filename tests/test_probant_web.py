@@ -2756,3 +2756,27 @@ def test_the_ir_audit_command_names_the_model_so_the_report_does_not_say_claude(
     assert E.AUDIT_IR_PROMPT.startswith(E.AUDIT_PROMPT)
     assert shlex.split(cmd)[-1] == E.AUDIT_IR_PROMPT            # the shown command and the run command agree
 
+
+
+def test_a_reading_shows_what_is_read_not_the_staging_file_and_the_model_still_gets_its_instruction(tmp_path):
+    """Henry, 20 Oct: "why does it say Read document.txt if its reading code / the repo files"."""
+    (tmp_path / "meta.json").write_text(json.dumps({"kind": "repo", "repo_name": "gadget", "files": [{}, {}, {}]}))
+    assert W.reading_label(tmp_path) == "the code of gadget (3 files)"
+    (tmp_path / "meta.json").write_text(json.dumps({"source_name": "battery-notes"}))
+    assert W.reading_label(tmp_path) == "“battery-notes”"
+    (tmp_path / "meta.json").unlink()
+    assert W.reading_label(tmp_path) == ""
+    b = _bridge(tmp_path)
+    b.reading, b.opening = "the code of gadget (3 files)", W.DRAFT_OPENING_INSTRUCTION
+    sent = []
+    async def send(obj):
+        sent.append(obj)
+    b.send = send
+    asyncio.run(b.open_with())
+    shown = [e for e in b.history if e["kind"] in ("reading", "user")]
+    assert shown[0]["label"] == "the code of gadget (3 files)"
+    assert shown[1]["text"] == "Read the code of gadget (3 files) and draft a matter for each invention in it."
+    assert "document.txt" not in json.dumps(shown)
+    assert sent == [{"type": "prompt", "message": W.DRAFT_OPENING_INSTRUCTION}]
+    js = (STATIC / "app.js").read_text()
+    assert 'case "reading": readingLabel' in js and 'name === "document.txt"' in js

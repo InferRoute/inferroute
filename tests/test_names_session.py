@@ -144,6 +144,9 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     (S.workspace_path("Acme", "brand") / "name-check.md").write_text("# Name check\n\nZEBRA (US 7)\n")
     report = c.get("/api/name-check?id=Acme/brand").json()
     assert report["present"] and "ZEBRA" in report["text"] and report["written_at"].endswith("Z")
+    from inferroute_cli import tm_search
+    tm_search.log_search(S.records_dir("Acme", "brand"), {"name": "Zebrafy", "classes": ["9"], "hits": [], "more": 0})
+    assert [x["name"] for x in c.get("/api/name-check?id=Acme/brand").json()["searches"]] == ["Zebrafy"]
     c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
     assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"
 

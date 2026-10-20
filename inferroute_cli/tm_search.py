@@ -398,10 +398,44 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
     return out
 
 
-def install_route(app, index_path: Path) -> None:
+SEARCH_LOG = "trademark-searches.jsonl"
+LOGGED_HITS = 40
+
+
+def log_search(log_dir: Path, result: Dict[str, Any]) -> None:
+    """Keep what a search returned, as the host saw it, in the matter's records (write-denied to the agent).
+    The matter page lists every search from this file, so the marks a founder reads come from the search, not
+    from the assistant retyping them, and the assistant's report can stay short."""
+    entry = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             **{k: result.get(k) for k in ("name", "classes", "data_date", "sources", "marks_searched")},
+             "hits": result.get("hits", [])[:LOGGED_HITS],
+             "more": result.get("more", 0) + max(0, len(result.get("hits", [])) - LOGGED_HITS)}
+    log_dir.mkdir(parents=True, exist_ok=True)
+    with (log_dir / SEARCH_LOG).open("a", encoding="utf-8") as fh:
+        fh.write(__import__("json").dumps(entry, ensure_ascii=False) + "\n")
+
+
+def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
+    """The searches of a matter, the latest for each name and set of classes, newest first."""
+    import json as _json
+    try:
+        lines = (log_dir / SEARCH_LOG).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    latest: Dict[Tuple, Dict[str, Any]] = {}
+    for line in lines:
+        try:
+            e = _json.loads(line)
+        except ValueError:
+            continue
+        latest[(compact(str(e.get("name") or "")), tuple(e.get("classes") or []))] = e
+    return sorted(latest.values(), key=lambda e: e.get("at") or "", reverse=True)
+
+
+def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None:
     """The trademark search as a host capability for a name session, behind the sealed proxy's per-session
     authentication. The index is opened on the host; the agent sends a name and classes and gets marks back.
-    Nothing here makes a network request."""
+    Each result is also kept in `log_dir` (see log_search). Nothing here makes a network request."""
     import asyncio
     from fastapi import Request
     from fastapi.responses import JSONResponse
@@ -432,6 +466,8 @@ def install_route(app, index_path: Path) -> None:
         try:
             import json as _json
             result = await asyncio.to_thread(run, _json.loads(raw or b"{}"))
+            if log_dir is not None:
+                await asyncio.to_thread(log_search, Path(log_dir), result)
         except FileNotFoundError:
             return JSONResponse({"error": "no trademark index is installed on this computer"}, status_code=503)
         except (ValueError, TypeError) as error:

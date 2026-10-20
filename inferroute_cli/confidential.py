@@ -900,7 +900,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 probant_intake.install_creation_route(local_app, creator)
             if probant and probant.get("mode") == "names":
                 from . import tm_search, probant as probant_mod
-                tm_search.install_route(local_app, probant_mod.tm_index_path())
+                tm_search.install_route(local_app, probant_mod.tm_index_path(),
+                                        Path(os.environ["IR_MATTER_RECORD_DIR"]) if os.environ.get("IR_MATTER_RECORD_DIR") else None)
             server = uvicorn.Server(uvicorn.Config(local_app, host="127.0.0.1",
                                                    port=port, log_level="critical",
                                                    timeout_keep_alive=SEALED_KEEPALIVE_S))

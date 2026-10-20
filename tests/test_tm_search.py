@@ -202,3 +202,20 @@ def test_searches_running_at_once_all_answer(index):
     with ThreadPoolExecutor(8) as pool:
         results = list(pool.map(lambda n: index.search(n, ["9", "42"]), names))
     assert all(r["name"] == n for r, n in zip(results, names))
+
+
+def test_each_search_is_kept_where_the_matter_page_reads_it(index, tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+    T.install_route(app, index.path, tmp_path / "records")
+    c = TestClient(app)
+    assert c.post("/probant/tm/search", json={"name": "Kwik", "classes": ["29"]}).status_code == 200
+    assert c.post("/probant/tm/search", json={"name": "Anteriora"}).status_code == 200
+    assert c.post("/probant/tm/search", json={"name": "Kwik", "classes": ["29"]}).status_code == 200
+    got = T.logged_searches(tmp_path / "records")
+    assert [g["name"] for g in got] == ["Kwik", "Anteriora"]          # latest per name and classes, newest first
+    kwik = got[0]
+    assert kwik["classes"] == ["29"] and kwik["data_date"] == "2026-09-30"
+    assert {h["number"] for h in kwik["hits"]} >= {"1", "2"}           # QUICK, KWIK'PAK as the search returned them
+    assert T.logged_searches(tmp_path / "nothing") == []

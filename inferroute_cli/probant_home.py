@@ -789,13 +789,15 @@ class Home:
                 _client, _matter, rec = matter_of(id)
             except S.ProbantError as e:
                 return problem(str(e), 404)
+            from . import tm_search
+            searches = await asyncio.to_thread(tm_search.logged_searches, S.records_dir(_client, _matter))
             path = Path(str(rec.get("workspace") or "")) / "name-check.md"
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")[:200_000]
                 at = dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             except OSError:
-                return {"present": False, "file": str(path)}
-            return {"present": True, "text": text, "written_at": at, "file": str(path)}
+                return {"present": False, "file": str(path), "searches": searches}
+            return {"present": True, "text": text, "written_at": at, "file": str(path), "searches": searches}
 
         @app.get("/api/matter")
         async def matter_view(id: str = ""):

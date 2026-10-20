@@ -694,6 +694,27 @@
       } else {
         p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
       }
+      // Every search, as the search itself returned it on this computer: the marks below are not retyped by the
+      // assistant, so their numbers, statuses and classes can be relied on as the register data says them.
+      const searches = (rep && rep.searches) || [];
+      if (searches.length) {
+        p.append(el("h2", "section", "Every search the assistant ran"));
+        p.append(el("p", "sub", "Straight from the search on this computer, closest first. The latest search of each name and set of classes is shown."));
+        for (const sr of searches) {
+          const cls = (sr.classes || []).length ? `classes ${sr.classes.join(", ")}` : "all classes";
+          const n = (sr.hits || []).length;
+          const box = el("details", "search-log",
+            el("summary", "", el("b", "", `“${sr.name}”`), ` · ${cls} · ${n ? `${n}${sr.more ? "+" : ""} similar mark${n === 1 ? "" : "s"}` : "no similar registered word marks found"} · ${localTime(sr.at)}`));
+          for (const h of sr.hits || []) {
+            const yours = (h.overlapping_classes || []).length ? ` · in your classes ${h.overlapping_classes.join(", ")}` : "";
+            box.append(el("div", "search-hit",
+              el("div", "", el("b", "", h.text), ` — ${h.register} ${h.number}, ${h.status}, classes ${(h.classes || []).join(", ") || "none recorded"}${yours}`),
+              el("div", "sub", (h.reasons || []).join("; "))));
+          }
+          if (sr.more) box.append(el("p", "sub", `…and ${sr.more} more, less close.`));
+          p.append(box);
+        }
+      }
     }
     p.append(el("h2", "section", "Sessions"));
     if (!m.sessions.length) p.append(el("p", "sub", isName

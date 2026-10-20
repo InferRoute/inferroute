@@ -1,0 +1,21 @@
+{
+ "about": "Evaluation set for the trademark name check (tm_search). `conflicts`: a name a founder might type, the classes they would search, and a registered mark it obviously resembles (compact spelling) that must come back in the top 20. Pairs are look-alikes and sound-alikes of real registered marks (English and French spellings, spacing, plurals), and Kwik/Quick is the textbook case. Picaro/Picasso (CJEU C-361/04) concerned cars under an EU mark; PICASSO is not in class 12 in the US or French data, so the pair is searched in class 9, where it is. `clean`: invented names that resemble no mark; nothing may come back for them as the same spelling or the same sound. Run with tools/tm_eval.py against a built index.",
+ "conflicts": [
+  ["Kwik", [9], "quick"], ["Kwench", [30], "quench"], ["Lexxus", [12], "lexus"], ["Fotoshop", [9], "photoshop"],
+  ["Kanon", [9], "canon"], ["Nyke", [25], "nike"], ["Adiddas", [25], "adidas"], ["Gougle", [9], "google"],
+  ["Spotifai", [9], "spotify"], ["Ubeur", [9], "uber"], ["Blablakar", [39], "blablacar"], ["Doktolib", [44], "doctolib"],
+  ["Mishlin", [12], "michelin"], ["Lorial", [3], "loreal"], ["Danon", [29], "danone"], ["Chanell", [3], "chanel"],
+  ["Picaro", [9], "picasso"], ["Zeroks", [9], "xerox"], ["Kodac", [9], "kodak"], ["Seefora", [3], "sephora"],
+  ["Karfour", [35], "carrefour"], ["Dekatlon", [28], "decathlon"], ["Fnak", [35], "fnac"], ["Bik", [16], "bic"],
+  ["Netflics", [41], "netflix"], ["Slak", [42], "slack"], ["Shopifai", [42], "shopify"], ["Stryp", [36], "stripe"],
+  ["Evyan", [32], "evian"], ["Perier", [32], "perrier"], ["Lakost", [25], "lacoste"], ["Ermes", [18], "hermes"],
+  ["Vintid", [35], "vinted"], ["Konto", [36], "qonto"], ["Lidia", [36], "lydia"], ["Mirakle", [35], "mirakl"],
+  ["Swyle", [35], "swile"], ["Deezor", [9], "deezer"], ["Kriteo", [35], "criteo"], ["Nutela", [30], "nutella"],
+  ["Oranjina", [32], "orangina"], ["Heetsh", [39], "heetch"], ["Kanva", [42], "canva"], ["Zoum", [9], "zoom"],
+  ["Air Bnb", [43], "airbnb"], ["Drop Box", [42], "dropbox"], ["Face Book", [9], "facebook"],
+  ["Linked In", [42], "linkedin"], ["Le Bon Coin", [35], "leboncoin"], ["Notions", [42], "notion"],
+  ["Docusigne", [9], "docusign"], ["Payfitt", [42], "payfit"]
+ ],
+ "clean": ["Plimquade", "Vaxtrumel", "Oszkariny", "Brulmipet", "Quandrefil", "Truvolenz", "Gemblarid",
+           "Fyntorax", "Wuxolamb", "Drelqontif"]
+}

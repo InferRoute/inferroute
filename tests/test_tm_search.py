@@ -121,3 +121,63 @@ def test_a_close_sound_key_alone_is_not_called_close():
     p = pathlib.Path(tempfile.mkdtemp()) / "x.sqlite"
     T.build(iter(path_rows), p, "d", ["t"])
     assert not T.Index(p).search("Antériorité")["hits"]
+
+
+def test_the_fine_sound_key_hears_kw_and_keeps_vowels():
+    # The index's key reads every vowel as "a" and "qu" as "k", so Kwik, Quick, Kick and Cake all read "kak";
+    # on the real index KICK, KEEK and CAKE were reported as sounding like "Kwik".
+    assert T.sound_fine("Kwik") == T.sound_fine("Quick") == T.sound_fine("Qwik") == T.sound_fine("Kwyk")
+    assert T.sound_fine("Kick") != T.sound_fine("Kwik") != T.sound_fine("Cake")
+    assert T.sound_fine("Zoum") == T.sound_fine("Zoom") and T.sound_fine("Konto") == T.sound_fine("Qonto")
+    assert T.sound_fine("Danon") == T.sound_fine("Danone") and T.sound_fine("Stryp") == T.sound_fine("Stripe")
+
+
+def _index_of(tmp_path, rows):
+    path = tmp_path / "x.sqlite"
+    T.build(iter(rows), path, "2026-09-30", ["test"])
+    return T.Index(path)
+
+
+def test_a_mark_that_sounds_the_same_ranks_above_one_that_only_contains_the_name(tmp_path):
+    ix = _index_of(tmp_path, [("US", "1", "KWIK SEW", "registered", ["9"], ""),
+                              ("US", "2", "QUICK", "registered", ["9"], ""),
+                              ("US", "3", "KICK", "registered", ["9"], ""),
+                              ("US", "4", "CAKE", "registered", ["9"], "")])
+    hits = ix.search("Kwik", ["9"])["hits"]
+    order = [h["number"] for h in hits]
+    assert order.index("2") < order.index("1")                   # QUICK ranked 78th on the real index before
+    reasons = {h["number"]: h["reasons"] for h in hits}
+    assert reasons["2"] == ["sounds alike"]
+    assert "sounds alike" not in reasons.get("3", []) and "4" not in reasons
+
+
+def test_containing_the_name_means_containing_it_within_words(tmp_path):
+    ix = _index_of(tmp_path, [("FR", "1", "Amplitude Anterior Approche", "registered", ["10"], ""),
+                              ("US", "2", "AIR BNB", "registered", ["43"], ""),
+                              ("US", "3", "ECHLORIAL", "registered", ["3"], ""),
+                              ("US", "4", "L'OREAL", "registered", ["3"], "")])
+    assert not ix.search("Anteriora")["hits"]                 # the letters only run on across a space
+    assert ix.search("Airbnb")["hits"][0]["number"] == "2"
+    order = [h["number"] for h in ix.search("Lorial", ["3"])["hits"]]
+    assert order.index("4") < order.index("3")               # the name inside a longer word ranks low
+
+
+EVAL_INDEX = __import__("os").environ.get("IR_TM_EVAL_INDEX") or str(__import__("pathlib").Path.home() / "anteriora-tmdata" / "index-us-fr.sqlite")
+
+
+@pytest.mark.skipif(not __import__("os").path.isfile(EVAL_INDEX), reason="needs a built index (IR_TM_EVAL_INDEX)")
+def test_the_evaluation_set_on_the_built_index(capsys):
+    """tests/data/tm_eval.json against the real index (about a minute and a half). Measured 2026-10-20 on the
+    US+FR index of 5,741,201 marks: before tuning 49/52 obvious conflicts in the top 20 (Kwik/QUICK 78th,
+    Picaro/PICASSO and Karfour/CARREFOUR never scored) and 5 false same-sound claims for
+    invented names (OSCAR ONO, TRUE VILLAINS); after, 52/52 and none. Median search 1.1 s before, 1.5 s after."""
+    import importlib.util
+    import pathlib
+    here = pathlib.Path(__file__).resolve().parent
+    spec = importlib.util.spec_from_file_location("tm_eval", here.parent / "tools" / "tm_eval.py")
+    tm_eval = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tm_eval)
+    data = json.loads((here / "data" / "tm_eval.json").read_text())
+    got = tm_eval.evaluate(T.Index(EVAL_INDEX), data)
+    assert got["recall"] == got["of"], {k: v for k, v in got["ranks"].items() if not v or v > 20}
+    assert not any(got["clean_strong"].values()), got["clean_strong"]

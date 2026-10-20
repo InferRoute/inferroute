@@ -36,6 +36,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 SCHEMA = "anteriora.tm-index/1"
 GRAM = 3
 MAX_CANDIDATES = 12000      # scored in full; ties are broken by id so a search always returns the same list
+POOL = 8                    # how many times that many are gathered before the length-aware shortlist
 
 _DIGITS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
            "7": "seven", "8": "eight", "9": "nine"}
@@ -79,6 +80,44 @@ def sound(text: str) -> str:
     head, tail = s[:1], s[1:]
     tail = re.sub(r"[aeiou]+", "a", tail)                  # vowel quality after the first letter is noisy
     return head + tail
+
+
+_FINE = [
+    (r"^kn", "n"), (r"^wr", "r"), (r"^ps", "s"), (r"^x", "s"),
+    (r"^chr", "kr"), (r"eau", "o"), (r"sch", "sh"), (r"tch", "ch"), (r"ch", "sh"), (r"dg", "j"), (r"ph", "f"), (r"gh", "g"),
+    (r"qu", "kw"), (r"q", "k"), (r"ck", "k"), (r"cw", "kw"), (r"x", "ks"),
+    (r"c(?=[eiy])", "s"), (r"c", "k"), (r"z", "s"), (r"y", "i"),
+    (r"ou|oo", "u"), (r"ee|ea|ie|ei", "i"), (r"ai|ay", "e"), (r"au|aw", "o"), (r"oe", "e"), (r"(?<![cs])h", ""),
+]
+_FINE = [(re.compile(a), b) for a, b in _FINE]
+
+
+def sound_fine(text: str) -> str:
+    """A finer sound key: sound()'s spelling rules with the vowels and the w of "qu" kept. sound() is what the
+    index is built on and only gathers candidates; with every vowel read as "a" and "qu"/"kw" as "k", "Kwik",
+    "Quick", "Kick" and "Cake" all read "kak". This key decides "sounds alike" (Kwik = Quick = Qwik, not Kick or
+    Cake) and grades how close two sounds are. It is computed at search time, so it changes without a new index."""
+    flat = compact(text)
+    s = "".join(_DIGITS.get(c, c) for c in flat)
+    for pattern, repl in _FINE:
+        s = pattern.sub(repl, s)
+    s = re.sub(r"(.)\1+", r"\1", s)
+    if len(s) > 3 and re.search(r"[^aeiouy]e$", flat):
+        s = s[:-1]                                         # a silent final e after a consonant
+    return s
+
+
+def _runs_of_words(flat: str, ws: Sequence[str]) -> bool:
+    """True if `flat` is two or more consecutive whole words of `ws` run together ("airbnb" in "AIR BNB")."""
+    for i in range(len(ws)):
+        joined = ws[i]
+        for j in range(i + 1, len(ws)):
+            joined += ws[j]
+            if joined == flat:
+                return True
+            if len(joined) >= len(flat):
+                break
+    return False
 
 
 def grams(key: str) -> List[str]:
@@ -214,7 +253,7 @@ class Index:
         need = 0.3 * sum(weights) if weights else 1.0       # a floor; the weighted ranking and the cap do the rest
         cand = [i for i, v in votes.items() if v >= need]
         cand.sort(key=lambda i: (-votes[i], i))
-        cand = cand[:MAX_CANDIDATES]
+        cand = self._shortlist(cand[:MAX_CANDIDATES * POOL], votes, sum(weights), len(grams(key)))
         wanted = {str(int(c)) for c in classes if str(c).strip().isdigit()}
         hits = []
         for chunk in range(0, len(cand), 900):
@@ -229,26 +268,49 @@ class Index:
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 "hits": hits[:limit], "more": max(0, len(hits) - limit)}
 
+    def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
+        """The candidates scored in full: those sharing the most of the name's sound fragments RELATIVE TO THEIR
+        OWN LENGTH. Raw shared weight favours long marks, which share more fragments with anything; ranked that
+        way, PICASSO (for "Picaro") and CARREFOUR (for "Karfour") sat past the 14,000th candidate and were never
+        scored. A mark found by its whole spelling or a whole word (100 / 40 votes) is always kept."""
+        if len(ids) <= MAX_CANDIDATES:
+            return ids
+        per_gram = weight / max(1, n_grams)
+        size: Dict[int, int] = {}
+        for chunk in range(0, len(ids), 900):
+            part = ids[chunk:chunk + 900]
+            for i, text in self.db.execute(f"SELECT id, text FROM marks WHERE id IN ({','.join('?' * len(part))})", part):
+                size[i] = len(compact(text)) + 2 - GRAM + 1
+        def dice(i: int) -> float:
+            return 2 * votes[i] / (weight + per_gram * size.get(i, n_grams))
+        kept = sorted(ids, key=lambda i: (-(votes[i] >= 40), -dice(i), i))
+        return kept[:MAX_CANDIDATES]
+
     @staticmethod
     def _score(row, flat: str, key: str, ws: List[str], wanted: set) -> Optional[Dict[str, Any]]:
         _, register, number, text, status, classes, filed = row
-        mflat, mkey, mws = compact(text), sound(text), words(text)
+        mflat, mws = compact(text), words(text)
+        fine, mfine = sound_fine(flat), sound_fine(text)
         reasons = []
         spell = similarity(flat, mflat)
-        hear = similarity(key, mkey)
+        hear = similarity(fine, mfine)
         if mflat == flat:
             reasons.append("same spelling")
-        elif mkey == key:
+        elif mfine == fine and len(fine) >= 2:
             reasons.append("sounds alike")
         elif spell >= 0.75 and len(flat) >= 4:
             reasons.append("spelled closely")
-        elif hear >= 0.85 and spell >= 0.5 and len(key) >= 3:
-            # Vowels are collapsed in the sound key, so a close key alone is weak evidence; the spelling has
-            # to be at least half the same too ("Annuaire Ehret" is not close to "Antériorité").
+        elif hear >= 0.75 and spell >= 0.5 and len(fine) >= 4:
+            # A close sound with at least half the spelling in common ("Annuaire Ehret" is not close to
+            # "Antériorité"; "Karfour" is close to "Carrefour").
             reasons.append("sounds close")
-        if len(flat) >= 4 and flat != mflat and flat in mflat:
+        # Containment counts whole words only: "Anteriora" is not inside "Amplitude Anterior Approche" just
+        # because the letters run on across a space.
+        inside = flat != mflat and len(flat) >= 4 and (_runs_of_words(flat, mws) or any(flat in w for w in mws))
+        holds = flat != mflat and len(mflat) >= 4 and (_runs_of_words(mflat, ws) or any(mflat in w for w in ws))
+        if inside:
             reasons.append("contains your name")
-        elif len(mflat) >= 4 and flat != mflat and mflat in flat:
+        elif holds:
             reasons.append("is contained in your name")
         shared = sorted({w for w in ws if w in mws and len(w) >= 3} - {flat if flat in mws and mflat == flat else ""})
         if shared and "same spelling" not in reasons:
@@ -257,10 +319,18 @@ class Index:
             return None
         mclasses = [c for c in (classes or "").split(",") if c]
         overlap = sorted(set(mclasses) & wanted, key=int) if wanted else []
-        # Closest first. A shared whole word outranks a loose sound-alike, and a sound key of three letters or
-        # fewer is too short to carry much on its own. Spelling breaks ties between marks that sound the same.
-        sounds = (0.9 if len(key) >= 4 else 0.75) if mkey == key else hear * 0.85
-        score = round(max(spell, sounds, 1.0 if mflat == flat else 0, 0.95 if shared else 0) + 0.1 * spell, 3)
+        # Closest first, in tiers measured on tests/data/tm_eval.json: the same spelling; the same sound (QUICK
+        # for "Kwik" ranked 78th when a mark merely containing the word scored higher); the name as a whole word
+        # of a longer mark, fewer extra words first; then close spellings and sounds by how close; then a word
+        # of the name inside the mark; the name inside a longer word; a shorter mark inside the name. Spelling
+        # breaks ties.
+        whole_word = flat in mws or bool(_runs_of_words(flat, mws))
+        tiers = [1.0 if mflat == flat else 0, 0.95 if "sounds alike" in reasons else 0,
+                 0.9 - 0.02 * min(5, len(mws) - len(ws)) if whole_word and mflat != flat else 0,
+                 0.9 * max(spell, hear), 0.75 if shared else 0,
+                 0.7 if inside else 0,          # inside a longer word ("ECHLORIAL") ranked above L'OREAL at 0.8
+                 0.5 + 0.15 * len(mflat) / len(flat) if holds else 0]
+        score = round(max(tiers) + 0.05 * spell, 3)
         return {"register": register, "number": number, "text": text, "status": status, "classes": mclasses,
                 "filed": filed, "reasons": reasons, "score": score,
                 "class_overlap": 1 if overlap else 0, "overlapping_classes": overlap}

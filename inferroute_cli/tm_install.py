@@ -22,6 +22,7 @@ INDEX = {
     "sha256": "d37b71fc64b974c97c47bddf834ac07ee50fcffbdff3ff76c314a1d4af5c5dca",
     "bytes": 804_175_872,
     "data": "US marks to 2026-09-30, French marks to 2026-10-16",
+    "sources": "USPTO (United States); INPI (France)",
 }
 CHUNK = 1 << 20
 

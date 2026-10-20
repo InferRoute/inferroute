@@ -56,6 +56,7 @@
   let homeUrl = "";
   let matterId = "";
   let readingSession = false;
+  let nameSession = false;          // a name matter: trademark search on this computer, no patent search
   let intakeId = "";
   let draftRefreshTimer = null;
 
@@ -2212,6 +2213,7 @@
     searchTiming = s.search_timing || null;
     searchOffered = Boolean(s.search);
     readingSession = s.mode === "intake";
+    nameSession = s.mode === "names";
     intakeId = String(s.intake_id || "");
     $("layout").hidden = false;
     document.title = `Anteriora · ${s.matter}`;
@@ -2249,6 +2251,9 @@
       refreshIntakeDrafts();
       draftRefreshTimer = setInterval(refreshIntakeDrafts, 5000);
       window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
+    } else if (nameSession && d.disclosure_words > 0) {
+      line.textContent = `Your product and names are in the matter folder (disclosure.md, ${d.disclosure_words} words). The trademark search runs on this computer; the AI reads your notes and the results.`;
+      $("input").placeholder = "Ask about your names, or add one to check…";
     } else if (d.disclosure_words > 0) {
       line.textContent = `The disclosure is in the matter folder: disclosure.md, ${d.disclosure_words} words.`;
     } else {
@@ -2260,7 +2265,9 @@
       $("empty").insertBefore(el("div", "row disclosure-actions", write), $("suggestions"));
     }
     const sugg = $("suggestions");
-    const ideas = readingSession ? [] : s.search
+    const ideas = readingSession ? [] : nameSession
+      ? ["Check the names in my notes", "Which trademark classes does my product fall in?", "Suggest a few names and check each one"]
+      : s.search
       ? ["Run a prior-art survey of the disclosure", "Summarise the disclosure's key technical features", "Which features are most likely to have prior art?"]
       : ["Summarise the disclosure's key technical features", "What would a prior-art search need to cover?"];
     for (const idea of ideas) {

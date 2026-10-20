@@ -136,7 +136,14 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     assert (S.workspace_path("Acme", "brand") / "disclosure.md").read_text().startswith("# Names to check")
     assert c.get("/api/overview").json()["matters"][0]["kind"] == "name"
     status = c.get("/api/tm-index").json()
-    assert status["installed"] is False and status["download_mb"] > 0
+    assert status["installed"] is False and status["download_mb"] > 0 and status["disk_mb"] > status["download_mb"]
+    # The page says what the data holds and what it does not, before the download and on every report.
+    assert any("USPTO" in x for x in status["searched"]) and any("INPI" in x for x in status["searched"])
+    assert "EU trade marks (EUIPO)" in status["not_searched"] and "company and trading names" in status["not_searched"]
+    assert c.get("/api/name-check?id=Acme/brand").json()["present"] is False
+    (S.workspace_path("Acme", "brand") / "name-check.md").write_text("# Name check\n\nZEBRA (US 7)\n")
+    report = c.get("/api/name-check?id=Acme/brand").json()
+    assert report["present"] and "ZEBRA" in report["text"] and report["written_at"].endswith("Z")
     c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
     assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"
 

@@ -28,6 +28,7 @@ import math
 import datetime as dt
 import re
 import sqlite3
+import threading
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -155,6 +156,29 @@ def similarity(a: str, b: str) -> float:
     return max(0.0, 1.0 - distance(a, b, cap=longest) / longest)
 
 
+# ── what a search covers, said the same way on the page, in the report and to the assistant ──
+
+# The registers a founder in France, the EU or the US would expect, in the order they are named. An index says
+# which it holds in its "sources"; every one it does not hold is named as NOT searched, so a register is never
+# left out of a sentence by being absent from the data.
+REGISTERS = [
+    ("USPTO", "the US register (USPTO), including international registrations designating the US"),
+    ("INPI", "the French register (INPI), French national filings"),
+    ("EUIPO", "EU trade marks (EUIPO)"),
+    ("WIPO", "international registrations designating France or the EU (WIPO Madrid)"),
+]
+ALWAYS_UNCOVERED = ["registers of other countries", "company and trading names", "domain names",
+                    "unregistered use of a name", "marks made only of a logo or picture"]
+
+
+def coverage(sources: str) -> Dict[str, List[str]]:
+    """{"searched": [...], "not_searched": [...]} for an index whose meta "sources" is `sources`."""
+    held = [label for key, label in REGISTERS if key in (sources or "")]
+    missing = [label for key, label in REGISTERS if key not in (sources or "")
+]
+    return {"searched": held, "not_searched": missing + ALWAYS_UNCOVERED}
+
+
 # ── building the index (our side; the result is the file a computer downloads) ──
 
 def build(rows: Iterable[Tuple[str, str, str, str, Sequence[str], str]], out: Path,
@@ -209,10 +233,21 @@ class Index:
     def __init__(self, path: Path):
         if not Path(path).is_file():
             raise FileNotFoundError(f"no trademark index at {path}")
-        self.db = sqlite3.connect(f"file:{path}?mode=ro", uri=True, check_same_thread=False)
+        self.path = Path(path)
+        # One read-only connection per thread. A name session searches several variants at once, and the host
+        # route runs each in a worker thread: sharing one connection failed 6 of 8 concurrent searches with
+        # "bad parameter or other API misuse" (a live session on 20 Oct saw 2 of 8 fail and retried them).
+        self._local = threading.local()
         self.meta = dict(self.db.execute("SELECT k, v FROM meta"))
         if self.meta.get("schema") != SCHEMA:
             raise ValueError(f"{path} is not a trademark index this version reads")
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "db", None)
+        if conn is None:
+            conn = self._local.db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+        return conn
 
     def _ids(self, key: str) -> array.array:
         row = self.db.execute("SELECT ids FROM post WHERE key = ?", (key,)).fetchone()
@@ -266,6 +301,7 @@ class Index:
         hits.sort(key=lambda h: (-h["class_overlap"], -h["score"], h["text"].lower()))
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
+                **coverage(self.meta.get("sources", "")),
                 "hits": hits[:limit], "more": max(0, len(hits) - limit)}
 
     def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
@@ -338,15 +374,17 @@ class Index:
 
 def report_lines(result: Dict[str, Any]) -> List[str]:
     """The plain-text result: what was searched first, then each mark and why it resembles the name."""
+    cov = coverage(result.get("sources", ""))
     out = [f"Registered marks close to “{result['name']}”",
-           f"Searched: {result['sources']} ({result['marks_searched']:,} live word marks), data as of "
+           f"Searched: {'; '.join(cov['searched'])} ({result['marks_searched']:,} live word marks), data as of "
            f"{result['data_date']}. Searched on this computer; the name was not sent anywhere.",
-           "Not searched: other registers, company and domain names, unregistered use, figurative marks. "
+           f"Not searched: {'; '.join(cov['not_searched'])}.",
            "This is a list of similar marks, not an opinion on whether you can use or register the name."]
     if result["classes"]:
         out.append(f"Classes you asked about: {', '.join(result['classes'])}.")
     if not result["hits"]:
-        out.append("No close registered word marks found in this data.")
+        out.append("No close registered word marks found in this data. That does not mean the name is free to use: "
+                   "the registers and rights listed as not searched can still hold it.")
         return out
     out.append("")
     for h in result["hits"]:
@@ -369,8 +407,15 @@ def install_route(app, index_path: Path) -> None:
     from fastapi.responses import JSONResponse
 
     state: Dict[str, Any] = {}
+    # One search at a time. Scoring is Python, so eight variants searched at once took 26.7 s for all of them
+    # to answer, against 14.0 s one after another (measured 20 Oct, US+FR index).
+    one_at_a_time = threading.Lock()
 
     def run(body: Dict[str, Any]) -> Dict[str, Any]:
+        with one_at_a_time:
+            return _run(body)
+
+    def _run(body: Dict[str, Any]) -> Dict[str, Any]:
         if "index" not in state:
             state["index"] = Index(index_path)
         name = str(body.get("name") or "").strip()

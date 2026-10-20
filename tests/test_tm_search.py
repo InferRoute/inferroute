@@ -74,6 +74,18 @@ def test_the_report_states_coverage_and_never_gives_a_verdict(index):
         assert word not in text.lower().replace("not an opinion on whether you can use", "")
     empty = "\n".join(T.report_lines(index.search("Xylophonique")))
     assert "No close registered word marks found in this data." in empty
+    assert "does not mean the name is free to use" in empty                # an empty list is not a clearance
+
+
+def test_every_register_not_in_the_data_is_named_as_not_searched():
+    us_fr = T.coverage("USPTO (United States), live word marks; INPI (France), live word marks")
+    assert len(us_fr["searched"]) == 2
+    assert "EU trade marks (EUIPO)" in us_fr["not_searched"]
+    assert any("WIPO Madrid" in x for x in us_fr["not_searched"])
+    assert {"company and trading names", "domain names", "unregistered use of a name"} <= set(us_fr["not_searched"])
+    with_eu = T.coverage("USPTO; INPI; EUIPO (European Union)")
+    assert "EU trade marks (EUIPO)" in with_eu["searched"] and "EU trade marks (EUIPO)" not in with_eu["not_searched"]
+    assert T.coverage("")["searched"] == []
 
 
 def test_a_search_opens_no_network_connection(index, monkeypatch):
@@ -181,3 +193,12 @@ def test_the_evaluation_set_on_the_built_index(capsys):
     got = tm_eval.evaluate(T.Index(EVAL_INDEX), data)
     assert got["recall"] == got["of"], {k: v for k, v in got["ranks"].items() if not v or v > 20}
     assert not any(got["clean_strong"].values()), got["clean_strong"]
+
+
+def test_searches_running_at_once_all_answer(index):
+    # A name session searches its variants in parallel; one shared SQLite connection made most of them fail.
+    from concurrent.futures import ThreadPoolExecutor
+    names = ["Kwik", "Anteriora", "Quick", "Zebra", "Anterion", "Kwick", "Anteriore", "Zebras"] * 3
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda n: index.search(n, ["9", "42"]), names))
+    assert all(r["name"] == n for r, n in zip(results, names))

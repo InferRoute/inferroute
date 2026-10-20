@@ -943,11 +943,13 @@ export default function (pi: ExtensionAPI) {
 					body: JSON.stringify(params),
 				});
 				const result = await response.json() as { error?: string; name?: string; classes?: string[];
-					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number };
+					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number;
+					searched?: string[]; not_searched?: string[] };
 				if (!response.ok || !result.hits) throw new Error(result.error ?? "The trademark search did not answer.");
 				const head = `Searched ${result.sources} (${(result.marks_searched ?? 0).toLocaleString("en")} live word marks, ` +
 					`data as of ${result.data_date}) for "${result.name}"` +
-					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer.";
+					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer." +
+					(result.not_searched?.length ? `\nNot searched: ${result.not_searched.join("; ")}.` : "");
 				const lines = result.hits.map((h) => `- ${h.text.length > 120 ? `${h.text.slice(0, 119)}…` : h.text} ` +
 					`(${h.register} ${h.number}, ${h.status}, classes ${h.classes.join(", ") || "none recorded"}` +
 					`${h.overlapping_classes.length ? `; overlaps ${h.overlapping_classes.join(", ")}` : ""}): ${h.reasons.join("; ")}`);

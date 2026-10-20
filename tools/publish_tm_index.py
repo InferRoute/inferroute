@@ -55,7 +55,8 @@ def main():
         subprocess.run(["xz", "-6", "-T0", "-k", "-c", str(db)], stdout=xz.open("wb"), check=True)
     info = {"url": f"{PUBLIC}/tm/{xz.name}", "xz_sha256": sha256(xz), "xz_bytes": xz.stat().st_size,
             "sha256": sha256(db), "bytes": db.stat().st_size,
-            "data": f"US marks to {a.uspto_date}, French marks to {fr_date}"}
+            "data": f"US marks to {a.uspto_date}, French marks to {fr_date}",
+            "sources": "USPTO (United States); INPI (France)"}
     print(json.dumps(info, indent=1))
     if a.upload:
         subprocess.run(["npx", "-y", "wrangler", "r2", "object", "put", f"{BUCKET}/tm/{xz.name}", "--file", str(xz),

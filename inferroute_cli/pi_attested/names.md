@@ -42,9 +42,10 @@ and their trademark attorney. Do not search the web or suggest you have.
 
 ## name-check.md
 
-- First lines: which registers were searched and the data date (the tool gives both),
-  that the search ran on the founder's computer, and what was not searched: other
-  registers, company names, domain names, unregistered use, figurative marks.
+- First lines: which registers were searched and the data date, that the search ran on
+  the founder's computer, and what was not searched. Copy the tool's "Not searched" line
+  as it is: it names the registers missing from this data (for example EU trade marks),
+  company names, domain names, unregistered use and logo-only marks.
 - The classes used and why.
 - For each name: the variants searched, then the close marks, closest first, each with
   its reasons.

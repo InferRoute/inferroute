@@ -750,24 +750,52 @@ class Home:
             return {"ok": True, "id": f"{client}/{matter}"}
 
         # ── the trademark index a name matter searches: whether it is installed, and installing it ──
+        # What a name check covers comes from tm_search.coverage, the same sentence the report and the assistant
+        # use, so the page cannot name a register the data does not hold, or leave out one it does not.
+        tm_progress: Dict[str, Any] = {"line": "", "running": False}
+
         @app.get("/api/tm-index")
         async def tm_index_status():
             import asyncio
-            from . import tm_install
+            from . import tm_install, tm_search
             path = S.tm_index_path()
             ok = await asyncio.to_thread(tm_install.installed, path)
             return {"installed": ok, "present": path.is_file(), "data": tm_install.INDEX["data"],
-                    "download_mb": round(tm_install.INDEX["xz_bytes"] / 1e6)}
+                    "download_mb": round(tm_install.INDEX["xz_bytes"] / 1e6),
+                    "disk_mb": round(tm_install.INDEX["bytes"] / 1e6),
+                    **tm_search.coverage(tm_install.INDEX.get("sources", "")),
+                    "installing": tm_progress["running"], "progress": tm_progress["line"]}
 
         @app.post("/api/tm-index/install")
         async def tm_index_install():
             import asyncio
             from . import tm_install
+            if tm_progress["running"]:
+                return problem("The trademark data is already being installed.", 409)
+            tm_progress.update(running=True, line="starting the download")
             try:
-                await asyncio.to_thread(tm_install.install, S.tm_index_path())
+                await asyncio.to_thread(tm_install.install, S.tm_index_path(),
+                                        None, lambda m: tm_progress.update(line=m.strip()))
             except tm_install.InstallError as e:
                 return problem(str(e), 502)
+            finally:
+                tm_progress.update(running=False, line="")
             return {"ok": True}
+
+        @app.get("/api/name-check")
+        async def name_check(id: str = ""):
+            """The report a name session wrote (name-check.md in the matter folder), shown on the matter page."""
+            try:
+                _client, _matter, rec = matter_of(id)
+            except S.ProbantError as e:
+                return problem(str(e), 404)
+            path = Path(str(rec.get("workspace") or "")) / "name-check.md"
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")[:200_000]
+                at = dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except OSError:
+                return {"present": False, "file": str(path)}
+            return {"present": True, "text": text, "written_at": at, "file": str(path)}
 
         @app.get("/api/matter")
         async def matter_view(id: str = ""):

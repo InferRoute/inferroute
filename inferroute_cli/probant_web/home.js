@@ -212,7 +212,7 @@
     });
     dialog("New matter", [
       el("p", "", "A matter is one thing you research: an invention, or the names you are considering. It keeps its folder, its sessions and its records."),
-      field("What are you checking?", kind, "Names are searched on this computer against registered trademarks in France and the US."),
+      field("What are you checking?", kind, "Names are searched on this computer, in a copy of the French and US trademark registers. EU trade marks are not included yet."),
       validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
       validation.field("matter", "Matter", "Required. A short name for this matter."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
@@ -222,6 +222,15 @@
     kind.addEventListener("change", () => {
       const names = kind.value === "name";
       const dateRow = date.closest(".field"); if (dateRow) dateRow.hidden = names;
+      // "Disclosure" is a patent word; for names the box holds the product and the names.
+      const textRow = text.closest(".field");
+      if (textRow) {
+        textRow.querySelector(".field-label").textContent = names ? "Your product and the names" : "Disclosure";
+        textRow.querySelector(".field-hint").textContent = names
+          ? "What the product does and the names you are considering. Saved as written; the AI reads it when you start a session."
+          : "Saved as written. The AI reads it when you start a session.";
+      }
+      matter.placeholder = names ? "e.g. bottle-names" : "e.g. cooling-system";
       if (names && !text.value.trim()) text.value = NAME_TEMPLATE;
       if (!names && text.value === NAME_TEMPLATE) text.value = "";
     });
@@ -289,7 +298,7 @@
       if (l.state === "starting") {
         box.className = "launch starting";
         box.append(el("div", "", el("span", "dot"), el("b", "", " Starting a session… "),
-          `checking the AI machine and the search machine from this computer (${l.elapsed} s; usually under a minute).`));
+          `checking the sealed machines it uses from this computer (${l.elapsed} s; usually under a minute).`));
       } else if (l.state === "ready") {
         box.className = "launch ready";
         const since = l.started_at ? new Date(l.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
@@ -430,40 +439,40 @@
       // machine that was up. A confident timetable is worse than none: nobody questions a timetable.
       if (d.reachable) {
         dot = "open";
-        head = "Search is available";
+        head = "Patent search is available";
         sub = "";
       } else if (d.found === false) {
         dot = "trouble";
-        head = "Search is not available from this computer";
+        head = "Patent search is not available from this computer";
         sub = "The search machine cannot be found at the address this computer is set up to use. "
           + "It needs looking at. Everything else on this page works as usual.";
       } else {
         dot = "trouble";
-        head = "Search is not answering";
+        head = "Patent search is not answering";
         sub = "It runs continuously, so this is not a closing time — try again in a few minutes. "
           + "Nothing is lost if a search cannot start.";
       }
     } else if (d.open_now && d.reachable) {
       dot = "open";
-      head = `Search is open until ${parisClose} Paris time`;
+      head = `Patent search is open until ${parisClose} Paris time`;
       sub = (elsewhere ? `That is ${hereClose} where you are. ` : "") + `Open ${timetable}.`;
     } else if (d.found === false) {
       // Not "closed until 13:00": this machine's address cannot be found at all, so an opening time would
       // be an invention. A person told a comforting timetable waits; a person told this asks.
       dot = "trouble";
-      head = "Search is not available from this computer";
+      head = "Patent search is not available from this computer";
       sub = "The search machine cannot be found at the address this computer is set up to use. This is not "
         + "the timetable — it needs looking at. Everything else on this page works as usual.";
     } else if (d.open_now && !d.reachable) {
       dot = "trouble";
-      head = "Search should be open now, but it is not answering";
+      head = "Patent search should be open now, but it is not answering";
       sub = `It is scheduled ${timetable}. Try again in a few minutes; nothing is lost if a search cannot start.`;
     } else if (d.reachable) {
       dot = "open";
-      head = "Search is answering, outside its usual hours";
+      head = "Patent search is answering, outside its usual hours";
       sub = `It normally runs ${timetable}.`;
     } else {
-      head = `Search is closed — opens ${untilText(d.opens_at) || "shortly"}`;
+      head = `Patent search is closed — opens ${untilText(d.opens_at) || "shortly"}`;
       sub = `Next at ${parisOpen} Paris time${elsewhere ? ` (${hereOpen} where you are)` : ""}, ${timetable}.`;
     }
     const bar = el("div", `search-status ${dot}`, el("span", "status-dot"),
@@ -495,8 +504,10 @@
     });
     const body = el("div", "matter-body",
       el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
-      el("div", "sub", `date bound ${m.date_bound || "—"}`),
+      el("div", "sub", m.kind === "name" ? "Name check" : `date bound ${m.date_bound || "—"}`),
       m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
+      m.kind === "name" ? el("div", "stats", el("span", "", plural(m.sessions, "session", "sessions")),
+        m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no names yet")) :
       el("div", "stats",
         el("span", "", plural(m.sessions, "session", "sessions")),
         el("span", "", plural(m.searches, "search", "searches")),
@@ -522,7 +533,7 @@
     try { data = await api("/api/overview"); } catch (e) { return; }
     clear(p);
     p.append(el("div", "page-head", el("h1", "", "Matters"),
-      el("p", "sub", "Each matter is one invention: its disclosure, its sessions with the assistant, and the records you keep.")));
+      el("p", "sub", "Each matter is one invention, or the names you are considering for a product: its notes, its sessions with the assistant, and the records you keep.")));
     // No key, no sessions: say so FIRST, before anything the person could press and have fail. Sharing and
     // Help do not need one and stay as they are.
     if (data.key && !data.key.present) p.append(keyCard(() => refresh()));
@@ -561,7 +572,7 @@
     if (!data.matters.length) {
       p.append(el("div", "empty-card",
         el("h2", "", "No matters yet"),
-        el("p", "", "Create a matter, paste the invention's disclosure, then start a session. The assistant surveys published patents for related art, in sealed machines this computer checks first."),
+        el("p", "", "Create a matter, then start a session. For an invention, paste its disclosure: the assistant surveys published patents for related art, in sealed machines this computer checks first. For names, list the names and say what the product does: the assistant checks them against registered trademarks, searched on this computer."),
         el("div", "row", button("Create your first matter", "primary", newMatterDialog), button("How it works", "ghost", () => { location.hash = "#/help"; }))));
       await renderDeleted(p);
       return;
@@ -624,19 +635,29 @@
       el("h1", "", `${m.client} / ${m.matter}`),
       el("p", "sub", isName ? `Name check · created ${localTime(m.created_at)}`
         : `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
+    let ix = null;
     if (isName) {
-      let ix = null;
       try { ix = await api("/api/tm-index"); } catch (e) { /* shown below as not installed */ }
       if (!ix || !ix.installed) {
-        const install = button(`Install the trademark index (${ix ? ix.download_mb : 250} MB download)`, "primary", async (ev) => {
+        const progress = el("p", "sub", ix && ix.installing ? ix.progress : "");
+        let poll = null;
+        const install = button(`Install the trademark data (${ix ? ix.download_mb : 250} MB download)`, "primary", async (ev) => {
           const b = ev.currentTarget; b.disabled = true; b.textContent = "Downloading and checking…";
-          try { await api("/api/tm-index/install", {}); toast("Trademark index installed.", "info"); refresh(); }
+          poll = setInterval(async () => {
+            try { const st = await api("/api/tm-index"); if (st.progress) progress.textContent = st.progress; } catch (_) { /* keep the last line */ }
+          }, 2000);
+          try { await api("/api/tm-index/install", {}); toast("Trademark data installed.", "info"); refresh(); }
           catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Try the install again"; }
+          finally { clearInterval(poll); }
         });
-        p.append(el("div", "card key-card", el("p", "", "A name check searches a copy of the trademark registers kept on this computer, so the names you check are never sent anywhere. Install it once; it is checked against this release before it is used."), install));
+        p.append(el("div", "card key-card",
+          el("p", "", "A name check searches a copy of the trademark registers kept on this computer, so the names you check are never sent anywhere. Install it once; this version of Anteriora checks the file before using it."),
+          ix ? el("p", "sub", `It holds ${ix.searched.join("; ")}. Data: ${ix.data}. ${ix.download_mb} MB to download, ${ix.disk_mb} MB on disk.`) : null,
+          ix ? el("p", "sub", `Not in it: ${ix.not_searched.join("; ")}.`) : null,
+          install, progress));
         return;
       }
-      p.append(el("p", "sub", `Trademark data: ${ix.data}. Searched on this computer.`));
+      p.append(el("p", "sub", `Trademark data on this computer: ${ix.data}. Searched on this computer.`));
     }
     p.append(el("div", "row actions",
       m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
@@ -654,10 +675,26 @@
           openLocal(r.view);
         } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
       })));
-    if (!words) p.append(el("p", "warn-text", "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
+    if (!words) p.append(el("p", "warn-text", isName ? "This matter lists no names yet. Add the product and the names before starting a session."
+      : "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
     if (m.needs_review) p.append(el("p", "warn-text", "Created from your document. Review the disclosure and date before starting a search."));
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
 
+    if (isName) {
+      let rep = null;
+      try { rep = await api(`/api/name-check?id=${enc(m.id)}`); } catch (e) { /* no report shown */ }
+      p.append(el("h2", "section", "Name check report"));
+      p.append(el("div", "card coverage-card",
+        el("p", "", el("b", "", "What was searched: "), `${ix.searched.join("; ")}. Data: ${ix.data}. Searched on this computer; the names were not sent anywhere.`),
+        el("p", "", el("b", "", "Not searched: "), `${ix.not_searched.join("; ")}.`),
+        el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether a name is available or safe to use: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
+      if (rep && rep.present) {
+        const body = el("pre", "report-text", rep.text);
+        p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${rep.file}`), body);
+      } else {
+        p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
+      }
+    }
     p.append(el("h2", "section", "Sessions"));
     if (!m.sessions.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."

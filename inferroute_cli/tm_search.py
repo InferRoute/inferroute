@@ -416,7 +416,7 @@ def log_search(log_dir: Path, result: Dict[str, Any]) -> None:
 
 
 def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
-    """The searches of a matter, the latest for each name and set of classes, newest first."""
+    """The searches of a matter, the latest for each name and set of classes, in the order they were run."""
     import json as _json
     try:
         lines = (log_dir / SEARCH_LOG).read_text(encoding="utf-8").splitlines()
@@ -429,7 +429,7 @@ def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
         except ValueError:
             continue
         latest[(compact(str(e.get("name") or "")), tuple(e.get("classes") or []))] = e
-    return sorted(latest.values(), key=lambda e: e.get("at") or "", reverse=True)
+    return list(latest.values())                       # file order is search order; a repeat keeps its first place
 
 
 def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None:

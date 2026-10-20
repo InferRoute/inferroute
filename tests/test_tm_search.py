@@ -214,7 +214,7 @@ def test_each_search_is_kept_where_the_matter_page_reads_it(index, tmp_path):
     assert c.post("/probant/tm/search", json={"name": "Anteriora"}).status_code == 200
     assert c.post("/probant/tm/search", json={"name": "Kwik", "classes": ["29"]}).status_code == 200
     got = T.logged_searches(tmp_path / "records")
-    assert [g["name"] for g in got] == ["Kwik", "Anteriora"]          # latest per name and classes, newest first
+    assert [g["name"] for g in got] == ["Kwik", "Anteriora"]          # latest per name and classes, search order
     kwik = got[0]
     assert kwik["classes"] == ["29"] and kwik["data_date"] == "2026-09-30"
     assert {h["number"] for h in kwik["hits"]} >= {"1", "2"}           # QUICK, KWIK'PAK as the search returned them

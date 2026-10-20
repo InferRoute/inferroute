@@ -114,6 +114,36 @@
   }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDialog(); });
 
+  // A name-check report is Markdown written by the assistant. Shown as text it read "## 1. Kwench" and
+  // "**QUENCH**". This renders the few forms the report uses (headings, lists, bold, rules) as DOM nodes built
+  // from text: nothing in the file is ever parsed as HTML, so the file cannot put markup or script on the page.
+  function renderReport(text) {
+    const box = el("div", "report-text");
+    const inline = (line) => {
+      const out = document.createElement("span");
+      String(line).split(/(\*\*[^*]+\*\*)/).forEach((part) => {
+        if (/^\*\*[^*]+\*\*$/.test(part)) out.append(el("b", "", part.slice(2, -2)));
+        else if (part) out.append(document.createTextNode(part.replace(/(^|\s)\*([^*\s][^*]*)\*(?=\s|$|[.,;:])/g, "$1$2")));
+      });
+      return out;
+    };
+    let list = null;
+    for (const raw of String(text || "").split("\n")) {
+      const line = raw.trimEnd();
+      const h = /^(#{1,4})\s+(.*)$/.exec(line);
+      const item = /^\s*(?:[-*]|\d+\.)\s+(.*)$/.exec(line);
+      if (item) {
+        if (!list) { list = document.createElement(/^\s*\d+\./.test(line) ? "ol" : "ul"); box.append(list); }
+        const li = document.createElement("li"); li.append(inline(item[1])); list.append(li);
+        continue;
+      }
+      list = null;
+      if (h) box.append(el(h[1].length <= 1 ? "h3" : "h4", "", inline(h[2])));
+      else if (/^(-{3,}|\*{3,})$/.test(line)) box.append(document.createElement("hr"));
+      else if (line.trim()) { const para = document.createElement("p"); para.append(inline(line)); box.append(para); }
+    }
+    return box;
+  }
   function field(label, input, hint) {
     return el("label", "field", el("span", "field-label", label), input, hint ? el("span", "field-hint", hint) : null);
   }
@@ -689,7 +719,7 @@
         el("p", "", el("b", "", "Not searched: "), `${ix.not_searched.join("; ")}.`),
         el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether a name is available or safe to use: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
       if (rep && rep.present) {
-        const body = el("pre", "report-text", rep.text);
+        const body = renderReport(rep.text);
         p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${rep.file}`), body);
       } else {
         p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
@@ -699,7 +729,7 @@
       const searches = (rep && rep.searches) || [];
       if (searches.length) {
         p.append(el("h2", "section", "Every search the assistant ran"));
-        p.append(el("p", "sub", "Straight from the search on this computer, closest first. The latest search of each name and set of classes is shown."));
+        p.append(el("p", "sub", "Straight from the search on this computer, in the order they were run; each list is closest first. If a name was searched again with the same classes, the latest search is shown."));
         for (const sr of searches) {
           const cls = (sr.classes || []).length ? `classes ${sr.classes.join(", ")}` : "all classes";
           const n = (sr.hits || []).length;

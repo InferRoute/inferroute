@@ -49,11 +49,13 @@ and their trademark attorney. Do not search the web or suggest you have.
   as it is: it names the registers missing from this data (for example EU trade marks),
   company names, domain names, unregistered use and logo-only marks.
 - The classes used and why.
-- For each name: the variants searched, then at most the six marks that matter most
+- For each name: the variants searched, then at most the three marks that matter most
   (closest first, in the founder's classes before others), each with its register,
-  number, status, classes and reasons. Do not copy every result: the matter page lists
-  every search in full, straight from the search, and says so. Say how many other close
-  marks each search found.
+  number, status, classes and reasons, and one sentence on what the search found. Do not
+  copy the other results: the matter page lists every search in full, straight from the
+  search, and says so. Say how many other close marks each search found.
+- Keep the whole file under 450 words. A short report the founder reads beats a long one,
+  and every word you write takes them time to wait for.
 - The data has no owners or goods descriptions: never say who owns a mark or what it
   covers beyond its classes.
 - "Questions to take to a trademark attorney": three to six specific questions this

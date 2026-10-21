@@ -578,7 +578,7 @@
     // the difference show up as a button that fails.
     if (data.update_waiting) {
       p.append(el("div", "update-note", el("b", "", "A newer version of Anteriora is installed. "),
-        "To use it, restart Anteriora home: press Ctrl+C in the terminal it runs in, then run anteriora home again. "
+        "To use it, quit Anteriora and open it again (if you started it from a terminal: press Ctrl+C there, then run anteriora home). "
         + "Sessions started from this page end with it, so finish them first."));
     }
     for (const l of data.running || []) {
@@ -830,7 +830,7 @@
     for (const x of d.deleted) {
       const row = el("div", "record-row",
         el("span", "", x.matter),
-        el("span", "sub", `deleted ${localTime(x.deleted_at)} · erased ${localTime(x.erase_after)}`),
+        el("span", "sub", `deleted ${localTime(x.deleted_at)} · erased after ${new Date(x.erase_after).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`),
         button("Restore", "ghost small", async (ev) => {
           const b = ev.currentTarget;                 // currentTarget is null again once this awaits
           b.disabled = true;
@@ -959,7 +959,7 @@
           "For names: say what the product does and list the names. Where you will sell it helps the assistant choose the classes.",
           "Use Personal as the client if the work is your own.")),
       sec("2. Start a session",
-        para("Start a session from the matter; it opens in its own tab. Before any text is sent, this computer checks the sealed machine that runs the AI assistant, and for inventions the sealed patent search machine, then encrypts your text to them."),
+        para("Start a session from the matter, then open it. Before any text is sent, this computer checks the sealed machine that runs the AI assistant, and for inventions the sealed patent search machine, then encrypts your text to them."),
         list("The panel on the right says what was checked, in plain words, with the technical detail one click away. If a check fails, nothing is sent to that machine.",
           "The assistant works in a closed box: no internet, and no files beyond the matter's folder.",
           "The AI can be slow: a survey or a name check usually takes 5 to 15 minutes. You can leave the tab open and come back.")),

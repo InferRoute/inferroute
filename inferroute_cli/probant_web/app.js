@@ -669,7 +669,14 @@
     edit: (a) => `Edited ${String(a.path || "").split("/").pop()}`,
     matter_marks: () => "Read your relevance marks",
     write: (a) => `Wrote ${String(a.path || "").split("/").pop()}`,
+    // The assistant's other tools, in words (21 Oct audit: "Used read_matter_file" was what a founder saw).
+    read_matter_file: (a) => `Read ${String(a.path || a.name || "a file in the matter").split("/").pop()}`,
+    read_patent: (a) => `Read ${String(a.key || a.id || "a patent").toUpperCase()}`,
+    trademark_search: (a) => `Searched the trademark registers for “${a.name || a.query || ""}”${Array.isArray(a.classes) && a.classes.length ? ` in class${a.classes.length > 1 ? "es" : ""} ${a.classes.join(", ")}` : ""}`,
+    propose_matter: (a) => `Proposed a matter: ${a.title || "an invention"}`,
+    record_findings: () => "Recorded what it found",
   };
+  const NICE_TOOL = (name) => String(name || "a tool").replace(/_/g, " ");
 
   // Once something in a card is marked relevant, offer the obvious next move in one click.
   // Every button sends exactly the words it shows.
@@ -1582,7 +1589,7 @@
       toolRunning = "Searching the patent database in its sealed machine…";
     } else {
       const fn = STEP_TEXT[ev.tool];
-      const step = el("div", "step", el("span", "step-dot", "·"), el("span", "", fn ? fn(ev.args || {}) : `Used ${ev.tool}`));
+      const step = el("div", "step", el("span", "step-dot", "·"), el("span", "", fn ? fn(ev.args || {}) : `Used ${NICE_TOOL(ev.tool)}`));
       log.append(step);
       toolRunning = fn ? `${fn(ev.args || {})}…` : "Working…";
     }

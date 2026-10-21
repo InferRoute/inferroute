@@ -730,7 +730,7 @@
       p.append(el("div", "card coverage-card",
         el("p", "", el("b", "", "What was searched: "), `${ix.searched.join("; ")}. Data: ${ix.data}. Searched on this computer; the names were not sent to any register, search engine or website. The assistant that reads your notes runs on the checked sealed machine.`),
         el("p", "", el("b", "", "Not searched: "), `${ix.not_searched.join("; ")}.`),
-        el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether a name is available or safe to use: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
+        el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether you can use or register a name: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
       if (rep && rep.present) {
         const body = renderReport(rep.text);
         p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), body);
@@ -978,7 +978,7 @@
         list("The search runs on this computer, in a copy of the registers downloaded once (about 250 MB). A name is never sent to a trademark register, a search engine or a website. The assistant that reads your notes and writes the report runs on the checked sealed machine.",
           "Searched: the US register (USPTO, including international registrations designating the US) and the French register (INPI, French national filings). The data dates are shown on the matter page.",
           "Not searched: EU trade marks (EUIPO), international registrations designating France or the EU (WIPO Madrid), other countries, company and trading names, domain names, unregistered use, logo-only marks.",
-          "The report lists registered marks that resemble each name and why, and questions to take to a trademark professional. It never says a name is available or safe to use: that is a legal judgement.")),
+          "The report lists registered marks that resemble each name and why, and questions to take to a trademark professional. It never says whether you can use or register a name: that is a legal judgement.")),
       sec("5. Read a document or a repository",
         list("Choose a folder, a git link or a GitHub repository (connect GitHub to choose a private one). You choose which parts it reads; test code can be left out.",
           "It lists every distinct invention it finds, then writes one draft matter per invention. A large repository can take 30 to 45 minutes.",

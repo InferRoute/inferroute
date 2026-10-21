@@ -986,7 +986,7 @@
           "Conversations are kept with the matter on this computer, readable only by your account.")),
       sec("What it can't prove",
         list("Hardware checks do not prove that software inside a machine cannot keep or disclose your text. The cloud platform's own components inside that boundary are part of what you trust.",
-          "The AI check measures firmware, start-up and the operating system, not the model-serving software loaded after start. The search machine's fingerprint matches InferRoute's signed reference; an independent proof from source code to the running image is still missing.",
+          "The AI check measures firmware, start-up and the operating system, not the model-serving software the machine loads after it starts. The search machine's fingerprint matches InferRoute's signed reference; an independent proof from source code to the running image is still missing.",
           "A search finds related documents. It doesn't prove novelty or that nothing else exists, and a name check is not a clearance search. None of this is legal advice.",
           "Browser extensions allowed to read every page can read these pages too. For sensitive work, use a browser profile without extensions.")),
       sec("Limits right now",

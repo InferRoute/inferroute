@@ -581,7 +581,7 @@ def failure_message(tail: List[str]) -> str:
     # machine failing its check, with "try again in a minute". Neither is true, and waiting fixes none of them.
     if "vm runtime" in low or "vm confinement" in low or "macos vm" in low or "vm executable" in low or "runtime artifact" in low:
         if "is not installed" in low:
-            return ("This Mac is missing the part of Anteriora that runs the assistant in a protected virtual machine, "
+            return ("This Mac is missing the part of Anteriora that runs the assistant in a isolated virtual machine, "
                     "so no session can start. Install it with the Mac instructions you were sent (the package "
                     "inferroute-macos-vm-runtime), then try again. Nothing was sent.")
         if "not provisioned" in low:
@@ -591,13 +591,13 @@ def failure_message(tail: List[str]) -> str:
             return ("Anteriora on a Mac needs Apple silicon (an M1 or later). This Mac has an Intel processor, "
                     "so no session can start. Nothing was sent.")
         if "older than" in low:
-            return ("This version of macOS is too old for the protected virtual machine Anteriora runs the assistant in, "
+            return ("This version of macOS is too old for the isolated virtual machine Anteriora runs the assistant in, "
                     "so no session can start. Nothing was sent.")
         if "signature" in low or "integrity" in low or "signing requirement" in low:
-            return ("The protected virtual machine's files did not pass their check, so it was not started and nothing "
+            return ("The isolated virtual machine's files did not pass their check, so it was not started and nothing "
                     "was sent. Reinstall Anteriora with the Mac instructions; if it happens again, tell InferRoute — "
                     "these files should never differ from the ones we signed.")
-        return ("The protected virtual machine the assistant runs in could not be started, so the session was not "
+        return ("The isolated virtual machine the assistant runs in could not be started, so the session was not "
                 "opened and nothing was sent. Try once more; if it fails again, send InferRoute this line: "
                 + next((ln.strip() for ln in reversed(tail) if "vm" in ln.lower()), "").strip())
     if "not opened" in low or "refused" in low or "could not open the confidential session" in low:

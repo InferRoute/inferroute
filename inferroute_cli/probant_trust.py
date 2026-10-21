@@ -326,7 +326,7 @@ def computer_item(confinement: str, surface: str = "terminal") -> Dict[str, Any]
 CONTROL_NOTE = "You approve the first search, your marks are yours alone, and the record is yours to export."
 
 
-EXPLAINER = ("Sealed hardware protects its memory from the cloud host. This computer checks the hardware "
+EXPLAINER = ("Sealed hardware keeps its memory encrypted from the cloud host. This computer checks the hardware "
              "evidence before sending text encrypted to its key. Software inside the machine can read that text; "
              "these checks do not prove what it does with it.")
 
@@ -359,7 +359,7 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
     if states["ai"] == FAIL:
         verdict, headline = "blocked", "Not opened: the AI machine could not be verified, so nothing was sent."
     elif any(states[k] in (FAIL, WARN) for k in ("ai", "search", "computer")):
-        verdict, headline = "limited", "Partly protected. Read the items marked below before using a client's invention."
+        verdict, headline = "limited", "Partly checked. Read the items marked below before sending an invention's details."
     else:
         # A MISSING search is not a WEAKENED protection (Henry, 22 Sep: "if this is just the mcp not being up
         # why do we need to tell the user 'Partly protected'"). With no search there is no second machine and

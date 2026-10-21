@@ -122,7 +122,7 @@ def test_no_search_at_all_is_MORE_private_and_must_not_read_as_degraded():
     s = T.build(_receipt(), None, ADDRESS)
     assert _item(s, "search")["state"] == T.OFF
     assert s["verdict"] == "private"
-    assert "Partly protected" not in _text(s)
+    assert "Partly checked" not in _text(s)
     head = s["headline"]
     assert "the AI model" in head and "the patent search service" not in head   # never claim a machine we did not check
     assert "nothing can leave this computer for a search machine" in head

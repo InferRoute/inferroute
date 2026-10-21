@@ -65,7 +65,7 @@ def test_the_home_page_follows_the_session_page_rules(home):
 def test_no_route_beyond_what_the_page_needs(home):
     h, c, _ = home
     paths = {r.path for r in h.app().routes}
-    assert paths == {"/", "/home.js", "/common.js", "/app.css", "/api/overview", "/api/matters", "/api/matter",
+    assert paths == {"/", "/home.js", "/common.js", "/app.css", *(f"/{f}" for f in __import__("inferroute_cli.probant_web", fromlist=["x"]).BRAND_FONTS), "/api/overview", "/api/matters", "/api/matter",
                      # Folder NAMES for the read-a-repository picker (19 Oct): the page cannot see the disk.
                      "/api/fs/dirs",
                      # A repository chosen from GitHub through the read-only Anteriora App (19 Oct).

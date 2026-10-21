@@ -34,7 +34,7 @@ from fastapi import Request
 
 from . import probant_trust
 from . import probant as S
-from .probant_web import ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
+from .probant_web import BRAND_FONTS, ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
 # ── when the search machine is meant to be up ──────────────────────────────────────────────────────────
 # The search enclave is a sealed machine that costs money to keep running, so it is scheduled rather than
@@ -671,13 +671,15 @@ class Home:
         app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         install_guard(app, lambda: home.port, lambda: home.token)
 
-        files = PageFiles(("home.html", "home.js", "common.js", "app.css"))
+        files = PageFiles(("home.html", "home.js", "common.js", "app.css", *BRAND_FONTS))
         static = files.handler
 
         app.get("/")(static("home.html", "text/html; charset=utf-8"))
         app.get("/home.js")(static("home.js", "text/javascript; charset=utf-8"))
         app.get("/common.js")(static("common.js", "text/javascript; charset=utf-8"))
         app.get("/app.css")(static("app.css", "text/css; charset=utf-8"))
+        for font in BRAND_FONTS:
+            app.get(f"/{font}")(static(font, "font/woff2"))
 
         def problem(msg: str, code: int = 400, extra: Optional[Dict[str, Any]] = None):
             return JSONResponse({"error": msg, **(extra or {})}, status_code=code)

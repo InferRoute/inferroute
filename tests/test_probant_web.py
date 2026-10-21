@@ -110,7 +110,7 @@ def test_only_prompt_abort_and_dialog_answers_ever_reach_the_agent(client):
 def test_no_route_exposes_shell_model_or_session_commands(client):
     b, c = client
     paths = {r.path for r in b.app().routes}
-    assert paths == {"/", "/common.js", "/app.js", "/app.css", "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/prompt/cancel", "/api/abort",
+    assert paths == {"/", "/common.js", "/app.js", "/app.css", *(f"/{f}" for f in W.BRAND_FONTS), "/api/session", "/api/disclosure", "/api/events", "/api/prompt", "/api/prompt/cancel", "/api/abort",
                      "/api/dialog", "/api/marks", "/api/mark", "/api/recheck", "/api/export", "/api/prove", "/api/audit-pack",
                      # Opens a terminal on the prepared pack. The ONLY route here that starts a program, and
                      # it takes a choice from three agents — never a command. See the launcher's own test.
@@ -499,7 +499,9 @@ def test_the_page_loads_nothing_from_outside():
                            for attrs, body in scripts)                             # local files only, no inline code
     assert re.search(r"\son[a-z]+=", html) is None                            # no inline handlers
     css = (STATIC / "app.css").read_text()
-    assert "url(" not in css and "@import" not in css
+    # The only url() allowed is one of the brand's own font files, served by this computer.
+    assert set(re.findall(r'url\("([^"]*)"\)', css)) == {f"/{f}" for f in W.BRAND_FONTS}
+    assert css.count("url(") == len(W.BRAND_FONTS) and "@import" not in css
 
 
 def test_the_browser_summary_states_what_the_page_guarantees_and_what_it_cannot():

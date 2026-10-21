@@ -41,6 +41,9 @@ from fastapi import Request
 from . import pi_attested
 
 STATIC = Path(__file__).resolve().parent / "probant_web"
+# The brand's typefaces, served from this computer: a page that fetched them from a font host would tell
+# that host each time someone opened Anteriora. Latin subsets of Inter, Newsreader and JetBrains Mono (SIL OFL).
+BRAND_FONTS = ("fonts/inter.woff2", "fonts/newsreader.woff2", "fonts/jetbrains-mono.woff2")
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 PUB_RE = re.compile(r"^[A-Z]{2}[-A-Z0-9]{2,}$")
 # The three judgements, and taking one back off. "cleared" is NOT a delete: the store is append-only
@@ -1052,13 +1055,15 @@ class Bridge:
         bridge = self
 
         install_guard(app, lambda: bridge.port, lambda: bridge.token)
-        files = PageFiles(("index.html", "common.js", "app.js", "app.css"))
+        files = PageFiles(("index.html", "common.js", "app.js", "app.css", *BRAND_FONTS))
         static = files.handler
 
         app.get("/")(static("index.html", "text/html; charset=utf-8"))
         app.get("/common.js")(static("common.js", "text/javascript; charset=utf-8"))
         app.get("/app.js")(static("app.js", "text/javascript; charset=utf-8"))
         app.get("/app.css")(static("app.css", "text/css; charset=utf-8"))
+        for font in BRAND_FONTS:
+            app.get(f"/{font}")(static(font, "font/woff2"))
 
         @app.get("/api/session")
         async def session():

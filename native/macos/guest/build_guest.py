@@ -53,11 +53,12 @@ EPOCH = 1759449600                                  # 2025-10-03T00:00:00Z — o
 APK_STATIC = ("apk-tools-static-3.0.8-r0.apk", "c8e2c88c13ba12a12269b79a3543e1190ff8c0ab0beb32b58cadfd5881c619e3")
 ALPINE_KEYS = ("alpine-keys-2.6-r0.apk", "dd211936d544f4050924ce8aec078d24e7b1b036ae70b30bd07867349587c708")
 
+# 2026-10-21: 6.18.57-r0 -> 6.18.58-r0 (the mirror no longer serves 6.18.57; verified by apk.static against alpine-keys 2.6 in the build below).
 # 2026-10-19: 6.18.56-r0 -> 6.18.57-r0 (the mirror no longer serves 6.18.56; apk verify against alpine-keys 2.6 aarch64 OK before pinning).
 # 2026-10-15: 6.18.55-r0 -> 6.18.56-r0 (the mirror no longer serves 6.18.55; apk verify against alpine-keys 2.6 aarch64 OK before pinning).
 # 2026-10-08: 6.18.54-r0 -> 6.18.55-r0 (aports 52fae6d7, 2026-10-05, a stable point release); the mirror no longer
 # serves 6.18.54. The new package's Alpine signature was verified (apk verify) before its sha256 was pinned here.
-KERNEL = {"aarch64": ("linux-virt-6.18.57-r0.apk", "b3820fee22e0366a15f7c139e5bc00348e333f3e7f77802271df7ded795aee4f")}
+KERNEL = {"aarch64": ("linux-virt-6.18.58-r0.apk", "b46c51ddf572d85b2ba7b9adfaa64f4c38fc490c93d97a20ffd2418d51284085")}
 MODULES = ("net/vmw_vsock/vsock", "net/vmw_vsock/vmw_vsock_virtio_transport_common",
            "net/vmw_vsock/vmw_vsock_virtio_transport", "drivers/char/hw_random/rng-core",
            "drivers/char/hw_random/virtio-rng")
@@ -67,7 +68,7 @@ REQUESTED = ("busybox", "musl", "python3", "nodejs", "bubblewrap")
 # until someone looks at it and updates this table on purpose.
 LOCK = {
     "ada-libs": "3.3.0-r0", "brotli-libs": "1.2.0-r1", "bubblewrap": "0.12.0-r0", "busybox": "1.37.0-r31",
-    "busybox-binsh": "1.37.0-r31", "c-ares": "1.34.8-r0", "ca-certificates": "20260909-r0", "gdbm": "1.26-r0",
+    "busybox-binsh": "1.37.0-r31", "c-ares": "1.34.9-r0", "ca-certificates": "20261020-r0", "gdbm": "1.26-r0",
     "icu-data-en": "78.1-r0", "icu-libs": "78.1-r0", "libbz2": "1.0.8-r6", "libcap2": "2.78-r0",
     "libcrypto3": "3.5.9-r0", "libexpat": "2.9.0-r0", "libffi": "3.5.2-r1", "libgcc": "15.2.0-r5",
     "libncursesw": "6.6_p20260516-r0", "libpanelw": "6.6_p20260516-r0", "libssl3": "3.5.9-r0",
@@ -82,6 +83,8 @@ LOCK = {
 # the stable mirror no longer serves r0. Reviewed and taken on purpose: a security fix, nothing else in the package.
 # 2026-10-18: libexpat 2.8.5-r0 -> 2.9.0-r0 (a dependency of python3, resolved to whatever the mirror serves; the mirror
 # no longer serves 2.8.5). Taken on purpose to unblock 0.9.118; nothing else in the resolved set moved.
+# 2026-10-21: c-ares 1.34.8 -> 1.34.9 (a dependency of nodejs) and ca-certificates 20260909 -> 20261020 (the CA bundle),
+# both because the mirror no longer serves the old revisions. Taken on purpose for 0.9.121; nothing else moved.
 PI_VERSION = "0.84.1"
 
 

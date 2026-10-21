@@ -1163,7 +1163,13 @@ class Home:
             except S.ProbantError as e:
                 return problem(str(e), 404)
             running = home.launches.running_intake(meta["id"])
+            finished = None
+            try:
+                finished = json.loads((I.path_of(meta["id"]) / "reading-finished.json").read_text())
+            except (OSError, ValueError):
+                pass
             return {"meta": meta, "proposals": proposals, "drafts": I.created_drafts(id), "dropped": I.dropped_count(id),
+                    "finished": finished,
                     "running": home.launches.view(running) if running else None,
                     "last_launch": home.launches.latest_intake_result(meta["id"]) if not running else None}
 

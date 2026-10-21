@@ -1405,11 +1405,18 @@
     p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
     p.append(el("div", "page-head", el("h1", "", d.meta.source_name),
       el("p", "sub", `${d.meta.chars.toLocaleString()} characters · staged ${localTime(d.meta.staged_at)}`)));
+    if (d.finished) {
+      // The reading is done: what it made, and what to do next (22 Oct test: nothing changed when it finished).
+      const n = (d.drafts || []).length;
+      p.append(el("div", "card key-card", el("p", "", el("b", "", `Reading finished at ${localTime(d.finished.at)} · ${n} draft matter${n === 1 ? "" : "s"}. `),
+        "Next: open each draft below, check its description against its passage, confirm the priority date, then start a prior-art survey from it."),
+        d.running ? el("p", "sub", "The session stays open so you can ask about the drafts; end it when you are done.") : null));
+    }
     if (d.running) {
       p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
       // What the wait really is (22 Oct test: "a few minutes" against 14 before the first finding).
       const listMin = 5 + Math.round((d.meta.chars || 0) / 4000);
-      p.append(el("p", "sub", `The AI first lists the inventions it finds (about ${listMin} minutes for ${(d.meta.chars || 0).toLocaleString()} characters), `
+      if (!d.finished) p.append(el("p", "sub", `The AI first lists the inventions it finds (about ${listMin} minutes for ${(d.meta.chars || 0).toLocaleString()} characters), `
         + "then writes one draft every minute or so. You can leave this page: drafts are saved to your matters as they are written, "
         + "and the session shows what it is doing."));
       watchDocument(id);

@@ -2878,3 +2878,12 @@ def test_fallback_puts_the_more_accurate_model_before_the_faster_one():
     order = list(C.FALLBACK_MODELS)
     assert order.index("glm-5.2") < order.index("kimi-k2.6")
     assert A.capability_of("kimi-k3") > A.capability_of("glm-5.2") > A.capability_of("kimi-k2.6")
+
+
+def test_a_reading_that_goes_idle_with_drafts_leaves_a_finished_marker(tmp_path):
+    """22 Oct test: a finished repository reading looked "running" for ever; the home page now reads this marker."""
+    b = _bridge(tmp_path)
+    b.mode, b.recorded, b.workspace = "intake", 3, str(tmp_path)
+    b._mark_reading_finished()
+    got = json.loads((tmp_path / "reading-finished.json").read_text())
+    assert got["drafts"] == 3 and got["at"].endswith("Z")

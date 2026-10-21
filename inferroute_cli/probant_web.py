@@ -542,6 +542,11 @@ class Bridge:
                 asyncio.ensure_future(self._continue_reading())
             elif self.oneshot and was and not self.busy and not self.dialogs:
                 asyncio.ensure_future(self._end_round())
+            # A reading on the page that went idle with drafts made and nothing left to continue: say so where the
+            # home page can read it (22 Oct test: a finished reading looked "running" for ever).
+            if (was and not self.busy and self.mode == "intake" and self.recorded and not self.pending_prompts
+                    and not self._should_continue_reading()):
+                self._mark_reading_finished()
         if event["kind"] == "tool_start":
             name = str(event.get("tool") or "")
             self.tool_counts[name] = self.tool_counts.get(name, 0) + 1
@@ -812,6 +817,13 @@ class Bridge:
     CONTINUE_PROMPT = ("Your last reply was cut off by a connection problem, so it may not have created its draft. "
                        "Continue with the first invention on your list that has no draft matter yet, one per reply, "
                        "until every item has a draft; then give the short summary.")
+
+    def _mark_reading_finished(self) -> None:
+        try:
+            (Path(self.workspace) / "reading-finished.json").write_text(json.dumps(
+                {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "drafts": self.recorded}))
+        except (OSError, TypeError):
+            pass                                    # a marker must never fail the turn it describes
 
     def _should_continue_reading(self) -> bool:
         return (self.mode == "intake" and self._reply_failed and self.continued < self.CONTINUE_LIMIT

@@ -205,6 +205,8 @@
   let ended = false;
   let stalled = false;
   let toolRunning = "";
+  let tmSearches = 0;               // trademark searches started in this session (name checks)
+  let reportCall = "";              // the tool call writing name-check.md, if one is under way
 
   // One way out that always works, wherever it is offered from. The bridge escalates on its side; here the
   // button must never sit on "Ending…" for ever, so a failure is said out loud.
@@ -397,7 +399,12 @@
       current.node.append(p.node);
       s();
     }
-    p.label.textContent = p.tool
+    // A name check speaks in its own steps (UX review, 22 Oct: "Thinking · 4,290 characters" is engineer-facing).
+    // The character count stays one hover away for whoever wants it.
+    p.label.title = `${p.thinking.toLocaleString()} characters of reasoning, ${p.tool.toLocaleString()} of tool input`;
+    p.label.textContent = nameSession
+      ? (tmSearches ? "Writing your report from the searches…" : "Reading your names and choosing the trademark classes…")
+      : p.tool
       ? `Preparing the next step · ${p.tool.toLocaleString()} characters written`
       : `Thinking · ${p.thinking.toLocaleString()} characters`;
   }
@@ -1619,6 +1626,15 @@
       const step = el("div", "step", el("span", "step-dot", "·"), el("span", "", fn ? fn(ev.args || {}) : `Used ${NICE_TOOL(ev.tool)}`));
       log.append(step);
       toolRunning = fn ? `${fn(ev.args || {})}…` : "Working…";
+      const args = ev.args || {};
+      if (ev.tool === "trademark_search") {
+        tmSearches += 1;
+        toolRunning = `Searching the trademark registers for “${args.name || ""}” (search ${tmSearches})…`;
+      }
+      if ((ev.tool === "write" || ev.tool === "edit") && /(^|\/)name-check[^/]*\.md$/.test(String(args.path || ""))) {
+        reportCall = String(ev.call || "");
+        toolRunning = "Writing your report…";
+      }
     }
     updateActivity();
     s();
@@ -1669,9 +1685,42 @@
     return line;
   }
 
+  // The report is on the matter page, which the founder left to come here: say it is ready and take them there
+  // (UX review, 22 Oct: the session said "saved to name-check.md" with no way to it).
+  // On a name check the founder's screen is the conversation: the panel shows its verdict card and opens on
+  // request (UX review, 22 Oct: it took a third of the screen during the whole wait).
+  function foldTrust() {
+    const t = $("trust");
+    if (!t || t.querySelector(".trust-unfold")) return;
+    t.classList.add("folded");
+    const b = el("button", "link small trust-unfold", "Details: what was checked");
+    b.type = "button";
+    b.addEventListener("click", () => {
+      const folded = t.classList.toggle("folded");
+      b.textContent = folded ? "Details: what was checked" : "Hide the details";
+    });
+    $("trust-body").after(b);
+  }
+
+  function reportReady() {
+    if (document.querySelector(".report-ready")) return;
+    const open = el("button", "primary", "Open the report");
+    open.type = "button";
+    open.addEventListener("click", () => goHome(matterRoute(matterId)));
+    const card = el("div", "report-ready card-note",
+      el("b", "", "Your report is ready. "),
+      "It lists the registered marks that resemble each name, and the questions to take to a trademark professional. ",
+      open);
+    log.append(card);
+  }
+
   function toolEnd(ev) {
     toolRunning = "";
     updateActivity();
+    if (reportCall && ev.call === reportCall) {
+      reportCall = "";
+      if (ev.ok !== false) reportReady();
+    }
     if (ev.tool === "suggest_next_steps") {
       const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];
       assistantSteps = steps.map(String).filter((t) => t && !/^[\/!]/.test(t)).slice(0, 4);
@@ -2258,7 +2307,16 @@
     renderTrust(s.trust);
     // A continuation: the home page wrote a first message from the earlier session. It goes in the box for the
     // person to read and edit — nothing is sent until they press Send.
-    if (s.draft && !$("input").value) {
+    // A name check started from the dialog: the app sends its first message itself, once, so the founder lands
+    // on a check already running. Marked in sessionStorage so a reload does not send it twice.
+    let autoSent = false;
+    try { autoSent = sessionStorage.getItem(`anteriora-autosent-${s.matter}`) === String(s.draft); } catch (_) { /* send once anyway */ }
+    // Only ever this one fixed sentence: a continuation's draft (an earlier session's notes) is never sent for you.
+    const NAMES_FIRST = "Check the names in my notes";
+    if (nameSession && s.autosend && String(s.draft) === NAMES_FIRST && !autoSent && !s.busy) {
+      try { sessionStorage.setItem(`anteriora-autosent-${s.matter}`, NAMES_FIRST); } catch (_) { /* ignore */ }
+      setTimeout(() => send(NAMES_FIRST), 800);
+    } else if (s.draft && !s.autosend && !$("input").value) {
       const box = $("input");
       box.value = String(s.draft);
       box.rows = Math.min(14, String(s.draft).split("\n").length + 1);
@@ -2289,6 +2347,9 @@
       window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
     } else if (nameSession && d.disclosure_words > 0) {
       line.textContent = `Your product and names are in the matter folder (disclosure.md, ${d.disclosure_words} words). The trademark search runs on this computer; the AI reads your notes and the results.`;
+      $("empty").querySelector(".hint").textContent = "Everything you type is encrypted on this computer before it goes to the AI's sealed machine. "
+        + "The search runs on this computer; the assistant searches straight away and asks you to confirm the classes afterwards.";
+      foldTrust();
       $("input").placeholder = "Ask about your names, or add one to check…";
     } else if (d.disclosure_words > 0) {
       line.textContent = `The disclosure is in the matter folder: disclosure.md, ${d.disclosure_words} words.`;

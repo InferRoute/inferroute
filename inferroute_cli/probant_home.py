@@ -419,7 +419,7 @@ class Launches:
                 it["proc"].kill()
 
     def start(self, matter_id: str, *, intake_dir: str = "", draft_client: str = "Personal",
-              draft: str = "", readable: str = "") -> Dict[str, Any]:
+              draft: str = "", readable: str = "", autosend: bool = False) -> Dict[str, Any]:
         """A session on a matter, or — with `intake_dir` — a session that reads one staged document and
         proposes matters from it. Both are the same child, the same page and the same sealed lane; only
         the command differs, so a reading session cannot drift into a second kind of session."""
@@ -430,8 +430,11 @@ class Launches:
         # The child's page shows a way back here, so a finished session is not a dead end.
         env = dict(os.environ, IR_PROBANT_NO_BROWSER="1", IR_PROBANT_HOME_URL=self.home_url)
         env.pop("IR_PROBANT_DRAFT", None)
+        env.pop("IR_PROBANT_AUTOSEND", None)
         if draft:
             env["IR_PROBANT_DRAFT"] = draft[:DRAFT_LIMIT]       # the page puts it in the message box; nothing is sent
+            if autosend:
+                env["IR_PROBANT_AUTOSEND"] = "1"                # …except the one first message of a name check
         if readable:
             # The assistant may read ONLY disclosure.md unless the professional has named another file for the session
             # (read_matter_file refuses the rest, on purpose: a stale backup once steered a survey). Choosing to
@@ -477,6 +480,8 @@ NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the M
 
 
 DRAFT_LIMIT = 8000
+NAMES_FIRST_MESSAGE = "Check the names in my notes"
+
 NOTES_DIR = "previous-sessions"
 NOTES_LIMIT = 400_000
 
@@ -897,7 +902,12 @@ class Home:
                     except OSError as e:
                         return problem(f"The earlier session could not be written into the matter's folder: {e}", 500)
                 draft = notes["message"]
-            return home.launches.view(home.launches.start(f"{client}/{matter}", draft=draft,
+            # A name check started from the new-matter dialog: its first message is sent by the app, so the founder
+            # lands on a check already running (UX review, 22 Oct). Only for a name matter, and only that message.
+            autosend = str(d.get("auto") or "") == "names" and rec.get("kind") == "name" and not earlier
+            if autosend:
+                draft = NAMES_FIRST_MESSAGE
+            return home.launches.view(home.launches.start(f"{client}/{matter}", draft=draft, autosend=autosend,
                                                           readable=notes["path"] if earlier else ""))
 
         @app.post("/api/sessions/end")

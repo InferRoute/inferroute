@@ -1077,7 +1077,8 @@ class Bridge:
                     "home": os.environ.get("IR_PROBANT_HOME_URL", ""),
                     # A session that continues an earlier one: the message the home page wrote from it. The page
                     # puts it in the message box for the person to read and edit; nothing is sent from here.
-                    "draft": os.environ.get("IR_PROBANT_DRAFT", "")[:8000]}
+                    "draft": os.environ.get("IR_PROBANT_DRAFT", "")[:8000],
+                    "autosend": os.environ.get("IR_PROBANT_AUTOSEND") == "1"}
 
         @app.get("/api/intake/drafts")
         async def intake_drafts():

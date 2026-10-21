@@ -429,16 +429,22 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     A("<!doctype html><html lang=en><head><meta charset=utf-8>")
     A(f"<title>Prior-art record — {_e(client)}/{_e(matter)}</title>")
     A("<style>"
-      "body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}"
-      "h1{font-size:1.5rem;margin:.2rem 0}h2{font-size:1.15rem;border-bottom:2px solid #eee;padding-bottom:.2rem;margin-top:2rem}"
-      ".sub{color:#666}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid #ddd;padding:.4rem .6rem;text-align:left;vertical-align:top}"
-      "th{background:#f6f6f6}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#f6f8fa;padding:.8rem;border-radius:6px;overflow:auto;font-size:12px;white-space:pre-wrap}"
-      ".ok{color:#127a2b}.warn{color:#b25000;font-weight:600}.bad{color:#b00020;font-weight:600}"
-      ".note{color:#666;font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}"
-      ".glance{background:#f4f8f5;border:1px solid #d5e6da;border-radius:8px;padding:.6rem 1.2rem 1rem;margin:1.2rem 0}"
+      # The Anteriora palette (paper, slate ink, one brass point), with system fonts only: the record must open
+      # offline, years from now, on a machine that has none of ours.
+      "body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#15222c;background:#faf8f4}"
+      "h1{font:500 1.6rem/1.2 'Iowan Old Style',Palatino,Georgia,serif;margin:.2rem 0}h2{font:500 1.2rem/1.3 'Iowan Old Style',Palatino,Georgia,serif;border-bottom:1px solid #d6d3cb;padding-bottom:.25rem;margin-top:2rem}"
+      ".brandline{display:flex;align-items:center;gap:.45rem;font:500 1.05rem 'Iowan Old Style',Palatino,Georgia,serif;color:#15222c;margin-bottom:1rem}.brandline svg{height:15px}"
+      ".sub{color:#4f6a80}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid #d6d3cb;padding:.4rem .6rem;text-align:left;vertical-align:top}"
+      "th{background:#f1eee6}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#f1eee6;padding:.8rem;border-radius:6px;overflow:auto;font-size:12px;white-space:pre-wrap}"
+      ".ok{color:#376e4c}.warn{color:#90531e;font-weight:600}.bad{color:#9e3f37;font-weight:600}"
+      ".note{color:#4f6a80;font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}"
+      ".glance{background:#e6f0e8;border:1px solid #c9dccd;border-radius:8px;padding:.6rem 1.2rem 1rem;margin:1.2rem 0}"
       ".glance h2{border:0;margin:.4rem 0 .2rem}.glance ul{margin:.3rem 0;padding-left:1.2rem}.glance li{margin:.35rem 0}"
-      ".who{color:#666;font-size:12px}"
+      ".who{color:#4f6a80;font-size:12px}"
       "</style></head><body>")
+    A('<div class=brandline><svg viewBox="6 21 47 32" fill="none" stroke-linecap="round" aria-hidden="true">'
+      '<circle cx="13" cy="40" r="4" fill="#b0873a"/><circle cx="37" cy="37" r="12" stroke="#15222c" stroke-width="4"/>'
+      '<line x1="49" y1="24" x2="49" y2="49" stroke="#15222c" stroke-width="4"/></svg>Anteriora</div>')
     A("<h1>Prior-art research record</h1>")
     # The record is the one thing here that leaves the firm — opposing counsel, a client's CTO, an examiner
     # may read it — so it carries the full product name and who stands behind it, not the in-product short one.

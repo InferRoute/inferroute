@@ -1404,8 +1404,12 @@
     p.append(el("div", "page-head", el("h1", "", d.meta.source_name),
       el("p", "sub", `${d.meta.chars.toLocaleString()} characters · staged ${localTime(d.meta.staged_at)}`)));
     if (d.running) {
-      p.append(launchBox(`document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
-      p.append(el("p", "sub", "Findings appear here as the document is read. A long document takes a few minutes."));
+      p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
+      // What the wait really is (22 Oct test: "a few minutes" against 14 before the first finding).
+      const listMin = 5 + Math.round((d.meta.chars || 0) / 4000);
+      p.append(el("p", "sub", `The AI first lists the inventions it finds (about ${listMin} minutes for ${(d.meta.chars || 0).toLocaleString()} characters), `
+        + "then writes one draft every minute or so. You can leave this page: drafts are saved to your matters as they are written, "
+        + "and the session shows what it is doing."));
       watchDocument(id);
     }
     if ((d.drafts || []).length) {

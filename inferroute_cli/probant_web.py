@@ -1435,7 +1435,10 @@ OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it, and prop
 # the first draft, because a reply that is only a list ends the turn and the session sits there waiting.
 DRAFT_OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it. Count every distinct invention separately: "
                              "two mechanisms that solve different problems, or could be claimed independently, are two "
-                             "inventions even in the same file. Begin your next reply with a short numbered list of them, "
+                             "inventions even in the same file; but functions or steps that only work together as one "
+                             "mechanism are ONE invention, not one per function. Mark a list item (minor) when it is a "
+                             "routine engineering convenience rather than something a founder would patent, and put the "
+                             "minor items last. Begin your next reply with a short numbered list of them, "
                              "one line each, and in that same reply create the draft matter for the first one with "
                              "create_draft_matter. Then create the rest ONE PER REPLY, in the order of your list, until "
                              "every item has a draft. Each draft preserves the invention's full technical description, "

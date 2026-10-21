@@ -122,7 +122,7 @@ def test_a_remote_url_never_keeps_embedded_credentials(repo):
 
 
 def test_a_folder_that_is_not_a_repository_is_refused(tmp_path):
-    with pytest.raises(S.ProbantError, match="not inside a git repository"):
+    with pytest.raises(S.ProbantError, match="is not a git repository.*git init"):
         R.snapshot(str(tmp_path))
 
 

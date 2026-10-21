@@ -95,7 +95,10 @@ def repo_root(path: str) -> Path:
     try:
         top = _git(p, "rev-parse", "--show-toplevel").strip()
     except S.ProbantError:
-        raise S.ProbantError(f"{p} is not inside a git repository")
+        # 22 Oct test: every plain folder of code met this sentence and stopped there. Say why, and the way through.
+        raise S.ProbantError(f"{p} is not a git repository. Anteriora reads only committed files, so each draft can be "
+                             f"dated from its history. To read this folder, make it one first, in a terminal: "
+                             f"cd \"{p}\" && git init && git add -A && git commit -m first — then choose it again.")
     return Path(top)
 
 
@@ -233,7 +236,13 @@ def snapshot(path: str, ref: str = "HEAD", only: Optional[List[str]] = None) -> 
     repository larger than one reading holds."""
     prefixes = [p.strip("/") for p in (only or []) if p.strip("/")]
     repo = repo_root(path)
-    commit = _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+    try:
+        commit = _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").strip()
+    except S.ProbantError:
+        if subprocess.run(["git", "-C", str(repo), "rev-parse", "--verify", "HEAD"], capture_output=True).returncode != 0:
+            raise S.ProbantError("This repository has no commits yet. Commit your files first (git add -A && git commit), "
+                                 "then choose it again.") from None
+        raise S.ProbantError(f"Commit '{ref}' was not found in this repository. Use HEAD, a branch name or a full commit id.") from None
     tree = _git(repo, "rev-parse", f"{commit}^{{tree}}").strip()
     listing = _git(repo, "ls-tree", "-r", "-l", "-z", commit)
     included: List[Dict[str, Any]] = []
@@ -320,11 +329,22 @@ def folder_choices(info: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
 
 def describe(info: Dict[str, Any], text: str, surface: str = "terminal") -> List[str]:
     """What the person approves: plain lines, no file contents."""
-    lines = [f"{info['repo_name']} at commit {info['commit'][:12]}: {len(info['files'])} file(s) to read, "
+    n = len(info['files'])
+    lines = [f"{info['repo_name']} at commit {info['commit'][:12]}: {n} file{'' if n == 1 else 's'} to read, "
              f"{len(text):,} characters."]
+    if not n:
+        lines.append("Nothing to read: no committed text file matches what you chose. Check the folder names, or read the "
+                     "whole repository.")
     if info.get("only"):
         lines.append(f"Only: {', '.join(info['only'])}")
     from .probant_intake import MAX_CHARS
+    # How long it will take, measured (20-22 Oct, sealed AI): about 5 minutes plus one per 4,000 characters before
+    # the list of inventions appears, then about a minute per draft. Said before the founder commits to it.
+    if 0 < len(text) <= MAX_CHARS and len(text) > 150_000:
+        mins = 5 + len(text) // 4000
+        lines.append(f"That is a long reading: about {mins // 60} h {mins % 60:02d} min before the list of inventions "
+                     f"appears. Choose the folders that hold your product's own ideas; leave vendored code, "
+                     f"documentation and generated files out.")
     if len(text) > MAX_CHARS:
         how = "Tick the folders to read below." if surface == "page" else "Choose folders with --only."
         lines.append(f"That is more than one reading holds ({MAX_CHARS:,} characters). {how}")

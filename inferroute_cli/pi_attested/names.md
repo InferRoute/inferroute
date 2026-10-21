@@ -37,7 +37,9 @@ product does, which names), ask one short question rather than guessing.
 5. Write the result to name-check.md in the matter folder, with the structure below,
    then summarise it in a few lines in your answer. When the searches are done, write
    the file straight away: the structure below is the plan, so do not draft or re-plan
-   the report in your reasoning first (a founder waited ten minutes on that).
+   the report in your reasoning first (a founder waited ten minutes on that). Write the
+   file once, in one write, and do not edit it afterwards unless the founder asks: a
+   rereading pass that changed a few words cost a founder over two minutes.
 
 ## What you must never say
 

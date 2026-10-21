@@ -377,7 +377,7 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
     cov = coverage(result.get("sources", ""))
     out = [f"Registered marks close to “{result['name']}”",
            f"Searched: {'; '.join(cov['searched'])} ({result['marks_searched']:,} live word marks), data as of "
-           f"{result['data_date']}. Searched on this computer; the name was not sent anywhere.",
+           f"{result['data_date']}. Searched on this computer; the name was not sent to any register, search engine or website.",
            f"Not searched: {'; '.join(cov['not_searched'])}.",
            "This is a list of similar marks, not an opinion on whether you can use or register the name."]
     if result["classes"]:

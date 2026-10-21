@@ -2,7 +2,7 @@
 
 That a close mark is found whichever way it is spelled; that the reasons given are true of the pair; that a
 long composite mark is not called close because of its length; that the same search returns the same list
-every time; that the output never says a name is available or clear; and that nothing is sent anywhere.
+every time; that the output never says a name is available or clear; and that the name is not sent to any register, search engine or website.
 """
 import json
 import socket
@@ -69,7 +69,7 @@ def test_the_same_search_returns_the_same_list(index):
 
 def test_the_report_states_coverage_and_never_gives_a_verdict(index):
     text = "\n".join(T.report_lines(index.search("Anteriora", ["42"])))
-    assert "data as of 2026-09-30" in text and "was not sent anywhere" in text and "Not searched:" in text
+    assert "data as of 2026-09-30" in text and "was not sent to any register, search engine or website" in text and "Not searched:" in text
     for word in ("available", "is clear", "cleared", "no risk", "likely to be confused", "safe to use"):
         assert word not in text.lower().replace("not an opinion on whether you can use", "")
     empty = "\n".join(T.report_lines(index.search("Xylophonique")))

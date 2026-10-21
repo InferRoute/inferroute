@@ -72,7 +72,7 @@ LOCK = {
     "icu-data-en": "78.1-r0", "icu-libs": "78.1-r0", "libbz2": "1.0.8-r6", "libcap2": "2.78-r0",
     "libcrypto3": "3.5.9-r0", "libexpat": "2.9.0-r0", "libffi": "3.5.2-r1", "libgcc": "15.2.0-r5",
     "libncursesw": "6.6_p20260516-r0", "libpanelw": "6.6_p20260516-r0", "libssl3": "3.5.9-r0",
-    "libstdc++": "15.2.0-r5", "mpdecimal": "4.0.1-r0", "musl": "1.2.6-r2",
+    "libstdc++": "15.2.0-r5", "mpdecimal": "4.0.1-r0", "musl": "1.2.6-r3",
     "ncurses-terminfo-base": "6.6_p20260516-r0", "nghttp2-libs": "1.70.0-r0", "nodejs": "24.18.1-r0",
     "pyc": "3.14.8-r0", "python3": "3.14.8-r0", "python3-pyc": "3.14.8-r0",
     "python3-pycache-pyc0": "3.14.8-r0", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
@@ -85,6 +85,7 @@ LOCK = {
 # no longer serves 2.8.5). Taken on purpose to unblock 0.9.118; nothing else in the resolved set moved.
 # 2026-10-21: c-ares 1.34.8 -> 1.34.9 (a dependency of nodejs) and ca-certificates 20260909 -> 20261020 (the CA bundle),
 # both because the mirror no longer serves the old revisions. Taken on purpose for 0.9.121; nothing else moved.
+# 2026-10-21 23:40: musl 1.2.6-r2 -> r3 (the mirror replaced it that evening; the C library every binary links).
 PI_VERSION = "0.84.1"
 
 

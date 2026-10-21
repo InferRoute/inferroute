@@ -248,7 +248,14 @@
         // A name check starts at once: the session is started here and opens itself when it is ready, and its
         // first message is sent by the app (UX review, 22 Oct). Only when at least one name is listed.
         const names = kind.value === "name" ? (text.value.match(/^\s*[-*•]\s*\S.*$/gm) || []) : [];
-        if (names.length) {
+        let tmReady = true;
+        if (names.length) { try { tmReady = !!(await api("/api/tm-index")).installed; } catch (_) { tmReady = false; } }
+        if (names.length && !tmReady) {
+          // First check on this computer: the registers are downloaded once, then the check starts by itself
+          // (0.9.122 test: a new founder pressed Check and was left at the install card, the flow lost).
+          try { sessionStorage.setItem("anteriora-auto-check", r.id); } catch (_) { /* starts by hand instead */ }
+          toast("First, Anteriora downloads the trademark registers once (about 250 MB). Your check starts by itself after that.", "info");
+        } else if (names.length) {
           try {
             await api("/api/sessions", { id: r.id, auto: "names" });
             try { sessionStorage.setItem("anteriora-auto-open", r.id); } catch (_) { /* opens by hand instead */ }
@@ -729,7 +736,22 @@
           poll = setInterval(async () => {
             try { const st = await api("/api/tm-index"); if (st.progress) progress.textContent = st.progress; } catch (_) { /* keep the last line */ }
           }, 2000);
-          try { await api("/api/tm-index/install", {}); toast("Trademark data installed.", "info"); refresh(); }
+          try {
+            await api("/api/tm-index/install", {});
+            toast("Trademark data installed.", "info");
+            // A check asked for before the data was here starts now, as it would have (see newMatterDialog).
+            let pending = "";
+            try { pending = sessionStorage.getItem("anteriora-auto-check") || ""; } catch (_) { /* none */ }
+            if (pending && pending === m.id) {
+              try { sessionStorage.removeItem("anteriora-auto-check"); } catch (_) { /* ignore */ }
+              try {
+                await api("/api/sessions", { id: m.id, auto: "names" });
+                try { sessionStorage.setItem("anteriora-auto-open", m.id); } catch (_) { /* opens by hand */ }
+                toast("Your check is starting. The assistant opens in a moment.", "info");
+              } catch (e) { toast(e.message, "error"); }
+            }
+            refresh();
+          }
           catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "Try the install again"; }
           finally { clearInterval(poll); }
         });

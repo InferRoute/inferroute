@@ -918,3 +918,11 @@ def test_a_reading_session_can_be_ended_from_the_home_page():
     assert 'await api("/api/sessions/end", { id: l.matter || matterId });' in js
     home_py = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_home.py").read_text()
     assert 'reading = any(it.get("intake_id") and it["matter"] == mid' in home_py
+
+
+def test_a_first_name_check_continues_by_itself_after_the_trademark_data_is_installed():
+    """0.9.122 test (22 Oct): a new founder pressed "Check the names" before the registers were on the computer and
+    was left at the install card. The dialog now remembers the check, and a finished install starts it."""
+    js = (STATIC / "home.js").read_text()
+    assert 'sessionStorage.setItem("anteriora-auto-check", r.id)' in js
+    assert 'if (pending && pending === m.id)' in js and 'await api("/api/sessions", { id: m.id, auto: "names" });' in js

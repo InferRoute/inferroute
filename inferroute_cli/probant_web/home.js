@@ -79,6 +79,8 @@
     return Number.isNaN(d.getTime()) ? String(iso || "") : d.toLocaleString([], { dateStyle: "medium", timeStyle: "short", hour12: false });
   };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  // A path in your home folder, written as people write it: ~/Anteriora/… rather than /home/<name>/… .
+  const tilde = (p) => String(p || "").replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~");
   const enc = (s) => encodeURIComponent(s);
   document.getElementById("brand").addEventListener("click", () => { location.hash = "#/"; });
 
@@ -228,6 +230,9 @@
     for (const [v, label] of [["invention", "An invention: search prior art"], ["name", "Names: check registered trademarks"]]) {
       const o = document.createElement("option"); o.value = v; o.textContent = label; kind.append(o);
     }
+    // The hint under the choice speaks about the choice made (21 Oct audit: the trademark hint showed under "An invention").
+    const KIND_HINT = { invention: "The assistant searches about 29.6 million US, European and WIPO patent publications, through a sealed machine this computer checks first.",
+      name: "Names are searched on this computer, in a copy of the French and US trademark registers. EU trade marks are not included yet." };
     const NAME_TEMPLATE = "The product: what it is and what it does, in a few sentences.\n\nNames being considered:\n- \n\nMarkets: where you will sell it (for example France, the EU, the US).";
     const validation = formErrors({ client, matter, priority_date: date, disclosure: text });
     const err = el("p", "form-error");
@@ -248,7 +253,7 @@
     });
     dialog("New matter", [
       el("p", "", "A matter is one thing you research: an invention, or the names you are considering. It keeps its folder, its sessions and its records."),
-      field("What are you checking?", kind, "Names are searched on this computer, in a copy of the French and US trademark registers. EU trade marks are not included yet."),
+      field("What are you checking?", kind, KIND_HINT.invention),
       validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
       validation.field("matter", "Matter", "Required. A short name for this matter."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
@@ -257,6 +262,8 @@
     ], [button("Cancel", "ghost", closeDialog), create]);
     kind.addEventListener("change", () => {
       const names = kind.value === "name";
+      const kindHint = kind.closest(".field")?.querySelector(".field-hint");
+      if (kindHint) kindHint.textContent = names ? KIND_HINT.name : KIND_HINT.invention;
       const dateRow = date.closest(".field"); if (dateRow) dateRow.hidden = names;
       // "Disclosure" is a patent word; for names the box holds the product and the names.
       const textRow = text.closest(".field");
@@ -726,7 +733,7 @@
         el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether a name is available or safe to use: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
       if (rep && rep.present) {
         const body = renderReport(rep.text);
-        p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${rep.file}`), body);
+        p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), body);
       } else {
         p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
       }
@@ -781,13 +788,13 @@
         const result = el("div", "check-result");
         result.hidden = true;
         list.append(el("div", "record-row", el("span", "when", `Exported ${localTime(e.made_at)}`),
-          el("span", "mono sub", e.folder), button("Open record", "ghost small", () => openLocal(e.view)),
+          el("span", "mono sub", tilde(e.folder)), button("Open record", "ghost small", () => openLocal(e.view)),
           button("Check this record", "ghost small", (ev) => runCheck(m.id, e.name, ev.currentTarget, result))),
           result);
       }
       p.append(list);
     }
-    p.append(el("p", "sub folder-line", `Matter folder: ${m.disclosure.folder}`));
+    p.append(el("p", "sub folder-line", `Matter folder: ${tilde(m.disclosure.folder)}`));
     p.append(el("div", "danger-zone",
       el("div", "", el("b", "", "Delete this matter"),
         el("p", "sub", "Its disclosure, sessions, marks and exported records go to Recently deleted. You can restore "

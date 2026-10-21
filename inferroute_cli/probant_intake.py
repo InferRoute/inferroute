@@ -100,6 +100,14 @@ def intake_root() -> Path:
     return S.probant_root() / ".intake"
 
 
+def _word_cut(slug: str, limit: int) -> str:
+    """A matter name cut at a word boundary, never mid-word ("…-with-hinged-overlapping-" in the 21 Oct audit)."""
+    if len(slug) <= limit:
+        return slug
+    cut = slug[:limit]
+    return (cut.rsplit("-", 1)[0] if "-" in cut else cut).strip("-._ ")
+
+
 def _slug(name: str) -> str:
     out = re.sub(r"[^A-Za-z0-9 ._-]+", "-", (name or "document").strip())[:60].strip(" -.")
     return out or "document"
@@ -199,7 +207,7 @@ def read_proposals(ident: str) -> List[Dict[str, Any]]:
         date = str(row.get("priority_date") or "").strip()
         out.append({"title": title, "summary": summary, "quote": quote, "where": at,
                     "priority_date": date if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date) else "",
-                    "suggested_matter": _slug(title).lower().replace(" ", "-")[:40]})
+                    "suggested_matter": _word_cut(_slug(title).lower().replace(" ", "-"), 40)})
     return out
 
 
@@ -305,7 +313,7 @@ class DraftCreator:
                     return {**prior, "already_created": True}
             if len(drafts) >= MAX_DRAFTS:
                 raise S.ProbantError(f"this reading has already created {MAX_DRAFTS} drafts; split a larger document")
-            base = _slug(title).lower().replace(" ", "-").strip("-._ ")[:48] or "invention"
+            base = _word_cut(_slug(title).lower().replace(" ", "-").strip("-._ "), 48) or "invention"
             if not base[0].isalnum() or not base[0].isascii():
                 base = "invention-" + base
             for n in range(1, 1001):

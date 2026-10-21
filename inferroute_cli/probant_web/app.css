@@ -51,7 +51,7 @@ code, .mono { font-family: var(--mono); font-size: .92em; }
 /* header */
 .top { display: flex; align-items: center; gap: 18px; padding: 10px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .brand { font-family: var(--display); font-weight: 500; font-size: 19px; letter-spacing: .1px; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
-.brand .mark { width: 22px; height: 22px; flex: 0 0 auto; }
+.brand .mark { height: 17px; width: auto; flex: 0 0 auto; margin-top: 2px; }
 .brand .mark .point { fill: var(--action); }
 /* The brand is the way home, as on every site people already use; it must not look like a form button. */
 button.brand { border: 0; background: none; padding: 2px 6px; margin-left: -6px; color: inherit;

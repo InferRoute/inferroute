@@ -780,6 +780,9 @@
 
   function offerDeeper(card) {
     if (!card || card.querySelector(".deeper") || ended) return;
+    // One such button on the page, under the newest card (21 Oct audit: it was repeated under seven cards,
+    // each one click from a multi-minute search).
+    for (const old of document.querySelectorAll(".deeper")) old.closest(".card-actions")?.remove();
     const b = el("button", "deeper", DEEPER);
     b.type = "button";
     b.addEventListener("click", () => { b.remove(); send(DEEPER); });

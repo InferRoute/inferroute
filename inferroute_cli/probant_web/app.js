@@ -843,6 +843,9 @@
   const IDEAS = [SURVEY,
                  "Search one feature of the disclosure on its own",
                  SUMMARISE_IDEA];
+  // A name session has no patent search and no marks: its ideas are about names.
+  const NAME_IDEAS = ["Check one more name", "Search these names in more classes",
+                      "Suggest a few invented names and check each one"];
   const STEPS_MAX = 5;
   let assistantSteps = [];             // the suggestions that came with the latest answer
   let marksAtTurn = null;              // your marks when the assistant took up the current message
@@ -898,6 +901,27 @@
     // all. Gated ONCE here instead of per branch, so a branch added later cannot be the next one to miss it.
     if (!started) { bar.hidden = true; return; }
     const groups = [];
+    if (nameSession) {
+      // Survey, deep search and steps from marks are patent actions (the audit, 21 Oct, saw "Run a prior-art
+      // survey of the disclosure" offered after a name check). The assistant's own list, else name ideas.
+      groups.push(assistantSteps.length ? { title: "", steps: assistantSteps.slice(0, 4) }
+                                        : { title: "Ideas", steps: NAME_IDEAS });
+      if (busy || ended) { bar.hidden = true; return; }
+      if (log.lastElementChild !== bar) { const keep = stick(); log.append(bar); keep(); }
+      for (const g of groups) {
+        if (g.title) list.append(el("div", "steps-sub", g.title));
+        const row = el("div", "steps-row");
+        for (const step of g.steps) {
+          const b = el("button", "step-btn", step);
+          b.type = "button";
+          b.addEventListener("click", () => send(step));
+          row.append(b);
+        }
+        list.append(row);
+      }
+      bar.hidden = false;
+      return;
+    }
     const mine = assistantSteps.slice(0, 4);
     if (mine.length) {
       groups.push({ title: "", steps: mine });
@@ -2224,6 +2248,8 @@
     searchOffered = Boolean(s.search);
     readingSession = s.mode === "intake";
     nameSession = s.mode === "names";
+    const scope = $("audit").querySelector("#audit-scope");      // made by auditOffer, not in the HTML
+    if (scope) scope.textContent = auditScope();
     intakeId = String(s.intake_id || "");
     $("layout").hidden = false;
     document.title = `Anteriora · ${s.matter}`;
@@ -2413,6 +2439,13 @@
     return box;
   }
 
+  // The panel is drawn before the session says what kind it is; the session state rewrites this one line.
+  // A declaration, not a const: auditOffer first runs near the top of this file, before this line is reached.
+  function auditScope() {
+    return nameSession
+      ? "Check hardware, signatures and identity without sharing your product notes, your names or the searches."
+      : "Check hardware, signatures and identity without sharing your disclosure, queries or patent text.";
+  }
   function auditOffer(box, plain) {
     clear(box);
     box.className = "audit-offer";        // its own block: the panel's container carries no styling of its own
@@ -2420,8 +2453,9 @@
     if (said) box.append(said);
     const go = el("button", "ghost", "Have your own AI audit it");
     go.type = "button";
-    box.append(el("div", "audit-title", "Independent audit"),
-      el("p", "sub", "Check hardware, signatures and identity without sharing your disclosure, queries or patent text."), go);
+    const scope = el("p", "sub", auditScope());
+    scope.id = "audit-scope";
+    box.append(el("div", "audit-title", "Independent audit"), scope, go);
     const results = el("div", "audit-results");
     auditResultsTarget = results;
     auditResultsSnapshot = "";

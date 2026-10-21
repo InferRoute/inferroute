@@ -734,8 +734,19 @@
       if (rep && rep.present) {
         const body = renderReport(rep.text);
         p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), body);
+      } else if (rep && (rep.earlier || []).length) {
+        p.append(el("p", "sub", "No report from the latest session yet. The earlier reports are below."));
       } else {
         p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
+      }
+      // Each session writes its own report; the earlier ones are kept, so a second check never erases the first.
+      const earlier = (rep && rep.earlier) || [];
+      if (earlier.length) {
+        p.append(el("h2", "section", "Earlier reports"));
+        for (const r of earlier) {
+          p.append(el("details", "search-log", el("summary", "", el("b", "", `Written ${localTime(r.written_at)}`), ` · ${r.file}`),
+            renderReport(r.text)));
+        }
       }
       // Every search, as the search itself returned it on this computer: the marks below are not retyped by the
       // assistant, so their numbers, statuses and classes can be relied on as the register data says them.

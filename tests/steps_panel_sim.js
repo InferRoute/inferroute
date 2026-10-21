@@ -14,6 +14,7 @@ const log = { lastElementChild: null, append(n) { this.lastElementChild = n; } }
 const stick = () => () => {};
 let busy = false, ended = false; const cards = new Map(); const marks = new Map(); const markOrder = [];
 const readingSession = false;   // reading sessions have no next-steps bar; renderSteps closes over it since the 0.9.95 intake work
+const nameSession = false;      // a name session has its own ideas (no survey, no marks); renderSteps closes over it
 const DEEPER = "Look deeper at the ones I marked relevant: search their features one at a time and find documents like them";
 const LEAVE_OUT = "Continue the survey, leaving out what I marked not relevant";
 eval(cut("  const SUMMARISE_IDEA", "  function markButtons(").replace(/\bconst\b|\blet\b/g, "var"));

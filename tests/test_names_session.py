@@ -147,6 +147,17 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     from inferroute_cli import tm_search
     tm_search.log_search(S.records_dir("Acme", "brand"), {"name": "Zebrafy", "classes": ["9"], "hits": [], "more": 0})
     assert [x["name"] for x in c.get("/api/name-check?id=Acme/brand").json()["searches"]] == ["Zebrafy"]
+    # A second session keeps the first report: it is moved aside before the session starts, and both are shown.
+    ws = S.workspace_path("Acme", "brand")
+    kept = S.keep_earlier_name_check(ws)
+    assert kept and kept.name.startswith("name-check-") and not (ws / "name-check.md").exists()
+    report = c.get("/api/name-check?id=Acme/brand").json()
+    assert report["present"] is False and "ZEBRA" in report["earlier"][0]["text"]
+    (ws / "name-check.md").write_text("# Name check\n\nZEBRO (FR 8)\n")
+    report = c.get("/api/name-check?id=Acme/brand").json()
+    assert "ZEBRO" in report["text"] and [r["file"] for r in report["earlier"]] == [str(kept)]
+    assert S.keep_earlier_name_check(ws) != kept and len(S.earlier_name_checks(ws)) == 2   # same minute: no clash
+    assert S.keep_earlier_name_check(ws) is None
     c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
     assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"
 

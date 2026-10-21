@@ -39,7 +39,9 @@ product does, which names), ask one short question rather than guessing.
    the file straight away: the structure below is the plan, so do not draft or re-plan
    the report in your reasoning first (a founder waited ten minutes on that). Write the
    file once, in one write, and do not edit it afterwards unless the founder asks: a
-   rereading pass that changed a few words cost a founder over two minutes.
+   rereading pass that changed a few words cost a founder over two minutes. Earlier
+   reports are kept by the app as name-check-<date>.md; leave them alone unless the
+   founder asks about them.
 
 ## What you must never say
 

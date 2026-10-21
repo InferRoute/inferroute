@@ -393,6 +393,9 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
             raise ProbantError(f"no trademark index is installed on this computer ({tm_index_path()}); "
                                "install it with: anteriora names --install")
         print(f"opening {client}/{matter} — name check, searched on this computer")
+        kept = keep_earlier_name_check(ws)
+        if kept:
+            print(f"  the earlier report is kept as {kept.name}")
         probant = {"matter": f"{client}/{matter}", "mode": "names"}
     else:
         print(f"opening {client}/{matter} — date bound {rec['date_bound']} (held here, not the model's to change)")
@@ -400,6 +403,29 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
     if web:
         probant["web"] = True
     return _launch_with_permit(client, matter, rec, ws, probant)
+
+
+NAME_CHECK = "name-check.md"
+
+
+def keep_earlier_name_check(ws: Path) -> Optional[Path]:
+    """Before a name session starts, move the last report aside as name-check-<when it was written>.md, so a
+    new session writes its own and the earlier one is kept. A second check of the same names found different
+    marks and wrote over the first report, which was then gone (audit, 21 Oct)."""
+    path = ws / NAME_CHECK
+    if not path.is_file():
+        return None
+    stamp = dt.datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d-%H%M")
+    dest, n = ws / f"name-check-{stamp}.md", 2
+    while dest.exists():
+        dest, n = ws / f"name-check-{stamp}-{n}.md", n + 1
+    path.rename(dest)
+    return dest
+
+
+def earlier_name_checks(ws: Path) -> List[Path]:
+    """The reports kept by keep_earlier_name_check, newest first."""
+    return sorted(ws.glob("name-check-*.md"), key=lambda q: q.stat().st_mtime, reverse=True)
 
 
 def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: dict) -> int:

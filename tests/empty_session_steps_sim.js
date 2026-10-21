@@ -32,6 +32,7 @@ const body = `
   let assistantSteps = [], marksAtTurn = null, deepMarksAtLastPress = null;
   let searchOffered = true, busy = false, ended = false;
   const readingSession = false;   // same stub as steps_panel_sim.js, same reason
+  const nameSession = false;      // same stub as steps_panel_sim.js, same reason
   const relevantOrdered = () => {
     const out = markOrder.filter((k) => marks.get(k) === "relevant");
     for (const k of Array.from(marks.keys())) if (marks.get(k) === "relevant" && !out.includes(k)) out.push(k);

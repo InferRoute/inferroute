@@ -1111,7 +1111,7 @@ def test_the_panel_proves_what_it_claims_with_the_records_own_verifier(client, m
     js = (STATIC / "app.js").read_text()
     assert 'api("/api/prove", {})' in js and "renderCheck(verdict, r.check || {}, true);" in js
     common = (STATIC / "common.js").read_text()
-    assert "function renderCheck(box, r, compact)" in common and 'if (compact && g.status !== "pass") item.open = true;' in common
+    assert "function renderCheck(box, r, compact)" in common and 'if (compact && g.status !== "pass" && g.status !== "info") item.open = true;' in common
 
 
 def test_a_skip_that_applies_to_every_search_is_said_once_with_its_count():

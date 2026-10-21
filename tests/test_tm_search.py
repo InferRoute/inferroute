@@ -221,3 +221,25 @@ def test_each_search_is_kept_where_the_matter_page_reads_it(index, tmp_path):
     assert kwik["classes"] == ["29"] and kwik["data_date"] == "2026-09-30"
     assert {h["number"] for h in kwik["hits"]} >= {"1", "2"}           # QUICK, KWIK'PAK as the search returned them
     assert T.logged_searches(tmp_path / "nothing") == []
+
+
+def test_the_assistant_reads_the_closest_few_and_every_same_word_mark():
+    # Six searches of 25 marks each put ~150 marks in front of the model; it needs the closest few for a report
+    # of three marks per name. A same-spelling mark outside the founder's classes sorts late and must not be cut.
+    hits = [{"text": f"M{i}", "reasons": ["spelled closely"]} for i in range(30)]
+    hits.insert(25, {"text": "KWENCH", "reasons": ["same spelling"]})
+    got = T.for_the_assistant({"hits": hits, "more": 7}, limit=10)
+    assert [h["text"] for h in got["hits"]] == [f"M{i}" for i in range(10)] + ["KWENCH"]
+    assert got["more"] == 7 + 31 - 11
+
+
+def test_the_page_keeps_more_marks_than_the_assistant_reads(index, tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(T, "SHOWN_HITS", 1)
+    app = FastAPI()
+    T.install_route(app, index.path, tmp_path / "records")
+    r = TestClient(app).post("/probant/tm/search", json={"name": "Kwik", "classes": ["29"]}).json()
+    logged = T.logged_searches(tmp_path / "records")[0]
+    assert len(logged["hits"]) > len(r["hits"])
+    assert len(r["hits"]) + r["more"] == len(logged["hits"]) + logged["more"]

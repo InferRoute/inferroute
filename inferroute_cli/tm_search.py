@@ -400,6 +400,19 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
 
 SEARCH_LOG = "trademark-searches.jsonl"
 LOGGED_HITS = 40
+# What the assistant reads back from one search. It needs the closest few to write a report that names at most three
+# marks per name; the matter page lists LOGGED_HITS from the host's log. With 25 per search, six searches put about
+# 150 marks in front of the model, which reasoned over them for 9-12k characters before writing (20 Oct turn logs).
+SHOWN_HITS = 10
+EXACT = ("same spelling", "sounds alike")
+
+
+def for_the_assistant(result: Dict[str, Any], limit: int = SHOWN_HITS) -> Dict[str, Any]:
+    """The first `limit` hits (the founder's classes first, then closest), plus any later mark spelled or sounding
+    the same as the name, so a same-word mark in another class is never cut. `more` counts the rest."""
+    hits = result.get("hits", [])
+    shown = hits[:limit] + [h for h in hits[limit:] if any(r in EXACT for r in h.get("reasons", []))][:limit]
+    return {**result, "hits": shown, "more": result.get("more", 0) + len(hits) - len(shown)}
 
 
 def log_search(log_dir: Path, result: Dict[str, Any]) -> None:
@@ -458,8 +471,8 @@ def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None
         if not name or len(name) > 120:
             raise ValueError("give one name of 1 to 120 characters")
         classes = [str(c) for c in (body.get("classes") or [])][:45]
-        limit = max(1, min(int(body.get("limit") or 25), 100))
-        return state["index"].search(name, classes, limit=limit)
+        limit = max(1, min(int(body.get("limit") or SHOWN_HITS), 100))
+        return limit, state["index"].search(name, classes, limit=max(limit, LOGGED_HITS))
 
     async def tm_search(request):
         raw = await request.body()
@@ -467,9 +480,10 @@ def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None
             return JSONResponse({"error": "the request is too large"}, status_code=413)
         try:
             import json as _json
-            result = await asyncio.to_thread(run, _json.loads(raw or b"{}"))
+            limit, full = await asyncio.to_thread(run, _json.loads(raw or b"{}"))
             if log_dir is not None:
-                await asyncio.to_thread(log_search, Path(log_dir), result)
+                await asyncio.to_thread(log_search, Path(log_dir), full)
+            result = for_the_assistant(full, limit)
         except FileNotFoundError:
             return JSONResponse({"error": "no trademark index is installed on this computer"}, status_code=503)
         except (ValueError, TypeError) as error:

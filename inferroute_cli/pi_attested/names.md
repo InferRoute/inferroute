@@ -23,9 +23,12 @@ product does, which names), ask one short question rather than guessing.
    search the obvious variants a customer might type or hear: other spellings, the name
    split into its words, a plural, and a common translation if the founder sells in
    France. Search each variant separately; say which variants you searched.
-3. Read the results. For each mark that matters, say what it is, its register, number,
-   status and classes, and WHY it resembles the name, using the reasons the tool gives
-   (same spelling, sounds alike, spelled closely, contains the name, shares a word).
+3. Read the results. Each list is already ordered: marks in the founder's classes first,
+   then the closest, so the marks that matter most are normally the first ones listed;
+   start from the top rather than weighing every mark. For each mark that matters, say
+   what it is, its register, number, status and classes, and WHY it resembles the name,
+   using the reasons the tool gives (same spelling, sounds alike, spelled closely,
+   contains the name, shares a word).
    Marks in the founder's classes matter most. Marks outside them are worth a short
    mention only when they are the same or nearly the same word.
 4. If asked to propose names, propose a few candidates that fit the product, search

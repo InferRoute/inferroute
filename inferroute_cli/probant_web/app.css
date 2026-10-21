@@ -83,8 +83,30 @@ button.brand:hover { background: var(--user); }
 /* The index goes first, because it is the thing that makes a long session navigable — but it is the first
    thing to drop when there is no room: the conversation and the proof panel both outrank it. */
 @media (max-width: 1240px) { .layout { grid-template-columns: minmax(0, 1fr) 380px; } .outline { display: none; } }
-@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .outline { display: none; }
+@media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } .outline { display: none; }
   .trust { border-left: 0; border-top: 1px solid var(--line); } }
+/* A phone (21 Oct audit): the conversation squeezed into a strip above the panel, and one long line widened
+   the whole page so text and the Send button were cut off. On a narrow screen the PAGE scrolls instead of
+   three nested boxes: the conversation first at full height, the panel after it, the composer pinned. */
+@media (max-width: 760px) {
+  html, body { height: auto; min-height: 100%; }
+  .layout { display: block; }
+  .chat { min-height: calc(100dvh - 110px); }
+  .log { overflow: visible; padding: 14px 16px; }
+  .log, .log * { overflow-wrap: anywhere; }
+  .log pre, .log table { max-width: 100%; overflow-x: auto; }
+  .composer { position: sticky; bottom: 0; z-index: 5; padding: 10px 12px 12px; flex-wrap: wrap; }
+  .composer textarea { min-width: 0; flex: 1 1 100%; }
+  .composer-actions { margin-left: auto; }
+  .trust { overflow: visible; padding: 16px; }
+  .activity { flex-wrap: wrap; padding: 4px 16px; gap: 4px 10px; }
+  /* The matter's name was cut to "P…" beside the verdict pill: on a phone the actions take the first row and
+     the name gets a row of its own, wrapping rather than truncating. */
+  .top { flex-wrap: wrap; row-gap: 6px; }
+  .top .top-actions { margin-left: auto; }
+  .top .matter { order: 3; flex: 1 1 100%; }
+  .top .matter-name { white-space: normal; overflow-wrap: anywhere; }
+}
 
 /* the index down the left.
    Rules learned the hard way on 18 Sep: nothing is absolutely positioned over text (that is how a click

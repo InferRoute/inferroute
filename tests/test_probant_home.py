@@ -286,8 +286,10 @@ def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made(
 
 def test_the_help_page_covers_the_whole_path_and_the_limits():
     js = (STATIC / "home.js").read_text()
-    for heading in ("How Anteriora works", "Create a matter", "Start a session", "Research with the assistant",
-                    "Mark what matters", "Keep the record", "What stays private", "What it can't prove", "Limits right now"):
+    # The three jobs a founder came for (21 Oct), the path through each, and the limits beside them.
+    for heading in ("How Anteriora works", "What you can do", "Create a matter", "Start a session", "Prior-art survey",
+                    "Name check", "Read a document or a repository", "Keep the record", "What stays private",
+                    "What it can't prove", "Limits right now"):
         assert heading in js, heading
     html = (STATIC / "home.html").read_text()
     assert "http://" not in html and "https://" not in html and re.search(r"\son[a-z]+=", html) is None

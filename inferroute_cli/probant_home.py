@@ -59,6 +59,13 @@ SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily — us
 SHARE_FILE_LIMIT = 64_000_000
 
 
+def _names_of(ws: Path) -> List[str]:
+    try:
+        return S.names_listed((ws / "disclosure.md").read_text(encoding="utf-8", errors="replace")[:50_000])
+    except OSError:
+        return []
+
+
 def search_availability(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """{"mode": "always"} or {"mode": "scheduled", "from_hour", "to_hour", "tz"}."""
     conf = (cfg or {}).get("availability")
@@ -264,7 +271,8 @@ def list_matters() -> List[Dict[str, Any]]:
                         "needs_review": bool(rec.get("needs_review")), "kind": rec.get("kind") or "invention",
                         "sessions": len(sessions), "searches": sum(s["searches"] for s in sessions),
                         "marks": len(marks), "last_activity": sessions[0]["started_at"] if sessions else rec.get("created_at"),
-                        "disclosure_words": disclosure_info(ws)["disclosure_words"] if ws.is_dir() else 0})
+                        "disclosure_words": disclosure_info(ws)["disclosure_words"] if ws.is_dir() else 0,
+                        **({"names": _names_of(ws)} if rec.get("kind") == "name" else {})})
     out.sort(key=lambda m: str(m.get("last_activity") or ""), reverse=True)
     return out
 

@@ -158,6 +158,7 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     assert "ZEBRO" in report["text"] and [r["file"] for r in report["earlier"]] == [str(kept)]
     assert S.keep_earlier_name_check(ws) != kept and len(S.earlier_name_checks(ws)) == 2   # same minute: no clash
     assert S.keep_earlier_name_check(ws) is None
+    assert c.get("/api/overview").json()["matters"][0]["names"] == ["Zebrafy"]      # the card shows the names
     c.post("/api/matters", json={"client": "Acme", "matter": "gadget", "disclosure": "x"})
     assert c.get("/api/matter?id=Acme/gadget").json()["kind"] == "invention"
 
@@ -175,3 +176,13 @@ def test_a_name_session_that_searched_but_wrote_no_report_is_reminded_once():
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "no loop" in r.stdout, r.stdout
+
+
+def test_the_names_a_matter_lists_are_read_from_either_template():
+    assert S.names_listed(S.TEMPLATE_NAMES) == []                                  # the empty template lists none
+    assert S.names_listed("# Names to check\n\n## The product\n\nA bottle.\n\n## Names being considered\n\n"
+                          "- Kwench\n- **Aquelia**\n\n## Markets\n\nFrance") == ["Kwench", "Aquelia"]
+    assert S.names_listed("The product: a bottle.\n\nNames being considered (one per line):\n- Taxly\n- Setaside\n\n"
+                          "Where you will sell it: France") == ["Taxly", "Setaside"]
+    assert S.names_listed("Names: Zebrafy, Zebrix") == ["Zebrafy", "Zebrix"]
+    assert S.names_listed("The product: labels that print names on bottles.") == []

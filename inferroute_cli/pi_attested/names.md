@@ -53,23 +53,37 @@ and a trademark professional. Do not search the web or suggest you have.
 
 ## name-check.md
 
-- First lines: which registers were searched and the data date, that the search ran on
-  the founder's computer, and what was not searched. Copy the tool's "Not searched" line
-  as it is: it names the registers missing from this data (for example EU trade marks),
-  company names, domain names, unregistered use and logo-only marks.
-- The classes used and why.
-- For each name: the variants searched, then at most the three marks that matter most
-  (closest first, in the founder's classes before others), each with its register,
-  number, status, classes and reasons, and one sentence on what the search found. Do not
-  copy the other results: the matter page lists every search in full, straight from the
-  search, and says so. Say how many other close marks each search found.
-- Keep the whole file under 450 words. A short report the founder reads beats a long one,
-  and every word you write takes them time to wait for.
-- The data has no owners or goods descriptions: never say who owns a mark or what it
-  covers beyond its classes.
-- A section headed exactly "Questions for a trademark professional": three to six specific questions this
-  search raises (for example, whether a registered mark in the same class with one
-  letter different is an obstacle; whether to file in the EU as well as France).
+The founder is not a lawyer. Write for them, in this order:
+
+1. Three opening lines, each on its own line:
+   `**Searched:** ` the registers and the data date from the tool, and that the search ran
+   on the founder's computer.
+   `**Not searched:** ` the tool's "Not searched" line, copied as it is.
+   `This report lists registered marks that resemble each name and why. It does not say
+   whether a name can be used or registered; that is a legal judgement for a trademark
+   professional.`
+2. `## At a glance`: one line per name with counts only, for example
+   "Kwench: 2 marks with the same spelling (outside your classes), 6 that sound alike,
+   4 in your classes." Never a grading word (no "risky", "strong", "weak", "clear").
+3. For each name, `## <the name>`, then "Classes searched: 21, 11, 9 (why: …)" in one
+   line, then the variants searched, then at most the three marks that matter most
+   (founder's classes first, then closest), each with its register, number, status,
+   classes, and its reason in plain words: same spelling, sounds alike, one letter
+   different, spelled closely, contains your name, shares a word; plus "in your classes"
+   or "outside your classes". Then how many other close marks each search found. Do not
+   copy the other results: the matter page lists every search in full.
+4. `## What you can do next`, these three lines:
+   - Confirm the classes above, or tell me which to add, and I will search again.
+   - Take the questions below to a trademark professional, and mention the registers that
+     were not searched (EU trade marks among them).
+   - Check another name: add it to your notes or type it here.
+5. `## Questions for a trademark professional`: three to six specific questions this search
+   raises (for example, whether a registered mark in the same class with one letter
+   different is an obstacle; whether to file in the EU as well as France).
+
+Keep the whole file under 450 words: a short report the founder reads beats a long one,
+and every word you write takes them time to wait for. The data has no owners or goods
+descriptions: never say who owns a mark or what it covers beyond its classes.
 
 ## A short guide to the Nice classes
 

@@ -145,7 +145,7 @@
       }
       list = null;
       if (h && h[1].length > 1) opening = false;
-      if (opening && /^[*_\s]*(not searched|searched|registers searched)\b/i.test(line)) continue;
+      if (opening && /^[*_\s]*(not searched|searched|registers searched|this report lists)\b/i.test(line)) continue;
       if (h) box.append(el(h[1].length <= 1 ? "h3" : "h4", "", inline(h[2])));
       else if (/^(-{3,}|\*{3,})$/.test(line)) box.append(document.createElement("hr"));
       else if (line.trim()) { const para = document.createElement("p"); para.append(inline(line)); box.append(para); }
@@ -541,7 +541,7 @@
   // ONE definition of a matter card.
   function matterCard(m) {
     const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
-    const start = button(m.needs_review ? "Review draft" : "Start a session", "primary start-session", (ev) => {
+    const start = button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
       if (m.needs_review) open(); else startSession(m.id, open);
     });
@@ -549,8 +549,10 @@
       el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
       el("div", "sub", m.kind === "name" ? "Name check" : `date bound ${m.date_bound || "—"}`),
       m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
-      m.kind === "name" ? el("div", "stats", el("span", "", plural(m.sessions, "session", "sessions")),
-        m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no names yet")) :
+      m.kind === "name" ? el("div", "stats",
+        (m.names || []).length ? el("span", "", `${plural(m.names.length, "name", "names")}: ${m.names.slice(0, 3).join(", ")}${m.names.length > 3 ? ", …" : ""}`)
+          : el("span", "warn-text", "no names yet"),
+        el("span", "", plural(m.sessions, "check", "checks"))) :
       el("div", "stats",
         el("span", "", plural(m.sessions, "session", "sessions")),
         el("span", "", plural(m.searches, "search", "searches")),
@@ -613,6 +615,10 @@
       p.append(el("p", "form-error", `Document reading history could not be loaded. ${e.message}`));
     }
     if (!data.matters.length) {
+    p.append(el("div", "card",
+      el("h2", "", "Check product names"),
+      el("p", "", "List the names you are considering. Anteriora searches the US and French trademark registers on this computer and reports the registered marks that resemble each name, and why. It never says a name is free: that is a legal judgement."),
+      el("div", "row", button("Check names", "primary", () => newMatterDialog({ kind: "name" })))));
       p.append(el("div", "empty-card",
         el("h2", "", "No matters yet"),
         el("p", "", "Create a matter, then start a session. For an invention, paste its disclosure: the assistant surveys published patents for related art, in sealed machines this computer checks first. For names, list the names and say what the product does: the assistant checks them against registered trademarks, searched on this computer."),
@@ -706,7 +712,7 @@
       m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
         : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
         : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
-        : button("Start a session", "primary", () => startSession(m.id, refresh)),
+        : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh)),
       button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;
@@ -718,7 +724,7 @@
           openLocal(r.view);
         } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
       })));
-    if (!words) p.append(el("p", "warn-text", isName ? "This matter lists no names yet. Add the product and the names before starting a session."
+    if (!words) p.append(el("p", "warn-text", isName ? "This matter lists no names yet. Add the product and the names, then check them."
       : "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
     if (m.needs_review) p.append(el("p", "warn-text", "Created from your document. Review the disclosure and date before starting a search."));
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
@@ -727,17 +733,17 @@
       let rep = null;
       try { rep = await api(`/api/name-check?id=${enc(m.id)}`); } catch (e) { /* no report shown */ }
       p.append(el("h2", "section", "Name check report"));
-      p.append(el("div", "card coverage-card",
-        el("p", "", el("b", "", "What was searched: "), `${ix.searched.join("; ")}. Data: ${ix.data}. Searched on this computer; the names were not sent to any register, search engine or website. The assistant that reads your notes runs on the checked sealed machine.`),
-        el("p", "", el("b", "", "Not searched: "), `${ix.not_searched.join("; ")}.`),
-        el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether you can use or register a name: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch.")));
-      if (rep && rep.present) {
-        const body = renderReport(rep.text);
-        p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), body);
+      const hasReport = Boolean(rep && rep.present);
+      if (hasReport) {
+        p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), renderReport(rep.text));
+      } else if (m.running) {
+        p.append(el("p", "", "The assistant is checking your names now. The report appears here when it is written (usually 10 to 15 minutes); you can watch it work in the session."));
       } else if (rep && (rep.earlier || []).length) {
-        p.append(el("p", "sub", "No report from the latest session yet. The earlier reports are below."));
+        p.append(el("p", "sub", "No report from the latest check yet. The earlier reports are below."));
+        // A name check's running session is opened from the box below; a second button here did the same thing.
+        : isName && m.running && m.running.state === "ready" ? null
       } else {
-        p.append(el("p", "sub", "No report yet. Start a session: the assistant writes it when it has searched your names."));
+        p.append(el("p", "sub", "No report yet. Press Check the names: the assistant searches each name on this computer and writes the report here."));
       }
       // Each session writes its own report; the earlier ones are kept, so a second check never erases the first.
       const earlier = (rep && rep.earlier) || [];
@@ -758,7 +764,7 @@
           const cls = (sr.classes || []).length ? `classes ${sr.classes.join(", ")}` : "all classes";
           const n = (sr.hits || []).length;
           const box = el("details", "search-log",
-            el("summary", "", el("b", "", `“${sr.name}”`), ` · ${cls} · ${n ? `${n}${sr.more ? "+" : ""} similar mark${n === 1 ? "" : "s"}` : "no similar registered word marks found"} · ${localTime(sr.at)}`));
+            el("summary", "", el("b", "", `“${sr.name}”`), ` · ${cls} · ${what} · ${localTime(sr.at)}`));
           for (const h of sr.hits || []) {
             const yours = (h.overlapping_classes || []).length ? ` · in your classes ${h.overlapping_classes.join(", ")}` : "";
             box.append(el("div", "search-hit",
@@ -771,7 +777,17 @@
       }
     }
     p.append(el("h2", "section", "Sessions"));
-    if (!m.sessions.length && m.running) p.append(el("p", "sub", "The open session above is listed here when it ends."));
+      // What was searched comes after the report, folded once there is one: before any report it is what a founder
+      // needs to know first; after, the report is.
+      const coverage = el("details", "card coverage-card",
+        el("summary", "", "What was searched, and what was not"),
+        el("p", "", el("b", "", "What was searched: "), `${ix.searched.join("; ")}. Data: ${ix.data}. Searched on this computer; the names were not sent to any register, search engine or website. The assistant that reads your notes runs on the checked sealed machine.`),
+        el("p", "", el("b", "", "Not searched: "), `${ix.not_searched.join("; ")}.`),
+        el("p", "sub", "The report lists registered marks that resemble your names and why. It does not say whether you can use or register a name: that is a legal judgement, and the rights listed as not searched can still apply. Have a trademark professional review it before you file or launch."));
+      coverage.open = !hasReport;
+      p.append(coverage);
+    if (!m.sessions.length && m.running) p.append(el("p", "sub", isName ? "The check now running is listed here when it ends."
+      : "The open session above is listed here when it ends."));
     else if (!m.sessions.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
       : "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
@@ -789,6 +805,12 @@
       for (const [, v] of markEntries) counts[v] = (counts[v] || 0) + 1;
       p.append(el("p", "", `${counts.relevant} relevant · ${counts["not-relevant"]} not relevant · ${counts.known} known`));
       p.append(el("div", "mark-list", ...markEntries.map(([k, v]) => el("span", `mark-chip m-${v}`, `${k} · ${v.replace("-", " ")}`))));
+          const inYours = (sr.hits || []).filter((h) => (h.overlapping_classes || []).length).length;
+          // Counts, not "40+ similar marks" on every row: the cap read as a verdict (UX review, 21 Oct).
+          const total = n + (sr.more || 0);
+          const yours = (sr.classes || []).length ? ` · ${inYours}${inYours === n && sr.more ? "+" : ""} in your classes` : "";
+          const what = !n ? "no close registered word marks found in this data"
+            : sr.more ? `${n} shown of ${total} close marks${yours}` : `${plural(n, "close mark", "close marks")}${yours}`;
     }
 
     p.append(el("h2", "section", "Records"));

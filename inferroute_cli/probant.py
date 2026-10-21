@@ -408,6 +408,33 @@ def cmd_open(spec: str, dev_unconfined: bool = False, web: bool = False) -> int:
 NAME_CHECK = "name-check.md"
 
 
+def names_listed(text: str) -> List[str]:
+    """The names a name matter's notes list: the list items under a line that mentions names (the templates'
+    "Names being considered", as a heading or a label), or a "Names: A, B" line. Shown on the matter card
+    ("2 names: Kwench, Aquelia"); the assistant reads the notes itself, so this never decides what is searched."""
+    out: List[str] = []
+    collecting = False
+    for line in text.splitlines():
+        item = re.match(r"\s*(?:[-*]|\d+[.)])\s*(.*)$", line)
+        if collecting and item:
+            name = item.group(1).strip().strip("*_").strip()
+            if name and name not in out:
+                out.append(name[:60])
+            continue
+        if collecting and not line.strip():
+            continue
+        if out:
+            break
+        collecting = False
+        label = re.match(r"\s*#*\s*[^:]*\bnames?\b[^:]*:?\s*(.*)$", line, re.I)
+        if label and not line.lstrip().startswith("# "):
+            inline = [n.strip().strip("*_").strip() for n in label.group(1).split(",") if n.strip()]
+            if inline and ":" in line:
+                return [n[:60] for n in inline][:20]
+            collecting = True
+    return out[:20]
+
+
 def keep_earlier_name_check(ws: Path) -> Optional[Path]:
     """Before a name session starts, move the last report aside as name-check-<when it was written>.md, so a
     new session writes its own and the earlier one is kept. A second check of the same names found different

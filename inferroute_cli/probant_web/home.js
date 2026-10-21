@@ -615,7 +615,7 @@
       p.append(el("p", "form-error", `Document reading history could not be loaded. ${e.message}`));
     }
     if (!data.matters.length) {
-    p.append(el("div", "card",
+    p.append(el("div", "card key-card",
       el("h2", "", "Check product names"),
       el("p", "", "List the names you are considering. Anteriora searches the US and French trademark registers on this computer and reports the registered marks that resemble each name, and why. It never says a name is free: that is a legal judgement."),
       el("div", "row", button("Check names", "primary", () => newMatterDialog({ kind: "name" })))));

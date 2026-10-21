@@ -484,6 +484,8 @@ button.link { border: 0; background: none; color: var(--action-text); padding: 0
 .check-group.pass .check-q::before { content: "\2713\00a0"; color: var(--accent); }
 .check-group.fail .check-q::before { content: "\2717\00a0"; color: var(--bad); }
 .check-group.skip .check-q::before { content: "\25cb\00a0"; color: var(--faint); }
+.check-group.info .check-q::before { content: "i\00a0\00a0"; color: var(--faint); font-style: italic; font-family: var(--display); }
+.check-row.r-note .check-status { color: var(--faint); }
 .check-todo { color: var(--warn); }
 .check-rows { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .check-row { display: grid; grid-template-columns: 46px minmax(0, 260px) minmax(0, 1fr); gap: 8px; font-size: 12.5px; }

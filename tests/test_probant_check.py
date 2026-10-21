@@ -123,3 +123,19 @@ def test_the_check_runs_the_bundles_own_verifier_not_a_copy_of_the_verdict(tmp_p
     out = C.check(bundle)
     assert out["code"] == 0 and out["verdict"] == "passed"
     assert out["result_line"] == "every check PASSED under production roots"
+
+
+def test_a_disclosure_line_under_a_passing_verdict_is_shown_as_a_disclosure_not_a_failure():
+    """21 Oct audit: "Everything checked out" and, three lines lower, a red "Other checks: a check this summary
+    has no name for did not pass". The verifier prints what the hardware check cannot cover (the cloud
+    platform's policy fragment) as a FAIL line beside RESULT "no failing record checks", and exits 0."""
+    from inferroute_cli import probant_check as C
+    out = ("  PASS manifest: all files match\n"
+           "    FAIL policy is self-contained: external policy dependency INSIDE the trust boundary\n"
+           "RESULT: no failing record checks under production roots; SKIP rows remain unverified\n")
+    r = C.parse(out, 0)
+    assert r["verdict"] == "passed" and r["failed"] == []
+    assert [g["key"] for g in r["groups"]] == ["intact", "disclosed"]
+    assert r["groups"][1]["status"] == "info" and "Not a failure" in r["groups"][1]["answer"]
+    # under a FAILING verdict the same line still counts as a failure
+    assert "policy is self-contained" in C.parse(out, 1)["failed"]

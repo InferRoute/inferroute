@@ -107,7 +107,7 @@ window.ProbantUI = (() => {
     if (r.note) box.append(el("p", "warn-text", r.note));
     for (const g of r.groups || []) {
       const item = el(compact ? "details" : "div", `check-group ${g.status}${compact ? " compact" : ""}`);
-      if (compact && g.status !== "pass") item.open = true;
+      if (compact && g.status !== "pass" && g.status !== "info") item.open = true;
       item.append(el(compact ? "summary" : "div", "check-q", g.question));
       item.append(el("p", "", g.answer || ""));
       if (g.todo) item.append(el("p", "check-todo", el("b", "", "What to do: "), g.todo));

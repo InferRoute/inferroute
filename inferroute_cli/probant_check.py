@@ -89,6 +89,11 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
 }
 
 
+DISCLOSED_TEXT = ("Not a failure: these lines name what the hardware check cannot cover, such as a part of the "
+                  "sealed machine's policy that the cloud platform signs and updates. The record names it, with its "
+                  "permissions, instead of leaving it out.")
+
+
 def group_of(name: str) -> str:
     low = name.lower()
     for key, _, _, words in GROUPS:
@@ -123,10 +128,24 @@ def parse(text: str, code: int) -> Dict[str, Any]:
                              "It is not a failure and not a pass. Run a search in a session, then export and check again.",
                 "result_line": result, "groups": [], "checks": len(rows), "failed": [], "output": text,
                 "plain": plain_block(text)}
+    # A PASSING verdict can still carry FAIL lines: the verifier prints what the hardware check does NOT cover
+    # (e.g. "policy is self-contained: external policy dependency … the cloud platform's fragment") as a FAIL
+    # beside a RESULT of "no failing record checks", and exits 0. Shown under "Other checks" with a red cross,
+    # it read as "Everything checked out" followed by an unexplained failure (21 Oct audit). Under a pass, such
+    # lines are what the record DISCLOSES about its own limits, and are shown as that.
+    if code in (0, 4):
+        for r in rows:
+            if r["status"] == "FAIL":
+                r["status"], r["group"] = "NOTE", "disclosed"
     groups = []
-    for key, question, ok_text, _ in (*GROUPS, ("other", "Other checks", "Everything else passed.", ())):
+    for key, question, ok_text, _ in (*GROUPS, ("other", "Other checks", "Everything else passed.", ()),
+                                      ("disclosed", "What the check discloses about its own limits",
+                                       DISCLOSED_TEXT, ())):
         mine = [r for r in rows if r["group"] == key]
         if not mine:
+            continue
+        if key == "disclosed":
+            groups.append({"key": key, "question": question, "rows": mine, "status": "info", "answer": ok_text})
             continue
         failed = [r for r in mine if r["status"] == "FAIL"]
         skipped = [r for r in mine if r["status"] == "SKIP"]

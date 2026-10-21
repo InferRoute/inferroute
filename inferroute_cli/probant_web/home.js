@@ -388,7 +388,7 @@
               if (!(await confirmBox("End this session?",
                     "The session stops and its page closes. Searches and marks already recorded are kept."))) return;
               try {
-                await api("/api/sessions/end", { id: matterId });
+                await api("/api/sessions/end", { id: l.matter || matterId });
                 toast("Session ended.", "info");
                 if (onChange) onChange();
               } catch (e) { toast(`Could not end it: ${e.message}`, "error"); }

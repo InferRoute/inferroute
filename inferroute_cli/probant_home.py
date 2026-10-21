@@ -919,10 +919,14 @@ class Home:
             """
             d = await body(request)
             mid = str(d.get("id") or "")
-            try:
-                matter_of(mid)
-            except S.ProbantError as e:
-                return problem(str(e), 404)
+            # A document or repository reading has no matter: its launch is named "document · <source>". It
+            # can be ended from here too (22 Oct test: the End buttons on a finished reading answered 404).
+            reading = any(it.get("intake_id") and it["matter"] == mid for it in list(home.launches.items.values()))
+            if not reading:
+                try:
+                    matter_of(mid)
+                except S.ProbantError as e:
+                    return problem(str(e), 404)
             ended = home.launches.stop_running(mid)
             return {"ok": True, "ended": ended}
 

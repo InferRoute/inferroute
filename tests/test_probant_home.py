@@ -909,3 +909,12 @@ def test_inside_the_probant_app_the_banner_does_not_tell_the_person_to_keep_a_te
     monkeypatch.delenv("IR_PROBANT_NO_BROWSER")
     assert H.run(open_browser=False) == 0
     assert "Keep this terminal open" in capsys.readouterr().out
+
+
+def test_a_reading_session_can_be_ended_from_the_home_page():
+    """22 Oct: a finished repository reading kept its session open and both End buttons answered 404, because the
+    end route looked the id up as a matter and a reading has none ("repository · <name>")."""
+    js = (STATIC / "home.js").read_text()
+    assert 'await api("/api/sessions/end", { id: l.matter || matterId });' in js
+    home_py = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_home.py").read_text()
+    assert 'reading = any(it.get("intake_id") and it["matter"] == mid' in home_py

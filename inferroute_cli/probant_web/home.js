@@ -347,7 +347,9 @@
       el("p", "", "Check the AI's description against its supporting passage. Correct missing or overstated features before searching."),
       el("p", "sub", `Source: ${origin.source_name || "uploaded document"}`),
       field("Disclosure", text),
-      field("Priority date", date, origin.suggested_priority_date
+      field("Priority date", date, origin.suggested_priority_date && origin.date_source === "git"
+        ? `Suggested from the repository's history: the quoted lines took their present form by ${origin.suggested_priority_date}. Commit dates are what the committer's computer said, not proof. Confirm it, or enter the date you can prove.`
+        : origin.suggested_priority_date
         ? "Suggested by the AI from the source. Confirm it; leave blank to use today."
         : "No priority date was supplied. Leave blank to use today, or enter the date you have confirmed."),
       err,

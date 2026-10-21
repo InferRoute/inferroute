@@ -340,6 +340,12 @@ class DraftCreator:
                 if located:
                     origin["repo"] = located
                     source_lines += "\n" + R.date_note(located) + "\n"
+                    # A date to start from (22 Oct test: every repository draft said "no priority date was supplied"
+                    # while git knew). The LATEST date the quoted lines took their present form: the passage existed
+                    # whole from then. Only a suggestion; the founder confirms it in the review dialog.
+                    if not date and located.get("lines_dated"):
+                        origin["suggested_priority_date"] = located["lines_dated"][-1]
+                        origin["date_source"] = "git"
                 source_lines += "\n" + " ".join(R.public_notice(self.meta)) + "\n"
             rec = {"schema": "inferroute.probant.matter/1", "client": self.client, "matter": name,
                    "date_bound": S._today(), "pre_filing_default": True,

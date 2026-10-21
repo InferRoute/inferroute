@@ -255,3 +255,12 @@ def test_a_repository_too_large_offers_its_folders_and_splits_one_too_large_alon
     assert split["src/deep"] == ["src/deep"] and split["src (files directly in it)"] == ["src/engine.py"]
     text = "x" * 4_000_001
     assert "Tick the folders" in R.describe(info, text, "page")[1] and "--only" in R.describe(info, text)[1]
+
+
+def test_a_repository_draft_suggests_the_date_its_lines_took_their_present_form():
+    """22 Oct: every repository draft said "No priority date was supplied" while git knew when the quoted lines
+    were written. The draft now carries the latest of those dates as a suggestion the founder confirms."""
+    src = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_intake.py").read_text()
+    assert 'origin["suggested_priority_date"] = located["lines_dated"][-1]' in src and 'origin["date_source"] = "git"' in src
+    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    assert 'origin.date_source === "git"' in js and "Suggested from the repository's history" in js

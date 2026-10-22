@@ -53,9 +53,12 @@
   // they choose which repositories the Anteriora App may read. Opened from the click itself, so the browser
   // allows the new tab (a server opening a browser reaches nobody on another screen — Henry, 20 Oct).
   const GITHUB_PAGES = new Set(["https://github.com/login/device", "https://github.com/apps/anteriora/installations/new"]);
+  // And InferRoute's terms of sale and privacy pages, for the footer (22 Oct, before the first paid pilot). Fixed
+  // here the same way; they open in one named tab of their own.
+  const SITE_PAGES = new Set(["https://inferroute.ai/terms", "https://inferroute.ai/privacy"]);
   function openLocal(url) {
-    const github = GITHUB_PAGES.has(url);
-    if (!github && !SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
+    const github = GITHUB_PAGES.has(url), site = SITE_PAGES.has(url);
+    if (!github && !site && !SESSION_LINK.test(url) && !RECORD_LINK.test(url)) { toast("That link was not made by this computer, so it wasn't opened.", "error"); return; }
     // Where it opens decides how many tabs a day of work leaves behind. A SESSION replaces this tab (its page
     // has a way back, and the session itself lives in a process, not in the tab). A RECORD goes to one named
     // tab that every later record reuses. "_blank" made a new tab per click, which is what Henry hit on 3 Oct.
@@ -65,7 +68,7 @@
     // GitHub gets one named tab of its own, reused like the record tab. Without "noopener" (which would force a
     // new tab each click) the opened page can reach this one through window.opener; the only pages opened this
     // way are GitHub's own, at the two addresses fixed above (no opener policy on them, measured 20 Oct).
-    window.open(url, github ? "anteriora-github" : SESSION_LINK.test(url) ? "_self" : "probant-record");
+    window.open(url, site ? "anteriora-site" : github ? "anteriora-github" : SESSION_LINK.test(url) ? "_self" : "probant-record");
   }
 
   function toast(message, level) {
@@ -544,6 +547,19 @@
     }
   }
 
+  // Terms, privacy and support, under the Matters page and Help (22 Oct, before the first paid pilot). The two
+  // pages open through openLocal; the support address is text, so it can be selected and copied.
+  function legalFooter() {
+    const f = $("legal");
+    if (!f.childNodes.length) {
+      f.append(button("Terms of sale", "link", () => openLocal("https://inferroute.ai/terms")), " · ",
+        button("Privacy", "link", () => openLocal("https://inferroute.ai/privacy")), " · ",
+        el("span", "selectable", "Support: support@inferroute.ai"), " · ",
+        el("span", "", "Not legal advice"));
+    }
+    return f;
+  }
+
   // The first thing a computer without a key shows. The key is typed or pasted into a masked field, sent to
   // this computer's own page, checked with InferRoute, and saved here; it is never shown again.
   function keyCard(done) {
@@ -566,6 +582,8 @@
       el("h2", "", "Add your InferRoute key"),
       el("p", "", "Anteriora needs the key InferRoute sent you before it can run a session. Paste it here once; it "
         + "is kept on this computer only, in a file only you can read. Sharing and Help work without it."),
+      // The pilot is onboarded by hand (22 Oct): someone without a key needs to know who to ask.
+      el("p", "sub selectable", "No key yet? Write to support@inferroute.ai."),
       field("Your key", keyInput, "It starts with inf_. Nothing is sent anywhere until you press the button, and then only to InferRoute, to check it."),
       err, el("div", "dialog-actions", save));
   }
@@ -1967,6 +1985,7 @@
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
     for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === here);
+    legalFooter().hidden = !(parts[0] === "" || parts[0] === "help");
     // A matter id ("client/matter") travels encoded as ONE segment: #/matter/Acme%2Fcooling.
     if (parts[0] === "matter" && parts[1]) return renderMatter(parts[1]);
     if (parts[0] === "session" && parts[1] && parts[2]) return renderSession(parts[1], parts[2]);

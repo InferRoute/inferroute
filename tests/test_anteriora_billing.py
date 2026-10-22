@@ -125,3 +125,51 @@ def test_opening_a_matter_records_its_permit_and_settles_it(home, service, monke
     assert S.main(["open", "Acme/gadget"]) == 0
     rec = S.load_record("Acme", "gadget")
     assert rec["permit"]["state"] == "delivered" and rec["permit"]["first_session"] == seen["session_id"]
+
+
+def _site_answers(monkeypatch, home, status, body):
+    """The site's real refusal, as an HTTP error from urlopen: nothing leaves this computer."""
+    import io
+    import urllib.error
+    from inferroute_cli import config
+    monkeypatch.setenv("IR_ANTERIORA_BILLING", "1")
+    monkeypatch.setattr(config, "load", lambda: type("C", (), {"api_key": "inf_test_key_123456"})())
+
+    def refuse(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(json.dumps(body).encode()))
+
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+
+
+@pytest.mark.parametrize("status,body,words", [
+    (402, {"error": "Nothing left on this account for this. Buy more at inferroute.ai/anteriora.",
+           "needsPurchase": True}, "no checks or searches left"),
+    (403, {"error": "Your plan's devices are all in use. Add a seat, or remove a device from your account page.",
+           "deviceLimit": True}, "maximum number of computers"),
+])
+def test_an_empty_account_or_a_full_device_list_is_said_in_the_apps_words(home, monkeypatch, status, body, words):
+    """22 Oct, pilot audit: a 402 or 403 from /api/anteriora/permit reached the founder as "Something went
+    wrong… Try once more", with the buy link under Technical details. The words come from the app now, the
+    home page shows them as the message, and the 403 no longer points to an account page that does not exist."""
+    from inferroute_cli import probant_home as H
+    _site_answers(monkeypatch, home, status, body)
+    with pytest.raises(B.BillingError) as got:
+        B.before_session({}, "s1")
+    said = str(got.value)
+    assert words in said.lower() and "account page" not in said
+    # As the home page sees it: the launcher's stderr, merged into the tail it reads.
+    msg = H.failure_message(["Opening Acme/gadget", f"  {said}"])
+    assert msg.startswith(said) and msg != H.GENERIC_FAILURE
+    if status == 402:
+        assert "inferroute.ai/anteriora" in msg
+    else:
+        assert "support@inferroute.ai" in msg and "account page" not in msg
+
+
+def test_any_other_refusal_is_not_worded_as_an_empty_account(home, monkeypatch):
+    """22 Oct: a 403 that is not the device limit (a proxy, a revoked key) used to read "Nothing left on this
+    account", sending a founder to buy what they already had."""
+    _site_answers(monkeypatch, home, 403, {})
+    with pytest.raises(B.BillingError) as got:
+        B.before_session({}, "s1")
+    assert "left" not in str(got.value) and "403" in str(got.value)

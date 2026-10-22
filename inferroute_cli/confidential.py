@@ -1045,6 +1045,26 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                         return 2
                 else:
                     preexec = pi_attested.preexec_confine(pi_confine_ports, write_paths=write_paths, then=reset_sigint)
+            # A session with no search verifier — a name check — has nobody else to write its record, so this
+            # launcher writes it, now, before the agent starts: a session ended from the home page (SIGTERM,
+            # a bounded wait, then SIGKILL) or killed outright still appears under the matter's sessions.
+            # See pi_attested.begin_host_session_record.
+            host_record = None
+            if (agent == "pi" and probant is not None and probant.get("mode") == "names"
+                    and os.environ.get("IR_MATTER_RECORD_DIR")):
+                from . import pi_attested
+                rec_sid = pi_attested.new_record_session_id()
+                try:
+                    host_record = pi_attested.begin_host_session_record(
+                        os.environ["IR_MATTER_RECORD_DIR"], rec_sid,
+                        pi_attested.host_session_record(
+                            sess_id=rec_sid, receipt=session.receipt, surface="browser" if web else "terminal",
+                            confinement=(mac_backend.label if mac_backend is not None
+                                         else pi_attested.confinement_label()),
+                            mode="names", matter=str(probant.get("matter") or "")))
+                except OSError as e:
+                    console.print(f"[yellow]this session's record could not be written ({e}); the matter page "
+                                  "will not list it.[/]")
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             page = None
             if web:
@@ -1090,6 +1110,9 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                         # from inside the session; its new version is put beside the original.
                         console.print(f"[grey58]The assistant changed files that already existed. Your originals "
                                       f"are untouched; its versions are in the matter folder under {aside[0]}/[/]")
+            if host_record is not None:
+                from . import pi_attested
+                pi_attested.end_host_session_record(host_record, exit_code=rc)
             if agent == "pi":
                 from . import pi_attested
                 if sandbox is not None:

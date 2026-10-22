@@ -599,8 +599,7 @@ def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None,
     # confinement denies the agent (D1). One file PER SESSION (Q2): a fresh, unique path each launch, so a
     # later session never overwrites what an earlier one disclosed. When a matter is open the file lands in
     # that matter's records dir; otherwise in the flat attested-records dir.
-    import time as _time
-    sess_id = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime()) + "-" + os.urandom(4).hex()
+    sess_id = new_record_session_id()
     global LAST_SESSION_ID
     LAST_SESSION_ID = sess_id
     rec_dir = os.environ.get("IR_MATTER_RECORD_DIR")
@@ -702,6 +701,91 @@ def stop_search_proxy() -> None:
             proc.wait(timeout=5)
         except Exception:                                   # noqa: BLE001
             proc.kill()
+
+
+def new_record_session_id() -> str:
+    """The id a session's host-written records carry: 20261022T201500Z-1a2b3c4d (the home page's SESSION_ID_RE)."""
+    import time as _time
+    return _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime()) + "-" + os.urandom(4).hex()
+
+
+def _write_atomic(path: Path, doc: dict) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def begin_host_session_record(rec_dir: str | Path, sess_id: str, record: dict) -> Path:
+    """The record of a session that has NO search verifier — a name check — written by the launcher, at the start.
+
+    A matter session's record (<session>.json under the matter's attested-records) is written by the search
+    verifier when the extension POSTs it. A name session starts no search verifier (nothing goes to a search
+    machine), so the extension fell back to its own local file, Pi's config dir (IR_ATTESTED_RECORD_DIR), which
+    the home page never reads: every name session ended with its trademark searches logged and its report written
+    and the matter page saying "No sessions yet" (a Mac, 0.9.122, 22 Oct). It was the same on Linux, and the same
+    however the session ended.
+
+    Written BEFORE the agent starts, so a session ended from the home page — SIGTERM, then a bounded wait, then
+    SIGKILL — or killed outright still has its record; `end_host_session_record` adds when it ended. Host-written
+    under confidential/, which the agent cannot write. Created exclusively: a session never overwrites another's."""
+    path = Path(rec_dir) / f"{sess_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    _write_atomic(path, record)
+    return path
+
+
+def end_host_session_record(path: str | Path, **fields) -> None:
+    """Stamp the end of a session on the record `begin_host_session_record` wrote. Never raises: the
+    session is over, and the record it already has is the one that matters."""
+    import time as _time
+    try:
+        p = Path(path)
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        stamp = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
+        doc.update({"ended_at": stamp, "written_at": stamp, **fields})
+        _write_atomic(p, doc)
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
+def host_session_record(*, sess_id: str, receipt, surface: str, confinement: str, mode: str,
+                        matter: str = "") -> dict:
+    """The record body for a session the host records itself, in the shape the extension's records have
+    (inferroute.attested-session/1), so the home page, `anteriora proof` and the export read it the same way."""
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    checks = dict(getattr(receipt, "checks", None) or {})
+    passed = sum(1 for c in checks.values() if isinstance(c, dict) and c.get("ok"))
+    return {
+        "schema": "inferroute.attested-session/1",
+        "session_id": sess_id,
+        "written_by": "host",
+        "mode": mode,
+        "matter": matter,
+        "surface": surface,
+        "started_at": now,
+        "written_at": now,
+        "model_lane": {
+            "verified": bool(getattr(receipt, "is_confidential", False)),
+            "checks": f"{passed}/{len(checks)}" if checks else "",
+            "receipt": str(getattr(receipt, "path", "") or ""),
+            "check_list": [{"label": c.get("label", k), "ok": bool(c.get("ok")), "why": c.get("why", "")}
+                           for k, c in checks.items() if isinstance(c, dict)],
+            "model": str(getattr(receipt, "model_short", "") or ""),
+            "instance": (getattr(receipt, "instance", None) or {}).get("id") if isinstance(
+                getattr(receipt, "instance", None), dict) else None,
+        },
+        "search_lane": {"offered": False, "searches": []},
+        "confinement": confinement,
+        "note": ("Written by the launcher: this session had no search machine, so no search verifier to write it. "
+                 + ("Its trademark searches ran on this computer and are in trademark-searches.jsonl beside this file."
+                    if mode == "names" else "")).strip(),
+    }
 
 
 # ───────────────────────── egress confinement ─────────────────────────

@@ -1319,6 +1319,7 @@
     // usually is (the server picks the first that exists), and repositories come first, under a box that filters.
     const LAST_FOLDER = "anteriora-repo-folder";
     const filter = input("text", "Type to filter the folders here");
+    filter.className = "picker-filter";
     filter.setAttribute("aria-label", "Filter the folders here");
     let here = null;
     function drawListing() {

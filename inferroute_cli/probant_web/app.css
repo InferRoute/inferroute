@@ -389,6 +389,8 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 #dialog .modal-card { display: flex; flex-direction: column; overflow: hidden; }
 #dialog .dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 3px; margin: -3px; }
 #dialog .dialog-actions { flex: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+/* The folder picker's filter box, above the list it filters (21 Oct). */
+.picker-filter { box-sizing: border-box; width: 100%; margin: 2px 0 8px; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .dialog-actions input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .toasts { position: fixed; right: 16px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: 420px; }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); font-size: 14px; white-space: pre-wrap; }

@@ -6,6 +6,7 @@ translate); ``/v1/models`` answers with the pinned model so Claude Code never tr
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 
@@ -20,6 +21,66 @@ from .session import ConfidentialSession
 # and cost a race — the server's FIN crossing the agent's next request on a pooled connection, which the
 # agent can only report as a connection error. Hold the connection for the session instead.
 SEALED_KEEPALIVE_S = 600
+
+# HOW LONG A STREAMED REPLY MAY SAY NOTHING TO THE AGENT. Every agent's HTTP client has a body idle timer:
+# Pi's (undici `bodyTimeout`, its `httpIdleTimeoutMs`) is 300 s, and when it fires the agent reports
+# "terminated" and redoes the whole reply. A sealed reply can legitimately go quiet for longer than that in
+# the middle: under load the enclave keeps generating — a long tool call is buffered by the server's
+# tool-call parser and emitted only when it parses — and nothing reaches the wire meanwhile. Measured on
+# 21 Oct: the last delta Pi showed, then exactly 300.6 s of nothing, then "terminated" after 916 s; on
+# 22 Oct the same after 370 s (≈70 s of tokens, then 300 s). Both times the receipt counted no error and no
+# usage for that reply — the stream was cancelled from the AGENT's side — and the gateway, whose log row is
+# written in a `finally`, recorded the cut as a complete 200.
+#
+# So while the upstream is quiet this endpoint says so itself: an SSE comment line, which every SSE parser
+# (OpenAI, Anthropic, Pi) skips by specification, and which resets the agent's idle timer. Silence that is
+# real — the enclave or the relay gone — is still bounded, by the session's own read timeout on the relay
+# leg, and ends as a named error event rather than as a socket the agent watched die.
+STREAM_HEARTBEAT_S = 15.0
+HEARTBEAT = b": keep-alive\n\n"
+
+
+async def with_heartbeat(stream, every: float | None = None):
+    """Yield `stream` unchanged, plus `HEARTBEAT` whenever it has been silent for `every` seconds.
+
+    The pending read is never cancelled by a heartbeat (cancelling it would abandon a half-read frame); the
+    same read is simply waited on again. A heartbeat is only written at a line boundary, so it can never
+    land inside an SSE line. When the consumer goes away (the agent disconnected, the server is stopping)
+    the pending read is cancelled and the inner stream closed, which is what closes the relay leg."""
+    every = STREAM_HEARTBEAT_S if every is None else every
+    it = stream.__aiter__()
+    pending: asyncio.Future | None = None
+    at_boundary = True
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(it.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=every)
+            if not done:
+                if at_boundary:
+                    yield HEARTBEAT
+                continue
+            fut, pending = pending, None
+            try:
+                chunk = fut.result()
+            except StopAsyncIteration:
+                return
+            if chunk:
+                at_boundary = bytes(chunk[-1:]) == b"\n"
+            yield chunk
+    finally:
+        if pending is not None and not pending.done():
+            pending.cancel()
+            try:
+                await pending
+            except BaseException:                 # noqa: BLE001 — the read we are abandoning
+                pass
+        closer = getattr(it, "aclose", None)
+        if closer is not None:
+            try:
+                await closer()
+            except Exception:                     # noqa: BLE001 — a stream we already left behind
+                pass
 
 
 def create_app(session: ConfidentialSession, token: str) -> FastAPI:
@@ -74,7 +135,7 @@ def create_app(session: ConfidentialSession, token: str) -> FastAPI:
                                          status_code=500, media_type="text/event-stream")
             return JSONResponse(status_code=500, content={"type": "error", "error": {"type": "api_error", "message": msg}})
         if body.get("stream"):
-            return StreamingResponse(stream, status_code=status, headers=headers, media_type="text/event-stream")
+            return StreamingResponse(with_heartbeat(stream), status_code=status, headers=headers, media_type="text/event-stream")
         chunks = []
         async for c in stream:
             chunks.append(c)
@@ -105,7 +166,7 @@ def create_app(session: ConfidentialSession, token: str) -> FastAPI:
                                          status_code=500, media_type="text/event-stream")
             return JSONResponse(status_code=500, content={"error": {"message": msg, "type": "server_error"}})
         if body.get("stream"):
-            return StreamingResponse(stream, status_code=status, headers=headers, media_type="text/event-stream")
+            return StreamingResponse(with_heartbeat(stream), status_code=status, headers=headers, media_type="text/event-stream")
         chunks = []
         async for c in stream:
             chunks.append(c)

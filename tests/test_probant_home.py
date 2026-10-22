@@ -326,6 +326,34 @@ def test_a_failed_start_is_not_refreshed_off_the_screen():
     assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost"' in js
 
 
+def test_the_card_the_matter_page_and_the_footer_count_one_session_the_same_way(home):
+    """21 Oct audit: the session footer said "· 25 results" (the last search), the matter page "3 searches · 19
+    documents", and the home card "0 sessions · Start a session" while that session ran. Now: a signed document READ
+    is not a search; the card carries the running launch and counts the open session before its record is written;
+    the footer counts searches and distinct documents, as the matter page does."""
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    rdir = S.records_dir("Acme", "cooling")
+    with (rdir / f"{SID}.searches.jsonl").open("a") as f:
+        f.write(json.dumps({"at": "2026-09-17T16:41:00Z", "key": "WO-1-A1", "statement": {"sig": "bb", "kind": "document"},
+                            "result": {"kind": "document", "key": "WO-1-A1"}}) + "\n")
+    assert c.get("/api/matter", params={"id": "Acme/cooling"}).json()["sessions"][0]["searches"] == 1
+    m = c.get("/api/overview").json()["matters"][0]
+    assert m["sessions"] == 1 and m["searches"] == 1 and "running" not in m
+    alive = SimpleNamespace(poll=lambda: None)
+    h.launches.items["x"] = {"id": "x", "matter": "Acme/cooling", "started": time.time(), "state": "ready",
+                             "url": "http://127.0.0.1:41234/#k=" + "k" * 30, "message": "", "proc": alive}
+    m = c.get("/api/overview").json()["matters"][0]
+    assert m["running"]["state"] == "ready" and m["sessions"] == 2      # the open one, not yet recorded, is counted
+    js = (STATIC / "home.js").read_text()
+    assert 'button("Open the session", "primary start-session"' in js and "● session open now" in js
+    assert "!rows.some((s) => sessionStartedAfter(s, live[m.id]))" in js
+    ts = (Path(H.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "sessionTotals = { searches: searchNo, documents: firstSeen.size };" in ts
+    assert "p.hits} results" not in ts.split("function searchStatus", 1)[1].split("\n}\n", 1)[0]
+
+
 def test_a_session_that_has_ended_is_not_offered_as_open_and_does_not_block_a_new_one(tmp_path):
     """19 Sep: the home page listed two sessions with "Open the session"; both opened onto "Session closed".
     Their assistants had ended; only their pages stayed up, for exporting. The home page counted a session as

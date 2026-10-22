@@ -670,7 +670,14 @@
   // ONE definition of a matter card.
   function matterCard(m) {
     const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
-    const start = button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
+    // A matter with a session going says so, and its button goes back into that session (21 Oct audit: the card
+    // read "0 sessions" and offered "Start a session" while one ran). `m.running` is the same launch the matter page
+    // shows, and the server counts it in `m.sessions` once it is open.
+    const live = m.running && m.running.state === "ready" && m.running.url ? m.running : null;
+    const starting = m.running && m.running.state === "starting";
+    const start = live ? button("Open the session", "primary start-session", (ev) => { ev.stopPropagation(); openLocal(live.url); })
+      : starting ? button("Starting…", "primary start-session", (ev) => { ev.stopPropagation(); open(); })
+      : button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
       if (m.needs_review) open(); else startSession(m.id, open);
     });
@@ -692,7 +699,8 @@
         el("span", "", plural(m.searches, "search", "searches")),
         el("span", "", plural(m.marks, "mark", "marks")),
         m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
-      el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
+      live ? el("div", "live-text", "● session open now") : starting ? el("div", "sub", "a session is starting…")
+        : el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
       el("div", "matter-open", "Open this matter →"));
     const cardNode = el("div", `matter-card clickable kind-${kindKey}`, body, el("div", "matter-foot", start));
     cardNode.tabIndex = 0;
@@ -776,13 +784,13 @@
   // at a time, and its record is written once the session is going, so for a while the newest row is the PREVIOUS
   // session and marking that one "open" would send the person into the wrong place. `live` maps matter id -> its
   // running launch (state "ready").
+  const sessionStartedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
   function sessionTable(sessions, withMatter, live) {
     const t = el("div", "sessions");
     const newest = new Set();
-    const startedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
     for (const s of sessions) {
       const l = (live || {})[s.matter];
-      if (l && !newest.has(s.matter) && startedAfter(s, l)) { newest.add(s.matter); s.__live = l; }
+      if (l && !newest.has(s.matter) && sessionStartedAfter(s, l)) { newest.add(s.matter); s.__live = l; }
     }
     for (const s of sessions) {
       const matterId = s.matter;
@@ -941,12 +949,21 @@
       }
     }
     p.append(el("h2", "section", "Sessions"));
-    if (!m.sessions.length && m.running) p.append(el("p", "sub", isName ? "The check now running is listed here when it ends."
-      : "The open session above is listed here when it ends."));
-    else if (!m.sessions.length) p.append(el("p", "sub", isName
+    // The open session is a row from the moment it is open, as the home card counts it. Its record is written once
+    // it is going, so until then it is listed from the launch, with the counts that record will hold (21 Oct audit:
+    // the card, this list and the session's own footer each said something different).
+    const rows = m.sessions.map((s) => ({ ...s, matter: m.id }));
+    const live = liveMap(m.running ? [m.running] : []);
+    if (live[m.id] && !rows.some((s) => sessionStartedAfter(s, live[m.id]))) {
+      rows.unshift({ id: "", matter: m.id, started_at: new Date(live[m.id].started_at * 1000).toISOString(), surface: "browser",
+                     searches: 0, documents: 0 });
+    }
+    if (!rows.length && m.running) p.append(el("p", "sub", isName ? "The check now starting is listed here once it is open."
+      : "The session now starting is listed here once it is open."));
+    else if (!rows.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
       : "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
-    else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false, liveMap(m.running ? [m.running] : [])));
+    else p.append(sessionTable(rows, false, live));
 
     // A cleared mark is a row in the store's history, not a mark: the professional asked for NO opinion on
     // that document. Counted here it would show as a fourth kind ("US-X · cleared") and inflate the total,
@@ -1989,5 +2006,11 @@
   $("read-repo").addEventListener("click", readRepoDialog);
   for (const b of document.querySelectorAll("#nav button")) b.addEventListener("click", () => { location.hash = b.dataset.route; });
   window.addEventListener("hashchange", route);
+  // Coming back to this tab (from a session's tab, or after a while) reads the matters again, so a card's counts
+  // are those of the record as it is now and not of when the page was first drawn. Not while a dialog is open:
+  // redrawing would close what the person is typing into.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && $("dialog").hidden && /^#\/(matter\/|$)/.test(location.hash || "#/")) route();
+  });
   route();
 })();

@@ -383,13 +383,22 @@ function showLifecycle(ctx: ExtensionContext, s: LifecycleStatus | null): void {
 	ctx.ui.setStatus(LIFECYCLE_STATUS_KEY, t ? t.fg(s.over_budget ? "warning" : "dim", text) : text);
 }
 
+// What this session has searched so far, on the same definitions as the matter page's session row
+// (probant_home.list_sessions): searches that completed, and the distinct documents they returned. The footer used
+// to say the LAST search's hit count ("· 25 results") beside a matter page saying "3 searches · 19 documents" —
+// two numbers for one session (21 Oct audit). Set by the search tool as each search completes.
+let sessionTotals = { searches: 0, documents: 0 };
+
 function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	if (!ctx.hasUI) return;
 	const t = ctx.ui.theme;
+	const totals = sessionTotals.searches
+		? ` · ${sessionTotals.searches} search${sessionTotals.searches === 1 ? "" : "es"} · ${sessionTotals.documents} document${sessionTotals.documents === 1 ? "" : "s"} so far`
+		: "";
 	const text = p.ok
 		? p.testRoots
 			? `◐ Search: TEST machine, not a real verification`
-			: `🔒 Search: ${p.ours ? "InferRoute's sealed machine" : "sealed machine"}, checked at ${hhmm(p.at)}${p.phase === "search" ? ` · ${p.hits} results` : ""}`
+			: `🔒 Search: ${p.ours ? "InferRoute's sealed machine" : "sealed machine"}, checked at ${hhmm(p.at)}${totals}`
 		: `⛔ Search: ${plainRefusal(p.refusal)}`;
 	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
 }
@@ -1532,6 +1541,8 @@ export default function (pi: ExtensionAPI) {
 			// number grades. hit.text is the representation the index DOES embed.
 			if (d.text || d.title) docText.set(d.key, d.text || String(d.title));
 		}
+		sessionTotals = { searches: searchNo, documents: firstSeen.size };
+		searchStatus(ctx, sp);
 		return { sp, out, earlier };
 	}
 

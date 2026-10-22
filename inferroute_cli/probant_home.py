@@ -277,13 +277,19 @@ def list_matters() -> List[Dict[str, Any]]:
     return out
 
 
-def _report_at(ws: Path) -> Optional[str]:
-    """When the name check's report was last written, for the matter card ("report ready · …")."""
+def _report_at(ws: Path) -> Optional[Dict[str, Any]]:
+    """When the name check's report was last written, for the matter card ("report ready · …"). While a new check
+    runs, the previous report has been moved aside as name-check-<when>.md: then the newest of those, marked earlier."""
+    stamp = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
     try:
-        t = (ws / "name-check.md").stat().st_mtime
+        return {"at": stamp((ws / "name-check.md").stat().st_mtime), "earlier": False}
     except OSError:
-        return None
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+        pass
+    try:
+        older = max((p.stat().st_mtime for p in ws.glob("name-check-*.md")), default=None)
+    except OSError:
+        older = None
+    return {"at": stamp(older), "earlier": True} if older else None
 
 
 def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any]]:

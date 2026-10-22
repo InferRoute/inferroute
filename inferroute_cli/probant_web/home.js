@@ -680,7 +680,7 @@
     const body = el("div", "matter-body",
       el("div", `kind-chip kind-${kindKey}`, kindIcon(kindKey), el("span", "", kindLabel)),
       el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
-      m.kind === "name" ? el("div", "sub", m.report_at ? `report ready · ${localTime(m.report_at)}` : "no report yet")
+      m.kind === "name" ? el("div", "sub", !m.report_at ? "no report yet" : m.report_at.earlier ? `earlier report · ${localTime(m.report_at.at)}` : `report ready · ${localTime(m.report_at.at)}`)
         : el("div", "sub", `date bound ${m.date_bound || "—"}`),
       m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
       m.kind === "name" ? el("div", "stats",

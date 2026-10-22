@@ -602,6 +602,13 @@ def failure_message(tail: List[str]) -> str:
     low = text.lower()
     if "no inferroute key" in low or "run `ir login`" in low:
         return "No InferRoute key is saved on this computer. Add it in the box at the top of the Matters page, then try again. Nothing was sent."
+    # The account answered before anything opened (22 Oct). BEFORE the "refused" branch below, and in the
+    # words anteriora_billing chose, so the buy link is in the message and not under "Technical details".
+    from .anteriora_billing import DEVICE_LIMIT_WORDS, NO_UNITS_WORDS
+    if "no checks or searches left" in low or "nothing left on this account" in low:
+        return NO_UNITS_WORDS + " Nothing was sent."
+    if "maximum number of computers" in low or "devices are all in use" in low:
+        return DEVICE_LIMIT_WORDS + " Nothing was sent."
     if "nested agent session" in low:
         return "This was started from inside another assistant session. Start Anteriora home from a normal terminal."
     # BEFORE the general "refused" below. On a Mac the agent runs in a virtual machine, and every way that

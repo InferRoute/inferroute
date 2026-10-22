@@ -34,6 +34,12 @@ class BillingError(Exception):
     pass
 
 
+NO_UNITS_WORDS = ("You have no checks or searches left on this account. Buy more at inferroute.ai/anteriora, "
+                  "then start again.")
+DEVICE_LIMIT_WORDS = ("This account is already used on its maximum number of computers. Write to "
+                      "support@inferroute.ai to move it to this one.")
+
+
 def enabled() -> bool:
     return os.environ.get("IR_ANTERIORA_BILLING") == "1"
 
@@ -57,8 +63,13 @@ def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
             detail = json.loads(e.read() or b"{}")
         except ValueError:
             detail = {}
-        if e.code in (402, 403):
-            raise BillingError(detail.get("error") or "Nothing left on this account for this.")
+        # The app's own words for the two answers a founder can act on, not the site's (22 Oct). The site's
+        # 403 sent people to "your account page", which does not exist yet; and the home page recognises
+        # these two sentences (probant_home.failure_message) to show them in place of "Something went wrong".
+        if e.code == 402 or detail.get("needsPurchase"):
+            raise BillingError(NO_UNITS_WORDS)
+        if e.code == 403 and detail.get("deviceLimit"):
+            raise BillingError(DEVICE_LIMIT_WORDS)
         raise BillingError(detail.get("error") or f"the account service answered {e.code}")
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise BillingError(f"could not reach the account service ({getattr(e, 'reason', e)}); try again")

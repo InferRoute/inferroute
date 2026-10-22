@@ -946,3 +946,11 @@ def test_a_first_name_check_continues_by_itself_after_the_trademark_data_is_inst
     js = (STATIC / "home.js").read_text()
     assert 'sessionStorage.setItem("anteriora-auto-check", r.id)' in js
     assert 'if (pending && pending === m.id)' in js and 'await api("/api/sessions", { id: m.id, auto: "names" });' in js
+
+
+def test_the_key_card_says_who_to_ask_for_a_key():
+    """22 Oct: the pilot is onboarded by hand, and the key card spoke of "the key InferRoute sent you" to people
+    who had none. It now says where to ask, as text that can be copied."""
+    js = (STATIC / "home.js").read_text()
+    card = js[js.index("function keyCard"):js.index("// ── pages ──")]
+    assert '"sub selectable", "No key yet? Write to support@inferroute.ai."' in card

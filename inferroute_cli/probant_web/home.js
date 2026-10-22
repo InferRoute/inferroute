@@ -582,6 +582,8 @@
       el("h2", "", "Add your InferRoute key"),
       el("p", "", "Anteriora needs the key InferRoute sent you before it can run a session. Paste it here once; it "
         + "is kept on this computer only, in a file only you can read. Sharing and Help work without it."),
+      // The pilot is onboarded by hand (22 Oct): someone without a key needs to know who to ask.
+      el("p", "sub selectable", "No key yet? Write to support@inferroute.ai."),
       field("Your key", keyInput, "It starts with inf_. Nothing is sent anywhere until you press the button, and then only to InferRoute, to check it."),
       err, el("div", "dialog-actions", save));
   }

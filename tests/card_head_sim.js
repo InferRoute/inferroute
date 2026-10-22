@@ -6,9 +6,10 @@ const fn = (name) => {
   if (i < 0) throw new Error(`app.js no longer has function ${name} — update this harness`);
   return src.slice(i, src.indexOf("\n  }\n", i) + 4);
 };
-const marks = new Map(); const searchesByNo = new Map();
+const marks = new Map(); const searchesByNo = new Map(); const cards = new Map();
+const shownByNo = new Map(); const shownNo = (no) => shownByNo.get(no) || no;
 function outlineUpdate() {}
-eval(fn("shortAbout") + fn("refreshCardSummary"));
+eval(fn("shortAbout") + fn("refreshCardSummary") + fn("renumber"));
 const node = () => ({ textContent: "", hidden: false });
 searchesByNo.set(1, { about: "A wrist worn device measuring blood glucose with near infrared light" });
 searchesByNo.set(2, { about: "Routing by permission" });
@@ -24,4 +25,14 @@ const withMarks = { sub: entry.sub.textContent, notes: entry.notes.textContent, 
 const lone = { sub: node(), notes: node(), n: 10, fresh: 10, keys: [], overlap: new Map() };
 refreshCardSummary(lone);
 const naming = { known: shortAbout(2), long: shortAbout(1), unknown: shortAbout(9) };
-console.log(JSON.stringify({ withMarks, lone: { sub: lone.sub.textContent, hidden: lone.notes.hidden }, naming }));
+// Numbering in PAGE order (21 Oct audit: "Search 4, 5, 3, 7, 6"). Five cards appear in this order; the extension
+// numbered them as they completed. One was not sent; a survey's two queries sit between the others.
+const card = (searchNo, failed) => ({ searchNo, failed, title: node(), outline: { which: node() } });
+const legs = [{ searchNo: 6, paint() { this.painted = this.shown; } }, { searchNo: 4, paint() { this.painted = this.shown; } }];
+cards.set("a", card(3)); cards.set("b", card(0)); cards.set("c", card(0, true));
+cards.set("d", { deep: true, legs }); cards.set("e", card(5));
+renumber();
+const order = { titles: ["a", "b", "c", "e"].map((k) => cards.get(k).title.textContent),
+                index: ["a", "b", "c", "e"].map((k) => cards.get(k).outline.which.textContent),
+                legs: legs.map((l) => l.painted), alsoIn6: shortAbout(6) };
+console.log(JSON.stringify({ withMarks, lone: { sub: lone.sub.textContent, hidden: lone.notes.hidden }, naming, order }));

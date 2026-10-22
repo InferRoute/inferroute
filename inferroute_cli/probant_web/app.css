@@ -391,6 +391,12 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 #dialog .dialog-actions { flex: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 /* The folder picker's filter box, above the list it filters (21 Oct). */
 .picker-filter { box-sizing: border-box; width: 100%; margin: 2px 0 8px; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+/* A draft's Markdown, as it reads, above the box where it is edited (21 Oct). */
+.md-preview-fold { margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.md-preview-fold > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; color: var(--muted); }
+.md-preview { padding: 0 14px 10px; max-height: 260px; overflow-y: auto; overflow-wrap: anywhere; }
+.md-preview h4 { margin: 10px 0 6px; font-size: 15px; }
+.md-preview blockquote { background: none; border-left: 2px solid var(--line); border-radius: 0; padding: 0 0 0 12px; color: var(--muted); }
 .dialog-actions input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 .toasts { position: fixed; right: 16px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: 420px; }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); font-size: 14px; white-space: pre-wrap; }

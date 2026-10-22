@@ -442,6 +442,16 @@
     date.value = origin.suggested_priority_date || (m.pre_filing_default ? "" : m.date_bound);
     try { text.value = (await api(`/api/disclosure?id=${enc(m.id)}`)).text; }
     catch (e) { toast(e.message, "error"); return; }
+    // The draft is Markdown, and in the box it read as "#", "##" and ">" (21 Oct audit). Above the box, the same text
+    // as it reads, folded on request; the box stays what is edited and saved. Built by common.js markdown(), text
+    // nodes only.
+    const shown = el("div", "md-preview");
+    const paintPreview = () => { clear(shown); shown.append(markdown(text.value)); };
+    let previewTimer = null;
+    text.addEventListener("input", () => { clearTimeout(previewTimer); previewTimer = setTimeout(paintPreview, 250); });
+    paintPreview();
+    const preview = el("details", "md-preview-fold", el("summary", "", "How it reads"), shown);
+    preview.open = true;
     const err = el("p", "form-error");
     const save = button("Save reviewed draft", "primary", async () => {
       err.textContent = "";
@@ -456,7 +466,8 @@
     dialog("Review draft matter", [
       el("p", "", "Check the AI's description against its supporting passage. Correct missing or overstated features before searching."),
       el("p", "sub", `Source: ${origin.source_name || "uploaded document"}`),
-      field("Disclosure", text),
+      preview,
+      field("Disclosure", text, "What you edit and save. The view above follows it."),
       field("Priority date", date, origin.suggested_priority_date && origin.date_source === "git"
         ? `Suggested from the repository's history: the quoted lines took their present form by ${origin.suggested_priority_date}. Commit dates are what the committer's computer said, not proof. Confirm it, or enter the date you can prove.`
         : origin.suggested_priority_date

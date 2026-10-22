@@ -57,6 +57,14 @@ window.ProbantUI = (() => {
       const h = /^\s*#{1,6}\s+(.*)$/.exec(line);
       if (h) { out.append(el("h4", "", inline(h[1]))); i++; continue; }
       if (/^\s*!\[/.test(line)) { i++; continue; }
+      // A quoted passage ("> …"), as a draft matter carries its supporting passage: shown as a quote, not as a line
+      // that starts with ">" (21 Oct audit, the review-draft preview).
+      if (/^\s*>/.test(line)) {
+        const quote = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, ""));
+        out.append(el("blockquote", "", inline(quote.join(" ").trim())));
+        continue;
+      }
       if (isTable(line)) {
         const table = el("table", "");
         let header = true;
@@ -84,7 +92,7 @@ window.ProbantUI = (() => {
         continue;
       }
       const para = [];
-      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|```|[-*•]\s|\d+[.)]\s|\||-{3,}\s*$)/.test(lines[i])) para.push(lines[i++].trim());
+      while (i < lines.length && lines[i].trim() && !/^\s*(#{1,6}\s|```|[-*•]\s|\d+[.)]\s|\||>|-{3,}\s*$)/.test(lines[i])) para.push(lines[i++].trim());
       if (!para.length) { para.push(lines[i++].trim()); }
       out.append(el("p", "", inline(para.join(" "))));
     }

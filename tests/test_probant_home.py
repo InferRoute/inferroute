@@ -1001,3 +1001,29 @@ def test_dialog_buttons_stay_in_view_while_the_dialog_scrolls():
     assert "#dialog .modal-card { display: flex; flex-direction: column; overflow: hidden; }" in css
     assert re.search(r"#dialog \.dialog-body \{[^}]*min-height: 0; overflow-y: auto;", css)
     assert re.search(r"#dialog \.dialog-actions \{ flex: none;", css)
+
+
+def test_the_review_draft_shows_the_markdown_as_it_reads_above_the_box():
+    """21 Oct audit: the review-draft box showed raw Markdown ("#", "##", ">"). The box stays the thing edited and
+    saved; above it, a folding view of the same text through common.js markdown(), which now shows a "> " passage
+    as a quote."""
+    import shutil, subprocess
+    js = (STATIC / "home.js").read_text()
+    review = js[js.index("async function reviewDraftDialog"):js.index("// ── starting a session ──")]
+    assert 'const preview = el("details", "md-preview-fold", el("summary", "", "How it reads"), shown);' in review
+    assert "shown.append(markdown(text.value))" in review and "preview.open = true;" in review
+    assert review.index("      preview,\n") < review.index('field("Disclosure", text,')
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    harness = """
+const made = []; global.document = { createElement: (t) => ({ t, kids: [], className: "", append(...c) { this.kids.push(...c); } }),
+  createTextNode: (x) => ({ text: x }), createDocumentFragment: () => ({ kids: [], append(...c) { this.kids.push(...c); } }) };
+global.window = {};
+require(process.argv[1]);
+const out = window.ProbantUI.markdown("# Routing\\n\\n> if allowed(user): route()\\n> second line\\n\\nAfter.");
+console.log(JSON.stringify(out.kids.map((k) => k.t)));
+"""
+    r = subprocess.run([node, "-e", harness, str(STATIC / "common.js")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == ["h4", "blockquote", "p"]

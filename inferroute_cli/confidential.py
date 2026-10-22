@@ -30,13 +30,6 @@ DEFAULT_MODEL = "kimi-k2.6"
 # reporting "the AI machine couldn't be reached": the pinned instance cycles out and there is no
 # alternative. The other fleets were healthy throughout, so this was never a carrier outage.
 PROBANT_MODEL = "kimi-k3"
-# A NAME CHECK's default, measured 22 Oct (6 sequential runs, same names, report checked against the searches):
-# kimi-k2.6 wrote the report in 70-71 s with every cited register number exact and no verdict word; kimi-k3 took
-# 863 s (and 2 of 3 runs died on the fleet's 429s), glm-5.2 741-875 s and once listed partial class lists as whole.
-# A name report is grounded in the search results on this computer, so the speed is worth it here. Reading and
-# drafting stay on PROBANT_MODEL: there kimi-k2.6 merged inventions and invented details (20 Oct). The backup
-# lane stays on, so a refused kimi-k2.6 still moves the session to another model.
-PROBANT_NAMES_MODEL = "kimi-k2.6"
 
 # Tried in order when a session cannot get an eligible instance on the model asked for. Ordering is
 # capability first, cheapest last — Probant is low-volume, so availability is worth more than price here.
@@ -756,8 +749,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
         hint = f"ir {agent} --model {user_model}" if agent != "claude" else f"ir --model {user_model}"
         sys.stderr.write(f"\n  Run this next time directly:  {hint}\n\n")
     # Probant's own default, not the lane's: see PROBANT_MODEL. An explicit --model still wins.
-    alias = _resolve_model(user_model or (
-        None if probant is None else PROBANT_NAMES_MODEL if probant.get("mode") == "names" else PROBANT_MODEL))
+    alias = _resolve_model(user_model or (PROBANT_MODEL if probant is not None else None))
     if agent == "pi":
         from . import pi_attested
         try:

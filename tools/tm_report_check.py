@@ -5,7 +5,8 @@ The report is written by the model; the search log (trademark-searches.jsonl, ke
 agent) is what the searches returned. This reads both and says, without judgement calls:
 - every register number the report cites, and whether a logged search returned it (a number no search returned
   was made up or mistyped);
-- whether the status and classes written next to a cited number agree with the search;
+- whether the status and classes written next to a cited number agree with the search, and whether a class list
+  that is only part of the mark's is written as if it were the whole (it must say it is an overlap);
 - wording the report must never use (a verdict on a name);
 - whether the sections the prompt asks for are there, and the word count against the 450-word cap.
 Meant for comparing models on the same names: run it on each run's report and log."""
@@ -22,9 +23,14 @@ FORBIDDEN = [r"\bis available\b", r"\bare available\b", r"\bfree to use\b", r"\b
              r"\bsafe\b", r"\blow[- ]risk\b", r"\bhigh[- ]risk\b", r"\brisky\b", r"\blikely to be confused\b",
              r"\bunlikely to be confused\b", r"\bno conflict\b", r"\bgo ahead\b"]
 SECTIONS = ["At a glance", "What you can do next", "Questions for a trademark professional"]
-CITE = re.compile(r"\b(US|FR)\s*(?:No\.?\s*)?(\d{5,9})\b")
+# "US 86332176", "USPTO 79150570", "FR 4774453", "INPI 4774453", "US No. 1", "FR n° 1": the register's name or code.
+CITE = re.compile(r"\b(US|USPTO|FR|INPI)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})\b", re.I)
+REGISTER = {"us": "US", "uspto": "US", "fr": "FR", "inpi": "FR"}
 STATUS = re.compile(r"\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b", re.I)
-CLASSES = re.compile(r"\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|and|&)\s*)?)+)", re.I)
+CLASSES = re.compile(r"\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|/|and|&)\s*)?)+)", re.I)
+# Words that say a class list is only part of the mark's: "overlaps your classes 7, 21", "in your class 9",
+# "classes incl. 21", "including class 11", "among them 9".
+PART = re.compile(r"overlap|your class|\bincl|\bamong\b|\be\.g\.|\bsuch as\b", re.I)
 
 
 def logged_hits(log: Path) -> Dict[tuple, Dict[str, Any]]:
@@ -43,7 +49,7 @@ def check(report: str, hits: Dict[tuple, Dict[str, Any]]) -> Dict[str, Any]:
     cited: List[Dict[str, Any]] = []
     found = list(CITE.finditer(report))
     for i, m in enumerate(found):
-        key = (m.group(1), m.group(2))
+        key = (REGISTER[m.group(1).lower()], m.group(2))
         # What is written right after this number, up to the next cited number: "(US 1, US 2) … in class 21"
         # says class 21 of the marks named after them, not of US 2.
         end = found[i + 1].start() if i + 1 < len(found) else len(report)
@@ -56,8 +62,12 @@ def check(report: str, hits: Dict[tuple, Dict[str, Any]]) -> Dict[str, Any]:
             if said_status:
                 row["status_ok"] = said_status.group(1).lower() == h["status"].lower()
             if said_classes:
-                said = set(re.findall(r"\d{1,2}", said_classes.group(1)))
-                row["classes_ok"] = said <= {str(int(c)) for c in h.get("classes", [])}
+                said = {str(int(c)) for c in re.findall(r"\d{1,2}", said_classes.group(1))}
+                real = {str(int(c)) for c in h.get("classes", [])}
+                row["classes_ok"] = said <= real
+                # Some of the mark's classes written as if they were all of them: GRINDEX "7/9/11" for nine.
+                said_as_part = PART.search(near[:said_classes.end()])
+                row["classes_partial"] = said < real and not said_as_part
         cited.append(row)
     low = report.lower()
     words = len(re.findall(r"\b\w[\w'-]*\b", report))
@@ -66,6 +76,7 @@ def check(report: str, hits: Dict[tuple, Dict[str, Any]]) -> Dict[str, Any]:
         "not_returned": [c["cite"] for c in cited if not c["returned"]],
         "status_wrong": [c["cite"] for c in cited if c.get("status_ok") is False],
         "classes_wrong": [c["cite"] for c in cited if c.get("classes_ok") is False],
+        "classes_partial": [c["cite"] for c in cited if c.get("classes_partial")],
         "forbidden": sorted({m.group(0) for p in FORBIDDEN for m in re.finditer(p, low)}),
         "sections_missing": [s for s in SECTIONS if s.lower() not in low],
         "says_not_searched": "not searched" in low,
@@ -84,7 +95,7 @@ def main(argv: List[str]) -> int:
     else:
         for k, v in got.items():
             print(f"{k:18} {v}")
-    bad = got["not_returned"] or got["status_wrong"] or got["classes_wrong"] or got["forbidden"]
+    bad = got["not_returned"] or got["status_wrong"] or got["classes_wrong"] or got["classes_partial"] or got["forbidden"]
     return 1 if bad else 0
 
 

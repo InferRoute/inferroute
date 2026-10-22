@@ -23,3 +23,20 @@ def test_a_made_up_number_a_wrong_status_and_a_verdict_are_reported():
     got = C.check("QUENCH — US 86332176, pending, class 9. ZWENCH — FR 1234567, registered. Kwench looks safe.", HITS)
     assert got["not_returned"] == ["FR 1234567"] and got["status_wrong"] == ["US 86332176"]
     assert got["forbidden"] == ["safe"] and "At a glance" in got["sections_missing"]
+
+
+def test_a_register_named_in_full_is_still_a_citation():
+    # glm-5.2 wrote "USPTO 79150570" and the checker counted 0 citations although all were right.
+    hits = {("US", "79150570"): {"status": "registered", "classes": ["9"]}, ("FR", "4774453"): {"status": "registered", "classes": ["1", "11"]}}
+    got = C.check("AQUA — USPTO 79150570, registered, class 9. Aqualina — INPI 4774453, registered, classes 1, 11.", hits)
+    assert got["cited"] == 2 and not got["not_returned"] and not got["classes_wrong"] and not got["classes_partial"]
+
+
+def test_part_of_a_mark_s_classes_written_as_the_whole_is_flagged_unless_worded_as_an_overlap():
+    hits = {("US", "72137309"): {"status": "registered", "classes": ["7", "9", "11", "21", "35"]}}
+    assert C.check("GRINDEX — US 72137309, registered, classes 7/9/11.", hits)["classes_partial"] == ["US 72137309"]
+    for ok in ("GRINDEX — US 72137309, registered, overlaps your classes 7, 21.",
+               "GRINDEX — US 72137309, registered, in your class 21.",
+               "GRINDEX — US 72137309, registered, classes 7, 9, 11, 21, 35."):
+        got = C.check(ok, hits)
+        assert not got["classes_partial"] and not got["classes_wrong"], ok

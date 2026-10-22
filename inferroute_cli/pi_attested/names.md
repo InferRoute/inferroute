@@ -68,7 +68,9 @@ The founder is not a lawyer. Write for them, in this order:
 3. For each name, `## <the name>`, then "Classes searched: 21, 11, 9 (why: …)" in one
    line, then the variants searched, then at most the three marks that matter most
    (founder's classes first, then closest), each with its register, number, status,
-   classes, and its reason in plain words: same spelling, sounds alike, one letter
+   classes, and its reason in plain words. Classes: either every class the tool lists for
+   the mark, or only the shared ones written as "overlaps your classes 7, 21"; never a few
+   of its classes written as if they were all of them. Then its reason: same spelling, sounds alike, one letter
    different, spelled closely, contains your name, shares a word; plus "in your classes"
    or "outside your classes". Then how many other close marks each search found. Do not
    copy the other results: the matter page lists every search in full.

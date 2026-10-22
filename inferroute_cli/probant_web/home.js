@@ -218,6 +218,60 @@
     } };
   }
 
+
+  // ── a name check's notes: three plain fields, written to disclosure.md in the shape names_listed reads ──
+  // (Henry, 22 Oct: "it's not super clear what should be put in the disclosure for trademarks"). A name check
+  // never asks for a "disclosure": it asks for the names, what the product is, and where it will be sold.
+  const NAME_HEADS = { names: "Names being considered (one per line):", product: "The product, in one or two sentences:",
+    markets: "Where you will sell it (for example France, the EU, the US):" };
+  function composeNameNotes(names, product, markets) {
+    const list = String(names || "").split(/\n|,/).map((x) => x.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean);
+    return `${NAME_HEADS.names}\n${list.map((n) => `- ${n}`).join("\n")}\n\n${NAME_HEADS.product}\n${String(product || "").trim()}\n\n`
+      + `${NAME_HEADS.markets}\n${String(markets || "").trim()}\n`;
+  }
+  function parseNameNotes(text) {
+    const t = String(text || "");
+    const at = (head) => t.indexOf(head);
+    const iN = at(NAME_HEADS.names), iP = at(NAME_HEADS.product), iM = at(NAME_HEADS.markets);
+    if (iN < 0 || iP < iN || iM < iP) return null;                 // written some other way: edit it as text
+    const block = (a, head, b) => t.slice(a + head.length, b < 0 ? undefined : b).trim();
+    const names = block(iN, NAME_HEADS.names, iP).split("\n").map((x) => x.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean);
+    return { names: names.join("\n"), product: block(iP, NAME_HEADS.product, iM), markets: block(iM, NAME_HEADS.markets, -1) };
+  }
+  function nameFields(values) {
+    const v = values || {};
+    const names = input("textarea", "Kwench\nAquelia");
+    names.rows = 4; names.value = v.names || "";
+    const product = input("textarea", "A reusable water bottle with a built-in filter and a hydration-tracking app.");
+    product.rows = 3; product.value = v.product || "";
+    const markets = input("text", "France and the US");
+    markets.value = v.markets || "";
+    return { names, product, markets,
+      nodes: [field("Names to check", names, "One per line. Each is searched with its close spellings and sound-alikes."),
+        field("What the product is", product, "One or two sentences. The assistant uses it to choose the trademark classes."),
+        field("Where you will sell it", markets, "Optional. For example France, the EU, the US.")],
+      value: () => composeNameNotes(names.value, product.value, markets.value),
+      count: () => names.value.split(/\n|,/).map((x) => x.trim()).filter(Boolean).length };
+  }
+
+  // The three jobs' icons (brand kit icons/), drawn as SVG nodes: this page builds no markup from strings.
+  const KIND_ICON = {
+    name: [["path", { d: "M4 4h7.5l9 9-7 7-9-9z" }], ["circle", { cx: "7.75", cy: "7.75", r: "1.1" }], ["path", { d: "M11.5 10l3.5 3.5" }], ["path", { d: "M9.5 12.5l2.5 2.5" }]],
+    invention: [["circle", { cx: "9", cy: "10", r: "5.25" }], ["circle", { cx: "9", cy: "10", r: "1", fill: "currentColor", stroke: "none" }], ["path", { d: "M5.3 13.7 3 16" }], ["path", { d: "M16 7h5M16 11h5M16 15h5M12.5 19H21" }]],
+    draft: [["path", { d: "M6 3h8l5 5v13H6z" }], ["path", { d: "M14 3v5h5" }], ["circle", { cx: "9.5", cy: "10.5", r: "1.25" }], ["circle", { cx: "9.5", cy: "17", r: "1.25" }], ["circle", { cx: "14.5", cy: "12.5", r: "1.25" }], ["path", { d: "M9.5 11.75v4M9.5 15.75c0-1.9 1.4-2.2 3-2.3l.8-.1" }]],
+  };
+  function kindIcon(kind) {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.75", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", class: "kind-icon" })) svg.setAttribute(k, v);
+    for (const [tag, attrs] of KIND_ICON[kind] || KIND_ICON.invention) {
+      const n = document.createElementNS(NS, tag);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+      svg.append(n);
+    }
+    return svg;
+  }
+
   function newMatterDialog(opts) {
     const client = input("text", "e.g. Acme");
     client.value = "Personal";
@@ -234,11 +288,27 @@
     // The hint under the choice speaks about the choice made (21 Oct audit: the trademark hint showed under "An invention").
     const KIND_HINT = { invention: "The assistant searches about 29.6 million US, European and WIPO patent publications, through a sealed machine this computer checks first.",
       name: "Names are searched on this computer, in a copy of the French and US trademark registers. EU trade marks are not included yet." };
+    const nf = nameFields();
+    const nameBox = el("div", "name-fields", ...nf.nodes);
+    // The check's own name follows the first name typed, until the person writes one themselves.
+    let slugTouched = false;
+    matter.addEventListener("input", () => { slugTouched = true; });
+    nf.names.addEventListener("input", () => {
+      if (slugTouched || kind.value !== "name") return;
+      const first = nf.names.value.split(/\n|,/)[0].trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+      matter.value = first ? `${first}-names` : "";
+    });
+    nameBox.hidden = true;
     const NAME_TEMPLATE = "Names being considered (one per line):\n- \n\nThe product, in one or two sentences:\n\nWhere you will sell it (for example France, the EU, the US):\n";
     const validation = formErrors({ client, matter, priority_date: date, disclosure: text });
     const err = el("p", "form-error");
     const create = button("Create matter", "primary", async () => {
       err.textContent = "";
+      if (kind.value === "name") {
+        if (!nf.count()) { err.textContent = "Write at least one name to check."; nf.names.focus(); return; }
+        text.value = nf.value();
+      }
       if (!validation.validate()) return;
       create.disabled = true;
       try {
@@ -277,6 +347,7 @@
       validation.field("matter", "Matter", "Required. A short name for this matter."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
       validation.field("disclosure", "Disclosure", "Saved as written. The AI reads it when you start a session."),
+      nameBox,
       err,
     ], [button("Cancel", "ghost", closeDialog), create]);
     const relabel = () => {
@@ -303,16 +374,32 @@
           : "Saved as written. The AI reads it when you start a session.";
       }
       matter.placeholder = names ? "e.g. bottle-names" : "e.g. cooling-system";
-      if (names && !text.value.trim()) text.value = NAME_TEMPLATE;
+      nameBox.hidden = !names;
+      if (textRow) textRow.hidden = names;
       if (!names && text.value === NAME_TEMPLATE) text.value = "";
     });
     if (opts && opts.kind === "name") { kind.value = "name"; kind.dispatchEvent(new Event("change")); }
-    setTimeout(() => (kind.value === "name" ? text : client).focus(), 0);
+    setTimeout(() => (kind.value === "name" ? nf.names : client).focus(), 0);
   }
 
-  async function editDisclosureDialog(matterId, onSaved) {
+  async function editDisclosureDialog(matterId, onSaved, isName) {
     let current = "";
     try { current = (await api(`/api/disclosure?id=${enc(matterId)}`)).text; } catch (e) { toast(e.message, "error"); return; }
+    const parsed = isName ? parseNameNotes(current) : null;
+    if (isName && (parsed || !current.trim())) {
+      const nf = nameFields(parsed || {});
+      const err = el("p", "form-error");
+      const save = button("Save", "primary", async () => {
+        if (!nf.count()) { err.textContent = "Write at least one name to check."; nf.names.focus(); return; }
+        try {
+          await api("/api/disclosure", { id: matterId, text: nf.value() });
+          closeDialog(); toast(`Saved: ${plural(nf.count(), "name", "names")} to check.`, "info"); onSaved();
+        } catch (e) { err.textContent = e.message; }
+      });
+      dialog("Names and product", [el("p", "", "What the assistant reads when it checks your names. Saved with this check on this computer."),
+        ...nf.nodes, err], [button("Cancel", "ghost", closeDialog), save]);
+      return;
+    }
     const text = input("textarea");
     text.rows = 16;
     text.value = current;
@@ -325,8 +412,9 @@
         onSaved();
       } catch (e) { err.textContent = e.message; }
     });
-    dialog("Disclosure", [
-      el("p", "", "The invention, as the assistant will read it. Saved in the matter's folder on this computer."),
+    dialog(isName ? "Names and product" : "Disclosure", [
+      el("p", "", isName ? "Your names and what the product is, as the assistant will read them. Saved with this check on this computer."
+        : "The invention, as the assistant will read it. Saved in the matter's folder on this computer."),
       text, err,
     ], [button("Cancel", "ghost", closeDialog), save]);
   }
@@ -586,9 +674,14 @@
       ev.stopPropagation();
       if (m.needs_review) open(); else startSession(m.id, open);
     });
+    // What KIND of work each card is, at a glance (Henry, 22 Oct: name checks and patent matters looked the same).
+    const kindKey = m.needs_review ? "draft" : m.kind === "name" ? "name" : "invention";
+    const kindLabel = { name: "Name check", invention: "Prior-art search", draft: "Draft from a reading" }[kindKey];
     const body = el("div", "matter-body",
+      el("div", `kind-chip kind-${kindKey}`, kindIcon(kindKey), el("span", "", kindLabel)),
       el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
-      el("div", "sub", m.kind === "name" ? "Name check" : `date bound ${m.date_bound || "—"}`),
+      m.kind === "name" ? el("div", "sub", m.report_at ? `report ready · ${localTime(m.report_at)}` : "no report yet")
+        : el("div", "sub", `date bound ${m.date_bound || "—"}`),
       m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
       m.kind === "name" ? el("div", "stats",
         (m.names || []).length ? el("span", "", `${plural(m.names.length, "name", "names")}: ${m.names.slice(0, 3).join(", ")}${m.names.length > 3 ? ", …" : ""}`)
@@ -601,7 +694,7 @@
         m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
       el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
       el("div", "matter-open", "Open this matter →"));
-    const cardNode = el("div", "matter-card clickable", body, el("div", "matter-foot", start));
+    const cardNode = el("div", `matter-card clickable kind-${kindKey}`, body, el("div", "matter-foot", start));
     cardNode.tabIndex = 0;
     cardNode.setAttribute("role", "link");
     cardNode.setAttribute("aria-label", `Open ${m.client} / ${m.matter}`);
@@ -771,7 +864,7 @@
         : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
         : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
         : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh)),
-      button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh)),
+      button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh, isName)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;
         b.disabled = true;

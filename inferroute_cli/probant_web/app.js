@@ -2346,7 +2346,7 @@
       draftRefreshTimer = setInterval(refreshIntakeDrafts, 5000);
       window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
     } else if (nameSession && d.disclosure_words > 0) {
-      line.textContent = `Your product and names are in the matter folder (disclosure.md, ${d.disclosure_words} words). The trademark search runs on this computer; the AI reads your notes and the results.`;
+      line.textContent = "The assistant reads your names and what the product is, then searches each name on this computer and writes your report.";
       $("empty").querySelector(".hint").textContent = "Everything you type is encrypted on this computer before it goes to the AI's sealed machine. "
         + "The search runs on this computer; the assistant searches straight away and asks you to confirm the classes afterwards.";
       foldTrust();

@@ -18,6 +18,8 @@
   --bad: #9e3f37;
   --bad-soft: #f5e3e1;
   --user: #e9e5db;
+  --info: #366590;
+  --info-soft: #e2ecf4;
   --shadow: 0 1px 2px rgba(21, 34, 44, .06), 0 4px 16px rgba(21, 34, 44, .05);
   --radius: 10px;
   --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -30,7 +32,7 @@
     --bg: #0b151d; --panel: #101e29; --ink: #f1eee6; --muted: #aeb9c1; --faint: #8b9fae; --line: #2b4252;
     --accent: #8fd0a0; --accent-soft: #17302a; --action: #b0873a; --action-text: #d2ac62; --on-action: #0b151d;
     --warn: #e4a56c; --warn-soft: #3a2a1c; --bad: #e59089; --bad-soft: #3b2224;
-    --user: #172833; --shadow: 0 1px 2px rgba(0, 0, 0, .4);
+    --user: #172833; --shadow: 0 1px 2px rgba(0, 0, 0, .4); --info: #93bedf; --info-soft: #1b2f42;
   }
 }
 @font-face { font-family: "Inter"; src: url("/fonts/inter.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
@@ -816,3 +818,15 @@ button.link.small { font-size: 12px; color: var(--faint); margin: 2px 0 6px; }
 @media (min-width: 981px) and (max-width: 1240px) { .layout:has(.trust.folded) { grid-template-columns: minmax(0, 1fr) 300px; } }
 @media (min-width: 1241px) { .layout:has(.trust.folded) { grid-template-columns: 244px minmax(0, 1fr) 300px; } }
 .report-ready { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; border-radius: var(--radius); padding: 12px 16px; }
+
+/* What kind of work a card is (22 Oct): a labelled chip with the job's icon, and a coloured top edge. */
+.kind-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .3px;
+  text-transform: uppercase; padding: 3px 9px 3px 7px; border-radius: 999px; margin-bottom: 6px; width: fit-content; }
+.kind-chip .kind-icon { width: 15px; height: 15px; }
+.kind-chip.kind-name { color: var(--info); background: var(--info-soft); }
+.kind-chip.kind-invention { color: var(--action-text); background: var(--user); }
+.kind-chip.kind-draft { color: var(--warn); background: var(--warn-soft); }
+.matter-card.kind-name { border-top: 3px solid var(--info); }
+.matter-card.kind-invention { border-top: 3px solid var(--action); }
+.matter-card.kind-draft { border-top: 3px solid var(--warn); }
+.name-fields { display: grid; gap: 4px; }

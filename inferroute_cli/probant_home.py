@@ -272,9 +272,18 @@ def list_matters() -> List[Dict[str, Any]]:
                         "sessions": len(sessions), "searches": sum(s["searches"] for s in sessions),
                         "marks": len(marks), "last_activity": sessions[0]["started_at"] if sessions else rec.get("created_at"),
                         "disclosure_words": disclosure_info(ws)["disclosure_words"] if ws.is_dir() else 0,
-                        **({"names": _names_of(ws)} if rec.get("kind") == "name" else {})})
+                        **({"names": _names_of(ws), "report_at": _report_at(ws)} if rec.get("kind") == "name" else {})})
     out.sort(key=lambda m: str(m.get("last_activity") or ""), reverse=True)
     return out
+
+
+def _report_at(ws: Path) -> Optional[str]:
+    """When the name check's report was last written, for the matter card ("report ready · …")."""
+    try:
+        t = (ws / "name-check.md").stat().st_mtime
+    except OSError:
+        return None
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any]]:

@@ -186,3 +186,18 @@ def test_the_names_a_matter_lists_are_read_from_either_template():
                           "Where you will sell it: France") == ["Taxly", "Setaside"]
     assert S.names_listed("Names: Zebrafy, Zebrix") == ["Zebrafy", "Zebrix"]
     assert S.names_listed("The product: labels that print names on bottles.") == []
+
+
+def test_the_three_name_fields_write_notes_whose_names_are_found_again():
+    """22 Oct (Henry: unclear what to put in the "disclosure" for trademarks): a name check asks for names,
+    what the product is and where it will be sold, and writes them in the shape names_listed reads."""
+    from pathlib import Path
+    from inferroute_cli import probant as P
+    js = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    for head in ("Names being considered (one per line):", "The product, in one or two sentences:",
+                 "Where you will sell it (for example France, the EU, the US):"):
+        assert head in js
+    composed = ("Names being considered (one per line):\n- Kwench\n- Aquelia\n\n"
+                "The product, in one or two sentences:\nA bottle.\n\n"
+                "Where you will sell it (for example France, the EU, the US):\nFrance\n")
+    assert P.names_listed(composed) == ["Kwench", "Aquelia"]

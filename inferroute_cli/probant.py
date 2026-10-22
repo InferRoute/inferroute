@@ -466,16 +466,18 @@ def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: 
     from .launch import _new_session_id
     session_id = _new_session_id()
     try:
-        if B.before_session(rec, session_id) is not None:
-            _write_record(client, matter, rec)
+        permit = B.before_session(rec, session_id)
     except B.BillingError as e:
         raise ProbantError(str(e))
+    if permit is not None:
+        _write_record(client, matter, rec)
+        probant["permit"] = permit["id"]            # goes with the sealed session: header + usage reports
     probant["session_id"] = session_id
     rdir = records_dir(client, matter)
     before = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
     started = time.time()
     rc = confidential_mod.launch([], agent="pi", probant=probant)
-    if B.enabled():
+    if permit is not None:
         after = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
         fresh = load_record(client, matter)
         if B.after_session(fresh, session_id, B.delivered(fresh, ws, before, after, started)):
@@ -531,7 +533,23 @@ def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals
         probant["draft_client"] = client
     if web:
         probant["web"] = True
+    # A reading takes one search unit, keyed by its intake id, when billing is on (anteriora_billing).
+    from . import anteriora_billing as B
+    from .launch import _new_session_id
+    session_id = _new_session_id()
+    reading = B.load_reading(meta["id"])
+    try:
+        permit = B.before_session(reading, session_id)
+    except B.BillingError as e:
+        raise ProbantError(str(e))
+    if permit is not None:
+        B.save_reading(reading)
+        probant["permit"] = permit["id"]
+    probant["session_id"] = session_id
     rc = confidential_mod.launch([], agent="pi", probant=probant)
+    if permit is not None:
+        if B.after_session(reading, session_id, B.reading_delivered(meta["id"])):
+            B.save_reading(reading)
     print()
     if rc != 0:
         return rc

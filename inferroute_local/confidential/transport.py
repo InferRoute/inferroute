@@ -153,6 +153,9 @@ def invoke_headers(names: dict, *, fleet_id: str, instance_id: str, nonce: str, 
 class Transport:
     name = "?"
     relay_sees = "ciphertext only"
+    # The Anteriora unit permit covering this session, if any: sent with every relay request and every usage
+    # report so the gateway can tell the session is paid for in units. Empty: nothing is sent (as before).
+    permit = ""
 
     def __init__(self, http: httpx.AsyncClient):
         self.http = http
@@ -253,16 +256,19 @@ class DirectOperator(Transport):
 class InferRouteRelay(Transport):
     name = "InferRoute relay (ciphertext only)"
 
-    def __init__(self, http: httpx.AsyncClient, api_url: str, api_key: str, session_id: str = ""):
+    def __init__(self, http: httpx.AsyncClient, api_url: str, api_key: str, session_id: str = "", permit: str = ""):
         super().__init__(http)
         self.base = api_url.rstrip("/")
         self.api_key = api_key
         self.session_id = session_id
+        self.permit = permit
 
     def _auth(self) -> dict:
         h = {"Authorization": f"Bearer {self.api_key}", "User-Agent": UA}
         if self.session_id:
             h["x-inferroute-session"] = self.session_id
+        if self.permit:
+            h["x-inferroute-permit"] = self.permit
         return h
 
     async def builds(self) -> list:
@@ -318,6 +324,8 @@ class InferRouteRelay(Transport):
 
     async def report_usage(self, payload: dict) -> None:
         try:
+            if self.permit:
+                payload = {**payload, "permit": self.permit}
             await self.http.post(f"{self.base}/confidential/usage", headers=self._auth(), json=payload, timeout=10)
         except Exception:
             pass
@@ -328,11 +336,11 @@ class RelayUnavailable(Exception):
 
 
 def make_transport(http: httpx.AsyncClient, *, api_url: str = "", api_key: str = "", session_id: str = "",
-                   prefer_direct: bool | None = None) -> Transport:
+                   prefer_direct: bool | None = None, permit: str = "") -> Transport:
     """Direct when an operator key is present (explicit BYOK beats the relay); otherwise the relay."""
     direct_key = os.environ.get("IR_OPERATOR_API_KEY", "")
     if prefer_direct is True or (prefer_direct is None and direct_key):
         return DirectOperator(http, api_key=direct_key)
     if not api_key:
         raise ValueError("no InferRoute key (run `ir login`) and no IR_OPERATOR_API_KEY for direct mode")
-    return InferRouteRelay(http, api_url=api_url, api_key=api_key, session_id=session_id)
+    return InferRouteRelay(http, api_url=api_url, api_key=api_key, session_id=session_id, permit=permit)

@@ -496,7 +496,7 @@ def _lane_price(alias, economy: bool) -> dict:
     return dict((row.get("economy") if economy else row.get("standard")) or {})
 
 
-async def _open_session(alias, session_id: str, http, console, *, continuity: bool = False):
+async def _open_session(alias, session_id: str, http, console, *, continuity: bool = False, permit: str = ""):
     """`continuity`: open the side lane instead of a single session — several verified sessions, one
     conversation, with a standby warmed in the background so a fleet going bad never reaches the user.
 
@@ -508,7 +508,8 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
     from . import config as cfg
     creds = cfg.load()
     try:
-        transport = make_transport(http, api_url=creds.api_url, api_key=creds.api_key, session_id=session_id)
+        transport = make_transport(http, api_url=creds.api_url, api_key=creds.api_key, session_id=session_id,
+                                   permit=permit)
     except ValueError as e:
         console.print(f"[red]{e}[/]")
         sys.exit(2)
@@ -840,7 +841,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             use_continuity = (probant is not None
                               and os.environ.get("IR_PROBANT_CONTINUITY") != "0")
             session, receipt = await _open_session(alias, session_id, http, console,
-                                                   continuity=use_continuity)
+                                                   continuity=use_continuity,
+                                                   permit=str((probant or {}).get("permit") or ""))
             search_endpoint = None
             if agent == "pi" and receipt.is_confidential and probant is not None:
                 from . import pi_attested

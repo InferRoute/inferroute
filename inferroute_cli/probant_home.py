@@ -208,6 +208,14 @@ def matter_marks(client: str, matter: str) -> Dict[str, str]:
             for k, v in (state.get("marks") or {}).items()}
 
 
+def _epoch(iso: Any) -> float:
+    """2026-09-17T16:37:34Z → seconds since 1970 (0 when it is not a stamp)."""
+    try:
+        return dt.datetime.strptime(str(iso), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp()
+    except ValueError:
+        return 0.0
+
+
 def _stamp_of(session_id: str) -> str:
     """20260917T163734Z-… → 2026-09-17T16:37:34Z (the fallback start time)."""
     s = session_id[:16]
@@ -215,7 +223,11 @@ def _stamp_of(session_id: str) -> str:
 
 
 def _signed_searches(rows: List[dict]) -> List[dict]:
-    return [r for r in rows if (r.get("statement") or {}).get("sig")]
+    """Signed SEARCHES: a document read is archived in the same file with a signed statement of kind "document"
+    (probant_export._row_kind). Counted here it made the matter page say one more search than the session's own
+    footer, which counts searches only (21 Oct audit: the two panels disagreed)."""
+    return [r for r in rows if (r.get("statement") or {}).get("sig")
+            and str((r.get("statement") or {}).get("kind") or "search") != "document"]
 
 
 def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
@@ -739,6 +751,18 @@ class Home:
                     recent.append({**s, "matter": m["id"]})
             recent.sort(key=lambda s: s["id"], reverse=True)
             running = [home.launches.view(it) for it in home.launches.items.values() if it["state"] in ("starting", "ready")]
+            # Each card says whether its matter has a session going, from the same launches the matter page reads
+            # (21 Oct audit: a card read "0 sessions · Start a session" while that matter's session was running).
+            # A running session's record is written once it is going, so until then it is counted here, on the
+            # same rule the session tables use to find the live row: the newest session that began after the launch.
+            for m in matters:
+                live = home.launches.running_for(m["id"])
+                if not live:
+                    continue
+                m["running"] = home.launches.view(live)
+                newest = _epoch(m["last_activity"]) if m["sessions"] else 0
+                if live["state"] == "ready" and newest < live["started"] - 5:
+                    m["sessions"] += 1
             return {"matters": matters, "recent": recent[:12], "running": running, "update_waiting": files.stale(),
                     "key": key_status()}
 

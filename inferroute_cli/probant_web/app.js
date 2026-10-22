@@ -1387,7 +1387,7 @@
   function outlineUpdate(entry, note) {
     const rec = entry && entry.outline;
     if (!rec) return;
-    if (entry.searchNo) rec.which.textContent = `Search ${entry.searchNo}`;
+    if (entry.shown) rec.which.textContent = `Search ${entry.shown}`;
     rec.note.textContent = note || "";
     rec.note.hidden = !note;
   }
@@ -1477,13 +1477,42 @@
     paintActivityTime();
   }, 500);
 
+  // ── search numbers, in the order the searches appear on the page ──
+  //
+  // The extension numbers a search when it COMPLETES, so parallel searches came back numbered "4, 5, 3, 7, 6" down
+  // the page and in the index, and a running one read plain "Search" (21 Oct audit). The page numbers what it
+  // shows, in the order it shows it: each card from the moment it appears, a survey's queries when the survey
+  // returns them, and a search that was not sent gives its number back. The extension's number stays the key that
+  // "also in" references use; `shownNo` turns it into the number on screen.
+  const shownByNo = new Map();          // the extension's search number → the number shown
+  const shownNo = (no) => shownByNo.get(no) || no;
+  function renumber() {
+    let n = 0;
+    shownByNo.clear();
+    for (const e of cards.values()) {
+      if (e.deep) {
+        for (const leg of e.legs || []) {
+          if (!leg.searchNo) continue;
+          leg.shown = ++n;
+          shownByNo.set(leg.searchNo, n);
+          leg.paint();
+        }
+        continue;
+      }
+      e.shown = e.failed ? 0 : ++n;
+      if (e.searchNo && e.shown) shownByNo.set(e.searchNo, e.shown);
+      e.title.textContent = e.shown ? `🔍 Sealed patent search ${e.shown}` : "🔍 Sealed patent search";
+      if (e.outline) e.outline.which.textContent = e.shown ? `Search ${e.shown}` : "Search";
+    }
+  }
+
   // "Also in" names the earlier search by what it was about, not by a number you would have to go and look up.
   // A number is what is left only when the earlier search is not on this page.
   const searchesByNo = new Map();       // search number → its card entry
   function shortAbout(no, max = 42) {
     const e = searchesByNo.get(no);
     const about = e && e.about ? e.about : "";
-    if (!about) return `search ${no}`;
+    if (!about) return `search ${shownNo(no)}`;
     return `‘${about.length > max ? `${about.slice(0, max - 1).trimEnd()}…` : about}’`;
   }
   // Where the press did NOT reach, said plainly, from facts the record already holds. This is the
@@ -1517,7 +1546,7 @@
   function seenIn(no) {
     const e = searchesByNo.get(no);
     const tag = el("span", "seen", `also in ${shortAbout(no)}`);
-    if (e && e.about) tag.title = `Also returned by search ${no}: ${e.about}`;
+    if (e && e.about) tag.title = `Also returned by search ${shownNo(no)}: ${e.about}`;
     return tag;
   }
 
@@ -1537,7 +1566,11 @@
       const sub = el("span", "sub", "planning the queries…");
       const title = el("span", "title", "🔍 Deep prior-art survey");
       const qline = String(a.text || "").replace(/\s+/g, " ").trim();
-      const what = el("span", "what", `“${qline.length > 110 ? `${qline.slice(0, 109).trimEnd()}…` : qline}”`);
+      // Named by WHAT IT SEARCHED, the parts of the description its queries covered, once it says; until then by
+      // what it is doing. Quoting the opening of the disclosure made every survey's head and index row read the
+      // same (21 Oct audit). The description it was given stays in the body.
+      const what = el("span", "what", "");
+      what.hidden = true;
       const notes = el("span", "notes", "");
       notes.hidden = true;
       const toggle = el("button", "card-toggle", "▾");
@@ -1550,8 +1583,8 @@
       if (qline) body.append(el("div", "card-query", qline.length > 320 ? `${qline.slice(0, 320)}…` : qline));
       card.append(body);
       const t0 = ev.at || serverNow();
-      const entry = { card, sub, title, body, toggle, head, notes, keys: [], collapsed: false, byUser: false,
-                      startedAt: t0, phase: "verifying", phaseAt: t0, approvalMs: 0, done: false, deep: true };
+      const entry = { card, sub, title, what, body, toggle, head, notes, keys: [], collapsed: false, byUser: false,
+                      startedAt: t0, phase: "verifying", phaseAt: t0, approvalMs: 0, done: false, deep: true, legs: [] };
       const flip = (e) => { if (e) e.stopPropagation(); setCollapsed(entry, !entry.collapsed, true); };
       toggle.addEventListener("click", flip);
       head.addEventListener("click", (e) => {
@@ -1564,8 +1597,7 @@
       cards.set(ev.call, entry);
       setCollapsed(entry, true);
       entry.about = "deep survey";
-      outlineAdd({ kind: "search", el: card, label: "Deep survey",
-                   detail: qline.slice(0, 60), entry });
+      outlineAdd({ kind: "search", el: card, label: "Deep survey", detail: "choosing what to search…", entry });
       return;
     }
     if (ev.tool === "prior_art_search") {
@@ -1620,6 +1652,7 @@
       // page (Henry, 19 Sep: "instead of 'also in search 2' let's say also in 'Routing by permission'").
       entry.about = a.feature ? String(a.feature) : a.like ? `documents like ${String(a.like).toUpperCase()}` : q.replace(/\s+/g, " ").trim();
       outlineAdd({ kind: "search", el: card, label: "Search", detail: a.feature ? `feature: ${a.feature}` : a.like ? `like ${String(a.like).toUpperCase()}` : q.slice(0, 60), entry });
+      renumber();                          // numbered from the moment it appears, in page order
       toolRunning = "Searching the patent database in its sealed machine…";
     } else {
       const fn = STEP_TEXT[ev.tool];
@@ -1750,6 +1783,7 @@
       if (!ev.ok) {
         e.sub.textContent = "the survey did not complete";
         e.sub.classList.add("warn");
+        if (e.outline) e.outline.text.textContent = "did not complete";
         clear(e.body);
         e.body.append(el("div", "warn", String(ev.text || "the deep survey did not complete")));
         setCollapsed(e, false, false);          // a refusal opens itself, as a search's does
@@ -1792,9 +1826,16 @@
           // for. Henry, 25 Sep: "they should stay collapsed in the beginning and only expand when clicked".
           const block = el("div", `deep-leg ${leg.status} folded`);
           const legBody = el("div", "deep-leg-body");
-          const head = el("button", "deep-leg-head",
-            `${mark} ${leg.searchNo ? `Search ${leg.searchNo} · ` : ""}${leg.feature} — ${count}`);
+          const head = el("button", "deep-leg-head", "");
           head.type = "button";
+          // Its number is the one renumber() gives it, in page order; the extension's is only the key.
+          const shownLeg = { searchNo: leg.searchNo, shown: 0, rec: null, paint: () => {
+            head.textContent = `${mark} ${shownLeg.shown ? `Search ${shownLeg.shown} · ` : ""}${leg.feature} — ${count}`;
+            if (shownLeg.rec) shownLeg.rec.which.textContent = shownLeg.shown ? `Search ${shownLeg.shown}` : "Search";
+          } };
+          e.legs.push(shownLeg);
+          shownLeg.paint();
+          if (leg.searchNo) searchesByNo.set(leg.searchNo, { about: leg.feature || leg.about || "" });
           head.setAttribute("aria-expanded", "false");
           const setLeg = (open) => {
             block.classList.toggle("folded", !open);
@@ -1830,11 +1871,21 @@
             // The outline must OPEN the leg, not only scroll to it. Being sent to a folded block is the
             // same nothing-happened as being sent to a folded card, which this already handles one level
             // up — and Henry reported exactly that symptom on 24 Sep, before legs could fold at all.
-            outlineAdd({ kind: "search", el: block, entry: e, open: () => setLeg(true),
-                         label: leg.searchNo ? `Search ${leg.searchNo}` : "Search",
+            const own = e.outline;            // a leg's row must not take over the survey's own
+            shownLeg.rec = outlineAdd({ kind: "search", el: block, entry: e, open: () => setLeg(true), label: "Search",
                          detail: `${leg.about.slice(0, 54)}${leg.about.length > 54 ? "…" : ""}` });
+            e.outline = own;
           }
         }
+        // What it searched: the parts of the description its queries covered, in the head and the index row.
+        const covered = (d.legs || []).map((l) => String(l.feature || "")).filter(Boolean);
+        if (covered.length) {
+          const line = `${covered.length} ${covered.length === 1 ? "query" : "queries"}: ${covered.join("; ")}`;
+          e.what.textContent = line.length > 110 ? `${line.slice(0, 109).trimEnd()}…` : line;
+          e.what.hidden = false;
+          if (e.outline) e.outline.text.textContent = line.length > 60 ? `${line.slice(0, 59).trimEnd()}…` : line;
+        }
+        renumber();
         e.body.append(el("div", "card-foot", "These are the combined results of separate queries, not a "
           + "merged ranking: the same invention can appear more than once under different publication "
           + "numbers. Mark what matters — the next deep search walks outward from what you marked."));
@@ -1854,7 +1905,6 @@
     entry.done = true;                  // the clock stops; the bridge records the wait for the statistics
     sub.classList.remove("slow");
     if (ev.details && ev.details.searchNo) {
-      title.textContent = `🔍 Sealed patent search ${ev.details.searchNo}`;
       entry.searchNo = ev.details.searchNo;
       searchesByNo.set(entry.searchNo, entry);
     }
@@ -1868,6 +1918,7 @@
       recordSlip(card);
       cards.delete(ev.call);
       outlineDrop(entry);          // the card is gone; an index row pointing at a detached node goes nowhere
+      renumber();                  // …and so is its number
       return;
     }
     if (!ev.ok || !d.ok) {
@@ -1875,6 +1926,7 @@
       body.append(el("div", "card-note bad", plainRefusal(ev.text || d.refusal)));
       setCollapsed(entry, false);                 // a refusal is short and worth reading; never fold it away
       entry.failed = true;
+      renumber();                                 // not sent, so not a search: its number goes to the next one
       outlineUpdate(entry, "not sent");
       s();
       return;
@@ -1907,6 +1959,7 @@
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));
     entry.n = docs.length;
+    renumber();                          // the extension's number is known now: "also in" references can be shown
     renderResultsPanel();                // a search's documents just landed; the panel is keyed off cards
     refreshCardSummary(entry);
     outlineUpdate(entry, "");            // the description stays; the count lives in the card head
@@ -2052,10 +2105,27 @@
     const lines = String(ev.message || "").split("\n");
     let para = [];
     const flush = () => { if (para.length) { body.append(el("p", "", para.join(" "))); para = []; } };
-    for (const raw of lines) {
-      const line = raw.trim();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
       if (!line) { flush(); continue; }
-      if (/^".*"$/.test(line) || (/^"/.test(line) && line.length > 40)) { flush(); body.append(el("blockquote", "", line.replace(/^"|"$/g, ""))); continue; }
+      // The quoted text is the exact text to be sent, in full and on as many lines as it has (21 Oct audit: it was
+      // cut with "…" although Help promises the exact text). It ends at a line closing the quote that is followed by
+      // a blank line, as the extension writes it, so a quote mark inside the text does not end it early. It goes in
+      // a box that scrolls, so a long one cannot push the buttons off the screen.
+      if (/^"/.test(line)) {
+        const closes = (k) => (k === i ? line.length > 1 && /"$/.test(line) : /"\s*$/.test(lines[k])) && !(lines[k + 1] || "").trim();
+        let end = i;
+        while (end < lines.length && !closes(end)) end++;
+        if (end < lines.length) {
+          flush();
+          const quoted = [line.slice(1), ...lines.slice(i + 1, end + 1)].join("\n").replace(/"\s*$/, "");
+          const q = el("blockquote", "approval-query", quoted);
+          q.tabIndex = 0;                         // scrollable by keyboard too
+          body.append(q);
+          i = end;
+          continue;
+        }
+      }
       if (line.startsWith("(technical:")) { flush(); body.append(el("p", "tech-line", line)); continue; }
       para.push(line);
     }

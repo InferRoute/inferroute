@@ -71,10 +71,25 @@
     window.open(url, site ? "anteriora-site" : github ? "anteriora-github" : SESSION_LINK.test(url) ? "_self" : "probant-record");
   }
 
+  // Notices: one of each at a time, and they belong to the page they were raised on (21 Oct audit: they stacked,
+  // the same one twice, and stayed on through route changes). A repeat restarts the one already shown. Leaving a
+  // page clears its notices, except those raised in the last moment, which are about the move itself ("Matter
+  // created", then the matter opens); an error is kept a few seconds more, so it can still be read.
+  const shownToasts = new Map();    // level + text → { node, timer, at }
   function toast(message, level) {
-    const t = el("div", `toast ${level || "info"}`, String(message || ""));
-    $("toasts").append(t);
-    setTimeout(() => t.remove(), level === "error" ? 12000 : 6000);
+    const lvl = level || "info", text = String(message || ""), id = `${lvl}\n${text}`;
+    const old = shownToasts.get(id);
+    const node = old ? old.node : el("div", `toast ${lvl}`, text);
+    if (old) clearTimeout(old.timer); else $("toasts").append(node);
+    const drop = () => { node.remove(); shownToasts.delete(id); };
+    shownToasts.set(id, { node, at: Date.now(), error: lvl === "error", drop, timer: setTimeout(drop, lvl === "error" ? 12000 : 6000) });
+  }
+  function clearToasts() {
+    for (const t of Array.from(shownToasts.values())) {
+      if (Date.now() - t.at < 1500) continue;                   // raised by the click that is moving the page
+      clearTimeout(t.timer);
+      if (t.error) t.timer = setTimeout(t.drop, 3000); else t.drop();
+    }
   }
 
   const localTime = (iso) => {
@@ -430,6 +445,16 @@
     date.value = origin.suggested_priority_date || (m.pre_filing_default ? "" : m.date_bound);
     try { text.value = (await api(`/api/disclosure?id=${enc(m.id)}`)).text; }
     catch (e) { toast(e.message, "error"); return; }
+    // The draft is Markdown, and in the box it read as "#", "##" and ">" (21 Oct audit). Above the box, the same text
+    // as it reads, folded on request; the box stays what is edited and saved. Built by common.js markdown(), text
+    // nodes only.
+    const shown = el("div", "md-preview");
+    const paintPreview = () => { clear(shown); shown.append(markdown(text.value)); };
+    let previewTimer = null;
+    text.addEventListener("input", () => { clearTimeout(previewTimer); previewTimer = setTimeout(paintPreview, 250); });
+    paintPreview();
+    const preview = el("details", "md-preview-fold", el("summary", "", "How it reads"), shown);
+    preview.open = true;
     const err = el("p", "form-error");
     const save = button("Save reviewed draft", "primary", async () => {
       err.textContent = "";
@@ -444,7 +469,8 @@
     dialog("Review draft matter", [
       el("p", "", "Check the AI's description against its supporting passage. Correct missing or overstated features before searching."),
       el("p", "sub", `Source: ${origin.source_name || "uploaded document"}`),
-      field("Disclosure", text),
+      preview,
+      field("Disclosure", text, "What you edit and save. The view above follows it."),
       field("Priority date", date, origin.suggested_priority_date && origin.date_source === "git"
         ? `Suggested from the repository's history: the quoted lines took their present form by ${origin.suggested_priority_date}. Commit dates are what the committer's computer said, not proof. Confirm it, or enter the date you can prove.`
         : origin.suggested_priority_date
@@ -688,7 +714,14 @@
   // ONE definition of a matter card.
   function matterCard(m) {
     const open = () => { location.hash = `#/matter/${enc(m.id)}`; };
-    const start = button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
+    // A matter with a session going says so, and its button goes back into that session (21 Oct audit: the card
+    // read "0 sessions" and offered "Start a session" while one ran). `m.running` is the same launch the matter page
+    // shows, and the server counts it in `m.sessions` once it is open.
+    const live = m.running && m.running.state === "ready" && m.running.url ? m.running : null;
+    const starting = m.running && m.running.state === "starting";
+    const start = live ? button("Open the session", "primary start-session", (ev) => { ev.stopPropagation(); openLocal(live.url); })
+      : starting ? button("Starting…", "primary start-session", (ev) => { ev.stopPropagation(); open(); })
+      : button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
       if (m.needs_review) open(); else startSession(m.id, open);
     });
@@ -710,7 +743,8 @@
         el("span", "", plural(m.searches, "search", "searches")),
         el("span", "", plural(m.marks, "mark", "marks")),
         m.disclosure_words ? el("span", "", `${m.disclosure_words} words`) : el("span", "warn-text", "no disclosure yet")),
-      el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
+      live ? el("div", "live-text", "● session open now") : starting ? el("div", "sub", "a session is starting…")
+        : el("div", "sub", m.sessions ? `last session ${localTime(m.last_activity)}` : `created ${localTime(m.created_at)}`),
       el("div", "matter-open", "Open this matter →"));
     const cardNode = el("div", `matter-card clickable kind-${kindKey}`, body, el("div", "matter-foot", start));
     cardNode.tabIndex = 0;
@@ -794,13 +828,13 @@
   // at a time, and its record is written once the session is going, so for a while the newest row is the PREVIOUS
   // session and marking that one "open" would send the person into the wrong place. `live` maps matter id -> its
   // running launch (state "ready").
+  const sessionStartedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
   function sessionTable(sessions, withMatter, live) {
     const t = el("div", "sessions");
     const newest = new Set();
-    const startedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
     for (const s of sessions) {
       const l = (live || {})[s.matter];
-      if (l && !newest.has(s.matter) && startedAfter(s, l)) { newest.add(s.matter); s.__live = l; }
+      if (l && !newest.has(s.matter) && sessionStartedAfter(s, l)) { newest.add(s.matter); s.__live = l; }
     }
     for (const s of sessions) {
       const matterId = s.matter;
@@ -959,12 +993,21 @@
       }
     }
     p.append(el("h2", "section", "Sessions"));
-    if (!m.sessions.length && m.running) p.append(el("p", "sub", isName ? "The check now running is listed here when it ends."
-      : "The open session above is listed here when it ends."));
-    else if (!m.sessions.length) p.append(el("p", "sub", isName
+    // The open session is a row from the moment it is open, as the home card counts it. Its record is written once
+    // it is going, so until then it is listed from the launch, with the counts that record will hold (21 Oct audit:
+    // the card, this list and the session's own footer each said something different).
+    const rows = m.sessions.map((s) => ({ ...s, matter: m.id }));
+    const live = liveMap(m.running ? [m.running] : []);
+    if (live[m.id] && !rows.some((s) => sessionStartedAfter(s, live[m.id]))) {
+      rows.unshift({ id: "", matter: m.id, started_at: new Date(live[m.id].started_at * 1000).toISOString(), surface: "browser",
+                     searches: 0, documents: 0 });
+    }
+    if (!rows.length && m.running) p.append(el("p", "sub", isName ? "The check now starting is listed here once it is open."
+      : "The session now starting is listed here once it is open."));
+    else if (!rows.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
       : "No sessions yet. Start one: the assistant reads the disclosure and surveys published patents with you."));
-    else p.append(sessionTable(m.sessions.map((s) => ({ ...s, matter: m.id })), false, liveMap(m.running ? [m.running] : [])));
+    else p.append(sessionTable(rows, false, live));
 
     // A cleared mark is a row in the store's history, not a mark: the professional asked for NO opinion on
     // that document. Counted here it would show as a fourth kind ("US-X · cleared") and inflate the total,
@@ -1307,27 +1350,55 @@
     const picked = el("p", "picked");
     const listing = el("div", "picker");
     const where = el("p", "sub");
-    async function browse(dir) {
-      clear(listing); err.textContent = "";
-      let r;
-      try { r = await api(`/api/fs/dirs?path=${enc(dir || "")}`); } catch (e) { err.textContent = e.message; return; }
-      where.textContent = r.path;
+    // Opening at the home folder meant a list of 90 and more entries to find one repository in (21 Oct audit). It
+    // opens where the last repository was chosen from (remembered in this browser), else at a folder where code
+    // usually is (the server picks the first that exists), and repositories come first, under a box that filters.
+    const LAST_FOLDER = "anteriora-repo-folder";
+    const filter = input("text", "Type to filter the folders here");
+    filter.className = "picker-filter";
+    filter.setAttribute("aria-label", "Filter the folders here");
+    let here = null;
+    function drawListing() {
+      clear(listing);
+      const r = here;
+      if (!r) return;
       if (r.parent) listing.append(button("↑ Up one folder", "pick up", () => browse(r.parent)));
       if (r.git) listing.append(button("✓ Choose this folder (a git repository)", "pick repo", () => choose(r.path)));
-      for (const d of r.dirs) {
+      const q = filter.value.trim().toLowerCase();
+      const dirs = r.dirs.filter((d) => !q || d.name.toLowerCase().includes(q));
+      // Repositories first, each group in the server's (alphabetical) order.
+      for (const d of [...dirs.filter((x) => x.git), ...dirs.filter((x) => !x.git)]) {
         listing.append(d.git ? button(`${d.name} — git repository, choose it`, "pick repo", () => choose(d.path))
                              : button(`${d.name} ›`, "pick", () => browse(d.path)));
       }
       if (!r.dirs.length) listing.append(el("p", "sub", "No folders here."));
+      else if (!dirs.length) listing.append(el("p", "sub", "No folder here matches."));
       if (r.truncated) listing.append(el("p", "sub", "Only the first 500 folders are shown."));
     }
+    filter.addEventListener("input", drawListing);
+    async function browse(dir, fallback) {
+      clear(listing); err.textContent = "";
+      let r;
+      try { r = await api(`/api/fs/dirs?path=${enc(dir || "")}`); }
+      catch (e) { if (fallback) { browse(""); return; } err.textContent = e.message; return; }    // a remembered folder that is gone
+      here = r;
+      filter.value = "";
+      where.textContent = tilde(r.path);
+      drawListing();
+    }
+    const startBrowsing = () => {
+      let last = "";
+      try { last = localStorage.getItem(LAST_FOLDER) || ""; } catch (_) { last = ""; }
+      browse(last, Boolean(last));
+    };
     function choose(p) {
+      try { localStorage.setItem(LAST_FOLDER, here && here.path !== p ? here.path : (here && here.parent) || p); } catch (_) { /* not remembered */ }
       chosen = p; reset(); clear(choicesBox); only.value = ""; err.textContent = "";
       clear(picked); picked.append(el("strong", "", "Repository: "), p, " ",
         button("Change", "link", () => { chosen = ""; clear(picked); folderBox.hidden = false; browse(p); }));
       folderBox.hidden = true;
     }
-    const folderBox = el("div", "", where, listing);
+    const folderBox = el("div", "", where, filter, listing);
     const folderPane = el("div", "", picked, folderBox,
       el("p", "field-hint", "Folders marked git repository can be chosen. Only files tracked in git are read. Environment files, keys, "
         + "credential files, dependencies, build output and anything that looks like a secret are left out."));
@@ -1437,7 +1508,7 @@
       segGh.classList.toggle("on", m === "github"); segFolder.classList.toggle("on", m === "folder");
       urlLink.hidden = m === "url"; typeLink.hidden = m === "path";
       if (m === "github") ghRender(); else stopPoll();
-      if (m === "folder" && !chosen && !listing.firstChild) browse("");
+      if (m === "folder" && !chosen && !listing.firstChild) startBrowsing();
       if (m === "url") url.focus();
       if (m === "path") path.focus();
     }
@@ -1981,6 +2052,7 @@
   async function route() {
     stopWatching();
     closeDialog();
+    clearToasts();
     const h = location.hash || "#/";
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
@@ -2015,5 +2087,11 @@
   $("read-repo").addEventListener("click", readRepoDialog);
   for (const b of document.querySelectorAll("#nav button")) b.addEventListener("click", () => { location.hash = b.dataset.route; });
   window.addEventListener("hashchange", route);
+  // Coming back to this tab (from a session's tab, or after a while) reads the matters again, so a card's counts
+  // are those of the record as it is now and not of when the page was first drawn. Not while a dialog is open:
+  // redrawing would close what the person is typing into.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && $("dialog").hidden && /^#\/(matter\/|$)/.test(location.hash || "#/")) route();
+  });
   route();
 })();

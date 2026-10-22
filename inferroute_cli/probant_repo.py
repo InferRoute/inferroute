@@ -148,12 +148,30 @@ def _remotes(repo: Path) -> List[str]:
     return out
 
 
+# Where code usually lives, in the order people name it. The picker opened at the home folder, a list of 90 and more
+# entries with the repositories somewhere inside (21 Oct audit); the first of these that exists is a closer start.
+START_DIRS = ("code", "projects", "workspaces", "Developer", "src", "Documents")
+
+
+def start_dir() -> Path:
+    """Where the folder picker opens when the page names no folder: the first of START_DIRS in the home folder that
+    is a folder, else the home folder. The page asks for the folder last chosen from, when it remembers one."""
+    home = Path.home()
+    for name in START_DIRS:
+        try:
+            if (home / name).is_dir():
+                return home / name
+        except OSError:
+            continue
+    return home
+
+
 def list_dirs(path: str = "") -> Dict[str, Any]:
-    """The sub-folders of `path` (default: the home folder), for the page's folder picker. Names only — no
+    """The sub-folders of `path` (default: start_dir()), for the page's folder picker. Names only — no
     file is opened — and each says whether it is a git repository, so the picker can lead to one. Hidden
     folders are left out; a repository's own folders are not listed (it is the thing to choose)."""
     home = Path.home()
-    p = Path(path).expanduser() if path else home
+    p = Path(path).expanduser() if path else start_dir()
     try:
         p = p.resolve()
         if not p.is_dir():

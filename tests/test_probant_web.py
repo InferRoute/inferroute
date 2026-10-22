@@ -854,7 +854,31 @@ def test_a_document_seen_before_names_the_search_by_what_it_was_about():
     assert naming["unknown"] == "search 9"                                     # only when not on this page
     js = (STATIC / "app.js").read_text()
     assert "doc.alsoIn ? seenIn(doc.alsoIn) : null" in js
-    assert "tag.title = `Also returned by search ${no}: ${e.about}`" in js     # the full wording on hover
+    # The number on hover is the one on screen (21 Oct audit: page order, not the order searches completed).
+    assert "tag.title = `Also returned by search ${shownNo(no)}: ${e.about}`" in js     # the full wording on hover
+
+
+def test_searches_are_numbered_in_the_order_the_page_shows_them():
+    """21 Oct audit: the index and the cards read "Search 4, 5, 3, 7, 6" — the extension numbers a search when it
+    completes, and parallel searches complete in any order — and a running one read plain "Search". The page now
+    numbers what it shows, in page order, from the moment a card appears; a search not sent gives its number back;
+    a survey's queries take theirs where the survey sits. Drives the page's real renumber()."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "card_head_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    order = json.loads(r.stdout.strip().splitlines()[-1])["order"]
+    assert order["titles"] == ["🔍 Sealed patent search 1", "🔍 Sealed patent search 2", "🔍 Sealed patent search",
+                               "🔍 Sealed patent search 5"]
+    assert order["index"] == ["Search 1", "Search 2", "Search", "Search 5"]
+    assert order["legs"] == [3, 4]
+    assert order["alsoIn6"] == "search 3"                 # the extension's 6 is the third search on the page
+    js = (STATIC / "app.js").read_text()
+    assert 'outlineAdd({ kind: "search", el: card, label: "Deep survey", detail: "choosing what to search…", entry });' in js
+    assert "qline.slice(0, 60), entry" not in js            # a survey is named by what it searched, not the disclosure
 
 def test_a_slip_in_an_optional_hint_costs_the_hint_never_the_search():
     """19 Sep: the assistant named a search with an 86-character label; the schema capped it at 80, so Pi
@@ -2887,3 +2911,15 @@ def test_a_reading_that_goes_idle_with_drafts_leaves_a_finished_marker(tmp_path)
     b._mark_reading_finished()
     got = json.loads((tmp_path / "reading-finished.json").read_text())
     assert got["drafts"] == 3 and got["at"].endswith("Z")
+
+
+def test_the_approval_shows_the_whole_text_it_would_send():
+    """21 Oct audit: the approval cut the query at 400 characters with "…", while Help promises "the assistant shows
+    you the exact text it wants to send". The extension now sends the whole text, and the page shows it, on all its
+    lines, in a box that scrolls inside the dialog."""
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "const preview = o.want.preview;" in ts and "preview.slice(0, 400)" not in ts
+    js = (STATIC / "app.js").read_text()
+    assert 'const q = el("blockquote", "approval-query", quoted);' in js
+    css = (STATIC / "app.css").read_text()
+    assert re.search(r"blockquote\.approval-query \{[^}]*max-height:[^}]*overflow-y: auto", css)

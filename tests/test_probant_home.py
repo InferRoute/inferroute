@@ -346,6 +346,34 @@ def test_a_failed_start_is_not_refreshed_off_the_screen():
     assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost"' in js
 
 
+def test_the_card_the_matter_page_and_the_footer_count_one_session_the_same_way(home):
+    """21 Oct audit: the session footer said "· 25 results" (the last search), the matter page "3 searches · 19
+    documents", and the home card "0 sessions · Start a session" while that session ran. Now: a signed document READ
+    is not a search; the card carries the running launch and counts the open session before its record is written;
+    the footer counts searches and distinct documents, as the matter page does."""
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    rdir = S.records_dir("Acme", "cooling")
+    with (rdir / f"{SID}.searches.jsonl").open("a") as f:
+        f.write(json.dumps({"at": "2026-09-17T16:41:00Z", "key": "WO-1-A1", "statement": {"sig": "bb", "kind": "document"},
+                            "result": {"kind": "document", "key": "WO-1-A1"}}) + "\n")
+    assert c.get("/api/matter", params={"id": "Acme/cooling"}).json()["sessions"][0]["searches"] == 1
+    m = c.get("/api/overview").json()["matters"][0]
+    assert m["sessions"] == 1 and m["searches"] == 1 and "running" not in m
+    alive = SimpleNamespace(poll=lambda: None)
+    h.launches.items["x"] = {"id": "x", "matter": "Acme/cooling", "started": time.time(), "state": "ready",
+                             "url": "http://127.0.0.1:41234/#k=" + "k" * 30, "message": "", "proc": alive}
+    m = c.get("/api/overview").json()["matters"][0]
+    assert m["running"]["state"] == "ready" and m["sessions"] == 2      # the open one, not yet recorded, is counted
+    js = (STATIC / "home.js").read_text()
+    assert 'button("Open the session", "primary start-session"' in js and "● session open now" in js
+    assert "!rows.some((s) => sessionStartedAfter(s, live[m.id]))" in js
+    ts = (Path(H.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "sessionTotals = { searches: searchNo, documents: firstSeen.size };" in ts
+    assert "p.hits} results" not in ts.split("function searchStatus", 1)[1].split("\n}\n", 1)[0]
+
+
 def test_a_session_that_has_ended_is_not_offered_as_open_and_does_not_block_a_new_one(tmp_path):
     """19 Sep: the home page listed two sessions with "Open the session"; both opened onto "Session closed".
     Their assistants had ended; only their pages stayed up, for exporting. The home page counted a session as
@@ -954,3 +982,76 @@ def test_the_key_card_says_who_to_ask_for_a_key():
     js = (STATIC / "home.js").read_text()
     card = js[js.index("function keyCard"):js.index("// ── pages ──")]
     assert '"sub selectable", "No key yet? Write to support@inferroute.ai."' in card
+
+
+def test_home_notices_are_shown_once_and_leave_with_their_page():
+    """21 Oct audit: on the home page notices stacked, the same one twice, and stayed through route changes. Drives
+    the page's real toast()/clearToasts(): a repeat is one notice; leaving a page clears its notices but keeps the
+    one raised by the click that moved it, and keeps an error a few seconds more."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    js = (STATIC / "home.js").read_text()
+    start = js.index("  const shownToasts = new Map();")
+    end = js.index("\n  }\n", js.index("  function clearToasts()")) + 4
+    harness = """
+let now = 1000; Date.now = () => now;
+const timers = []; global.setTimeout = (f, ms) => { timers.push({ f, at: now + ms }); return timers.length; };
+global.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].f = null; };
+const run = (to) => { now = to; for (const t of timers) if (t.f && t.at <= now) { const f = t.f; t.f = null; f(); } };
+const box = []; const $ = () => ({ append: (n) => box.push(n) });
+const el = (tag, cls, text) => ({ cls, text, remove() { const i = box.indexOf(this); if (i >= 0) box.splice(i, 1); } });
+""" + js[start:end] + """
+toast("Saved."); toast("Saved."); toast("Saved.", "error");
+const once = box.length;
+now = 5000; toast("Matter created.");
+clearToasts();
+const afterRoute = box.map((n) => n.text + "/" + n.cls);
+run(7900); const errorLater = box.map((n) => n.text);
+run(8100); const errorGone = box.map((n) => n.text);
+console.log(JSON.stringify({ once, afterRoute, errorLater, errorGone }));
+"""
+    r = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["once"] == 2                                     # "Saved." once as info, once as an error
+    assert out["afterRoute"] == ["Saved./toast error", "Matter created./toast info"]
+    assert out["errorLater"] == ["Saved.", "Matter created."] and out["errorGone"] == ["Matter created."]
+    assert "    clearToasts();" in js[js.index("async function route()"):]
+
+
+
+def test_dialog_buttons_stay_in_view_while_the_dialog_scrolls():
+    """21 Oct audit: "Create matter" sat below the fold of a 1280x800 screen in the new-matter dialog. The dialog's
+    body scrolls and its card does not, so the buttons stay at the bottom of the card."""
+    css = (STATIC / "app.css").read_text()
+    assert "#dialog .modal-card { display: flex; flex-direction: column; overflow: hidden; }" in css
+    assert re.search(r"#dialog \.dialog-body \{[^}]*min-height: 0; overflow-y: auto;", css)
+    assert re.search(r"#dialog \.dialog-actions \{ flex: none;", css)
+
+
+def test_the_review_draft_shows_the_markdown_as_it_reads_above_the_box():
+    """21 Oct audit: the review-draft box showed raw Markdown ("#", "##", ">"). The box stays the thing edited and
+    saved; above it, a folding view of the same text through common.js markdown(), which now shows a "> " passage
+    as a quote."""
+    import shutil, subprocess
+    js = (STATIC / "home.js").read_text()
+    review = js[js.index("async function reviewDraftDialog"):js.index("// ── starting a session ──")]
+    assert 'const preview = el("details", "md-preview-fold", el("summary", "", "How it reads"), shown);' in review
+    assert "shown.append(markdown(text.value))" in review and "preview.open = true;" in review
+    assert review.index("      preview,\n") < review.index('field("Disclosure", text,')
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    harness = """
+const made = []; global.document = { createElement: (t) => ({ t, kids: [], className: "", append(...c) { this.kids.push(...c); } }),
+  createTextNode: (x) => ({ text: x }), createDocumentFragment: () => ({ kids: [], append(...c) { this.kids.push(...c); } }) };
+global.window = {};
+require(process.argv[1]);
+const out = window.ProbantUI.markdown("# Routing\\n\\n> if allowed(user): route()\\n> second line\\n\\nAfter.");
+console.log(JSON.stringify(out.kids.map((k) => k.t)));
+"""
+    r = subprocess.run([node, "-e", harness, str(STATIC / "common.js")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == ["h4", "blockquote", "p"]

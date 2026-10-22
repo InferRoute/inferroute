@@ -1709,9 +1709,14 @@
     open.addEventListener("click", () => goHome(matterRoute(matterId)));
     const card = el("div", "report-ready card-note",
       el("b", "", "Your report is ready. "),
-      "It lists the registered marks that resemble each name, and the questions to take to a trademark professional. ",
+      "It lists the registered marks that resemble each name, and the questions to take to a trademark professional. "
+      + "The assistant may still be writing a short summary here; the report itself is complete. ",
       open);
     log.append(card);
+    // Bring it into view (video team, 22 Oct: on a phone it landed below the fold and nothing scrolled to it), and
+    // say it where the eye already is.
+    try { card.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) { /* not essential */ }
+    toast("Your name-check report is ready.", "info");
   }
 
   function toolEnd(ev) {

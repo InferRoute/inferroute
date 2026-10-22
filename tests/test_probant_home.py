@@ -954,3 +954,40 @@ def test_a_first_name_check_continues_by_itself_after_the_trademark_data_is_inst
     js = (STATIC / "home.js").read_text()
     assert 'sessionStorage.setItem("anteriora-auto-check", r.id)' in js
     assert 'if (pending && pending === m.id)' in js and 'await api("/api/sessions", { id: m.id, auto: "names" });' in js
+
+
+def test_home_notices_are_shown_once_and_leave_with_their_page():
+    """21 Oct audit: on the home page notices stacked, the same one twice, and stayed through route changes. Drives
+    the page's real toast()/clearToasts(): a repeat is one notice; leaving a page clears its notices but keeps the
+    one raised by the click that moved it, and keeps an error a few seconds more."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    js = (STATIC / "home.js").read_text()
+    start = js.index("  const shownToasts = new Map();")
+    end = js.index("\n  }\n", js.index("  function clearToasts()")) + 4
+    harness = """
+let now = 1000; Date.now = () => now;
+const timers = []; global.setTimeout = (f, ms) => { timers.push({ f, at: now + ms }); return timers.length; };
+global.clearTimeout = (id) => { if (timers[id - 1]) timers[id - 1].f = null; };
+const run = (to) => { now = to; for (const t of timers) if (t.f && t.at <= now) { const f = t.f; t.f = null; f(); } };
+const box = []; const $ = () => ({ append: (n) => box.push(n) });
+const el = (tag, cls, text) => ({ cls, text, remove() { const i = box.indexOf(this); if (i >= 0) box.splice(i, 1); } });
+""" + js[start:end] + """
+toast("Saved."); toast("Saved."); toast("Saved.", "error");
+const once = box.length;
+now = 5000; toast("Matter created.");
+clearToasts();
+const afterRoute = box.map((n) => n.text + "/" + n.cls);
+run(7900); const errorLater = box.map((n) => n.text);
+run(8100); const errorGone = box.map((n) => n.text);
+console.log(JSON.stringify({ once, afterRoute, errorLater, errorGone }));
+"""
+    r = subprocess.run([node, "-e", harness], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-600:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["once"] == 2                                     # "Saved." once as info, once as an error
+    assert out["afterRoute"] == ["Saved./toast error", "Matter created./toast info"]
+    assert out["errorLater"] == ["Saved.", "Matter created."] and out["errorGone"] == ["Matter created."]
+    assert "    clearToasts();" in js[js.index("async function route()"):]

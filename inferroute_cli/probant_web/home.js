@@ -68,10 +68,25 @@
     window.open(url, github ? "anteriora-github" : SESSION_LINK.test(url) ? "_self" : "probant-record");
   }
 
+  // Notices: one of each at a time, and they belong to the page they were raised on (21 Oct audit: they stacked,
+  // the same one twice, and stayed on through route changes). A repeat restarts the one already shown. Leaving a
+  // page clears its notices, except those raised in the last moment, which are about the move itself ("Matter
+  // created", then the matter opens); an error is kept a few seconds more, so it can still be read.
+  const shownToasts = new Map();    // level + text → { node, timer, at }
   function toast(message, level) {
-    const t = el("div", `toast ${level || "info"}`, String(message || ""));
-    $("toasts").append(t);
-    setTimeout(() => t.remove(), level === "error" ? 12000 : 6000);
+    const lvl = level || "info", text = String(message || ""), id = `${lvl}\n${text}`;
+    const old = shownToasts.get(id);
+    const node = old ? old.node : el("div", `toast ${lvl}`, text);
+    if (old) clearTimeout(old.timer); else $("toasts").append(node);
+    const drop = () => { node.remove(); shownToasts.delete(id); };
+    shownToasts.set(id, { node, at: Date.now(), error: lvl === "error", drop, timer: setTimeout(drop, lvl === "error" ? 12000 : 6000) });
+  }
+  function clearToasts() {
+    for (const t of Array.from(shownToasts.values())) {
+      if (Date.now() - t.at < 1500) continue;                   // raised by the click that is moving the page
+      clearTimeout(t.timer);
+      if (t.error) t.timer = setTimeout(t.drop, 3000); else t.drop();
+    }
   }
 
   const localTime = (iso) => {
@@ -1973,6 +1988,7 @@
   async function route() {
     stopWatching();
     closeDialog();
+    clearToasts();
     const h = location.hash || "#/";
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";

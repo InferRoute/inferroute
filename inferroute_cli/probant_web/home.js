@@ -1063,14 +1063,20 @@
     // Continue: a finished session cannot be resumed (a stored transcript is never reopened in attested mode), so this
     // starts a NEW session that begins from this one: its conversation, searches and marks are put in the matter's
     // folder for the assistant to read. One session at a time per matter.
-    let running = null;
-    try { running = (await api(`/api/matter?id=${enc(matterId)}`)).running; } catch (_) { running = null; }
+    let running = null, isName = false;
+    try { const mm = await api(`/api/matter?id=${enc(matterId)}`); running = mm.running; isName = mm.kind === "name"; }
+    catch (_) { running = null; }
     const next = el("div", "row actions");
     if (running && running.state === "ready") {
       next.append(button("Open your running session", "primary", () => openLocal(running.url)),
         el("span", "sub", "A session is already open on this matter, so a new one cannot start."));
     } else if (running) {
       next.append(button("Starting…", "primary", () => {}));
+    } else if (isName) {
+      // A name session keeps no conversation to continue from; what a founder wants next is a new check, which
+      // writes its own report and keeps this one under "Earlier reports".
+      next.append(button("Check the names again", "primary", () => startSession(matterId, () => { location.hash = `#/matter/${enc(matterId)}`; })),
+        el("span", "sub", "Starts a new check of the names in your notes. The report it writes is shown on the matter page; this session's report is kept there too."));
     } else {
       next.append(button("Continue from this session", "primary", async () => {
         try { await api("/api/sessions", { id: matterId, continue_from: sid }); location.hash = `#/matter/${enc(matterId)}`; }
@@ -1085,7 +1091,8 @@
 
     p.append(el("h2", "section", "Conversation"));
     if (!s.conversation) {
-      p.append(el("p", "sub", s.surface === "browser"
+      p.append(el("p", "sub", isName ? "A name check's conversation isn't kept. Its report and every search it ran are on the matter page."
+        : s.surface === "browser"
         ? "This session's conversation wasn't kept (it ran before conversations were kept)."
         : "Conversations aren't kept for terminal sessions. The searches below are."));
     } else {

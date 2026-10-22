@@ -991,3 +991,13 @@ console.log(JSON.stringify({ once, afterRoute, errorLater, errorGone }));
     assert out["afterRoute"] == ["Saved./toast error", "Matter created./toast info"]
     assert out["errorLater"] == ["Saved.", "Matter created."] and out["errorGone"] == ["Matter created."]
     assert "    clearToasts();" in js[js.index("async function route()"):]
+
+
+
+def test_dialog_buttons_stay_in_view_while_the_dialog_scrolls():
+    """21 Oct audit: "Create matter" sat below the fold of a 1280x800 screen in the new-matter dialog. The dialog's
+    body scrolls and its card does not, so the buttons stay at the bottom of the card."""
+    css = (STATIC / "app.css").read_text()
+    assert "#dialog .modal-card { display: flex; flex-direction: column; overflow: hidden; }" in css
+    assert re.search(r"#dialog \.dialog-body \{[^}]*min-height: 0; overflow-y: auto;", css)
+    assert re.search(r"#dialog \.dialog-actions \{ flex: none;", css)

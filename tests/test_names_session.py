@@ -201,3 +201,13 @@ def test_the_three_name_fields_write_notes_whose_names_are_found_again():
                 "The product, in one or two sentences:\nA bottle.\n\n"
                 "Where you will sell it (for example France, the EU, the US):\nFrance\n")
     assert P.names_listed(composed) == ["Kwench", "Aquelia"]
+
+
+def test_a_name_check_defaults_to_the_model_measured_fastest_with_exact_citations():
+    """22 Oct benchmark: kimi-k2.6 wrote name reports in ~70 s with every cited number exact; kimi-k3 took ~14 min.
+    Names mode alone switches; reading and drafting keep PROBANT_MODEL."""
+    from pathlib import Path
+    from inferroute_cli import confidential as C
+    assert C.PROBANT_NAMES_MODEL == "kimi-k2.6" and C.PROBANT_MODEL == "kimi-k3"
+    src = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "confidential.py").read_text()
+    assert 'PROBANT_NAMES_MODEL if probant.get("mode") == "names" else PROBANT_MODEL' in src

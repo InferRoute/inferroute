@@ -475,7 +475,7 @@
         box.className = "launch ready";
         const since = l.started_at ? new Date(l.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
         box.append(el("div", "", el("b", "", "A session is open on this matter. "),
-            `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session, checked and private.`),
+            `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session.`),
           el("div", "row actions",
             button("Open the session", "primary", () => openLocal(l.url)),
             // END IT FROM HERE. Without this a session could only be ended from inside its own tab, so one

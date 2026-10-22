@@ -1314,27 +1314,54 @@
     const picked = el("p", "picked");
     const listing = el("div", "picker");
     const where = el("p", "sub");
-    async function browse(dir) {
-      clear(listing); err.textContent = "";
-      let r;
-      try { r = await api(`/api/fs/dirs?path=${enc(dir || "")}`); } catch (e) { err.textContent = e.message; return; }
-      where.textContent = r.path;
+    // Opening at the home folder meant a list of 90 and more entries to find one repository in (21 Oct audit). It
+    // opens where the last repository was chosen from (remembered in this browser), else at a folder where code
+    // usually is (the server picks the first that exists), and repositories come first, under a box that filters.
+    const LAST_FOLDER = "anteriora-repo-folder";
+    const filter = input("text", "Type to filter the folders here");
+    filter.setAttribute("aria-label", "Filter the folders here");
+    let here = null;
+    function drawListing() {
+      clear(listing);
+      const r = here;
+      if (!r) return;
       if (r.parent) listing.append(button("↑ Up one folder", "pick up", () => browse(r.parent)));
       if (r.git) listing.append(button("✓ Choose this folder (a git repository)", "pick repo", () => choose(r.path)));
-      for (const d of r.dirs) {
+      const q = filter.value.trim().toLowerCase();
+      const dirs = r.dirs.filter((d) => !q || d.name.toLowerCase().includes(q));
+      // Repositories first, each group in the server's (alphabetical) order.
+      for (const d of [...dirs.filter((x) => x.git), ...dirs.filter((x) => !x.git)]) {
         listing.append(d.git ? button(`${d.name} — git repository, choose it`, "pick repo", () => choose(d.path))
                              : button(`${d.name} ›`, "pick", () => browse(d.path)));
       }
       if (!r.dirs.length) listing.append(el("p", "sub", "No folders here."));
+      else if (!dirs.length) listing.append(el("p", "sub", "No folder here matches."));
       if (r.truncated) listing.append(el("p", "sub", "Only the first 500 folders are shown."));
     }
+    filter.addEventListener("input", drawListing);
+    async function browse(dir, fallback) {
+      clear(listing); err.textContent = "";
+      let r;
+      try { r = await api(`/api/fs/dirs?path=${enc(dir || "")}`); }
+      catch (e) { if (fallback) { browse(""); return; } err.textContent = e.message; return; }    // a remembered folder that is gone
+      here = r;
+      filter.value = "";
+      where.textContent = tilde(r.path);
+      drawListing();
+    }
+    const startBrowsing = () => {
+      let last = "";
+      try { last = localStorage.getItem(LAST_FOLDER) || ""; } catch (_) { last = ""; }
+      browse(last, Boolean(last));
+    };
     function choose(p) {
+      try { localStorage.setItem(LAST_FOLDER, here && here.path !== p ? here.path : (here && here.parent) || p); } catch (_) { /* not remembered */ }
       chosen = p; reset(); clear(choicesBox); only.value = ""; err.textContent = "";
       clear(picked); picked.append(el("strong", "", "Repository: "), p, " ",
         button("Change", "link", () => { chosen = ""; clear(picked); folderBox.hidden = false; browse(p); }));
       folderBox.hidden = true;
     }
-    const folderBox = el("div", "", where, listing);
+    const folderBox = el("div", "", where, filter, listing);
     const folderPane = el("div", "", picked, folderBox,
       el("p", "field-hint", "Folders marked git repository can be chosen. Only files tracked in git are read. Environment files, keys, "
         + "credential files, dependencies, build output and anything that looks like a secret are left out."));
@@ -1444,7 +1471,7 @@
       segGh.classList.toggle("on", m === "github"); segFolder.classList.toggle("on", m === "folder");
       urlLink.hidden = m === "url"; typeLink.hidden = m === "path";
       if (m === "github") ghRender(); else stopPoll();
-      if (m === "folder" && !chosen && !listing.firstChild) browse("");
+      if (m === "folder" && !chosen && !listing.firstChild) startBrowsing();
       if (m === "url") url.focus();
       if (m === "path") path.focus();
     }

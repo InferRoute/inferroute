@@ -195,6 +195,22 @@ def test_the_folder_picker_lists_folder_names_and_marks_repositories(repo, tmp_p
         R.list_dirs(str(tmp_path / "a-file.txt"))
 
 
+def test_the_folder_picker_opens_where_code_is_and_the_page_remembers_and_filters(tmp_path, monkeypatch):
+    """21 Oct audit: the picker opened at the home folder, 90 and more entries. With no folder named it opens at the
+    first of ~/code, ~/projects, ~/workspaces, ~/Developer, ~/src, ~/Documents that exists, else home. The page asks
+    for the folder last chosen from first (localStorage, inside try/catch), lists repositories first, and filters."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert R.list_dirs("")["path"] == str(tmp_path.resolve())
+    (tmp_path / "Documents").mkdir()
+    (tmp_path / "workspaces").mkdir()
+    assert R.list_dirs("")["path"] == str((tmp_path / "workspaces").resolve())
+    js = (Path(R.__file__).resolve().parent / "probant_web" / "home.js").read_text()
+    assert 'try { last = localStorage.getItem(LAST_FOLDER) || ""; } catch (_) { last = ""; }' in js
+    assert "try { localStorage.setItem(LAST_FOLDER," in js
+    assert "[...dirs.filter((x) => x.git), ...dirs.filter((x) => !x.git)]" in js
+    assert 'const folderBox = el("div", "", where, filter, listing);' in js
+
+
 @pytest.mark.parametrize("bad", ["file:///etc", "/home/me/repo", "ext::sh -c touch% /tmp/pwned",
                                  "--upload-pack=touch /tmp/pwned", "https://", "ftp://example.com/r.git"])
 def test_a_git_link_that_is_not_https_or_ssh_is_refused_before_git_runs(home, bad):

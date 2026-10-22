@@ -399,6 +399,10 @@ body.home .top { position: sticky; top: 0; z-index: 5; }
 .nav button.active { color: var(--ink); background: var(--user); }
 .page { max-width: 1040px; margin: 0 auto; padding: 24px 20px 64px; }
 .page-head h1 { font-size: 24px; margin: 6px 0 4px; }
+/* Terms, privacy and support under the Matters page and Help (22 Oct). */
+.legal { max-width: 1040px; margin: -40px auto 0; padding: 0 20px 28px; color: var(--muted); font-size: 13px; line-height: 1.9; }
+.legal button.link { font-size: 13px; }
+.selectable { user-select: text; -webkit-user-select: text; }
 .page-head { margin-bottom: 14px; }
 .sub { color: var(--muted); font-size: 13px; }
 h2.section { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint); margin: 30px 0 10px; }

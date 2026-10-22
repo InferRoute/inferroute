@@ -268,6 +268,8 @@ def test_the_session_page_keeps_its_conversation_privately(tmp_path):
 # ── the page's code ──
 
 def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made():
+    """Besides this computer's own links, only pages fixed in the code: two GitHub pages (20 Oct), and
+    InferRoute's terms of sale and privacy pages for the footer (22 Oct, before the first paid pilot)."""
     js = (STATIC / "home.js").read_text()
     code = re.sub(r"//[^\n]*", "", js)
     for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function",
@@ -282,6 +284,24 @@ def test_the_home_page_builds_text_only_and_opens_only_links_this_computer_made(
     pages = re.search(r"GITHUB_PAGES = new Set\(\[([^\]]*)\]\)", js).group(1)
     assert sorted(re.findall(r'"([^"]+)"', pages)) == ["https://github.com/apps/anteriora/installations/new",
                                                         "https://github.com/login/device"]
+    site = re.search(r"SITE_PAGES = new Set\(\[([^\]]*)\]\)", js).group(1)
+    assert sorted(re.findall(r'"([^"]+)"', site)) == ["https://inferroute.ai/privacy", "https://inferroute.ai/terms"]
+    assert "SITE_PAGES.has(url)" in opener
+    # Every fixed address the page passes to openLocal is one of those.
+    fixed = set(re.findall(r'openLocal\("([^"]+)"\)', code))
+    assert fixed <= {"https://inferroute.ai/privacy", "https://inferroute.ai/terms"}, fixed
+
+
+def test_the_matters_page_and_help_carry_terms_privacy_and_support():
+    """22 Oct, before the first paid pilot: where the terms and the privacy notice are, who to write to, and that
+    none of it is legal advice — under the Matters page and Help, the address as text a person can copy."""
+    js = (STATIC / "home.js").read_text()
+    footer = js[js.index("function legalFooter"):js.index("function keyCard")]
+    for words in ("Terms of sale", "Privacy", "Support: support@inferroute.ai", "Not legal advice"):
+        assert words in footer, words
+    assert '"selectable", "Support: support@inferroute.ai"' in footer
+    assert 'parts[0] === "" || parts[0] === "help"' in js
+    assert 'id="legal"' in (STATIC / "home.html").read_text()
 
 
 def test_the_help_page_covers_the_whole_path_and_the_limits():

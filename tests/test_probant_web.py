@@ -2911,3 +2911,15 @@ def test_a_reading_that_goes_idle_with_drafts_leaves_a_finished_marker(tmp_path)
     b._mark_reading_finished()
     got = json.loads((tmp_path / "reading-finished.json").read_text())
     assert got["drafts"] == 3 and got["at"].endswith("Z")
+
+
+def test_the_approval_shows_the_whole_text_it_would_send():
+    """21 Oct audit: the approval cut the query at 400 characters with "…", while Help promises "the assistant shows
+    you the exact text it wants to send". The extension now sends the whole text, and the page shows it, on all its
+    lines, in a box that scrolls inside the dialog."""
+    ts = (Path(W.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    assert "const preview = o.want.preview;" in ts and "preview.slice(0, 400)" not in ts
+    js = (STATIC / "app.js").read_text()
+    assert 'const q = el("blockquote", "approval-query", quoted);' in js
+    css = (STATIC / "app.css").read_text()
+    assert re.search(r"blockquote\.approval-query \{[^}]*max-height:[^}]*overflow-y: auto", css)

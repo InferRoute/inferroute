@@ -2105,10 +2105,27 @@
     const lines = String(ev.message || "").split("\n");
     let para = [];
     const flush = () => { if (para.length) { body.append(el("p", "", para.join(" "))); para = []; } };
-    for (const raw of lines) {
-      const line = raw.trim();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
       if (!line) { flush(); continue; }
-      if (/^".*"$/.test(line) || (/^"/.test(line) && line.length > 40)) { flush(); body.append(el("blockquote", "", line.replace(/^"|"$/g, ""))); continue; }
+      // The quoted text is the exact text to be sent, in full and on as many lines as it has (21 Oct audit: it was
+      // cut with "…" although Help promises the exact text). It ends at a line closing the quote that is followed by
+      // a blank line, as the extension writes it, so a quote mark inside the text does not end it early. It goes in
+      // a box that scrolls, so a long one cannot push the buttons off the screen.
+      if (/^"/.test(line)) {
+        const closes = (k) => (k === i ? line.length > 1 && /"$/.test(line) : /"\s*$/.test(lines[k])) && !(lines[k + 1] || "").trim();
+        let end = i;
+        while (end < lines.length && !closes(end)) end++;
+        if (end < lines.length) {
+          flush();
+          const quoted = [line.slice(1), ...lines.slice(i + 1, end + 1)].join("\n").replace(/"\s*$/, "");
+          const q = el("blockquote", "approval-query", quoted);
+          q.tabIndex = 0;                         // scrollable by keyboard too
+          body.append(q);
+          i = end;
+          continue;
+        }
+      }
       if (line.startsWith("(technical:")) { flush(); body.append(el("p", "tech-line", line)); continue; }
       para.push(line);
     }

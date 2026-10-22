@@ -380,6 +380,8 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 .dialog-body { font-size: 14px; }
 .dialog-body p { margin: 0 0 10px; }
 .dialog-body blockquote { margin: 0 0 12px; padding: 10px 14px; background: var(--user); border-radius: 8px; white-space: pre-wrap; }
+/* The exact text an approval would send, in full: it scrolls inside the dialog rather than being cut (21 Oct). */
+.dialog-body blockquote.approval-query { max-height: min(40vh, 320px); overflow-y: auto; overflow-wrap: anywhere; border: 1px solid var(--line); }
 .dialog-body .tech-line { color: var(--faint); font-size: 12px; font-family: var(--mono); word-break: break-all; }
 .dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
 .dialog-actions input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }

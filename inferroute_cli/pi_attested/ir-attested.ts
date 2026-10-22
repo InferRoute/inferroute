@@ -1369,7 +1369,10 @@ export default function (pi: ExtensionAPI) {
 				const identity = isInferRoutes(verified)
 					? "running exactly the software InferRoute published (signed reference checked)"
 					: "running exactly the software this computer expects";
-				const preview = o.want.preview.length > 400 ? `${o.want.preview.slice(0, 400)}…` : o.want.preview;
+				// The WHOLE text, never cut: Help promises "the assistant shows you the exact text it wants to send",
+				// and a preview cut at 400 characters with "…" asked a yes about words nobody had read (21 Oct
+				// audit). The page shows it in a box that scrolls.
+				const preview = o.want.preview;
 				pending = (async () => {
 					const ok = await ctx.ui.confirm(
 						"Allow a sealed patent search?",

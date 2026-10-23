@@ -263,7 +263,13 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
     if t == "extension_error":
         return [{"kind": "notify", "level": "error", "message": f"extension error: {strip_ansi(ev.get('error'))}"}]
     if t == "auto_retry_start":
-        return [{"kind": "notify", "level": "warning", "message": "The AI machine didn't answer; retrying…"}]
+        # Pi retries a reply cut by a transient error FROM THE START: it drops the cut reply from the conversation
+        # and the model writes the answer again. The page had already shown the cut reply, so without this the
+        # professional read a paragraph that stops mid-sentence followed by the same paragraph again (23 Oct,
+        # reproduced by cutting a kimi-k3 reply with the lane's own mid-reply error). `reply_redone` lets the page
+        # fold the cut reply away as superseded.
+        return [{"kind": "reply_redone"},
+                {"kind": "notify", "level": "warning", "message": "The AI machine didn't answer; retrying…"}]
     if t == "response" and ev.get("success") is False:
         return [{"kind": "notify", "level": "error", "message": strip_ansi(ev.get("error") or "the request was refused")}]
     return []
@@ -671,6 +677,12 @@ class Bridge:
             row = {"kind": "withdrawn", "text": event.get("text", "")}
         elif kind == "assistant_end" and (event.get("text") or "").strip():
             row = {"kind": "assistant", "text": event.get("text", "")}
+            # A reply that was stopped, or cut by an error, is kept as what was shown, and SAID to be cut: read
+            # later (on the matter page, or as an earlier session's background) it must not pass for an answer.
+            if event.get("stopped") in ("aborted", "error"):
+                row["cut"] = "stopped" if event["stopped"] == "aborted" else "error"
+        elif kind == "reply_redone":
+            row = {"kind": "redone"}
         elif kind == "tool_end" and event.get("tool") == "prior_art_search":
             d = event.get("details") or {}
             row = {"kind": "search", "ok": bool(event.get("ok") and d.get("ok")), "search_no": d.get("searchNo"),

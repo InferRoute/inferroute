@@ -408,6 +408,18 @@
       ? `Preparing the next step · ${p.tool.toLocaleString()} characters written`
       : `Thinking · ${p.thinking.toLocaleString()} characters`;
   }
+  let lastCut = null;
+  // Pi retries a reply cut by a transient error from the start, and the model writes the whole answer again.
+  // The cut copy stays readable, folded under one line, so the page does not show a paragraph that stops
+  // mid-sentence followed by the same paragraph again (23 Oct).
+  function replyRedone() {
+    const node = lastCut;
+    lastCut = null;
+    if (!node || !node.isConnected) return;
+    const fold = el("details", "cut-reply", el("summary", "", "A reply was cut off by a connection problem and is written again below."));
+    node.replaceWith(fold);
+    fold.append(node);
+  }
   function assistantEnd(ev) {
     if (!current) assistantStart();
     current.text = ev.text || "";
@@ -424,6 +436,9 @@
     // and linkifying a half-written one would make "US-20151" a button to nothing.
     linkifyPubNos(current.node);
     if (!current.text.trim()) current.node.remove();
+    // A reply cut by an error that Pi is about to write again (reply_redone) is folded away then; any other
+    // reply clears it, so only the reply just cut can be folded.
+    lastCut = ev.stopped === "error" && current.node.isConnected ? current.node : null;
     if (ev.stopped === "error") showError(ev.error || "");
     if (ev.stopped === "aborted") log.append(el("div", "step", "Stopped."));
     current = null;
@@ -2238,6 +2253,7 @@
       case "assistant_start": assistantStart(); break;
       case "assistant_delta": assistantDelta(ev.text); break;
       case "assistant_progress": assistantProgress(ev.what, ev.n); break;
+      case "reply_redone": replyRedone(); break;
       case "reading": readingLabel = String(ev.label || ""); break;
       case "assistant_end":
         assistantEnd(ev);

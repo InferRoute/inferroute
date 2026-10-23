@@ -1161,7 +1161,11 @@
       for (const row of s.conversation) {
         if (row.kind === "user") conv.append(el("div", "msg msg-user", row.text));
         else if (row.kind === "withdrawn") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "You took this question back before it was sent: "), el("span", "msg-withdrawn", row.text)));
-        else if (row.kind === "assistant") { const n = el("div", "msg msg-assistant"); n.append(markdown(row.text)); conv.append(n); }
+        else if (row.kind === "assistant") {
+          const n = el("div", "msg msg-assistant"); n.append(markdown(row.text)); conv.append(n);
+          // Said to be cut, so a reply that stops mid-sentence does not pass for an answer.
+          if (row.cut) conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", row.cut === "stopped" ? "You stopped this reply here." : "This reply was cut off here by a connection problem.")));
+        } else if (row.kind === "redone") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant wrote that reply again from the start:")));
         else if (row.kind === "search") {
           const what = row.feature ? ` · ${row.feature}` : row.like ? ` · documents like ${row.like}` : "";
           conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "",

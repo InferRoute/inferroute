@@ -544,7 +544,9 @@ def continue_notes(client: str, matter: str, sid: str) -> Optional[Dict[str, str
             if kind == "user" and text:
                 out += [f"**The professional:** {text}", ""]
             elif kind == "assistant" and text:
-                out += [f"**The assistant:** {text}", ""]
+                cut = {"stopped": " *(stopped by the professional here)*",
+                       "error": " *(cut off here by an error)*"}.get(row.get("cut"), "")
+                out += [f"**The assistant:** {text}{cut}", ""]
             elif kind == "search":
                 n = row.get("search_no")
                 out += [f"*(search {n} was run here{'' if row.get('ok') else ' and did not complete'})*", ""]

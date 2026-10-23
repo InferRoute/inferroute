@@ -2923,3 +2923,33 @@ def test_the_approval_shows_the_whole_text_it_would_send():
     assert 'const q = el("blockquote", "approval-query", quoted);' in js
     css = (STATIC / "app.css").read_text()
     assert re.search(r"blockquote\.approval-query \{[^}]*max-height:[^}]*overflow-y: auto", css)
+
+
+def test_a_reply_pi_writes_again_after_a_cut_is_folded_away_and_kept_as_cut(client, tmp_path):
+    """23 Oct: a kimi-k3 reply cut mid-sentence by the lane's mid-reply error ("…the transition temperature and
+    the amount of travel"), then Pi's auto-retry wrote the whole answer again. The page showed both, and the kept
+    conversation stored the cut copy as an answer. The retry is now an event the page folds the cut reply under,
+    and the record says which reply was cut and that the next one is the rewrite."""
+    redo = W.normalize({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 3, "delayMs": 2000,
+                        "errorMessage": "the connection to the enclave dropped mid-reply (ReadTimeout); please retry"})
+    assert redo[0] == {"kind": "reply_redone"} and redo[1]["kind"] == "notify"
+    b, _ = client
+    b.conversation_file = tmp_path / "conv.jsonl"
+    cut = W.normalize({"type": "message_end", "message": {"role": "assistant", "stopReason": "error",
+                       "errorMessage": "dropped mid-reply", "content": [{"type": "text", "text": "the amount of travel"}]}})
+    stopped = W.normalize({"type": "message_end", "message": {"role": "assistant", "stopReason": "aborted",
+                           "content": [{"type": "text", "text": "Feature 1"}]}})
+    whole = W.normalize({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
+                         "content": [{"type": "text", "text": "the whole answer"}]}})
+    for ev in cut + redo + whole + stopped:
+        b.publish(ev)
+    rows = [json.loads(l) for l in b.conversation_file.read_text().splitlines()]
+    assert [(r["kind"], r.get("cut")) for r in rows] == [("assistant", "error"), ("redone", None),
+                                                          ("assistant", None), ("assistant", "stopped")]
+    js = (STATIC / "app.js").read_text()
+    assert 'case "reply_redone": replyRedone(); break;' in js
+    fold = js[js.index("function replyRedone"):js.index("function assistantEnd")]
+    assert "node.replaceWith(fold)" in fold and "fold.append(node)" in fold     # folded, not deleted
+    assert 'lastCut = ev.stopped === "error"' in js
+    home = (STATIC / "home.js").read_text()
+    assert "row.cut" in home and 'row.kind === "redone"' in home

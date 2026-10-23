@@ -1094,3 +1094,13 @@ def test_a_patent_session_asks_before_starting_while_search_is_offline():
     assert 'kind !== "name" && await searchOfflineNow()' in fn and "Patent search is offline right now" in fn
     assert 'startSession(m.id, open, m.kind || "invention")' in src
     assert 'startSession(m.id, refresh, isName ? "name" : "invention")' in src
+
+
+def test_opening_a_matter_starts_at_the_top_of_its_page():
+    """0.9.124 end-to-end test: opening a matter from a scrolled list landed at the bottom of the matter page, because
+    the page is one scrolling document and the router kept the list's position. A new route scrolls to the top
+    (checked in a browser at 390 and 1280 px); a redraw of the same route keeps the reader's place."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    fn = src[src.index("  async function route() {"):src.index("  function showNoKey()")]
+    assert "if (h !== lastRoute) { lastRoute = h; window.scrollTo(0, 0); }" in fn
+    assert fn.index("window.scrollTo(0, 0)") < fn.index("return renderMatter(")

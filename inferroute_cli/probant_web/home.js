@@ -2059,11 +2059,16 @@
   }
 
   // ── routing ──
+  // A new page opens at its top. The page is one scrolling document, so the scroll position of the list was
+  // carried into the matter it opened, which then showed its bottom (0.9.124 test). A redraw of the SAME page
+  // (coming back to the tab) keeps the place the person was reading.
+  let lastRoute = null;
   async function route() {
     stopWatching();
     closeDialog();
     clearToasts();
     const h = location.hash || "#/";
+    if (h !== lastRoute) { lastRoute = h; window.scrollTo(0, 0); }
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
     for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === here);

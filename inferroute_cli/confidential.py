@@ -899,10 +899,18 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 from . import probant_intake
                 creator = probant_intake.DraftCreator(str(probant["intake"]), str(probant["draft_client"]))
                 probant_intake.install_creation_route(local_app, creator)
+            # A name check's record id, chosen now: its trademark searches are stamped with it as they are logged,
+            # its conversation is kept under it, and its record (written below) carries it. The searches log is
+            # matter-wide, so without the id a session's export could not say which searches were its own.
+            names_sid = None
             if probant and probant.get("mode") == "names":
-                from . import tm_search, probant as probant_mod
+                from . import tm_search, pi_attested, probant as probant_mod
+                if os.environ.get("IR_MATTER_RECORD_DIR"):
+                    names_sid = pi_attested.new_record_session_id()
+                    probant["record_session_id"] = names_sid
                 tm_search.install_route(local_app, probant_mod.tm_index_path(),
-                                        Path(os.environ["IR_MATTER_RECORD_DIR"]) if os.environ.get("IR_MATTER_RECORD_DIR") else None)
+                                        Path(os.environ["IR_MATTER_RECORD_DIR"]) if os.environ.get("IR_MATTER_RECORD_DIR") else None,
+                                        session_id=names_sid)
             server = uvicorn.Server(uvicorn.Config(local_app, host="127.0.0.1",
                                                    port=port, log_level="critical",
                                                    timeout_keep_alive=SEALED_KEEPALIVE_S))
@@ -1053,7 +1061,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             if (agent == "pi" and probant is not None and probant.get("mode") == "names"
                     and os.environ.get("IR_MATTER_RECORD_DIR")):
                 from . import pi_attested
-                rec_sid = pi_attested.new_record_session_id()
+                rec_sid = names_sid or pi_attested.new_record_session_id()
                 try:
                     host_record = pi_attested.begin_host_session_record(
                         os.environ["IR_MATTER_RECORD_DIR"], rec_sid,
@@ -1110,9 +1118,22 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                         # from inside the session; its new version is put beside the original.
                         console.print(f"[grey58]The assistant changed files that already existed. Your originals "
                                       f"are untouched; its versions are in the matter folder under {aside[0]}/[/]")
+            failure = None
+            if page is not None:
+                from . import probant_web
+                failure = probant_web.agent_failure(rc, turns=page.bridge.turns,
+                                                    asked_to_stop=page.bridge.stop_requested)
+                if failure:
+                    # Read by the home page (probant_home.Launches._follow): this session did not run, whatever
+                    # its link said a moment ago.
+                    console.print(f"{probant_web.AGENT_STOPPED_MARK} (exit code {rc}, "
+                                  f"{page.bridge.turns} answer{'s' if page.bridge.turns != 1 else ''})")
             if host_record is not None:
                 from . import pi_attested
-                pi_attested.end_host_session_record(host_record, exit_code=rc)
+                ending: dict = {"exit_code": rc}
+                if page is not None:
+                    ending.update(turns=page.bridge.turns, ended_by="person" if page.bridge.stop_requested else "itself")
+                pi_attested.end_host_session_record(host_record, **ending)
             if agent == "pi":
                 from . import pi_attested
                 if sandbox is not None:

@@ -415,11 +415,13 @@ def for_the_assistant(result: Dict[str, Any], limit: int = SHOWN_HITS) -> Dict[s
     return {**result, "hits": shown, "more": result.get("more", 0) + len(hits) - len(shown)}
 
 
-def log_search(log_dir: Path, result: Dict[str, Any]) -> None:
+def log_search(log_dir: Path, result: Dict[str, Any], session_id: Optional[str] = None) -> None:
     """Keep what a search returned, as the host saw it, in the matter's records (write-denied to the agent).
     The matter page lists every search from this file, so the marks a founder reads come from the search, not
-    from the assistant retyping them, and the assistant's report can stay short."""
+    from the assistant retyping them, and the assistant's report can stay short. The log is matter-wide; each
+    line names the session that ran it, so a session's record can carry its own searches and no other's."""
     entry = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+             **({"session_id": session_id} if session_id else {}),
              **{k: result.get(k) for k in ("name", "classes", "data_date", "sources", "marks_searched")},
              "hits": result.get("hits", [])[:LOGGED_HITS],
              "more": result.get("more", 0) + max(0, len(result.get("hits", [])) - LOGGED_HITS)}
@@ -447,7 +449,32 @@ def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
     return list(latest.values())                       # file order is search order; a repeat keeps its first place
 
 
-def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None:
+def session_searches(log_dir: Path, session_id: str, started_at: str = "", ended_at: str = "") -> List[Dict[str, Any]]:
+    """Every search one session ran, in order, from the matter-wide log: the lines stamped with its id, and — for a
+    line written before searches carried an id — those that fall between the session's start and end. Name
+    sessions on one matter never overlap (the home page runs one at a time), so the window cannot take another's."""
+    import json as _json
+    try:
+        lines = (log_dir / SEARCH_LOG).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out: List[Dict[str, Any]] = []
+    for line in lines:
+        try:
+            e = _json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        if e.get("session_id"):
+            if e["session_id"] == session_id:
+                out.append(e)
+        elif started_at and str(e.get("at") or "") >= started_at and (not ended_at or str(e.get("at") or "") <= ended_at):
+            out.append(e)
+    return out
+
+
+def install_route(app, index_path: Path, log_dir: Optional[Path] = None, session_id: Optional[str] = None) -> None:
     """The trademark search as a host capability for a name session, behind the sealed proxy's per-session
     authentication. The index is opened on the host; the agent sends a name and classes and gets marks back.
     Each result is also kept in `log_dir` (see log_search). Nothing here makes a network request."""
@@ -482,7 +509,7 @@ def install_route(app, index_path: Path, log_dir: Optional[Path] = None) -> None
             import json as _json
             limit, full = await asyncio.to_thread(run, _json.loads(raw or b"{}"))
             if log_dir is not None:
-                await asyncio.to_thread(log_search, Path(log_dir), full)
+                await asyncio.to_thread(log_search, Path(log_dir), full, session_id)
             result = for_the_assistant(full, limit)
         except FileNotFoundError:
             return JSONResponse({"error": "no trademark index is installed on this computer"}, status_code=503)

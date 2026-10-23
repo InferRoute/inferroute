@@ -58,6 +58,9 @@ HISTORY_CAP = 5000
 # Printed by a session once its assistant has ended and only its page stays up (for exporting). The home page
 # reads it to stop offering "Open the session" for a session that is over — one line, one definition.
 ENDED_MARK = "The page stays open so you can export the record."
+# Printed by the launcher when the assistant program stopped by itself before it could work (agent_failure).
+# The home page reads it from the child's output and reports a failed start, not an open session.
+AGENT_STOPPED_MARK = "The assistant program stopped before the session could run"
 # Pi event types this page knows: the ones normalize() handles (some deliberately ignored in part — the
 # professional's own messages, the marks note) and routine bookkeeping it has no use for. Only a type OUTSIDE
 # this set is reported at the end of a session as one "the page has no word for": that line exists to catch
@@ -426,17 +429,62 @@ def _first_pubno(text: str) -> str:
     return m.group(1) if m else ""
 
 
+# Why an assistant program stops as a session begins, in words for the person at the page. Matched on the exit
+# code first, then on what the program printed (the tail the home page keeps). Never a diagnosis we cannot back.
+_EXIT_CAUSES = {
+    127: "a program it needs was not found on this computer",
+    126: "a program it needs could not be run on this computer",
+    137: "it was stopped by the system, often for lack of memory",
+}
+
+
+def agent_failure(exit_code: Optional[int], *, turns: int, asked_to_stop: bool) -> Optional[Dict[str, Any]]:
+    """Whether the assistant program FAILED rather than ended: it stopped by itself, with a failing exit code
+    or before it answered once. A session someone ended, or that ended cleanly after working, is not a failure.
+    Returns {"exit_code", "turns", "message"} for the page, or None."""
+    if exit_code is None or asked_to_stop:
+        return None
+    if exit_code == 0 and turns > 0:
+        return None
+    cause = _EXIT_CAUSES.get(exit_code, "")
+    if turns == 0:
+        head = "The assistant stopped as the session began, so nothing was asked and nothing was sent."
+    else:
+        head = "The assistant stopped unexpectedly. What it answered before that is kept."
+    why = f" It ended with code {exit_code}" + (f": {cause}." if cause else ".")
+    if exit_code == 0:
+        why = " It closed by itself before answering."
+    return {"exit_code": exit_code, "turns": turns,
+            "message": head + why + " Start the session again. If it stops the same way, send InferRoute the "
+                       "technical details shown on the matter's page in Anteriora home."}
+
+
+def conversation_counters(session: Any) -> Dict[str, Any]:
+    """The request counters of a whole conversation: the receipt of the machine serving it now plus those of
+    every machine it was moved from (continuity's `retired`). A plain session has no `retired` and counts as itself."""
+    out: Dict[str, Any] = dict(getattr(getattr(session, "receipt", None), "counters", None) or {})
+    for old in getattr(session, "retired", None) or []:
+        for k, v in (getattr(getattr(old, "receipt", None), "counters", None) or {}).items():
+            if isinstance(v, (int, float)) and isinstance(out.get(k, 0), (int, float)):
+                out[k] = out.get(k, 0) + v
+    return out
+
+
 class Bridge:
     def __init__(self, *, matter: str, date_bound: str, workspace: Path, summary: Dict[str, Any],
                  search_endpoint: Optional[str], receipt: Callable[[], Any],
                  rebuild_summary: Callable[[], Dict[str, Any]], export: Callable[[], Path],
                  conversation_file: Optional[Path] = None, records_dir: Optional[Path] = None,
-                 mode: str = "matter", intake_id: str = ""):
+                 mode: str = "matter", intake_id: str = "", counters: Optional[Callable[[], Dict[str, Any]]] = None):
         self.matter, self.date_bound, self.workspace = matter, date_bound, workspace
         self.summary = summary
         self.mode, self.intake_id = mode, intake_id
         self.search_endpoint = search_endpoint
         self._receipt, self._rebuild, self._export = receipt, rebuild_summary, export
+        # What the session's footer counts. The CONVERSATION's requests, not the current machine's: when the
+        # lane moves a conversation to a standby, the receipt it now writes starts its own count, and the
+        # footer said "1 request" over a conversation whose receipt rows credited 4 (23 Oct).
+        self._counters = counters or (lambda: dict(getattr(self._receipt(), "counters", None) or {}))
         self.token = secrets.token_urlsafe(32)
         self.end_grace = 0.0                # raised by the launcher for a VM-held agent; see VM_END_GRACE
         self.port = 0
@@ -446,6 +494,11 @@ class Bridge:
         self.busy = False
         self.ended: Optional[Dict[str, Any]] = None
         self.proc: Any = None
+        # How the agent's process ended: its exit code, and whether anyone ASKED it to stop (the End button,
+        # the home page, a signal, a finished round). An agent that stopped by itself before a single turn, or
+        # with a failing code, did not run a session; see agent_failure.
+        self.exit_code: Optional[int] = None
+        self.stop_requested = False
         self._seq = 0
         self.closed = asyncio.Event()
         # Set when this page is going away. The event stream never ends on its own — it is a long poll that
@@ -978,6 +1031,7 @@ class Bridge:
                 self._watchdog.cancel()
                 self._watchdog = None
         rc = await proc.wait()
+        self.exit_code = rc
         self.busy = False
         self.stalled = False
         self.ended = self.session_end()
@@ -1022,6 +1076,7 @@ class Bridge:
         """End the agent process for good, however wedged it is. Returns what it took, for the page to
         report honestly: a session that cannot be ended is worse than one that ends abruptly."""
         proc = self.proc
+        self.stop_requested = True
         if proc is None or proc.returncode is not None:
             return "already-ended"
         try:
@@ -1047,11 +1102,15 @@ class Bridge:
         return "would-not-end"
 
     def session_end(self) -> Dict[str, Any]:
-        r = self._receipt()
-        c = dict(getattr(r, "counters", None) or {})
+        c = dict(self._counters() or {})
         end = {"requests": c.get("requests", 0), "sealed_bytes": c.get("plaintext_bytes_sealed_here", 0),
                "opened_bytes": c.get("response_bytes_opened_here", 0), "plaintext_left": 0,
                "export_command": f"anteriora export {self.matter}"}
+        failed = agent_failure(self.exit_code, turns=self.turns, asked_to_stop=self.stop_requested)
+        if failed:
+            # The page must not say "Session closed. Nothing was asked" over an assistant that crashed as it
+            # started (23 Oct: Pi exited 127 three times and each page read as a quiet, healthy session).
+            end["failed"] = failed
         if self.dropped:
             # Names of event types only, never their content. A turn that ends in an event the page has no
             # word for is exactly the shape of the 17 Sep hang; this is the trail that names it next time.
@@ -1339,7 +1398,9 @@ class Bridge:
             proved.pop("pack_identity", None)
             proved.pop("restore_error", None)
             probant_audit_results.remember(bridge.records_dir, None)
-            return {"ok": True, "path": str(path), "check": result, "verify_anyone": ("python3 verify_record.py . --reference <InferRoute's reference> "
+            return {"ok": True, "path": str(path), "check": result,
+                    "verify_anyone": ("sha256sum -c SHA256SUMS" if result.get("kind") == "name-check" else
+                                      "python3 verify_record.py . --reference <InferRoute's reference> "
                                       "--reference-key <its key>")}
 
         @app.post("/api/audit-pack")
@@ -1517,15 +1578,19 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
         raise ProbantError("this session is reading a document, not working a matter: open a matter from what "
                             "it proposes, and export that matter's record.")
 
-    kept = (records_dir(client, name) / f"{pi_attested.LAST_SESSION_ID}.conversation.jsonl"
-            if client and search_endpoint and pi_attested.LAST_SESSION_ID else None)
+    # The conversation is kept beside the session's record, under the record's id. A matter session's record is
+    # written by its search verifier (LAST_SESSION_ID); a name check has none, and its launcher names the record
+    # it writes itself (probant["record_session_id"]). Keyed on the search endpoint alone, a name check kept no
+    # conversation and its reopened page said "A name check's conversation isn't kept" (23 Oct).
+    kept = conversation_file_for(probant, client, name, search_endpoint)
     bridge = Bridge(matter=matter, date_bound=probant.get("date_bound", ""), workspace=workspace,
                     summary=probant.get("summary") or {}, search_endpoint=search_endpoint,
                     receipt=lambda: session.receipt, rebuild_summary=rebuild,
                     export=(no_export if mode == "intake" else lambda: probant_export.write_bundle(client, name, None)),
                     conversation_file=kept,
                     records_dir=records_dir(client, name) if client else None,
-                    mode=mode, intake_id=str(probant.get("intake") or ""))
+                    mode=mode, intake_id=str(probant.get("intake") or ""),
+                    counters=lambda: conversation_counters(session))
     from .probant import _irhome
     bridge.turn_log = (_irhome() / "confidential" / "turns" /
                        f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}.jsonl")
@@ -1556,6 +1621,16 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     console.print("[grey58]" + ("Opened it for you. " if opened else "") +
                   "The link works on this computer only and belongs to this session alone; don't share it.[/]\n")
     return Page(bridge, server, task)
+
+
+def conversation_file_for(probant: Dict[str, Any], client: str, name: str,
+                          search_endpoint: Optional[str]) -> Optional[Path]:
+    """Where a session's conversation is kept: beside its record, under the record's id, or None when the session
+    has no record of its own (a reading session)."""
+    from . import pi_attested
+    from .probant import records_dir
+    record_sid = str(probant.get("record_session_id") or "") or (pi_attested.LAST_SESSION_ID if search_endpoint else None)
+    return records_dir(client, name) / f"{record_sid}.conversation.jsonl" if client and record_sid else None
 
 
 def reading_label(workspace: Path) -> str:

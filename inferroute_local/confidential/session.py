@@ -631,13 +631,20 @@ class ConfidentialSession:
         linebuf = b""
         usage: dict = {}
         done = False                      # the upstream's own terminator; the only thing that ends an OpenAI SSE
+        # Whether the last line passed on left an event OPEN (a `data:` line not yet followed by its blank line).
+        # An error written then would be read as more of that event — a client joins the two `data:` lines and
+        # fails to parse either — so it is preceded by the blank line that closes the open one.
+        open_event = False
+
+        def ends(line: bytes) -> bytes:
+            return (b"\n" if open_event else b"") + line
         try:
             async for chunk in raw:
                 plain = opener.feed(chunk)
                 if opener.passthrough:
                     ev = opener.passthrough.pop()
                     msg = (ev.get("error") or {}).get("message") if isinstance(ev.get("error"), dict) else json.dumps(ev)[:300]
-                    yield ("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode()
+                    yield ends(("data: " + json.dumps(translate.openai_error(f"upstream: {msg}")) + "\n\n").encode())
                     yield DONE
                     _err(c, "upstream_passthrough", UPSTREAM_UNKNOWN); self.last_fault = UPSTREAM_UNKNOWN
                     return
@@ -652,31 +659,34 @@ class ConfidentialSession:
                     line, linebuf = linebuf[:i + 1], linebuf[i + 1:]
                     translate.scan_openai_usage(line, usage)
                     done = done or _is_done(line)
+                    open_event = bool(line.strip())
                     yield self._relabel(line)
             tail = opener.flush()
             if tail:
                 translate.scan_openai_usage(tail, usage)
                 done = done or _is_done(tail)
+                open_event = not tail.endswith(b"\n\n") and bool(tail.strip())
                 yield self._relabel(tail)
             if linebuf:
                 done = done or _is_done(linebuf)
+                open_event = bool(linebuf.strip())
                 yield self._relabel(linebuf)
         except e2ee.E2EEError as e:
             _err(c, "reply_unopenable", INTEGRITY_FAULT); self.last_fault = INTEGRITY_FAULT
-            yield ("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode()
+            yield ends(("data: " + json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")) + "\n\n").encode())
             yield DONE
             return
         except (httpx.HTTPError, OSError) as e:
             _err(c, "stream_dropped", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
-            yield ("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode()
+            yield ends(("data: " + json.dumps(translate.openai_error(f"the connection to the enclave dropped mid-reply ({type(e).__name__}); please retry")) + "\n\n").encode())
             yield DONE
             return
         finally:
             c["ciphertext_frames_received"] += opener.frames
         if not done:
             _err(c, "stream_truncated", INSTANCE_FAULT); self.last_fault = INSTANCE_FAULT
-            yield ("data: " + json.dumps(translate.openai_error(
-                "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode()
+            yield ends(("data: " + json.dumps(translate.openai_error(
+                "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode())
             yield DONE
         self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
 

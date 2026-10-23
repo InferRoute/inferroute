@@ -37,6 +37,9 @@ class FakeCarrier:
         # Cut the stream short, WITHOUT its "data: [DONE]" — what an enclave whose answer stops part-way
         # looks like on the wire. Nothing else about the exchange changes.
         self.truncate = False
+        # With truncate: also cut the last event before its blank line, so the stream stops between an event's
+        # `data:` line and the empty line that ends it.
+        self.truncate_mid_event = False
 
     async def models(self):
         return [{"name": "fake", "fleet_id": "fl_1", "sealed_model": "fake/Model"}]
@@ -72,6 +75,8 @@ class FakeCarrier:
         text = "".join(f"data: {json.dumps(c)}\n\n" for c in self.reply(body))
         if not self.truncate:
             text += "data: [DONE]\n\n"
+        elif self.truncate_mid_event:
+            text = text[:-1]
         wire = enc.stream(client_pk, [text.encode()[i:i + 13] for i in range(0, len(text), 13)])
 
         async def many():
@@ -509,6 +514,37 @@ def test_a_reply_that_stops_part_way_ends_the_stream_instead_of_leaving_the_agen
     said = json.loads(lines[-2][6:])
     assert "ended part-way" in json.dumps(said), "and must say why, so the agent can report it or retry"
     assert s.receipt.counters["errors"] == 1          # counted, not silently smoothed over
+
+
+def _sse_events(raw: str) -> list:
+    """Events as an SSE client reads them: `data:` lines joined with a newline, dispatched at a blank line."""
+    events, data = [], []
+    for line in raw.split("\n"):
+        if line == "":
+            if data:
+                events.append("\n".join(data))
+            data = []
+        elif line.startswith("data:"):
+            data.append(line[5:].lstrip(" "))
+    return events
+
+
+def test_the_error_that_ends_a_cut_stream_is_an_event_of_its_own(world):
+    """23 Oct: a reply cut between an event's `data:` line and its blank line had the lane's error line
+    appended to that same event. An SSE client joins the two `data:` lines into one payload, so the agent
+    got "Unexpected non-whitespace character after JSON" instead of the error, and could neither say what
+    happened nor retry it. The error must start a new event."""
+    carrier = FakeCarrier(world["enclaves"])
+    carrier.truncate = carrier.truncate_mid_event = True
+    carrier.reply = lambda body: [{"id": "c1", "choices": [{"index": 0, "delta": {"content": "half a sen"}}]}]
+    s = _session(carrier)
+    asyncio.run(s.open())
+    _, _, out = asyncio.run(_oai(s, {"model": "x", "stream": True, "messages": [{"role": "user", "content": "go"}]}))
+    events = _sse_events(out.decode())
+    assert events[-1] == "[DONE]"
+    for e in events[:-1]:
+        json.loads(e)                                 # every event is one JSON object
+    assert "ended part-way" in events[-2] and "half a sen" in events[-3]
 
 
 def test_a_complete_reply_is_not_accused_of_stopping_part_way(world):

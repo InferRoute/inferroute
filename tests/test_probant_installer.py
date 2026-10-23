@@ -295,7 +295,9 @@ def test_the_installer_prints_what_this_computer_is_at_the_end_and_when_it_stops
     wheels(site)
     done = _run(tmp_path, site, tmp_path / "home-target")
     assert done.returncode == 0, done.stderr
-    assert "This computer:" in done.stdout and "send it back with your public key" in done.stdout.replace("copy this line and ", "")
+    # 0.9.124 test: "send it back" did not say why. It says what the line is for.
+    assert "This computer:" in done.stdout and "include this line: it says which build fits this computer" in done.stdout
+    assert "send it back" not in done.stdout
     assert platform.machine() in done.stdout                                            # the real uname -m, not a placeholder
     bad = tmp_path / "site2"
     bad.mkdir()

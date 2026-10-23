@@ -148,7 +148,7 @@ say ""
 say "Anteriora $VERSION is installed."
 say ""
 say "  This computer:       $(machine_line)"
-say "                       (copy this line and send it back with your public key)"
+say "                       (when you send InferRoute your public key, include this line: it says which build fits this computer)"
 say ""
 if [ "$LINKED" = "yes" ]; then
   say "  Start it:            anteriora          (in a new Terminal window; it will ask for your InferRoute key first)"

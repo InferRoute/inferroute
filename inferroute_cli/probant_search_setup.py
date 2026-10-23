@@ -178,6 +178,9 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     ots = _get_optional(f"{SITE}/reference/current.json.ots")
     wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key,
               "policy_file": str(policy_path), "provisioned_by": MARK}
+    hours = published_hours(where)
+    if hours:
+        wanted["availability"] = hours
     unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == ref_bytes
                  and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists()))
     _atomic(ref_path, ref_bytes)
@@ -188,7 +191,33 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     _atomic(cfg_path, json.dumps(wanted, indent=1).encode() + b"\n")
     if unchanged:
         return "unchanged", "Patent search was already set up and is up to date."
-    return "configured", "Patent search is set up. Anteriora checks the search machine against InferRoute's signed reference before any text is sent."
+    # ONLY WHAT WAS CHECKED. This run checked InferRoute's signed files, not the search machine: it may be
+    # switched off (0.9.124: "Patent search is set up" was printed for a machine whose name did not resolve).
+    return "configured", ("Patent search settings are in place: InferRoute's signed reference was checked on this "
+                          "computer. The search machine itself is checked before each search, before any text is sent.")
+
+
+def published_hours(where: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The search machine's opening hours, when the published file states them; None otherwise.
+
+    The home page shows them when a search machine is offline. Only a well-formed daily window is kept (two
+    whole hours and a timezone name); anything else is dropped rather than shown, so a page never states hours
+    nobody published. Like the address, this is availability information: it decides nothing about trust."""
+    a = where.get("availability") if isinstance(where, dict) else None
+    if not isinstance(a, dict) or a.get("mode") != "scheduled":
+        return None
+    w, tz = a.get("window"), a.get("tz")
+    if (not isinstance(w, list) or len(w) != 2 or not all(isinstance(h, int) and 0 <= h <= 24 for h in w)
+            or not isinstance(tz, str) or not re.fullmatch(r"[A-Za-z_]+(/[A-Za-z_+-]+)*", tz)):
+        return None
+    return {"mode": "scheduled", "window": [w[0], w[1]], "tz": tz}
+
+
+def reachable(enclave: str) -> str:
+    """Whether anything answers at the search address right now: "up", "unreachable" or "unknown-host".
+    Liveness only, never a verification (the home page's own probe, so the two say the same)."""
+    from .probant_home import _search_probe_state
+    return _search_probe_state(enclave)
 
 
 def ensure_quietly() -> None:
@@ -207,5 +236,17 @@ def main_setup(force: bool = False) -> int:
     except SetupError as e:
         sys.stderr.write(f"\n  Patent search was not set up: {e}\n\n")
         return 1
-    print(f"\n  {words}\n")
+    print(f"\n  {words}")
+    if state != "kept":
+        try:
+            enclave = str(json.loads(pi_attested.search_config_path().read_text()).get("enclave") or "")
+            up = reachable(enclave) == "up" if enclave else None
+        except Exception:                                   # noqa: BLE001
+            up = None
+        if up is True:
+            print("  The search machine is answering right now.")
+        elif up is False:
+            print("  The search machine is not answering right now, so patent search is offline for the moment.\n"
+                  "  Name checks and readings work without it.")
+    print("")
     return 0

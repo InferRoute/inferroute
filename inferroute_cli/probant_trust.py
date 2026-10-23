@@ -145,7 +145,7 @@ def ai_item(receipt: Any) -> Dict[str, Any]:
         # meter reading is. It is NOT a limitation — a limitation is something we cannot prove, and this
         # is something we do and can show.
         n = machines_served(receipt)
-        points.append("Your text leaves this computer encrypted, and can be opened only inside hardware "
+        points.append("Your text leaves this computer sealed, and can be opened only inside hardware "
                       "this computer checked first.")
         # A COUNT UNDER A TICK READS AS A PROMISE. The fifth reader: "'One machine has opened it' up
         # top versus 'a session is not tied to one machine' — one, or several? Which is it?" Both were
@@ -377,16 +377,16 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
         # What changes is the COUNT of sealed machines, which must not claim two when one was checked.
         verdict = "private"
         if mode == "names":
-            headline = ("Sealed hardware checked for this session: the AI model. Text is encrypted before it leaves "
-                        "this computer, and the trademark search runs on this computer.")
+            headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this computer to "
+                        "the verified machine, and the trademark search runs on this computer.")
         elif states["search"] == OK:
             headline = ("Sealed hardware checked for this session: the AI model and the patent search service. "
-                        "Text is encrypted before it leaves this computer.")
+                        "Text is sealed on this computer to the verified machine it goes to.")
         else:
             missing = ("no patent search is set up on this computer" if states["search"] == OFF
                        else "no search tool is offered while reading a document")
-            headline = ("Sealed hardware checked for this session: the AI model. Text is encrypted "
-                        f"before it leaves this computer; {missing}, so nothing can leave this "
+            headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this "
+                        f"computer to the verified machine; {missing}, so nothing can leave this "
                         "computer for a search machine at all.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items, "control_note": CONTROL_NOTE,

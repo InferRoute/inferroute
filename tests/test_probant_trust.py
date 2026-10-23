@@ -214,3 +214,28 @@ def test_a_failed_technical_row_is_never_under_connections_checked():
     assert item["state"] == T.WARN and "did not pass" in item["summary"]
     assert s["verdict"] == "limited" and "Partly checked" in s["headline"]
 
+
+
+@pytest.mark.parametrize("search,mode", [(_search(reference={"ok": True}), "matter"), (None, "matter"),
+                                         (None, "intake"), (None, "names")])
+def test_the_headline_does_not_sell_on_encryption(search, mode):
+    """Henry, 22 Oct: "encrypted" as a selling point reads weaker than what the app does. The approved wording
+    says what it is sealed TO: the machine this computer verified. "Encrypted" stays in the technical
+    explanation one level down."""
+    s = T.build(_receipt(), search, ADDRESS, mode=mode)
+    assert s["verdict"] == "private"
+    assert "encrypt" not in s["headline"].lower()
+    assert "sealed on this computer to the verified machine" in s["headline"]
+    assert not any("encrypt" in p.lower() for p in _item(s, "ai")["points"])
+
+
+def test_the_page_does_not_sell_on_encryption():
+    """User-facing selling lines in the page and the home page. Technical explanations keep the word."""
+    from pathlib import Path
+    web = Path(T.__file__).resolve().parent / "probant_web"
+    for name in ("index.html", "app.js", "home.js"):
+        text = (web / name).read_text()
+        for old in ("Everything you type is encrypted", "The AI receives text encrypted", "sealed searches leave, encrypted",
+                    "encrypted here ·", "then encrypts your text", "is encrypted on this computer to a machine",
+                    "then sent encrypted to", "Encrypted to their key"):
+            assert old not in text, f"{name}: {old}"

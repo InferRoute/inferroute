@@ -354,7 +354,7 @@ def test_the_claim_the_lane_depends_on_is_conditioned():
         "a behaviour we can prove is filed as something we cannot"
     # Lead with the thing no reader knew: that the text leaves at all. All three learned it from the
     # small print or not at all.
-    assert "leaves this computer encrypted" in one, "the card no longer says the text leaves"
+    assert "leaves this computer sealed" in one, "the card no longer says the text leaves"
     assert "opened only inside hardware this computer checked first" in one, "the claim went singular"
     # ...and it must not deny a worry the reader did not have: "nobody says that unless somebody
     # somewhere was worried about unverified ones."

@@ -2063,7 +2063,7 @@
     $("dialog-title").textContent = "Disclosure";
     const body = $("dialog-body");
     clear(body);
-    body.append(el("p", "", "The invention, as the assistant will read it. It stays on this computer; only its sealed searches leave, encrypted."), box, err);
+    body.append(el("p", "", "The invention, as the assistant will read it. It is kept on this computer; what the assistant sends is sealed to the verified machine it goes to."), box, err);
     const actions = $("dialog-actions");
     clear(actions);
     actions.append(cancel, save);
@@ -2205,7 +2205,7 @@
     const kb = (n) => `${Math.round((Number(n) || 0) / 1024)} KB`;
     const did = Number(summary.requests) > 0;
     box.append(el("div", "", el("b", "", "Session closed. "),
-      did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} encrypted here · plaintext that left this computer: 0 bytes.`
+      did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} sealed here · plaintext that left this computer: 0 bytes.`
           : "Nothing was asked in this session, so there is nothing to export."));
     box.append(el("div", "", did ? "Export the record to keep it (button on the right), then close this tab."
                                  : "Start another session when you are ready — a session is just a sitting, and the matter keeps everything."));
@@ -2414,7 +2414,7 @@
     if (readingSession) {
       $("welcome-title").textContent = "Reading your document";
       line.textContent = "Draft matters appear below as they are created. Review them before starting searches.";
-      $("empty").querySelector(".hint").textContent = "The AI receives text encrypted to its checked machine. This reading session has no patent-search tool.";
+      $("empty").querySelector(".hint").textContent = "Text is sealed on this computer to the AI's verified machine. This reading session has no patent-search tool.";
       $("input").placeholder = "Ask about the document or draft matters…";
       $("trust").querySelector(".prove").hidden = true;
       refreshIntakeDrafts();
@@ -2422,7 +2422,7 @@
       window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
     } else if (nameSession && d.disclosure_words > 0) {
       line.textContent = "The assistant reads your names and what the product is, then searches each name on this computer and writes your report.";
-      $("empty").querySelector(".hint").textContent = "Everything you type is encrypted on this computer before it goes to the AI's sealed machine. "
+      $("empty").querySelector(".hint").textContent = "Everything you type is sealed on this computer to the AI's verified machine before it is sent. "
         + "The search runs on this computer; the assistant searches straight away and asks you to confirm the classes afterwards.";
       foldTrust();
       $("input").placeholder = "Ask about your names, or add one to check…";

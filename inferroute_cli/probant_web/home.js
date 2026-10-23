@@ -1216,7 +1216,7 @@
           "For names: say what the product does and list the names. Where you will sell it helps the assistant choose the classes.",
           "Use Personal as the client if the work is your own.")),
       sec("2. Start a session",
-        para("Start a session from the matter, then open it. Before any text is sent, this computer checks the sealed machine that runs the AI assistant, and for inventions the sealed patent search machine, then encrypts your text to them."),
+        para("Start a session from the matter, then open it. Before any text is sent, this computer checks the sealed machine that runs the AI assistant, and for inventions the sealed patent search machine, then seals your text on this computer to them."),
         list("The panel on the right says what was checked, in plain words, with the technical detail one click away. If a check fails, nothing is sent to that machine.",
           "The assistant works in a closed box: no internet, and no files beyond the matter's folder.",
           "The AI can be slow: a survey or a name check usually takes 5 to 15 minutes. You can leave the tab open and come back.")),
@@ -1238,7 +1238,7 @@
           "Each patent search in it is signed by the search machine, with the hardware report that identifies it. Anyone can check it without trusting InferRoute: in the record's folder, run python3 verify_record.py with InferRoute's published reference.",
           "The record holds your description in plain text: store it as carefully as the original.")),
       sec("What stays private",
-        list("Text sent to the AI assistant or the patent search machine is encrypted on this computer to a machine it checked first.",
+        list("Text sent to the AI assistant or the patent search machine is sealed on this computer to a machine it checked first.",
           "The network carries ciphertext; timing and message sizes remain visible. Software inside the sealed machines handles your text in the clear.",
           "Conversations are kept with the matter on this computer, readable only by your account.")),
       sec("What it can't prove",
@@ -1321,7 +1321,7 @@
       el("p", "", "The AI reads your document and creates one draft matter per invention, with a complete summary and supporting passage. "
         + "You review each disclosure and date before searching. No searches start automatically."),
       field("Create drafts under this client", client, "Use Personal for your own work. Existing matters are kept."),
-      field("Document", file, "A .txt or .md file. Read locally, then sent encrypted to the checked AI model. No patent search runs during reading."),
+      field("Document", file, "A .txt or .md file. Read locally, then sealed on this computer to the verified AI machine. No patent search runs during reading."),
       chosen,
       field("Or paste it", text),
       err,
@@ -1853,7 +1853,7 @@
           el("span", "mono", r.path),
           el("p", "", "Saved on this computer; it has not been sent. Send this file by email, a shared folder or USB. "
             + "They save it, then choose Sharing → Open a delivery sent to you in Anteriora."),
-          el("p", "sub", "Encrypted to their key, with a copy sealed to you so you can reopen what you sent."),
+          el("p", "sub", "Sealed to their key, with a copy sealed to you so you can reopen what you sent."),
           button("Copy the path", "ghost small", () => navigator.clipboard.writeText(r.path)
             .then(() => toast("Copied.", "info")).catch(() => {})));
       } catch (e) { toast(e.message, "error"); } finally { go.disabled = false; }

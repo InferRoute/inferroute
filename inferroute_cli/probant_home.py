@@ -238,13 +238,19 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
         if not SESSION_ID_RE.match(sid):
             continue
         rec = _json(f) or {}
-        searches = _signed_searches(_jsonl(rdir / f"{sid}.searches.jsonl"))
+        rows = _jsonl(rdir / f"{sid}.searches.jsonl")
+        searches = _signed_searches(rows)
         keys = {str(h.get("key")) for x in searches for h in ((x.get("result") or {}).get("hits") or [])}
         model = rec.get("model_lane") or {}
         kept = (rdir / f"{sid}.conversation.jsonl").exists()
+        ai_verified, boxed = bool(model.get("verified")), probant_trust.closed_box(rec.get("confinement"))
+        unanswered = sum(1 for r in rows if r.get("kind") == "unanswered")
         out.append({"id": sid, "started_at": _stamp_of(sid), "surface": rec.get("surface") or ("browser" if kept else ""),
-                    "searches": len(searches), "documents": len(keys), "ai_verified": bool(model.get("verified")),
-                    "boxed": probant_trust.closed_box(rec.get("confinement")),
+                    "searches": len(searches), "documents": len(keys), "ai_verified": ai_verified,
+                    "boxed": boxed, "unanswered": unanswered,
+                    # The list row's "✓ checked" reads EVERY line the session page shows under its checks, here,
+                    # once: it said "✓ checked" beside a session whose page said a search was never answered.
+                    "checked": ai_verified and boxed and not unanswered,
                     "conversation": kept})
     out.sort(key=lambda s: s["id"], reverse=True)
     return out
@@ -324,7 +330,6 @@ def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any
     summary = next((s for s in list_sessions(client, matter) if s["id"] == sid), {})
     return {"id": sid, "matter": f"{client}/{matter}", **summary,
             "model": {"verified": bool(model.get("verified")), "checks": model.get("checks"), "name": model.get("model")},
-            "unanswered": sum(1 for r in rows if r.get("kind") == "unanswered"),
             "conversation": _jsonl(conv_file) if conv_file.exists() else None,
             "searches": searches, "marks": matter_marks(client, matter)}
 

@@ -137,7 +137,8 @@ def test_a_past_session_shows_signed_searches_marks_and_the_kept_conversation(ho
     S.state_path("Acme", "cooling").write_text(json.dumps({"marks": {"WO-1-A1": {"latest": {"value": "relevant"}}}}))
     m = c.get("/api/matter", params={"id": "Acme/cooling"}).json()
     assert m["sessions"][0] == {"id": SID, "started_at": "2026-09-17T16:37:34Z", "surface": "browser", "searches": 1,
-                                "documents": 2, "ai_verified": True, "boxed": True, "conversation": True}
+                                "documents": 2, "ai_verified": True, "boxed": True, "unanswered": 1,
+                                "checked": False, "conversation": True}
     d = c.get("/api/session", params={"id": "Acme/cooling", "sid": SID}).json()
     assert [x["query"] for x in d["searches"]] == ["a wrist device"]          # the unsigned row is not a search
     assert d["unanswered"] == 1 and d["marks"] == {"WO-1-A1": "relevant"}
@@ -1055,3 +1056,16 @@ console.log(JSON.stringify(out.kids.map((k) => k.t)));
     r = subprocess.run([node, "-e", harness, str(STATIC / "common.js")], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stderr[-600:]
     assert json.loads(r.stdout.strip().splitlines()[-1]) == ["h4", "blockquote", "p"]
+
+
+def test_the_session_list_badge_reads_every_check_its_session_page_shows(home):
+    """The session page shows "◐ 1 search was sent but never answered" under its checks; the list row for the
+    same session said "✓ checked". One predicate, computed here, and the list badge reads it."""
+    h, c, _ = home
+    c.post("/api/matters", json={"client": "Acme", "matter": "cooling"})
+    _session_fixture()
+    row = c.get("/api/matter", params={"id": "Acme/cooling"}).json()["sessions"][0]
+    assert row["ai_verified"] and row["boxed"] and row["unanswered"] == 1
+    assert row["checked"] is False
+    js = (Path(H.__file__).resolve().parent / "probant_web" / "home.js").read_text()
+    assert "s.ai_verified && s.boxed ?" not in js and 's.checked ? "ok-text"' in js

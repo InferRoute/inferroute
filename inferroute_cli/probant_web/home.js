@@ -845,7 +845,7 @@
         el("span", "", plural(s.searches, "search", "searches")),
         el("span", "", plural(s.documents, "document", "documents")),
         s.__live ? el("span", "live-text", "● open now")
-          : el("span", s.ai_verified && s.boxed ? "ok-text" : "warn-text", s.ai_verified && s.boxed ? "✓ checked" : "◐ see details"));
+          : el("span", s.checked ? "ok-text" : "warn-text", s.checked ? "✓ checked" : "◐ see details"));
       row.type = "button";
       // A session that is still open goes straight back INTO it; a finished one shows what it did, with a way to continue.
       row.addEventListener("click", () => {

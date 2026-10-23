@@ -239,3 +239,46 @@ def test_the_page_does_not_sell_on_encryption():
                     "encrypted here ·", "then encrypts your text", "is encrypted on this computer to a machine",
                     "then sent encrypted to", "Encrypted to their key"):
             assert old not in text, f"{name}: {old}"
+
+
+def _verifier_answer(detail, step="search enclave reachable"):
+    """The verifier's /enclave answer when its first step fails, exactly as search_verifier builds it."""
+    return {"ok": False, "test_roots": False, "enclave": {}, "refusal": f"{step}: {detail}",
+            "steps": [{"ok": False, "step": step, "detail": detail}]}
+
+
+NOTHING_ANSWERED = ("nothing answered — no connection. The search machine is probably not running; "
+                    "this is a connection failure, NOT a failed verification")
+
+
+def test_a_search_machine_that_is_switched_off_reads_as_an_outage_not_a_trust_failure():
+    """0.9.124 end-to-end test: the search machine's name did not resolve, and the panel showed a red cross,
+    "Could not be verified", and "Partly checked". An outage is neutral, and says nothing was sent."""
+    s = T.build(_receipt(), _verifier_answer(NOTHING_ANSWERED), ADDRESS, matter="A/b")
+    item = _item(s, "search")
+    assert item["state"] == T.OFF and item.get("offline") is True
+    assert item["summary"] == "Not available right now, nothing was sent to it."
+    assert "verif" not in item["summary"].lower()
+    assert not any(not r["ok"] for r in item["technical"])          # no red cross one level down either
+    assert s["verdict"] == "private" and "Partly checked" not in s["headline"]
+    assert "offline right now" in s["headline"] and "the patent search service" not in s["headline"]
+
+
+@pytest.mark.parametrize("detail", [
+    "answered 500, not with an offer — something is listening there, but it is not serving a sealed search",
+    "answered, but not with a usable offer (ValueError) — something is listening there",
+])
+def test_something_answering_wrongly_stays_a_failed_verification(detail):
+    """Reached, but not a sealed search: that IS trust-relevant and keeps its red cross."""
+    s = T.build(_receipt(), _verifier_answer(detail), ADDRESS)
+    assert _item(s, "search")["state"] == T.FAIL
+    assert not _item(s, "search").get("offline")
+    assert s["verdict"] == "limited"
+
+
+def test_a_failed_check_after_the_machine_answered_is_never_an_outage():
+    answer = _verifier_answer(NOTHING_ANSWERED)
+    answer["steps"].insert(0, {"ok": True, "step": "search enclave reachable", "detail": "offer received"})
+    answer["steps"].append({"ok": False, "step": "hardware report", "detail": "bad signature"})
+    assert not T.search_offline(answer)
+    assert _item(T.build(_receipt(), answer, ADDRESS), "search")["state"] == T.FAIL

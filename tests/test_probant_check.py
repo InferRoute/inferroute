@@ -81,7 +81,8 @@ def test_a_skipped_check_is_reported_as_not_checked_never_as_passed():
                            "  SKIP reference signature: reference carries a signature but no --reference-key was given")
     out = C.parse(text, 4)
     ident = next(g for g in out["groups"] if g["key"] == "identity")
-    assert ident["status"] == "pass"                                  # other identity checks did pass
+    # Other identity checks did pass, but one line was not checked: a neutral mark, never a plain tick (23 Oct).
+    assert ident["status"] == "limited" and ident["answer"] == "Passed, with limits noted below."
     assert any("no --reference-key" in s for s in ident["not_checked"])
 
 

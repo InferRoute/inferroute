@@ -104,7 +104,8 @@ window.ProbantUI = (() => {
   // record. The verdict is the verifier's own exit code (probant_check.py); these are only its words. Every
   // failure says what it costs the person holding the record and what to do.
   const CHECK_PILL = { passed: "✓ Checked out", failed: "✗ Did not check out", refused: "○ Could not run",
-    test: "◐ Test run", unauthenticated: "◐ Reference unauthenticated", nothing: "○ Nothing to check yet" };
+    test: "◐ Test run", unauthenticated: "◐ Reference unauthenticated", nothing: "○ Nothing to check yet",
+    unchanged: "○ Files unchanged", limited: "○ Passed, with limits" };
   // `compact` (the session panel, which must leave the marks in view): each question is one line, and its
   // answer opens on click — except a question that did NOT pass, which opens by itself.
   function renderCheck(box, r, compact) {
@@ -136,8 +137,7 @@ window.ProbantUI = (() => {
       item.append(toggle, detail);
       box.append(item);
     }
-    box.append(el("p", "sub", `${r.checks} checks ran. Anyone can repeat this without InferRoute's software: `
-      + `run verify_record.py inside the record's folder.`));
+    box.append(el("p", "sub", `${r.checks} checks ran. ${r.repeat || "Anyone can repeat this without InferRoute's software: run verify_record.py inside the record's folder."}`));
   }
 
   return { el, clear, inline, markdown, renderCheck };

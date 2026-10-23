@@ -50,7 +50,14 @@ def _exports_of(client: str, matter: str) -> List[Path]:
     root = S.probant_root() / client / "exports"
     if not root.is_dir():
         return []
-    records = [d for d in root.iterdir() if d.is_dir() and d.name.startswith(f"{matter}-prior-art-record-")]
+    from .probant_export import NAME_RECORD, PATENT_RECORD, export_belongs_to
+    try:
+        rec = S.load_record(client, matter)
+    except Exception:                                          # noqa: BLE001
+        rec = {}
+    # Only the records made from THIS matter: an older, deleted matter of the same name keeps its own.
+    records = [d for d in root.iterdir() if d.is_dir() and export_belongs_to(rec, d)
+               and d.name.startswith((f"{matter}-{PATENT_RECORD}-", f"{matter}-{NAME_RECORD}-"))]
     shas = set()
     for d in records:
         try:

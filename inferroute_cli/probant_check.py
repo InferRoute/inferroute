@@ -99,6 +99,9 @@ DISCLOSED_TEXT = ("Not a failure: these lines name what the hardware check canno
                   "permissions, instead of leaving it out.")
 
 
+LIMITED_ANSWER = "Passed, with limits noted below."
+
+
 def group_of(name: str) -> str:
     low = name.lower()
     for key, _, _, words in GROUPS:
@@ -162,10 +165,13 @@ def parse(text: str, code: int) -> Dict[str, Any]:
             continue
         failed = [r for r in mine if r["status"] == "FAIL"]
         skipped = [r for r in mine if r["status"] == "SKIP"]
+        # A group with lines that were NOT checked is not a clean pass, and its mark and its answer must not read
+        # stronger than those lines: "✓ Other checks / Everything else passed" sat directly above "Not checked —
+        # … 3 enclave operations … not in this record" (23 Oct). Neutral mark, and the answer says there are limits.
         entry: Dict[str, Any] = {"key": key, "question": question, "rows": mine,
                                  "status": "fail" if failed else "skip" if skipped and not any(
-                                     r["status"] == "PASS" for r in mine) else "pass",
-                                 "answer": ok_text}
+                                     r["status"] == "PASS" for r in mine) else "limited" if skipped else "pass",
+                                 "answer": LIMITED_ANSWER if skipped and not failed else ok_text}
         if failed:
             means, todo = CONSEQUENCE.get(key, CONSEQUENCE["other"])
             entry["answer"] = means
@@ -182,6 +188,8 @@ def parse(text: str, code: int) -> Dict[str, Any]:
         groups.append(entry)
     failed = [r["name"] for r in rows if r["status"] == "FAIL"]
     plain = plain_block(text)
+    if verdict == "passed" and any(g["status"] in ("limited", "skip") for g in groups):
+        headline = "Checked out, with limits noted below."
     # THE HEADLINE IS DERIVED FROM EVERY CHECK THE PAGE SHOWS, not from the exit code alone. The two used to be
     # computed apart: the headline from the code, the groups from the lines, so a failed check under "Other
     # checks" could sit below "Everything checked out." The exit code can make this page MORE cautious than the
@@ -252,11 +260,60 @@ def published_reference() -> Tuple[Optional[str], Optional[str]]:
     return (str(ref) if ref and Path(str(ref)).exists() else None), (str(key) if key else None)
 
 
+NAME_REPEAT = "Anyone can repeat this: run sha256sum -c SHA256SUMS inside the record's folder."
+
+
+def check_name_record(d: Path, manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """A NAME CHECK's record has no signed search to verify: its trademark searches ran on the computer that made
+    it. What can be checked is that its files are the ones written at export. Said as exactly that — the patent
+    check said "Nothing to check yet… Run a search" over a record holding eight searches and a report (23 Oct)."""
+    import hashlib
+    listed = manifest.get("files") or {}
+    rows: List[Dict[str, str]] = []
+    for name, want in sorted(listed.items()):
+        p = d / name
+        if "/" in name or name.startswith(".") or not p.is_file():
+            rows.append({"status": "FAIL", "name": name, "detail": "missing from the folder", "group": "intact"})
+            continue
+        got = hashlib.sha256(p.read_bytes()).hexdigest()
+        rows.append({"status": "PASS" if got == want else "FAIL", "name": name,
+                     "detail": "matches the hash written at export" if got == want else "changed since export",
+                     "group": "intact"})
+    failed = [r["name"] for r in rows if r["status"] == "FAIL"]
+    n = int(manifest.get("trademark_searches") or 0)
+    held = f"{n} trademark search{'es' if n != 1 else ''}" if n else "no trademark search yet"
+    limits = ("A name check's searches ran on the computer that made this record, so nothing outside it signed "
+              "them: this check shows the files are unchanged since export, not that what they say is complete "
+              "or true. It does not say whether a name is free to use.")
+    if not rows:
+        failed = ["MANIFEST.json"]
+        rows = [{"status": "FAIL", "name": "MANIFEST.json", "detail": "lists no files", "group": "intact"}]
+    if failed:
+        means, todo = CONSEQUENCE["intact"]
+        group = {"key": "intact", "question": "Is the record whole and unaltered?", "rows": rows, "status": "fail",
+                 "answer": means, "todo": todo, "failed": failed}
+        return {"code": 1, "verdict": "failed", "kind": "name-check", "headline": failed_headline(failed),
+                "explainer": limits, "result_line": "", "groups": [group], "checks": len(rows), "failed": failed,
+                "output": "", "plain": [], "repeat": NAME_REPEAT}
+    group = {"key": "intact", "question": "Is the record whole and unaltered?", "rows": rows, "status": "pass",
+             "answer": f"Every file is present and matches the hash written at export. The record holds {held}."}
+    return {"code": 0, "verdict": "unchanged", "kind": "name-check",
+            "headline": "The record's files are unchanged since it was exported.",
+            "explainer": limits, "result_line": "", "groups": [group], "checks": len(rows), "failed": [],
+            "output": "", "plain": [], "repeat": NAME_REPEAT}
+
+
 def check(bundle_dir: str | Path, *, reference: Optional[str] = None, reference_key: Optional[str] = None,
           timeout: float = 300.0) -> Dict[str, Any]:
     """Run the bundle's own verifier over it and report what it found. `reference`/`reference_key` default
     to this computer's configured ones."""
     d = Path(bundle_dir)
+    try:
+        manifest = json.loads((d / "MANIFEST.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = {}
+    if isinstance(manifest, dict) and manifest.get("kind") == "name-check":
+        return check_name_record(d, manifest)
     script = d / "verify_record.py"
     if not script.exists():
         script = Path(__file__).resolve().parent / "pi_attested" / "verify_record.py"

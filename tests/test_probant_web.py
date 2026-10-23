@@ -2970,3 +2970,12 @@ def test_a_retry_notice_is_shown_only_while_something_was_asked(tmp_path):
     for out in W.normalize({"type": "auto_retry_start"}):
         b.publish(out, agent=True)
     assert [n["message"] for n in notices()] == ["The AI machine didn't answer; retrying…"]
+
+
+def test_notices_never_stand_between_a_person_and_a_button():
+    """0.9.124 end-to-end test: notices stacked bottom right, over "Export and check the record". They now sit at
+    the top and let clicks through (checked in a browser at 390/900/1280 px: no button under a notice is blocked)."""
+    css = (STATIC / "app.css").read_text()
+    rule = css[css.index(".toasts {"):]
+    rule = rule[:rule.index("}")]
+    assert "pointer-events: none" in rule and "top:" in rule and "bottom:" not in rule

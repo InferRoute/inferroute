@@ -406,7 +406,12 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 .md-preview h4 { margin: 10px 0 6px; font-size: 15px; }
 .md-preview blockquote { background: none; border-left: 2px solid var(--line); border-radius: 0; padding: 0 0 0 12px; color: var(--muted); }
 .dialog-actions input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-.toasts { position: fixed; right: 16px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: 420px; }
+/* Notices sit at the top, under the header and centred over the conversation: bottom right they covered "Export
+   and check the record" and the panel's other buttons (0.9.124 test). They hold text only and let clicks through,
+   so even where one overlaps something it never stands between a person and a button. */
+.toasts { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
+  align-items: center; gap: 8px; z-index: 20; width: max-content; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+@media (max-width: 760px) { .toasts { top: 104px; } body.home .toasts { top: 124px; } }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); font-size: 14px; white-space: pre-wrap; }
 .toast.warning { border-left-color: var(--warn); }
 .toast.error { border-left-color: var(--bad); }

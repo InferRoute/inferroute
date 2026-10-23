@@ -260,6 +260,18 @@ const SEARCH_HEARTBEAT_MS = 20_000;
 // `checked`: for a search, the verification that preceded it. The search response itself does not repeat the
 // reference block; but the search was pinned to that enclave's lifetime and the verifier re-runs the identity
 // check on every search, so a successful search on the SAME enclave inherits the identity it was checked under.
+// THE SEARCH MACHINE WAS NOT REACHED AT ALL: no answer at its address (it does not resolve, refuses the
+// connection, or times out). Same rule as probant_trust.search_offline: the verifier's only step is the
+// reachability one, and it says "nothing answered". Something that answered wrongly is still a failed check.
+function searchOffline(v: SearchVerdict): boolean {
+	const steps = v.steps ?? [];
+	return !v.ok && steps.length === 1 && steps[0].step === "search enclave reachable" && !steps[0].ok
+		&& String(steps[0].detail ?? "").startsWith("nothing answered");
+}
+// What the model is told when that happens: one plain line, so it stops and tells the person instead of
+// reading "connection-level failure" in the verifier's words and trying four more searches (0.9.124 test).
+const SEARCH_OFFLINE_ERROR = "Patent search is offline right now, so nothing was sent. Do not search again: tell the user search is offline and that their text stayed on this computer.";
+
 function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict): SearchProof {
 	return {
 		ok: out.ok && phase !== "declined",
@@ -1440,6 +1452,7 @@ export default function (pi: ExtensionAPI) {
 		searchStatus(ctx, vp);
 		if (!verified.ok) {
 			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+			if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);
 			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
 		}
 		const e = verified.enclave ?? {};
@@ -1491,6 +1504,7 @@ export default function (pi: ExtensionAPI) {
 		searchStatus(ctx, vp);
 		if (!verified.ok) {
 			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
+			if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);
 			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
 		}
 		const e = verified.enclave ?? {};
@@ -2128,7 +2142,7 @@ export default function (pi: ExtensionAPI) {
 					results.push({ feature: leg.feature, about: deepAbout(leg), status: "failed", hits: 0, why });
 					// A declined approval or an unverifiable machine stops the whole press: every remaining
 					// sub-query would ask the same machine the same question and fail the same way.
-					if (/declined|did not verify|verifier did not answer/.test(why)) break;
+					if (/declined|did not verify|verifier did not answer|offline right now/.test(why)) break;
 					continue;
 				}
 				sent += 1;
@@ -2202,6 +2216,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!sent) {
 				const why = results.find((x) => x.why)?.why ?? "no sub-query completed";
+				if (why === SEARCH_OFFLINE_ERROR) throw new Error(why);
 				throw new Error(`the deep search sent nothing: ${why}`);
 			}
 			const ledger = [

@@ -1835,7 +1835,9 @@ def test_a_connection_failure_is_not_shown_as_a_verification_failure():
     assert r.returncode == 0, r.stderr[-800:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
 
-    assert "isn't running" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
+    assert "offline right now" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
+    # 0.9.124: the extension's own outage line reads as an outage too, never as a refusal
+    assert "offline right now" in out["offline"] and "verif" not in out["offline"].lower(), out["offline"]
     assert "left this computer" in out["absent"], "say plainly that nothing was sent"
     assert "not a sealed search machine" in out["junk"], out["junk"]
     # the one that must NOT be blunted
@@ -2923,3 +2925,21 @@ def test_the_approval_shows_the_whole_text_it_would_send():
     assert 'const q = el("blockquote", "approval-query", quoted);' in js
     css = (STATIC / "app.css").read_text()
     assert re.search(r"blockquote\.approval-query \{[^}]*max-height:[^}]*overflow-y: auto", css)
+
+
+def test_a_search_asked_for_while_search_is_offline_is_said_first_and_the_person_chooses():
+    """0.9.124 end-to-end test: with the search machine offline, "Run a prior-art survey" was still offered and
+    sent, and the person learned of the outage from the assistant's failed attempts. The page now says so first,
+    from the trust panel's own outage flag, and only for messages that ask for a search."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "offline_choice_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["survey"] and out["typed"] and out["like"]
+    assert not out["chat"], "a message that does not ask for a search goes straight through"
+    assert out["gated"] and out["fromTrust"]

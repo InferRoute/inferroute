@@ -191,6 +191,7 @@ button.brand:hover { background: var(--user); }
 .card-note { padding: 8px 14px; font-size: 13px; color: var(--accent); background: var(--accent-soft); }
 .card-note.bad { color: var(--bad); background: var(--bad-soft); }
 .card-note.warn { color: var(--warn); background: var(--warn-soft); }
+.card-note.off { color: var(--muted); background: var(--user); }
 .docs { list-style: none; margin: 0; padding: 0; }
 /* A past session's rows have THREE children (rank, document, mark chip) — no relevance bar, no buttons — so they
    need their own columns; under the four-column rule the document fell into the 28px bar column and wrapped

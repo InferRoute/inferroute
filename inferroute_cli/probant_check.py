@@ -3,7 +3,8 @@
 The check itself is NOT reimplemented here. It runs the bundle's own `verify_record.py`, the one
 implementation of the verdict, and takes its EXIT CODE as the verdict; the printed lines are read only to
 say which part of the record a failure touches. A second opinion that could disagree with the verifier would
-be worse than none — so when the two could differ, the exit code wins and this module says so.
+be worse than none — so when the two could differ, the more cautious one wins and this module says so: a
+failing code is never shown as a pass, and a failed check shown on the page is never under a passing headline.
 
 What this adds is the sentence the exit code does not carry. A red `FAIL completeness` told a patent
 user nothing about whether they could still put the record in front of a client; every failure here says
@@ -89,6 +90,10 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
 }
 
 
+# The verifier's own heading for its confidentiality report. Rows under it "do NOT affect the exit code" (its
+# words): they describe what the evidence licenses, not whether the record checked out.
+DISCLOSURE_HEADING = "What this evidence licenses you to say about confidentiality"
+
 DISCLOSED_TEXT = ("Not a failure: these lines name what the hardware check cannot cover, such as a part of the "
                   "sealed machine's policy that the cloud platform signs and updates. The record names it, with its "
                   "permissions, instead of leaving it out.")
@@ -108,11 +113,15 @@ def parse(text: str, code: int) -> Dict[str, Any]:
     quietly stops grouping anything."""
     rows: List[Dict[str, str]] = []
     result = ""
+    in_report = False
     for line in text.splitlines():
+        if line.strip().startswith(DISCLOSURE_HEADING):
+            in_report = True
+            continue
         m = ROW.match(line)
         if m:
             rows.append({"status": m.group(1), "name": m.group(2).strip(), "detail": m.group(3).strip(),
-                         "group": group_of(m.group(2))})
+                         "group": group_of(m.group(2)), "report": in_report})
             continue
         r = RESULT.match(line.strip())
         if r:
@@ -133,10 +142,14 @@ def parse(text: str, code: int) -> Dict[str, Any]:
     # beside a RESULT of "no failing record checks", and exits 0. Shown under "Other checks" with a red cross,
     # it read as "Everything checked out" followed by an unexplained failure (21 Oct audit). Under a pass, such
     # lines are what the record DISCLOSES about its own limits, and are shown as that.
+    # Only the lines under the verifier's confidentiality report, which it says "do NOT affect the exit code".
+    # A FAIL anywhere else is a failed check whatever the exit code, and is never relabelled "Not a failure".
     if code in (0, 4):
         for r in rows:
-            if r["status"] == "FAIL":
+            if r["status"] == "FAIL" and r["report"]:
                 r["status"], r["group"] = "NOTE", "disclosed"
+    for r in rows:
+        del r["report"]
     groups = []
     for key, question, ok_text, _ in (*GROUPS, ("other", "Other checks", "Everything else passed.", ()),
                                       ("disclosed", "What the check discloses about its own limits",
@@ -167,10 +180,32 @@ def parse(text: str, code: int) -> Dict[str, Any]:
                 seen[line] = seen.get(line, 0) + 1
             entry["not_checked"] = [line if n == 1 else f"{line} (in {n} searches)" for line, n in seen.items()]
         groups.append(entry)
+    failed = [r["name"] for r in rows if r["status"] == "FAIL"]
+    plain = plain_block(text)
+    # THE HEADLINE IS DERIVED FROM EVERY CHECK THE PAGE SHOWS, not from the exit code alone. The two used to be
+    # computed apart: the headline from the code, the groups from the lines, so a failed check under "Other
+    # checks" could sit below "Everything checked out." The exit code can make this page MORE cautious than the
+    # lines (a failing code over all-PASS lines still reads as a failure); a failure shown on the page can never
+    # be outvoted by a passing code.
+    if failed:
+        headline = failed_headline(failed)
+        if verdict in ("passed", "unauthenticated"):
+            verdict = "failed"
+            explainer = ("The verifier's overall result was a pass, but a check shown below did not pass. "
+                         "Do not rely on this record until that is explained; send us the technical lines.")
+            # The statement a record licenses is the verifier's, computed for a record with no failure. It is
+            # not offered beside one.
+            plain = []
     return {"code": code, "verdict": verdict, "headline": headline, "explainer": explainer,
             "result_line": result, "groups": groups, "checks": len(rows),
-            "failed": [r["name"] for r in rows if r["status"] == "FAIL"], "output": text,
-            "plain": plain_block(text)}
+            "failed": failed, "output": text, "plain": plain}
+
+
+def failed_headline(failed: List[str]) -> str:
+    """Said plainly and calmly, counted by check rather than by line: a check that failed in each of 68
+    searches is one check that did not pass, not 68."""
+    n = len(dict.fromkeys(failed))
+    return "One check did not pass; see below." if n == 1 else f"{n} checks did not pass; see below."
 
 
 PLAIN_HEADING = "In plain words, for a reader who will not read the table above"

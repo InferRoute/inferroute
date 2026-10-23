@@ -130,12 +130,71 @@ def test_a_disclosure_line_under_a_passing_verdict_is_shown_as_a_disclosure_not_
     has no name for did not pass". The verifier prints what the hardware check cannot cover (the cloud
     platform's policy fragment) as a FAIL line beside RESULT "no failing record checks", and exits 0."""
     from inferroute_cli import probant_check as C
+    # As the verifier prints it: the disclosure rows sit under its confidentiality report, after RESULT.
     out = ("  PASS manifest: all files match\n"
-           "    FAIL policy is self-contained: external policy dependency INSIDE the trust boundary\n"
-           "RESULT: no failing record checks under production roots; SKIP rows remain unverified\n")
+           "RESULT: no failing record checks under production roots; SKIP rows remain unverified\n"
+           "\nWhat this evidence licenses you to say about confidentiality\n"
+           "  policy 380e3707bca09f61…\n"
+           "    FAIL policy is self-contained: external policy dependency INSIDE the trust boundary\n")
     r = C.parse(out, 0)
     assert r["verdict"] == "passed" and r["failed"] == []
     assert [g["key"] for g in r["groups"]] == ["intact", "disclosed"]
     assert r["groups"][1]["status"] == "info" and "Not a failure" in r["groups"][1]["answer"]
     # under a FAILING verdict the same line still counts as a failure
     assert "policy is self-contained" in C.parse(out, 1)["failed"]
+
+
+# ── the headline is derived from every check the page shows, not from the exit code alone ──
+
+DISCLOSURE_HEADING = "What this evidence licenses you to say about confidentiality"
+
+# A record-check FAIL that has no group of its own, printed BEFORE the confidentiality report, beside an exit
+# code of 0. The page shows it under "Other checks" with a red cross; the headline above it must not say that
+# everything checked out (22 Oct report: "Everything checked out" over a failed "Other checks").
+OTHER_FAIL = PASSING.replace(
+    "\nRESULT:", "  FAIL archive timestamp: the proof does not match the record\n\nRESULT:")
+
+
+@pytest.mark.parametrize("code", [0, 4])
+def test_a_failed_check_on_the_page_never_sits_under_a_reassuring_headline(code):
+    r = C.parse(OTHER_FAIL, code)
+    other = next(g for g in r["groups"] if g["key"] == "other")
+    assert other["status"] == "fail" and other["failed"] == ["archive timestamp"]
+    assert r["headline"] == "One check did not pass; see below."
+    assert "Everything" not in r["headline"] and "passed" not in r["headline"]
+    assert r["verdict"] == "failed" and r["failed"] == ["archive timestamp"]
+    assert r["code"] == code                          # the verifier's own code is kept, and the page says it differs
+    assert "verifier" in r["explainer"]
+    # The statement a record licenses is not offered over a failure shown beside it.
+    assert r["plain"] == []
+
+
+def test_the_failure_headline_counts_distinct_checks_not_rows():
+    two = FAILING.replace("  PASS hardware report: version 3, signature present",
+                          "  FAIL hardware report: signature does not verify")
+    assert C.parse(FAILING, 1)["headline"] == "One check did not pass; see below."
+    assert C.parse(two, 1)["headline"] == "2 checks did not pass; see below."
+    # A search-per-row failure repeated in every search is still one check.
+    again = FAILING + "  FAIL completeness (per-session sequence): sequence starts at seq 9\n"
+    assert C.parse(again, 1)["headline"] == "One check did not pass; see below."
+
+
+def test_only_the_confidentiality_report_is_read_as_a_disclosure():
+    """The verifier prints its confidentiality report under its own heading and says those rows "do NOT affect
+    the exit code". A FAIL there, under a pass, is a disclosure. A FAIL anywhere else is a failure, whatever
+    the exit code, and is never relabelled "Not a failure"."""
+    out = (OTHER_FAIL.replace("RESULT: every check PASSED under production roots",
+                              "RESULT: no failing record checks under production roots")
+           + f"\n{DISCLOSURE_HEADING}\n  policy 380e3707bca09f61…\n"
+             "    FAIL policy is self-contained: external policy dependency INSIDE the trust boundary\n")
+    r = C.parse(out, 0)
+    keys = {g["key"]: g for g in r["groups"]}
+    assert keys["disclosed"]["status"] == "info"
+    assert [x["name"] for x in keys["disclosed"]["rows"]] == ["policy is self-contained"]
+    assert keys["other"]["status"] == "fail"
+    assert r["failed"] == ["archive timestamp"] and r["verdict"] == "failed"
+
+
+def test_a_clean_pass_still_says_so():
+    r = C.parse(PASSING, 0)
+    assert r["verdict"] == "passed" and r["headline"] == "Everything checked out."

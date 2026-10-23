@@ -383,8 +383,12 @@ class Launches:
         self.home_url = home_url
 
     def view(self, it: Dict[str, Any]) -> Dict[str, Any]:
+        # A first session on a computer without the assistant program installs it (pi_runtime) before anything
+        # else: say so, rather than let "checking the sealed machines" run for a minute longer than it says.
+        setup = it["state"] == "starting" and any(SETUP_MARK in ln for ln in list(it["tail"]))
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
                 "started_at": int(it["started"]), "elapsed": int(time.time() - it["started"]), "message": it["message"],
+                "phase": "setup" if setup else "",
                 "detail": it.get("detail", "") if it["state"] == "failed" else ""}
 
     def running_intake(self, ident: str) -> Optional[Dict[str, Any]]:
@@ -472,8 +476,11 @@ class Launches:
             # (read_matter_file refuses the rest, on purpose: a stale backup once steered a survey). Choosing to
             # continue an earlier session IS naming its notes file, so it is named here, for this session alone.
             env["IR_ATTESTED_READABLE"] = ",".join(x for x in (env.get("IR_ATTESTED_READABLE", ""), readable) if x)
-        argv = ([sys.executable, "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web", "--client", draft_client] if intake_dir
-                else [sys.executable, "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
+        # -I: isolated mode, so the folder Anteriora was started from is NOT on the child's sys.path. Started from
+        # a folder holding an `inferroute_cli` directory (a source checkout, an unpacked wheel), `-m` alone ran
+        # THAT copy as the session instead of the installed one.
+        argv = ([sys.executable, "-I", "-m", "inferroute_cli", "probant", "intake", intake_dir, "--web", "--client", draft_client] if intake_dir
+                else [sys.executable, "-I", "-m", "inferroute_cli", "probant", "open", matter_id, "--web"])
         # Started from the event loop's (main) thread: PR_SET_PDEATHSIG fires when the THREAD that started the
         # child exits, so starting it from a worker thread would end the session when that worker is recycled.
         proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -508,6 +515,7 @@ class Launches:
             it["detail"] = failure_detail(list(it["tail"]))
 
 
+SETUP_MARK = "Setting up the assistant program"
 NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the Matters page."
 
 
@@ -658,12 +666,18 @@ def failure_message(tail: List[str]) -> str:
         return "Couldn't reach InferRoute to open the session. Check the connection (or `ir login`) and try again."
     if "workspace is missing" in low:
         return "This matter's folder is missing, so the session was not opened."
+    # The session tried to install the assistant program itself (pi_runtime) and could not: its own words.
+    for ln in tail:
+        _, sep, said = ln.partition("assistant setup failed:")
+        if sep and said.strip():
+            return said.strip() + " Press “Try again” to set it up again."
     if ("not found on path" in low or "is not installed on this computer" in low) and "pi" in low:
         # A page started as a service or from a desktop shortcut has a PATH a terminal does not, and every
-        # start failed in a second (19-20 Sep). The launcher now looks where these programs install, so
-        # reaching this means it really is absent — and the answer is an install, never "use a terminal".
-        return ("The assistant program (Pi) is not installed on this computer, so no session can start. "
-                "Install it with: npm install -g @earendil-works/pi-coding-agent — then try again. "
+        # start failed in a second (19-20 Sep). The launcher looks where these programs install AND installs
+        # Anteriora's own pinned copy when none is found, so reaching this means that could not be done here.
+        # Never an npm command: the person this page is for may have no npm, and should not need one.
+        return ("The assistant program is not installed on this computer, so no session can start. Press "
+                "“Try again”: Anteriora sets it up itself (once, about a minute, with an internet connection). "
                 "Nothing was sent.")
     # Nothing recognised. What the launcher printed is for the person who has to fix it, not for the
     # professional: it carries file paths, environment-variable names and half-sentences. It goes beside the

@@ -776,6 +776,9 @@ def main(argv: list[str] | None = None) -> int:
     hm.add_argument("--no-browser", action="store_true", help="print the link instead of opening the browser")
     ss = sub.add_parser("setup-search", help="set up patent search on this computer from InferRoute's published files")
     ss.add_argument("--force", action="store_true", help="replace a search configuration Anteriora did not write")
+    sa = sub.add_parser("setup-assistant", help="install the assistant program (Pi) and its Node runtime, "
+                                                "pinned, inside Anteriora's own folder (Linux; the installer runs it)")
+    sa.add_argument("--force", action="store_true", help="install again even if it is already there (a repair)")
     pf = sub.add_parser("proof", help="the technical detail behind the plain card: last session + a live search check")
     pf.add_argument("matter")
     ca = sub.add_parser("audit-client", help="a brief your OWN AI can use to audit this software itself, "
@@ -845,6 +848,9 @@ def main(argv: list[str] | None = None) -> int:
             print("  them — starting with whether anything can leave this computer unencrypted.")
             print("  Give it the folder and say: read CLIENT-AUDIT.md and do what it asks.\n")
             return 0
+        if a.cmd == "setup-assistant":
+            from . import pi_runtime
+            return pi_runtime.main_setup(force=a.force)
         if a.cmd == "setup-search":
             from . import probant_search_setup
             return probant_search_setup.main_setup(force=a.force)
@@ -1301,7 +1307,7 @@ def _cluster_workers(ident: str, src: Path, workers: int, reader: str, thinker: 
     started = time.time()
     procs = []
     for i in range(n):
-        argv = [sys.executable, "-m", "inferroute_cli", "probant", "cluster", str(src), "--resume", ident,
+        argv = [sys.executable, "-I", "-m", "inferroute_cli", "probant", "cluster", str(src), "--resume", ident,
                 "--slice", f"{i}/{n}", "--reader", reader or "", "--thinker", thinker or ""]
         argv += ["--budget", str(budget)] if budget else []
         # WITHOUT this the worker plans with the ordinary planner, finds nothing and exits in a second,

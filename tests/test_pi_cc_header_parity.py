@@ -41,7 +41,7 @@ def _stub(monkeypatch, tmp_path):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.delenv("IR_GRANT", raising=False)
-    monkeypatch.setattr("inferroute_cli.agents.binary_for", lambda a: "/bin/" + a)
+    monkeypatch.setattr("inferroute_cli.agents.binary_for", lambda a, **k: "/bin/" + a)
     for n in ("_persist_session_link", "_persist_last_model", "_record_launch", "_apply_wire_capture_env"):
         monkeypatch.setattr(f"inferroute_cli.launch.{n}", lambda *a, **k: None)
     monkeypatch.setattr("inferroute_cli.lane.announce", lambda *a, **k: None)

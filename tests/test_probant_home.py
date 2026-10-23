@@ -328,7 +328,8 @@ def test_the_agent_program_missing_from_path_is_named_plainly():
                               "opening Demo/glucose — date bound 2020-01-01"])
     # Still names the program, but the answer is an install, never "open a terminal" (20 Sep).
     assert "is not installed on this computer" in msg and "Nothing was sent" in msg
-    assert "npm install -g" in msg and "pi --version" not in msg
+    # …and an install the app does itself: a founder with no npm cannot follow an npm command (23 Oct).
+    assert "npm" not in msg and "pi --version" not in msg and "Try again" in msg
 
 
 def test_an_unrecognised_failure_is_plain_words_and_keeps_what_it_said_in_the_details():
@@ -451,6 +452,7 @@ def test_a_session_starts_from_a_page_whose_PATH_never_saw_node(monkeypatch, tmp
         (b / "pi").chmod(0o755)
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setenv("NVM_DIR", str(tmp_path / ".nvm"))
+    monkeypatch.setenv("IR_PI_RUNTIME_DIR", str(tmp_path / "no-private-runtime"))
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     found = agents.find_agent("pi")
     assert found == str(fake_nvm / "v22.22.3" / "bin" / "pi")     # the newest install, not the first found
@@ -464,24 +466,60 @@ def test_a_session_starts_from_a_page_whose_PATH_never_saw_node(monkeypatch, tmp
     assert agents.find_agent("pi") == str(other)
 
 
-def test_pi_is_found_in_probant_managed_install_prefix(monkeypatch, tmp_path):
-    from inferroute_cli import agents
-    managed = tmp_path / ".local" / "share" / "pi-test-0.84.1" / "bin"
-    managed.mkdir(parents=True)
-    binary = managed / "pi"
-    binary.write_text("#!/bin/sh\n")
-    binary.chmod(0o755)
-    monkeypatch.setenv("PATH", "/nonexistent")
-    monkeypatch.delenv("NVM_DIR", raising=False)
+def test_the_private_pinned_pi_is_found_before_any_pi_on_path(monkeypatch, tmp_path):
+    """Anteriora's own Pi (pi_runtime: pinned Pi on a pinned Node) wins over a global one, which may be another
+    release on a Node too old to run it. Only a COMPLETE install counts: no stamp, no private Pi."""
+    from inferroute_cli import agents, pi_runtime
+    monkeypatch.setenv("IR_PI_RUNTIME_DIR", str(tmp_path / "rt"))
     monkeypatch.delenv("IR_PI_BIN", raising=False)
-    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    assert agents.find_agent("pi") == str(binary)
+    on_path = tmp_path / "global" / "pi"
+    on_path.parent.mkdir()
+    on_path.write_text("#!/bin/sh\n")
+    on_path.chmod(0o755)
+    monkeypatch.setenv("PATH", str(on_path.parent))
+    d = pi_runtime.install_dir()
+    (d / "bin").mkdir(parents=True)
+    (d / "node" / "bin").mkdir(parents=True)
+    (d / "node" / "bin" / "node").write_text("")
+    (d / "bin" / "pi").write_text("#!/bin/sh\n")
+    (d / "bin" / "pi").chmod(0o755)
+    assert agents.find_agent("pi") == str(on_path)                 # half-installed: not used
+    (d / pi_runtime.STAMP).write_text(json.dumps({"pi": pi_runtime.PI_VERSION, "node": pi_runtime.NODE_VERSION}))
+    assert agents.find_agent("pi") == str(d / "bin" / "pi")
+    (d / pi_runtime.STAMP).write_text(json.dumps({"pi": "1.4.0", "node": pi_runtime.NODE_VERSION}))
+    assert agents.find_agent("pi") == str(on_path)                 # another release is not the pinned one
 
 
 def test_when_pi_really_is_absent_the_page_says_install_it_not_use_a_terminal():
     msg = H.failure_message(["`pi` is not installed on this computer (PATH and the usual install directories were checked)."])
-    assert "npm install -g @earendil-works/pi-coding-agent" in msg
-    assert "terminal" not in msg.lower()
+    assert "npm" not in msg and "terminal" not in msg.lower()
+    assert "Try again" in msg and "sets it up itself" in msg
+
+
+def test_a_setup_that_failed_in_the_session_is_reported_in_its_own_plain_words():
+    from inferroute_cli import pi_runtime
+    msg = H.failure_message([" Setting up the assistant program on this computer (once; about 56 MB to download) ...",
+                             f" ❌ assistant setup failed: {pi_runtime.NEEDS_CONNECTION_WORDS}",
+                             "    (download of https://nodejs.org/dist/v24.22.1/node.tar.xz failed: timed out)"])
+    assert msg.startswith(pi_runtime.NEEDS_CONNECTION_WORDS) and "Try again" in msg and "npm" not in msg
+
+
+def test_the_page_says_when_a_start_is_setting_up_the_assistant_first():
+    import collections
+    L = H.Launches()
+    it = {"id": "x", "matter": "m", "state": "starting", "url": None, "started": 0, "message": "",
+          "tail": collections.deque([" Setting up the assistant program on this computer (once) ..."])}
+    assert L.view(it)["phase"] == "setup"
+    it["tail"] = collections.deque(["opening Demo/glucose"])
+    assert L.view(it)["phase"] == ""
+
+
+def test_sessions_start_isolated_so_the_current_folder_cannot_shadow_the_program():
+    """Started from a folder holding an `inferroute_cli` directory, `python -m inferroute_cli` ran that copy."""
+    import inspect
+    src = inspect.getsource(H.Launches.start)
+    assert src.count('sys.executable, "-I", "-m", "inferroute_cli"') == 2
+    assert 'sys.executable, "-m"' not in src
 
 
 def test_the_child_gets_the_node_that_sits_beside_its_agent(tmp_path):

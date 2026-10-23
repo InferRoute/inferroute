@@ -218,6 +218,9 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
         return {"key": "search", "state": FAIL, "title": "Patent search",
                 "summary": "Could not be verified, so no search will be sent.",
                 "points": [_plain_search_refusal(str(search.get("refusal") or ""))], "more": [], "technical": technical}
+    # The item's state is derived from every row it shows. The verifier's `ok` is the conjunction of its steps,
+    # so this should never fire; if the two ever disagree, a red cross under "More" must not sit below a tick.
+    unpassed = [r["label"] for r in technical if not r["ok"]]
     enclave = search.get("enclave") or {}
     ref = {"ok": search_is_inferroutes(search)}
     identity = ("with a deployment fingerprint matching InferRoute's signed reference" if ref.get("ok")
@@ -243,6 +246,11 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
     if search.get("test_roots"):
         return {"key": "search", "state": WARN, "title": "Patent search",
                 "summary": "TEST machine: checked against test keys, not a real verification.",
+                "points": points, "more": more, "technical": technical}
+    if unpassed:
+        return {"key": "search", "state": WARN, "title": "Patent search",
+                "summary": ("One of its checks did not pass; see More." if len(unpassed) == 1 else
+                            f"{len(unpassed)} of its checks did not pass; see More."),
                 "points": points, "more": more, "technical": technical}
     return {"key": "search", "state": OK, "title": "Patent search",
             # "run by InferRoute" is an identity claim: only the signed reference, checked here, earns it.
@@ -358,7 +366,7 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
     states = {i["key"]: i["state"] for i in items}
     if states["ai"] == FAIL:
         verdict, headline = "blocked", "Not opened: the AI machine could not be verified, so nothing was sent."
-    elif any(states[k] in (FAIL, WARN) for k in ("ai", "search", "computer")):
+    elif any(i["state"] in (FAIL, WARN) for i in items):        # every item shown, none left out by name
         verdict, headline = "limited", "Partly checked. Read the items marked below before sending an invention's details."
     else:
         # A MISSING search is not a WEAKENED protection (Henry, 22 Sep: "if this is just the mcp not being up

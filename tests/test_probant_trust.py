@@ -202,3 +202,15 @@ def test_the_card_renders_every_state_without_error():
         T.render_card(summary, c)
     out = c.export_text()
     assert "What this can't prove" in out and "anteriora proof A/b" in out
+
+
+def test_a_failed_technical_row_is_never_under_connections_checked():
+    """The panel's verdict is derived from every check it shows. A search answer that says ok while one of
+    its own steps failed (the panel draws that step with a red cross under "More") must not read as checked."""
+    search = _search(reference={"ok": True})
+    search["steps"].append({"ok": False, "step": "index snapshot", "detail": "does not match"})
+    s = T.build(_receipt(), search, ADDRESS)
+    item = _item(s, "search")
+    assert item["state"] == T.WARN and "did not pass" in item["summary"]
+    assert s["verdict"] == "limited" and "Partly checked" in s["headline"]
+

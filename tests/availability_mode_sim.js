@@ -25,18 +25,24 @@ const MENTIONS_HOURS = /Paris|every day|\d\d:00|opens|closed until|outside its u
 
 // ALWAYS-ON, reachable: says it is available and NOTHING about hours.
 let t = say({ configured: true, mode: "always", reachable: true, found: true, open_now: true });
-if (!/Search is available/.test(t)) fail("always+up must say it is available: " + t);
+if (!/search is available/i.test(t)) fail("always+up must say it is available: " + t);
 if (MENTIONS_HOURS.test(t)) fail("always-on must not mention a timetable: " + t);
 
-// ALWAYS-ON, not answering: a fault, explicitly NOT a closing time.
-t = say({ configured: true, mode: "always", reachable: false, found: true, open_now: true });
-if (MENTIONS_HOURS.test(t)) fail("a continuous machine that is down must not be given hours: " + t);
-if (!/not a closing time/.test(t)) fail("it must say this is not a schedule: " + t);
+// ALWAYS-ON, not answering, or its address gone: an OUTAGE, said calmly (0.9.124 test), with what still works and
+// who to ask — and never a timetable, because this machine keeps none.
+for (const found of [true, false]) {
+  t = say({ configured: true, mode: "always", reachable: false, found, open_now: true });
+  if (MENTIONS_HOURS.test(t)) fail("a continuous machine that is down must not be given hours: " + t);
+  if (!/offline right now/.test(t)) fail("it must say search is offline: " + t);
+  if (!/Name checks and readings still work/.test(t)) fail("it must say what still works: " + t);
+  if (!/support@inferroute\.ai/.test(t)) fail("with no hours to give, it must say who to ask: " + t);
+  if (/needs looking at|cannot be found/.test(t)) fail("no alarm wording: " + t);
+}
 
-// ALWAYS-ON, address gone: still the distinct 'cannot be found' state, never a timetable.
-t = say({ configured: true, mode: "always", reachable: false, found: false, open_now: true });
-if (!/cannot be found/.test(t)) fail("an unresolvable address keeps its own state: " + t);
-if (MENTIONS_HOURS.test(t)) fail("no hours here either: " + t);
+// SCHEDULED, but its address is gone during or outside its hours: offline, its hours, and who to ask.
+t = say({ configured: true, mode: "scheduled", reachable: false, open_now: false, found: false,
+          opens_at: "2026-10-01T11:00:00Z", closes_at: "2026-10-01T13:00:00Z", tz: "Europe/Paris", from_hour: 13, to_hour: 15 });
+if (!/offline right now/.test(t) || !MENTIONS_HOURS.test(t) || !/support@inferroute\.ai/.test(t)) fail("scheduled+gone: " + t);
 
 // SCHEDULED still behaves exactly as before — the mode must not have eaten the feature.
 t = say({ configured: true, mode: "scheduled", reachable: true, open_now: true, found: true,

@@ -563,7 +563,22 @@
     return box;
   }
 
-  async function startSession(matterId, onChange) {
+  // Is patent search offline right now? Asked when a patent session is about to start, so the answer is current
+  // (the server keeps a probe for 30 seconds). Unknown counts as not offline: this only decides whether to warn.
+  async function searchOfflineNow() {
+    try {
+      const d = await api("/api/search-status");
+      return Boolean(d.configured && !d.reachable);
+    } catch (_) { return false; }
+  }
+
+  async function startSession(matterId, onChange, kind) {
+    // A prior-art session with the search machine offline: say so first, and let the person choose (0.9.124 test:
+    // it started as usual and the outage surfaced as failed searches). A name check never uses it.
+    if (kind && kind !== "name" && await searchOfflineNow()
+        && !(await confirmBox("Patent search is offline right now",
+          "You can still open a session and work on the disclosure with the assistant. It can't search until patent "
+          + "search is back, and nothing is sent to the search machine while it is offline.", "Open the session anyway"))) return;
     try {
       await api("/api/sessions", { id: matterId });
       onChange();
@@ -639,6 +654,7 @@
     return m ? `in ${h} h ${m} min` : `in ${h} h`;
   }
   function searchStatusBar(d) {
+    const STILL_WORKS = "Name checks and readings still work.";
     // The window in Paris, and the same instant where the reader is — shown only when they differ.
     const parisOpen = hourAt(d.opens_at, d.tz), parisClose = hourAt(d.closes_at, d.tz);
     const hereOpen = hourAt(d.opens_at), hereClose = hourAt(d.closes_at);
@@ -657,32 +673,26 @@
         dot = "open";
         head = "Patent search is available";
         sub = "";
-      } else if (d.found === false) {
-        dot = "trouble";
-        head = "Patent search is not available from this computer";
-        sub = "The search machine cannot be found at the address this computer is set up to use. "
-          + "It needs looking at. Everything else on this page works as usual.";
       } else {
-        dot = "trouble";
-        head = "Patent search is not answering";
-        sub = "It runs continuously, so this is not a closing time — try again in a few minutes. "
-          + "Nothing is lost if a search cannot start.";
+        // OFFLINE, SAID AS AN OUTAGE (0.9.124 test: "cannot be found… it needs looking at" read as breakage,
+        // with no times and nobody to ask). Not found and not answering are the same news to the reader: no
+        // search for now, everything else works. This machine keeps no published hours, so the line names who
+        // to ask instead of inventing a time.
+        dot = "closed";
+        head = "Patent search is offline right now";
+        sub = `${STILL_WORKS} Questions: support@inferroute.ai.`;
       }
     } else if (d.open_now && d.reachable) {
       dot = "open";
       head = `Patent search is open until ${parisClose} Paris time`;
       sub = (elsewhere ? `That is ${hereClose} where you are. ` : "") + `Open ${timetable}.`;
-    } else if (d.found === false) {
-      // Not "closed until 13:00": this machine's address cannot be found at all, so an opening time would
-      // be an invention. A person told a comforting timetable waits; a person told this asks.
-      dot = "trouble";
-      head = "Patent search is not available from this computer";
-      sub = "The search machine cannot be found at the address this computer is set up to use. This is not "
-        + "the timetable — it needs looking at. Everything else on this page works as usual.";
-    } else if (d.open_now && !d.reachable) {
-      dot = "trouble";
-      head = "Patent search should be open now, but it is not answering";
-      sub = `It is scheduled ${timetable}. Try again in a few minutes; nothing is lost if a search cannot start.`;
+    } else if (d.found === false || (d.open_now && !d.reachable)) {
+      // Offline when it should not be. Its published hours are given, and who to ask if it stays that way:
+      // its address not being found may mean it is not coming back on its own, so the hours alone could leave
+      // a person waiting for an opening that does not come.
+      dot = "closed";
+      head = "Patent search is offline right now";
+      sub = `${STILL_WORKS} It is scheduled ${timetable}. If it stays offline, write to support@inferroute.ai.`;
     } else if (d.reachable) {
       dot = "open";
       head = "Patent search is answering, outside its usual hours";
@@ -723,7 +733,7 @@
       : starting ? button("Starting…", "primary start-session", (ev) => { ev.stopPropagation(); open(); })
       : button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
-      if (m.needs_review) open(); else startSession(m.id, open);
+      if (m.needs_review) open(); else startSession(m.id, open, m.kind || "invention");
     });
     // What KIND of work each card is, at a glance (Henry, 22 Oct: name checks and patent matters looked the same).
     const kindKey = m.needs_review ? "draft" : m.kind === "name" ? "name" : "invention";
@@ -915,7 +925,7 @@
         : isName && m.running && m.running.state === "ready" ? null
         : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
         : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
-        : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh)),
+        : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh, isName ? "name" : "invention")),
       button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh, isName)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;

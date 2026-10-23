@@ -1069,3 +1069,28 @@ def test_the_session_list_badge_reads_every_check_its_session_page_shows(home):
     assert row["checked"] is False
     js = (Path(H.__file__).resolve().parent / "probant_web" / "home.js").read_text()
     assert "s.ai_verified && s.boxed ?" not in js and 's.checked ? "ok-text"' in js
+
+
+def test_the_home_page_says_an_offline_search_machine_is_offline_calmly():
+    """0.9.124 end-to-end test: with the search machine's name not resolving, Home said it "cannot be found… It
+    needs looking at", with no hours and nobody to ask. Runs the page's own searchStatusBar() over every state
+    (tests/availability_mode_sim.js): offline is said as offline, with what still works, the hours when the
+    service publishes them, and the support address otherwise."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "availability_mode_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, (r.stdout + r.stderr)[-1200:]
+
+
+def test_a_patent_session_asks_before_starting_while_search_is_offline():
+    """The Home page asks before a prior-art session starts with search offline, and only for a patent matter."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    fn = src[src.index("  async function startSession(matterId, onChange, kind) {"):src.index("    try {", src.index("  async function startSession("))]
+    assert 'kind !== "name" && await searchOfflineNow()' in fn and "Patent search is offline right now" in fn
+    assert 'startSession(m.id, open, m.kind || "invention")' in src
+    assert 'startSession(m.id, refresh, isName ? "name" : "invention")' in src

@@ -138,6 +138,7 @@ def test_a_draft_from_a_repository_is_located_and_dated_by_git_not_by_the_model(
     c, m = S._split_matter(row["id"])
     rec = S.load_record(c, m)
     where = rec["intake_origin"]["repo"]
+    assert rec["intake_origin"]["source_kind"] == "repo"           # the matter page says "your repository"
     assert where["file"] == "src/engine.py" and where["commit"] == info["commit"]
     assert where["lines"][0] == where["lines"][1] == 5
     assert where["file_added"].startswith("2024-03-01")             # the file existed from the first commit

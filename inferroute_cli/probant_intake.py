@@ -331,7 +331,9 @@ class DraftCreator:
             origin = {"intake": self.ident, "source_name": self.meta["source_name"],
                       "source_sha256": self.meta["sha256"], "quote": quote, "where": match.start(),
                       "suggested_priority_date": date, "title": title,
-                      "title_key": title_key, "quote_key": quote_key, "summary_key": summary_key}
+                      "title_key": title_key, "quote_key": quote_key, "summary_key": summary_key,
+                      # What was read: the matter page names it ("Created from your repository"), never assuming.
+                      "source_kind": "repo" if self.meta.get("kind") == "repo" else "document"}
             source_lines = f"Source: {self.meta['source_name']}\nSHA-256: {self.meta['sha256']}\n"
             if self.meta.get("kind") == "repo":
                 # Located and dated by git on this computer, from the staged commit; never the model's words.

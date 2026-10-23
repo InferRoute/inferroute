@@ -480,9 +480,18 @@
     ], [button("Cancel", "ghost", closeDialog), save]);
   }
 
+  // What a draft was read from (0.9.124 test: a repository draft said "Created from your document"). Drafts made
+  // before the record said so are told apart by the git location only a repository draft carries.
+  const draftSource = (m) => {
+    const o = m.intake_origin || {};
+    return o.source_kind === "repo" || o.repo ? "repository" : "document";
+  };
+
   // ── starting a session ──
   const watching = new Map();       // launch id → timer
-  function launchBox(matterId, launch, onChange) {
+  // `reading`: the launch is a document or repository reading, not a session on a matter; `finished` says the
+  // reading itself is done while its session stays open for questions.
+  function launchBox(matterId, launch, onChange, reading) {
     const box = el("div", "launch");
     const paint = (l) => {
       clear(box);
@@ -503,8 +512,14 @@
         }
         box.className = "launch ready";
         const since = l.started_at ? new Date(l.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
-        box.append(el("div", "", el("b", "", "A session is open on this matter. "),
-            `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session.`),
+        // A reading is not "a session on this matter" (0.9.124 test): it is said as a reading, and once the reading
+        // is done it says so, rather than reading as still at work.
+        const lead = !reading ? "A session is open on this matter. "
+          : reading.finished ? "Reading done. " : "Reading in progress. ";
+        const rest = reading && reading.finished
+          ? "Its session is still open, so you can ask about the drafts; end it when you are done."
+          : `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session.`;
+        box.append(el("div", "", el("b", "", lead), rest),
           el("div", "row actions",
             button("Open the session", "primary", () => openLocal(l.url)),
             // END IT FROM HERE. Without this a session could only be ended from inside its own tab, so one
@@ -851,7 +866,8 @@
       const row = el("button", "session-row",
         el("span", "when", localTime(s.started_at)),
         withMatter ? el("span", "matter-of", matterId) : null,
-        el("span", "how", s.surface === "browser" ? "browser" : s.surface === "terminal" ? "terminal" : "—"),
+        // Where it ran, in words (0.9.124 test: a bare "browser" read like a column of jargon).
+        el("span", "how", s.surface === "browser" ? "in the browser" : s.surface === "terminal" ? "in the terminal" : ""),
         el("span", "", plural(s.searches, "search", "searches")),
         el("span", "", plural(s.documents, "document", "documents")),
         s.__live ? el("span", "live-text", "● open now")
@@ -939,7 +955,7 @@
       })));
     if (!words) p.append(el("p", "warn-text", isName ? "This matter lists no names yet. Add the product and the names, then check them."
       : "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
-    if (m.needs_review) p.append(el("p", "warn-text", "Created from your document. Review the disclosure and date before starting a search."));
+    if (m.needs_review) p.append(el("p", "warn-text", `Created from your ${draftSource(m)}. Review the disclosure and date before starting a search.`));
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
 
     if (isName) {
@@ -1630,11 +1646,11 @@
       // The reading is done: what it made, and what to do next (22 Oct test: nothing changed when it finished).
       const n = (d.drafts || []).length;
       p.append(el("div", "card key-card", el("p", "", el("b", "", `Reading finished at ${localTime(d.finished.at)} · ${n} draft matter${n === 1 ? "" : "s"}. `),
-        "Next: open each draft below, check its description against its passage, confirm the priority date, then start a prior-art survey from it."),
-        d.running ? el("p", "sub", "The session stays open so you can ask about the drafts; end it when you are done.") : null));
+        "Next: open each draft below, check its description against its passage, confirm the priority date, then start a prior-art survey from it.")));
     }
     if (d.running) {
-      p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
+      p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id),
+        { finished: Boolean(d.finished) }));
       // What the wait really is (22 Oct test: "a few minutes" against 14 before the first finding).
       const listMin = 5 + Math.round((d.meta.chars || 0) / 4000);
       if (!d.finished) p.append(el("p", "sub", `The AI first lists the inventions it finds (about ${listMin} minutes for ${(d.meta.chars || 0).toLocaleString()} characters), `

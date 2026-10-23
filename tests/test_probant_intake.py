@@ -104,6 +104,7 @@ def test_draft_creator_accepts_a_section_label_without_changing_the_bound_source
     _, matter = S._split_matter(result["id"])
     rec = S.load_record("Acme", matter)
     assert rec["intake_origin"]["source_name"] == "report.txt"
+    assert rec["intake_origin"]["source_kind"] == "document"
     assert rec["intake_origin"]["quote"] == "COOLANT-MARKER channels moulded between the"
 
 

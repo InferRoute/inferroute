@@ -1104,3 +1104,14 @@ def test_opening_a_matter_starts_at_the_top_of_its_page():
     fn = src[src.index("  async function route() {"):src.index("  function showNoKey()")]
     assert "if (h !== lastRoute) { lastRoute = h; window.scrollTo(0, 0); }" in fn
     assert fn.index("window.scrollTo(0, 0)") < fn.index("return renderMatter(")
+
+
+def test_readings_and_drafts_are_named_for_what_they_are():
+    """0.9.124 end-to-end test: a repository draft said "Created from your document"; a reading said "A session is
+    open on this matter" and still looked at work once it had finished; the sessions list showed a bare "browser"."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    assert "Created from your ${draftSource(m)}" in src
+    assert 'o.source_kind === "repo" || o.repo ? "repository" : "document"' in src
+    assert '"Reading done. " : "Reading in progress. "' in src
+    assert "{ finished: Boolean(d.finished) }" in src
+    assert '? "browser" :' not in src and '"in the browser"' in src

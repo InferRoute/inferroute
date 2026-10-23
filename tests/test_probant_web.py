@@ -2955,3 +2955,18 @@ def test_below_980_the_page_scrolls_so_the_panel_never_covers_the_message_box():
     assert ".layout { display: block; }" in block
     assert "position: sticky" in block and ".composer" in block
     assert "html, body { height: auto;" in block
+
+
+def test_a_retry_notice_is_shown_only_while_something_was_asked(tmp_path):
+    """0.9.124 end-to-end test: "The AI machine didn't answer; retrying…" popped up after the report was done, about
+    a retry of Pi's own between turns. With no turn and no tool running, the notice is dropped; during a turn it
+    is still shown, because then the person is waiting on it."""
+    b = _bridge(tmp_path)
+    notices = lambda: [e for e in b.history if e.get("kind") == "notify"]
+    for out in W.normalize({"type": "auto_retry_start"}):
+        b.publish(out, agent=True)
+    assert notices() == []
+    b.publish({"kind": "busy", "value": True}, agent=True)
+    for out in W.normalize({"type": "auto_retry_start"}):
+        b.publish(out, agent=True)
+    assert [n["message"] for n in notices()] == ["The AI machine didn't answer; retrying…"]

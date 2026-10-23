@@ -8,7 +8,7 @@ it cannot write there. This closes both, by topology rather than by rule:
       verifying proxy  127.0.0.1:PORT   │    agent connects to  127.0.0.1:PORT
             ▲                           │            │
             │  relay thread             │            ▼  forwarder (binds first, then confines)
-      unix socket  <cfg>/tmp/netns/…    │──bind-mount──┘
+      unix socket  $XDG_RUNTIME_DIR/ir-…│──bind-mount──┘
 
 There is no route off the machine from inside — not a filtered one, an absent one. The only channel is a unix
 socket the launcher created, whose other end is a proxy that verifies the enclave before anything is sealed.
@@ -292,6 +292,25 @@ def runtime_ro_binds(*binaries: str) -> List[str]:
     return out
 
 
+# sun_path is 108 bytes on Linux including the terminating NUL.
+UNIX_PATH_MAX = 107
+
+
+def short_socket_dir() -> str:
+    """A fresh 0700 directory for the relay sockets, short enough for any port's `<port>.sock` to fit.
+    $XDG_RUNTIME_DIR (per-user, tmpfs, already 0700) when it is usable and short; /tmp otherwise."""
+    import tempfile
+    for base in (os.environ.get("XDG_RUNTIME_DIR", ""), "/tmp"):
+        if not base or not os.path.isdir(base) or not os.access(base, os.W_OK | os.X_OK):
+            continue
+        if len(os.path.join(base, "ir-XXXXXXXX", "65535.sock")) > UNIX_PATH_MAX:
+            continue
+        d = tempfile.mkdtemp(prefix="ir-", dir=base)
+        os.chmod(d, 0o700)
+        return d
+    raise NetnsUnavailable("no short private directory for the relay sockets ($XDG_RUNTIME_DIR and /tmp unusable)")
+
+
 class NetnsSandbox:
     """Host-side relays plus the bwrap command line that runs the agent inside an empty netns.
 
@@ -314,13 +333,17 @@ class NetnsSandbox:
         self.sock_dir = os.path.join(self.cfg_dir, "tmp", "netns")
         os.makedirs(self.sock_dir, mode=0o700, exist_ok=True)
         os.chmod(self.sock_dir, 0o700)
+        # The sockets themselves live apart, under a SHORT private name: a unix socket path is limited to 107
+        # bytes, and <home>/<config>/tmp/netns/<port>.sock passed that for a home path of ~65 characters
+        # ("AF_UNIX path too long", no session could start). mkdtemp makes it 0700 with a random name.
+        self.relay_dir = short_socket_dir()
         self.rw = [os.path.realpath(p) for p in rw if p and os.path.exists(p)]
         self.ro = list(ro) + runtime_ro_binds(binary or "pi")
         self.ro = [p for i, p in enumerate(self.ro) if p and p not in self.ro[:i]]
         self._stop = threading.Event()
         self._maps: Dict[int, str] = {}
         for port in self.ports:
-            sock_path = os.path.join(self.sock_dir, f"{port}.sock")
+            sock_path = os.path.join(self.relay_dir, f"{port}.sock")
             _relay(sock_path, port, self._stop)
             self._maps[port] = sock_path
         # The forwarder and a copy of the confinement module travel in the socket dir, which is already
@@ -344,6 +367,8 @@ class NetnsSandbox:
                 cmd += ["--ro-bind", p, p]
         for p in [self.cfg_dir, *self.rw]:
             cmd += ["--bind", p, p]
+        # Read-only: connecting to a socket needs no write access to the mount, and nothing inside may add to it.
+        cmd += ["--ro-bind", self.relay_dir, self.relay_dir]
         cmd += ["--setenv", "HOME", home, "--chdir", self.rw[0] if self.rw else home, "--"]
         cmd += [sys.executable if os.path.exists(sys.executable) else "python3", self.forward_py]
         for port, sock in self._maps.items():
@@ -364,6 +389,7 @@ class NetnsSandbox:
                 os.unlink(sock)
             except OSError:
                 pass
+        shutil.rmtree(self.relay_dir, ignore_errors=True)
 
 
 def run_in_netns_bind(argv: Sequence[str], *, ports: Sequence[int], cfg_dir: str, rw: Sequence[str],

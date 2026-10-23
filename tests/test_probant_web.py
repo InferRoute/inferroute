@@ -2943,3 +2943,15 @@ def test_a_search_asked_for_while_search_is_offline_is_said_first_and_the_person
     assert out["survey"] and out["typed"] and out["like"]
     assert not out["chat"], "a message that does not ask for a search goes straight through"
     assert out["gated"] and out["fromTrust"]
+
+
+def test_below_980_the_page_scrolls_so_the_panel_never_covers_the_message_box():
+    """0.9.124 end-to-end test: between 761 and 980 px the checks panel, as a second grid row, covered the message
+    box (at 768 Send was under it; at 900 the box was hidden). Below 980 the page scrolls instead, with the
+    message box pinned. Checked in a real browser at 390/768/900/1024/1280/1440; this pins the rule itself."""
+    css = (STATIC / "app.css").read_text()
+    block = css[css.index("@media (max-width: 980px) {"):]
+    block = block[:block.index("\n}\n")]
+    assert ".layout { display: block; }" in block
+    assert "position: sticky" in block and ".composer" in block
+    assert "html, body { height: auto;" in block

@@ -97,6 +97,7 @@ def test_draft_creator_accepts_a_section_label_without_changing_the_bound_source
     result = I.DraftCreator(meta["id"], "Acme").create({
         "title": "Cooling jacket",
         "summary": "A jacket routes coolant through moulded channels between cylindrical cells.",
+        "features": ["COOLANT-MARKER channels moulded between the\ncells"],
         "quote": "COOLANT-MARKER channels moulded between the",
         "source": "report.txt — Concept A section",
     })
@@ -246,3 +247,49 @@ def test_findings_are_recorded_in_one_call_because_a_round_trip_each_is_the_cost
         assert got["refused"].startswith("record_findings needs at least one finding")
         rows = [json.loads(line) for line in out.read_text().splitlines()]
         assert [x["title"] for x in rows] == ["One", "Two"]      # one call, one write, both findings
+
+
+KETTLE = (Path(__file__).parent / "data" / "invention-thermal-kettle.md").read_text()
+KETTLE_FEATURES = ["A kettle with two sensors: a thermistor under the heating plate and an infrared sensor in the lid aimed at the water surface.",
+                   "the controller records both readings and fits a simple correction curve (plate reading to water temperature) for that fill volume",
+                   "The correction is re-fitted every fill, so scale build-up on the plate is compensated automatically."]
+
+
+def test_a_draft_whose_summary_is_cut_or_garbled_is_refused_and_written_again(home):
+    """rc 0.9.125 e2e (D5, shot 37): reading the 1-page kettle document saved "…a first-heat-up calibration
+    one——all components of one mechanism…", ending "…a correction curve and a plate reading", and the assistant
+    called it "garbled and incomplete". That summary is refused now; nothing is created until it is whole."""
+    meta = I.stage(KETTLE, "invention-thermal-kettle.md")
+    creator = I.DraftCreator(meta["id"], "Personal")
+    seen = ("The text describes one mechanism in which a kettle's two water-temperature readings (one from a thermistor "
+            "under the heating plate, and optionally a second infrared sensor in the lid aimed at the water surface) and a "
+            "first-heat-up calibration one——all components of one mechanism that corrects plate temperature. The two "
+            "components described are a correction curve and a plate reading")
+    quote = "During the first heat-up of each fill, the controller records both readings"
+    with pytest.raises(S.ProbantError, match="stops mid-sentence"):
+        creator.create({"title": "Self-calibrating kettle", "summary": seen, "features": KETTLE_FEATURES, "quote": quote})
+    with pytest.raises(S.ProbantError, match="missing or repeated"):
+        creator.create({"title": "Self-calibrating kettle", "summary": seen + ".", "features": KETTLE_FEATURES, "quote": quote})
+    assert not (S.matters_dir() / "Personal").exists() or not any((S.matters_dir() / "Personal").iterdir())
+
+
+def test_a_document_draft_lists_its_features_in_the_documents_own_words(home):
+    meta = I.stage(KETTLE, "invention-thermal-kettle.md")
+    creator = I.DraftCreator(meta["id"], "Personal")
+    summary = ("A kettle has two sensors: a thermistor under the heating plate and an infrared sensor in the lid aimed "
+               "at the water surface. During the first heat-up of each fill the controller fits a correction curve from "
+               "plate reading to water temperature, and re-fits it every fill so scale build-up is compensated.")
+    quote = "During the first heat-up of each fill, the controller records both readings"
+    # No features: refused for a document. A feature the document does not contain: refused, and named.
+    with pytest.raises(S.ProbantError, match="features"):
+        creator.create({"title": "Self-calibrating kettle", "summary": summary, "quote": quote})
+    with pytest.raises(S.ProbantError, match="not in the document"):
+        creator.create({"title": "Self-calibrating kettle", "summary": summary, "quote": quote,
+                        "features": KETTLE_FEATURES[:2] + ["An optional infrared sensor may be added to the lid."]})
+    row = creator.create({"title": "Self-calibrating kettle", "summary": summary, "quote": quote, "features": KETTLE_FEATURES})
+    c, m = S._split_matter(row["id"])
+    text = (S.workspace_path(c, m) / "disclosure.md").read_text()
+    assert "## Features, in the document's words" in text
+    # The source's own sentences, line-wraps and all, as the document has them.
+    assert "- A kettle with two sensors: a thermistor under the heating plate and an infrared sensor in the lid aimed at the water surface." in text
+    assert row["features"][1].startswith("the controller records both readings and fits a simple correction curve")

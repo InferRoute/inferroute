@@ -1122,13 +1122,17 @@ export default function (pi: ExtensionAPI) {
 			name: "create_draft_matter",
 			label: "Create a draft matter",
 			description: "Create one draft matter from this uploaded document, under the client selected by the professional. " +
-				"Give a title, complete technical summary and exact supporting source passage (20–8000 characters). " +
+				"Give a title, complete technical summary, the invention's technical features and an exact supporting source " +
+				"passage (20–8000 characters). Each feature is a sentence or clause copied EXACTLY from the document, one per " +
+				"feature the summary describes; the summary restates them in complete sentences, in the document's terms, and " +
+				"calls nothing optional or alternative unless the document does. The host refuses a feature it cannot find in " +
+				"the document and a summary that stops mid-sentence; correct and call again. " +
 				"An optional source label may name a section; it cannot select another file. The host checks the passage, " +
 				"preserves the summary and avoids overwriting or duplicating existing drafts. " +
 				"A priority date is only a suggestion when explicitly stated in the source. Nothing is searched automatically.",
 			promptSnippet: "Create a draft matter for each distinct invention, with its supporting passage",
-			parameters: Type.Object({ title: Type.String(), summary: Type.String(), quote: Type.String(),
-				priority_date: Type.Optional(Type.String()), source: Type.Optional(Type.String()) }),
+			parameters: Type.Object({ title: Type.String(), summary: Type.String(), features: Type.Optional(Type.Array(Type.String())),
+				quote: Type.String(), priority_date: Type.Optional(Type.String()), source: Type.Optional(Type.String()) }),
 			async execute(_toolCallId, params, signal) {
 				const response = await fetch(`${ENDPOINT}/probant/intake/create-draft`, {
 					method: "POST", signal,

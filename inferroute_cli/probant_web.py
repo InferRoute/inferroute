@@ -1657,8 +1657,9 @@ DRAFT_OPENING_INSTRUCTION = ("Read document.txt in this directory, all of it. Co
                              "one line each, and in that same reply create the draft matter for the first one with "
                              "create_draft_matter. Then create the rest ONE PER REPLY, in the order of your list, until "
                              "every item has a draft. Each draft preserves the invention's full technical description, "
-                             "with the exact names, flags and values the source uses, is supported by a passage from the "
-                             "source, and states nothing the source does not say. Then give the professional a short "
+                             "with the exact names, flags and values the source uses, lists its features as passages "
+                             "copied from the source, is supported by a passage from the source, and states nothing the "
+                             "source does not say. Then give the professional a short "
                              "summary of the drafts actually created and anything that needs review.")
 
 

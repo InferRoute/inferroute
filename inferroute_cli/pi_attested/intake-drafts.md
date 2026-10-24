@@ -18,10 +18,15 @@ invention. Quote the supporting passage (code, a comment or the README) exactly 
 appears in one file. Do not include priority_date for repository drafts: the host
 dates them from the repository's history.
 
-For each distinct invention call create_draft_matter. Supply a concise title, a
-complete, self-contained technical summary, and a passage copied from the document
-that supports the invention. The summary must include the important technical
-features; do not extrapolate, invent missing details or turn limitations into facts.
+For each distinct invention call create_draft_matter. Supply a concise title, the
+invention's technical features, a complete, self-contained technical summary, and a
+passage copied from the document that supports the invention. Each feature is a
+sentence or clause copied exactly from the document (for a repository, features may be
+omitted). The summary restates every feature you list in complete sentences, using the
+document's own terms, and ends with a full stop; do not extrapolate, invent missing
+details or turn limitations into facts, and call a part optional, preferred or an
+alternative only where the document does. The host refuses a feature it cannot find
+in the document and a summary that stops mid-sentence: correct it and call again.
 Variations of the same invention belong together; separate inventions get separate
 drafts. A source-passage check does not prove the summary correct or patentable.
 The host already binds each call to the uploaded document. If you include the optional

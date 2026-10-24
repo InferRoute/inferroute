@@ -247,6 +247,32 @@ def create_matter(ident: str, client: str, matter: str, proposal_index: int,
     return f"{client}/{matter}"
 
 
+MAX_FEATURES = 20
+# A summary that stops mid-sentence, or carries a doubled dash or comma where words went missing, is not the
+# summary the model meant to write. rc 0.9.125 e2e (D5): a 1-page document produced "…a first-heat-up calibration
+# one——all components of one mechanism…" ending "…a correction curve and a plate reading", and the assistant
+# itself called what was saved "garbled and incomplete". Such a draft is refused, so it is written again.
+_SUMMARY_END = re.compile(r"""[.!?)\]"'”’*`]\s*$""")
+_SUMMARY_GAP = re.compile(r"(—\s*—|–\s*–|,\s*,|;\s*;|\(\s*\))")
+
+
+def summary_problem(summary: str) -> str:
+    """Why a summary cannot be a draft's description as written, in words for the model; "" when it can."""
+    text = summary.strip()
+    if not _SUMMARY_END.search(text):
+        return "it stops mid-sentence (its last sentence has no full stop)"
+    gap = _SUMMARY_GAP.search(text)
+    if gap:
+        return f"it has \"{gap.group(0)}\" where words seem to be missing or repeated"
+    return ""
+
+
+def _find_passage(body: str, passage: str):
+    """The passage in the source, allowing only line-wrap whitespace to differ."""
+    parts = passage.split()
+    return re.search(r"\s+".join(re.escape(part) for part in parts), body) if parts else None
+
+
 class DraftCreator:
     """A host capability bound to one source and one client, never to caller paths."""
 
@@ -257,12 +283,15 @@ class DraftCreator:
 
     def create(self, finding: dict) -> dict:
         import shutil
-        allowed = {"title", "summary", "quote", "priority_date", "source"}
+        allowed = {"title", "summary", "quote", "priority_date", "source", "features"}
         if not isinstance(finding, dict) or set(finding) - allowed:
-            raise S.ProbantError("provide only a title, summary, source passage and optional suggested date")
-        for key in allowed:
+            raise S.ProbantError("provide only a title, summary, features, source passage and optional suggested date")
+        for key in allowed - {"features"}:
             if key in finding and not isinstance(finding[key], str):
                 raise S.ProbantError(f"{key} must be text")
+        features = finding.get("features", [])
+        if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
+            raise S.ProbantError("features must be a list of passages, each copied exactly from the document")
         title = re.sub(r"\s+", " ", finding.get("title", "")).strip()
         summary = finding.get("summary", "").strip()
         quote = finding.get("quote", "").strip()
@@ -272,6 +301,31 @@ class DraftCreator:
             raise S.ProbantError(f"give a complete summary of {MAX_SUMMARY:,} characters or fewer; it will not be truncated")
         if not 20 <= len(quote) <= MAX_QUOTE:
             raise S.ProbantError(f"copy a supporting passage of 20–{MAX_QUOTE:,} characters from the document")
+        why = summary_problem(summary)
+        if why:
+            raise S.ProbantError(f"the summary looks cut off or garbled: {why}. Nothing was created. Write the summary "
+                                 "again as complete sentences, one for each feature you list, in the document's own terms.")
+        # EVERY FEATURE TRACEABLE TO THE SOURCE. The summary is the model's words and nothing here can check them; the
+        # features are the document's words, each found in it, and they are what the professional checks the summary
+        # against (rc 0.9.125, D5: the core sensor of a two-sensor kettle came out "optional"). Required for a
+        # document; a repository's mechanism is often spread over code, where its quoted passage carries it.
+        features = [f.strip() for f in features if f.strip()]
+        if self.meta.get("kind") != "repo" and not features:
+            raise S.ProbantError("list the invention's technical features in `features`: each one a sentence or clause "
+                                 "copied exactly from the document, one per feature the summary describes. Nothing was created.")
+        if len(features) > MAX_FEATURES or any(not 10 <= len(f) <= 1000 for f in features):
+            raise S.ProbantError(f"give at most {MAX_FEATURES} features, each a passage of 10–1,000 characters copied from the document")
+        found_features, missing = [], []
+        for f in features:
+            hit = _find_passage(self.body, f)
+            if hit is None:
+                missing.append(f)
+            elif " ".join(hit.group(0).split()) not in found_features:
+                found_features.append(" ".join(hit.group(0).split()))     # as the document has it, unwrapped
+        if missing:
+            shown = "; ".join(f"\"{m[:120]}\"" for m in missing[:3])
+            raise S.ProbantError(f"{len(missing)} of the features {'is' if len(missing) == 1 else 'are'} not in the document "
+                                 f"as written ({shown}). Copy each feature exactly from the document; nothing was created.")
         # Some models include a section locator (for example, "document.txt — Concept A").
         # `source` is descriptive only: it never selects a file. This creator is already bound
         # to the uploaded document, and the supporting quote is checked against that exact source.
@@ -354,11 +408,13 @@ class DraftCreator:
                    "created_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                    "workspace": str(ws.resolve()), "changes": [], "needs_review": True,
                    "intake_origin": origin}
-            disclosure = (f"# {title}\n\n{summary}\n\n## From the source document\n\n"
+            feature_lines = ("## Features, in the document's words\n\n"
+                             + "\n".join("- " + f for f in found_features) + "\n\n") if found_features else ""
+            disclosure = (f"# {title}\n\n{summary}\n\n{feature_lines}## From the source document\n\n"
                           + "\n".join("> " + line for line in quote.splitlines())
                           + "\n\n" + source_lines)
             row = {"id": f"{self.client}/{name}", "client": self.client,
-                   "title": title, "summary": summary, "quote": quote,
+                   "title": title, "summary": summary, "quote": quote, "features": found_features,
                    "suggested_priority_date": date, "title_key": title_key, "quote_key": quote_key, "summary_key": summary_key,
                    "status": "creating"}
             drafts.append(row)

@@ -1809,3 +1809,22 @@ def test_resume_model_is_the_model_the_newest_transcript_last_ran_on(tmp_path, m
         {"type": "message", "message": {"role": "assistant", "model": "glm-5.1", "stopReason": "error"}}]) + "\n")
     assert PA.resume_model(str(cwd)) == "glm-5.2"          # an errored turn on another model does not count
     assert PA.resume_model(str(tmp_path / "elsewhere")) is None
+
+
+def test_a_stopped_reply_is_closed_so_the_next_request_does_not_carry_two_questions():
+    """23 Oct: after Stop, Pi leaves the aborted reply out of the next request, so the model saw the stopped
+    question and the new one back to back and answered both (3 of 3 attempts). The extension's `context` hook
+    keeps the interrupted reply as a closed one (tests/stopped_reply_sim.ts runs the real block)."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(PA.__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "stopped_reply_sim.ts")],
+                       cwd=root, capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "strip-types" in r.stderr:
+        pytest.skip("this node cannot strip TypeScript")
+    assert r.returncode == 0, r.stdout + r.stderr[-800:]
+    assert "roles alternate after Stop" in r.stdout

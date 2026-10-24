@@ -929,6 +929,37 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// ── a stopped reply stays in the conversation ──
+	// Pi drops every assistant message that ended "aborted" or "error" from what it sends the model next time
+	// (pi-ai transformMessages: "Skip errored/aborted assistant messages entirely"). After Stop, the next request
+	// therefore carries two user messages in a row — the stopped question and the new one — and the model
+	// answers both: asked "in one sentence, the core idea?" after stopping a 12-feature list, it wrote the list
+	// again (reproduced 3 of 3, 23 Oct). Here the interrupted reply is kept as what it was: the text it had
+	// written, with a note that it was stopped. Its thinking and any half-written tool call are dropped, since
+	// neither was finished and a tool call nobody ran must not be replayed. Only the copy sent to the model
+	// changes; the session file keeps the message as Pi recorded it.
+	const STOPPED_NOTE = "[The professional stopped this reply here, before it was finished.]";
+	const FAILED_NOTE = "[This reply ended here on an error, before it was finished.]";
+	function closeInterruptedReplies<M>(messages: M[]): M[] {
+		let changed = false;
+		const out = messages.map((m) => {
+			const a = m as { role?: string; stopReason?: string; content?: unknown };
+			if (a?.role !== "assistant" || (a.stopReason !== "aborted" && a.stopReason !== "error")) return m;
+			changed = true;
+			const blocks = Array.isArray(a.content) ? (a.content as { type?: string; text?: unknown }[]) : [];
+			const text = blocks.filter((b) => b?.type === "text" && typeof b.text === "string").map((b) => b.text as string).join("").trimEnd();
+			const note = a.stopReason === "aborted" ? STOPPED_NOTE : FAILED_NOTE;
+			const { errorMessage: _dropped, ...rest } = a as { errorMessage?: unknown };
+			return { ...rest, stopReason: "stop", content: [{ type: "text", text: text ? `${text}\n\n${note}` : note }] } as M;
+		});
+		return changed ? out : messages;
+	}
+	pi.on("context", async (event) => {
+		const messages = closeInterruptedReplies(event.messages);
+		return messages === event.messages ? undefined : { messages };
+	});
+	// ── end stopped reply ──
+
 	// ── name check (a name matter) ──
 	// Registered only for a name matter. The search runs on the host against the local trademark index; the
 	// host route is behind this session's key, and nothing about the name goes to a register or a website.

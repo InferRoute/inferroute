@@ -1107,3 +1107,19 @@ def test_the_session_list_badge_reads_every_check_its_session_page_shows(home):
     assert row["checked"] is False
     js = (Path(H.__file__).resolve().parent / "probant_web" / "home.js").read_text()
     assert "s.ai_verified && s.boxed ?" not in js and 's.checked ? "ok-text"' in js
+
+
+def test_an_earlier_session_says_which_replies_were_cut_off(monkeypatch):
+    """A reply that was stopped or cut by an error is kept as what was shown; continued from, it must not read as
+    a finished answer (23 Oct: a cut paragraph followed by its rewrite)."""
+    detail = {"started_at": 0, "searches": [], "marks": {}, "conversation": [
+        {"kind": "user", "text": "List twelve features"},
+        {"kind": "assistant", "text": "1. A sealed", "cut": "stopped"},
+        {"kind": "assistant", "text": "the amount of", "cut": "error"},
+        {"kind": "redone"},
+        {"kind": "assistant", "text": "The whole answer."}]}
+    monkeypatch.setattr(H, "session_detail", lambda *a: detail)
+    notes = H.continue_notes("Acme", "cooling", "20261023T000000Z-x")["markdown"]
+    assert "**The assistant:** 1. A sealed *(stopped by the professional here)*" in notes
+    assert "**The assistant:** the amount of *(cut off here by an error)*" in notes
+    assert "**The assistant:** The whole answer.\n" in notes

@@ -181,6 +181,30 @@ def strip_ansi(text: Any) -> str:
     return ANSI.sub("", str(text or ""))
 
 
+# A sentence is finished when it ends on one of these (a closing quote, bracket or emphasis may follow).
+_SENTENCE_END = re.compile(r"""[.!?:;…)\]"'”’*`]\s*$""")
+_LAST_SENTENCE_END = re.compile(r"""[.!?:;…][)\]"'”’*`]*(?=\s)""")
+
+
+def mend_text_before_tool_call(text: str) -> str:
+    """The words a reply writes just before a tool call, without the half-sentence the model service drops.
+
+    rc 0.9.125 e2e (D4): "I have the search results for both names. Let", "…in my first draft. Let me rewrite it
+    from", "Let me write the report cleanly, from the actual search results, in one write" — every cut sentence in
+    that test was the text of a reply that went on to call a tool, and each was already cut in the message Pi
+    received (the page and the record show Pi's own final text, not the streamed pieces): the model service ends
+    the text where the tool call begins and the last few words never arrive. They cannot be recovered here, so the
+    half-sentence is not shown as if it were what the assistant said: the text ends at its last finished sentence,
+    and a preamble with no finished sentence at all ends in an ellipsis instead of mid-word."""
+    body = str(text or "").rstrip()
+    if not body or _SENTENCE_END.search(body):
+        return body
+    ends = list(_LAST_SENTENCE_END.finditer(body))
+    if ends:
+        return body[:ends[-1].end()].rstrip()
+    return body + "…"
+
+
 def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Pi RPC event → the page's small event vocabulary. Unknown events are dropped, not passed through."""
     t = ev.get("type")
@@ -206,6 +230,9 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         if msg.get("role") != "assistant":
             return []
         text = "".join(str(c.get("text", "")) for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "text")
+        calls_tool = any(isinstance(c, dict) and c.get("type") == "toolCall" for c in msg.get("content") or [])
+        if calls_tool and msg.get("stopReason") not in ("error", "aborted"):
+            text = mend_text_before_tool_call(text)
         out: Dict[str, Any] = {"kind": "assistant_end", "text": text}
         # How the reply ended and what it cost, as a word and INTEGERS only: what the turn log needs to tell a
         # slow reply from a wasted one. A 35-minute reply on 20 Oct ended with no usable output and was redone

@@ -1242,15 +1242,20 @@
         : "Conversations aren't kept for terminal sessions. The searches below are."));
     } else {
       const conv = el("div", "conversation");
+      let prev = null;
       for (const row of s.conversation) {
+        const before = prev; prev = row;
         if (row.kind === "user") conv.append(el("div", "msg msg-user", row.text));
         else if (row.kind === "withdrawn") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "You took this question back before it was sent: "), el("span", "msg-withdrawn", row.text)));
         else if (row.kind === "assistant") {
           const n = el("div", "msg msg-assistant"); n.append(markdown(row.text)); conv.append(n);
           // Said to be cut, so a reply that stops mid-sentence does not pass for an answer.
           if (row.cut) conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", row.cut === "stopped" ? "You stopped this reply here." : "This reply was cut off here by a connection problem.")));
-        } else if (row.kind === "redone") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant wrote that reply again from the start:")));
-        else if (row.kind === "search") {
+        } else if (row.kind === "redone") {
+          // Only after a reply the record shows as cut: a retry of a reply that never showed a word is not a
+          // rewrite of anything here, and the line made the next, ordinary reply read as a redo (rc 0.9.125 e2e).
+          if (before && before.kind === "assistant" && before.cut === "error") conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "", "The assistant wrote that reply again from the start:")));
+        } else if (row.kind === "search") {
           const what = row.feature ? ` · ${row.feature}` : row.like ? ` · documents like ${row.like}` : "";
           conv.append(el("div", "step", el("span", "step-dot", "·"), el("span", "",
             row.ok ? `Sealed search${row.search_no ? ` ${row.search_no}` : ""}${what}: ${plural(row.documents, "document", "documents")}` : "A search was not sent")));

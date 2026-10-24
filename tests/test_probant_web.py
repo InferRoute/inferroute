@@ -3118,3 +3118,33 @@ def test_a_refused_question_is_delivered_when_the_turn_that_refused_it_ends(tmp_
         assert [s["message"] for s in sent] == ["Q1", "Q1"]
     asyncio.run(go())
 
+
+def _end_with_tool(text, stop="toolUse"):
+    return W.normalize({"type": "message_end", "message": {"role": "assistant", "stopReason": stop, "content": [
+        {"type": "text", "text": text}, {"type": "toolCall", "id": "c1", "name": "write", "arguments": {}}]}})[0]["text"]
+
+
+def test_a_reply_that_goes_on_to_call_a_tool_never_ends_mid_word():
+    """rc 0.9.125 e2e (D4, shots 16, 18): "I have the search results for both names. Let" — each cut sentence in
+    that run was the text of a reply that then called a tool, already cut in the message Pi received."""
+    assert _end_with_tool("I have the search results for both names. Let") == "I have the search results for both names."
+    assert (_end_with_tool("I need to correct the report. Let me rewrite it from")
+            == "I need to correct the report.")
+    assert (_end_with_tool("Let me write the report cleanly, from the actual search results, in one write")
+            == "Let me write the report cleanly, from the actual search results, in one write…")
+    # Finished text is left exactly as it is, and so is a reply with no tool call or one that was cut by an error
+    # (that one is SAID to be cut on the page).
+    assert _end_with_tool("Writing the report now:") == "Writing the report now:"
+    assert _end_with_tool("Searched both (US and FR).") == "Searched both (US and FR)."
+    assert _end_with_tool("Half a sent", stop="error") == "Half a sent"
+    plain = W.normalize({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop",
+                                                            "content": [{"type": "text", "text": "Done. Let"}]}})
+    assert plain[0]["text"] == "Done. Let"
+
+
+def test_a_reopened_conversation_says_a_reply_was_redone_only_after_a_cut_one():
+    """rc 0.9.125 e2e (D4): the reopened session read "The assistant wrote that reply again from the start:" above
+    an ordinary reply, because the retried reply had shown nothing and was never kept."""
+    home = (STATIC / "home.js").read_text()
+    i = home.index('row.kind === "redone"')
+    assert 'before && before.kind === "assistant" && before.cut === "error"' in home[i:i + 400]

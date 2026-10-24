@@ -212,6 +212,7 @@
   let tmSearches = 0;               // trademark searches started in this session (name checks)
   let reportCall = "";              // the tool call writing name-check.md, if one is under way
   let reportWritten = false;        // name-check.md was written in this turn; announced when the turn has ended
+  let reportStep = null;            // the "Wrote name-check.md" line of the write under way
 
   // One way out that always works, wherever it is offered from. The bridge escalates on its side; here the
   // button must never sit on "Ending…" for ever, so a failure is said out loud.
@@ -1686,6 +1687,7 @@
       }
       if ((ev.tool === "write" || ev.tool === "edit") && /(^|\/)name-check[^/]*\.md$/.test(String(args.path || ""))) {
         reportCall = String(ev.call || "");
+        reportStep = step;
         toolRunning = "Writing your report…";
       }
     }
@@ -1795,6 +1797,10 @@
     if (reportCall && ev.call === reportCall) {
       reportCall = "";
       reportWriteEnded(ev.ok !== false);
+      // A draft the app refused because it did not match the searches (rc 0.9.125, D2) was never written: the line
+      // says what happened, in neutral words, and the corrected write that follows says "Wrote".
+      if (ev.ok === false && reportStep && reportStep.lastChild) reportStep.lastChild.textContent = "Checked the report against the searches";
+      reportStep = null;
     }
     if (ev.tool === "suggest_next_steps") {
       const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];

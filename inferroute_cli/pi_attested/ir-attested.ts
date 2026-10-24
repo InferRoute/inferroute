@@ -978,6 +978,9 @@ export default function (pi: ExtensionAPI) {
 	if (process.env.IR_TM_SEARCH === "1") {
 		type TmHit = { register: string; number: string; text: string; status: string; classes: string[];
 			filed: string; reasons: string[]; overlapping_classes: string[] };
+		// Every mark a trademark search in this session returned to the assistant, by "US 12345678": what the
+		// report may cite (see the report check below).
+		const tmReturned = new Map<string, { status: string; classes: string[] }>();
 		pi.registerTool({
 			name: "trademark_search",
 			label: "Trademark search",
@@ -998,6 +1001,7 @@ export default function (pi: ExtensionAPI) {
 					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number;
 					searched?: string[]; not_searched?: string[] };
 				if (!response.ok || !result.hits) throw new Error(result.error ?? "The trademark search did not answer.");
+				for (const h of result.hits) tmReturned.set(`${h.register} ${h.number}`, { status: h.status, classes: h.classes });
 				const head = `Searched ${result.sources} (${(result.marks_searched ?? 0).toLocaleString("en")} live word marks, ` +
 					`data as of ${result.data_date}) for "${result.name}"` +
 					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer." +
@@ -1024,6 +1028,61 @@ export default function (pi: ExtensionAPI) {
 		// name-check.md." and the turn ENDED with nothing written. The person sees a promise and an idle screen.
 		// So once per question: if this round searched and did not write name-check.md, ask for it, as the
 		// person would. Once, so a model that will not write cannot loop the session.
+		// ── report check ──
+		// rc 0.9.125 e2e (D2, shots 16, 25): the first draft of name-check.md carried mark details no search had
+		// returned; the assistant noticed in its next reply, told the founder "I fabricated mark details in my first
+		// draft", and that sentence stayed in the record. The cause was the draft being written from memory of the
+		// results rather than from the result lines. So the report is checked against what the searches in this
+		// session actually returned BEFORE it is written: a cited number no search returned, or a status or class
+		// that differs from the search, refuses the write, and the refusal tells the assistant what to correct and
+		// not to narrate it. The founder sees one report, written once it agrees with the searches.
+		const TM_CITE = /\b(US|USPTO|FR|INPI)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})\b/gi;
+		const TM_REGISTER: Record<string, string> = { us: "US", uspto: "US", fr: "FR", inpi: "FR" };
+		const TM_STATUS = /\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b/i;
+		const TM_CLASSES = /\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|\/|and|&)\s*)?)+)/i;
+		function tmReportProblems(report: string, returned: Map<string, { status: string; classes: string[] }>): string[] {
+			const found = [...report.matchAll(TM_CITE)];
+			const out: string[] = [];
+			found.forEach((m, i) => {
+				const key = `${TM_REGISTER[m[1].toLowerCase()]} ${m[2]}`;
+				const hit = returned.get(key);
+				if (!hit) { out.push(`${key}: no search in this session returned this number`); return; }
+				const at = (m.index ?? 0) + m[0].length;
+				const end = i + 1 < found.length ? (found[i + 1].index ?? report.length) : report.length;
+				const near = report.slice(at, Math.min(end, at + 80)).split("\n")[0];
+				const st = TM_STATUS.exec(near);
+				if (st && st[1].toLowerCase() !== String(hit.status).toLowerCase()) {
+					out.push(`${key}: the search gives its status as ${hit.status}, the report says ${st[1].toLowerCase()}`);
+				}
+				const cl = TM_CLASSES.exec(near);
+				if (cl) {
+					const real = new Set(hit.classes.map((c) => String(Number(c))));
+					const said = (cl[1].match(/\d{1,2}/g) ?? []).map((c) => String(Number(c)));
+					const wrong = said.filter((c) => !real.has(c));
+					if (wrong.length) {
+						out.push(`${key}: class ${wrong.join(", ")} is not among its classes in the search (${hit.classes.join(", ") || "none recorded"})`);
+					}
+				}
+			});
+			return [...new Set(out)];
+		}
+		pi.on("tool_call", async (event) => {
+			if (event.toolName !== "write" && event.toolName !== "edit") return;
+			const input = (event.input ?? {}) as { path?: unknown; content?: unknown; edits?: unknown; newText?: unknown };
+			if (!/(^|[\\/])name-check\.md$/.test(String(input.path ?? ""))) return;
+			const text = event.toolName === "write" ? String(input.content ?? "")
+				: [...(Array.isArray(input.edits) ? input.edits as { newText?: unknown }[] : []), { newText: input.newText }]
+					.map((e) => (typeof e?.newText === "string" ? e.newText : "")).join("\n");
+			const problems = tmReportProblems(text, tmReturned);
+			if (!problems.length) return;
+			return { block: true, reason: "Not written: name-check.md must say only what the searches in this session " +
+				"returned, and this draft does not:\n- " + problems.join("\n- ") + "\nCopy each mark's register, number, " +
+				"status and classes from the trademark_search result lines above (search again if you need a mark you do not " +
+				"have), then write the whole file again. This check is between you and the app: do not mention it, the " +
+				"draft or any correction to the founder; your answer describes only the report as written." };
+		});
+		// ── end report check ──
+
 		const TM_REMIND = "(Anteriora) The searches are done but name-check.md has not been written yet. Please write it " +
 			"now in the matter folder, from the searches you ran, with the structure your instructions give; then " +
 			"summarise it in two or three sentences.";

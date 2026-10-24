@@ -201,3 +201,25 @@ def test_the_three_name_fields_write_notes_whose_names_are_found_again():
                 "The product, in one or two sentences:\nA bottle.\n\n"
                 "Where you will sell it (for example France, the EU, the US):\nFrance\n")
     assert P.names_listed(composed) == ["Kwench", "Aquelia"]
+
+
+def test_a_report_that_cites_marks_no_search_returned_is_refused_before_it_is_written():
+    """rc 0.9.125 e2e (D2, shots 16, 25): the first draft carried mark details no search had returned; the assistant
+    then told the founder "I fabricated mark details in my first draft", and that stayed in the record. The report
+    is checked against this session's searches before it is written (tests/tm_report_check_sim.ts runs the block),
+    the prompt says to copy each mark from the result lines and never to narrate a correction, and the page calls
+    a refused write what it was, neutrally."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "tm_report_check_sim.ts")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "refused, quietly" in r.stdout
+    names = (root / "inferroute_cli" / "pi_attested" / "names.md").read_text()
+    assert "never from memory" in names and "Never tell the founder that a draft was wrong" in names
+    app = (root / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    assert '"Checked the report against the searches"' in app

@@ -35,7 +35,12 @@ product does, which names), ask one short question rather than guessing.
    every one, and show what each search found next to it. Never present a name as
    free: present what the search found.
 5. Write the result to name-check.md in the matter folder, with the structure below,
-   then summarise it in a few lines in your answer. When the searches are done, write
+   then summarise it in a few lines in your answer. Write it only from the search results
+   you have in front of you: copy each mark's register, number, status and classes from
+   the result lines, never from memory, and cite no mark a search did not return. The app
+   checks the file against the searches before saving it; if it refuses a write, correct
+   what it names and write again. Never tell the founder that a draft was wrong, made up
+   or corrected: your answer describes only the report as it was saved. When the searches are done, write
    the file straight away: the structure below is the plan, so do not draft or re-plan
    the report in your reasoning first (a founder waited ten minutes on that). Write the
    file once, in one write, and do not edit it afterwards unless the founder asks: a

@@ -174,6 +174,24 @@ def _plain_search_refusal(refusal: str) -> str:
 
 
 IDENTITY_STEP = "enclave identity"
+REACHABLE_STEP = "search enclave reachable"
+
+
+def search_offline(search: Optional[dict]) -> bool:
+    """True when the search machine was NOT REACHED at all: no answer at its address (the name does not
+    resolve, the connection is refused, or it timed out). That is an outage, not a trust failure, and it is
+    said as one.
+
+    Decided from the verifier's own first step, which already tells the two apart: "nothing answered" is a
+    connection failure, while an HTTP error or an unreadable reply means something IS listening there, and
+    that stays a failed verification. Any other failed step, or any step that passed, means the machine was
+    reached, so the answer is False. This changes the wording only: either way nothing was sealed or sent,
+    because nothing is sent before every check passes."""
+    if not isinstance(search, dict) or search.get("ok"):
+        return False
+    steps = [s for s in (search.get("steps") or []) if isinstance(s, dict)]
+    return (len(steps) == 1 and steps[0].get("step") == REACHABLE_STEP and not steps[0].get("ok")
+            and str(steps[0].get("detail") or "").startswith("nothing answered"))
 
 
 def search_is_inferroutes(search: Optional[dict]) -> bool:
@@ -214,6 +232,18 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
     steps = search.get("steps") or []
     technical = [{"label": str(s.get("step", "")), "ok": bool(s.get("ok")), "value": str(s.get("detail", ""))}
                  for s in steps if isinstance(s, dict)]
+    if search_offline(search):
+        # AN OUTAGE IS NOT A TRUST FAILURE. The 0.9.124 test read a red cross and "Could not be verified" for
+        # a machine that was simply switched off, and took it for a security problem. Neutral, and it says the
+        # one thing that matters: nothing went to it.
+        return {"key": "search", "state": OFF, "title": "Patent search", "offline": True,
+                "summary": "Not available right now, nothing was sent to it.",
+                "points": ["This computer could not reach the search machine, so the assistant cannot search "
+                           "for now. Nothing about this matter was sent to it."],
+                "more": ["Before any search, this computer checks the search machine. It did not answer, so "
+                         "it was not checked and nothing was sent. Searches can run again once it answers and "
+                         "passes its checks; use \"Check the machines again\" to look."],
+                "technical": []}
     if not search.get("ok"):
         return {"key": "search", "state": FAIL, "title": "Patent search",
                 "summary": "Could not be verified, so no search will be sent.",
@@ -388,6 +418,10 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
             headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this "
                         f"computer to the verified machine; {missing}, so nothing can leave this "
                         "computer for a search machine at all.")
+            if items[1].get("offline"):
+                headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this "
+                            "computer to the verified machine. Patent search is offline right now, so "
+                            "nothing is sent to it.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items, "control_note": CONTROL_NOTE,
             "limits": limits(states["search"], search_is_inferroutes(search), surface), "mode": mode, "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}

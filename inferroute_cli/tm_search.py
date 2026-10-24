@@ -344,10 +344,12 @@ class Index:
         # because the letters run on across a space.
         inside = flat != mflat and len(flat) >= 4 and (_runs_of_words(flat, mws) or any(flat in w for w in mws))
         holds = flat != mflat and len(mflat) >= 4 and (_runs_of_words(mflat, ws) or any(mflat in w for w in ws))
+        # Said so the direction cannot be swapped. "contains your name" beside "is contained in your name" read
+        # alike, and the 0.9.124 report said "DEVEL … contains your name" of a mark that is PART of "Tidevell".
         if inside:
-            reasons.append("contains your name")
+            reasons.append("has your whole name inside it")
         elif holds:
-            reasons.append("is contained in your name")
+            reasons.append("is part of your name")
         shared = sorted({w for w in ws if w in mws and len(w) >= 3} - {flat if flat in mws and mflat == flat else ""})
         if shared and "same spelling" not in reasons:
             reasons.append("shares the word " + ", ".join(f"“{w}”" for w in shared))

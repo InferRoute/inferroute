@@ -1828,3 +1828,38 @@ def test_a_stopped_reply_is_closed_so_the_next_request_does_not_carry_two_questi
         pytest.skip("this node cannot strip TypeScript")
     assert r.returncode == 0, r.stdout + r.stderr[-800:]
     assert "roles alternate after Stop" in r.stdout
+
+
+def test_an_offline_search_machine_gives_the_assistant_one_plain_line_to_stop_on():
+    """0.9.124 end-to-end test: with the search machine switched off, the assistant was handed the verifier's own
+    words ("search enclave", "connection failure, NOT a failed verification") and offered four more searches. The
+    error it now gets is one plain line telling it to stop and tell the person; something that answered wrongly is
+    still reported as a failed check. Runs the extension's own classifier in node."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    ts = (Path(PA.__file__).resolve().parent / "pi_attested" / "ir-attested.ts").read_text()
+    fn = ts[ts.index("function searchOffline("):ts.index("function searchProofOf(")]
+    off = {"ok": False, "steps": [{"ok": False, "step": "search enclave reachable",
+                                   "detail": "nothing answered — no connection. The search machine is probably not running"}]}
+    wrong = {"ok": False, "steps": [{"ok": False, "step": "search enclave reachable",
+                                     "detail": "answered 500, not with an offer — something is listening there"}]}
+    later = {"ok": False, "steps": [{"ok": True, "step": "search enclave reachable", "detail": "offer received"},
+                                    {"ok": False, "step": "hardware report", "detail": "bad"}]}
+    js = fn + f"\nconsole.log(JSON.stringify([{json.dumps(off)}, {json.dumps(wrong)}, {json.dumps(later)}].map(searchOffline).concat([SEARCH_OFFLINE_ERROR])));"
+    r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-800:]
+    offline, answered_wrongly, failed_later, message = json.loads(r.stdout.strip().splitlines()[-1])
+    assert (offline, answered_wrongly, failed_later) == (True, False, False)
+    assert "offline" in message and "Do not search again" in message and "\n" not in message
+    for jargon in ("enclave", "connection", "verif"):
+        assert jargon not in message.lower()
+    # Both sealed calls (search and read) use it, and a deep search stops on it rather than wrapping it.
+    assert ts.count("if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);") == 2
+    assert "if (why === SEARCH_OFFLINE_ERROR) throw new Error(why);" in ts
+    assert "offline right now/.test(why)) break;" in ts

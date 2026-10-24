@@ -269,7 +269,7 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         # reproduced by cutting a kimi-k3 reply with the lane's own mid-reply error). `reply_redone` lets the page
         # fold the cut reply away as superseded.
         return [{"kind": "reply_redone"},
-                {"kind": "notify", "level": "warning", "message": "The AI machine didn't answer; retrying…"}]
+                {"kind": "notify", "level": "warning", "message": "The AI machine didn't answer; retrying…", "retry": True}]
     if t == "response" and ev.get("success") is False:
         return [{"kind": "notify", "level": "error", "message": strip_ansi(ev.get("error") or "the request was refused")}]
     return []
@@ -526,6 +526,13 @@ class Bridge:
 
     # ── events ──
     def publish(self, event: Dict[str, Any], *, agent: bool = False) -> None:
+        # A RETRY NOTICE ONLY WHILE SOMETHING IS ASKED. Pi also retries requests of its own between turns, and the
+        # 0.9.124 test saw "The AI machine didn't answer; retrying…" pop up after the report was done, about nothing
+        # the person had asked for. With no turn and no tool running, there is nothing for them to wait on.
+        if event.get("retry") and not (self.busy or self.running_tools):
+            if agent:
+                self.last_agent = time.monotonic()
+            return
         if agent:
             self.last_agent = time.monotonic()
             if self.stalled:                       # it spoke again: withdraw the notice, don't leave it standing

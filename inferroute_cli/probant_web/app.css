@@ -85,19 +85,26 @@ button.brand:hover { background: var(--user); }
 /* The index goes first, because it is the thing that makes a long session navigable — but it is the first
    thing to drop when there is no room: the conversation and the proof panel both outrank it. */
 @media (max-width: 1240px) { .layout { grid-template-columns: minmax(0, 1fr) 380px; } .outline { display: none; } }
-@media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } .outline { display: none; }
-  .trust { border-left: 0; border-top: 1px solid var(--line); } }
-/* A phone (21 Oct audit): the conversation squeezed into a strip above the panel, and one long line widened
-   the whole page so text and the Send button were cut off. On a narrow screen the PAGE scrolls instead of
-   three nested boxes: the conversation first at full height, the panel after it, the composer pinned. */
-@media (max-width: 760px) {
+/* Below 980 px there is no room for the panel beside the conversation. On a phone (21 Oct audit) the
+   conversation squeezed into a strip above the panel; between 761 and 980 px (0.9.124 test) the panel, as a
+   second grid row, covered the message box, so at 768 Send sat under it and at 900 the box was hidden. So
+   the PAGE scrolls instead of nested boxes, at every width below 980: the conversation first at full height,
+   the panel after it, and the message box pinned to the bottom of the screen. */
+@media (max-width: 980px) {
   html, body { height: auto; min-height: 100%; }
   .layout { display: block; }
+  .outline { display: none; }
   .chat { min-height: calc(100dvh - 110px); }
-  .log { overflow: visible; padding: 14px 16px; }
+  .log { overflow: visible; }
+  .composer { position: sticky; bottom: 0; z-index: 5; }
+  .trust { border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+}
+/* A phone: one long line widened the whole page so text and the Send button were cut off. */
+@media (max-width: 760px) {
+  .log { padding: 14px 16px; }
   .log, .log * { overflow-wrap: anywhere; }
   .log pre, .log table { max-width: 100%; overflow-x: auto; }
-  .composer { position: sticky; bottom: 0; z-index: 5; padding: 10px 12px 12px; flex-wrap: wrap; }
+  .composer { padding: 10px 12px 12px; flex-wrap: wrap; }
   .composer textarea { min-width: 0; flex: 1 1 100%; }
   .composer-actions { margin-left: auto; }
   .trust { overflow: visible; padding: 16px; }
@@ -191,6 +198,7 @@ button.brand:hover { background: var(--user); }
 .card-note { padding: 8px 14px; font-size: 13px; color: var(--accent); background: var(--accent-soft); }
 .card-note.bad { color: var(--bad); background: var(--bad-soft); }
 .card-note.warn { color: var(--warn); background: var(--warn-soft); }
+.card-note.off { color: var(--muted); background: var(--user); }
 .docs { list-style: none; margin: 0; padding: 0; }
 /* A past session's rows have THREE children (rank, document, mark chip) — no relevance bar, no buttons — so they
    need their own columns; under the four-column rule the document fell into the 28px bar column and wrapped
@@ -398,7 +406,12 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 .md-preview h4 { margin: 10px 0 6px; font-size: 15px; }
 .md-preview blockquote { background: none; border-left: 2px solid var(--line); border-radius: 0; padding: 0 0 0 12px; color: var(--muted); }
 .dialog-actions input { flex: 1; font: inherit; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-.toasts { position: fixed; right: 16px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 20; max-width: 420px; }
+/* Notices sit at the top, under the header and centred over the conversation: bottom right they covered "Export
+   and check the record" and the panel's other buttons (0.9.124 test). They hold text only and let clicks through,
+   so even where one overlaps something it never stands between a person and a button. */
+.toasts { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
+  align-items: center; gap: 8px; z-index: 20; width: max-content; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+@media (max-width: 760px) { .toasts { top: 104px; } body.home .toasts { top: 124px; } }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); font-size: 14px; white-space: pre-wrap; }
 .toast.warning { border-left-color: var(--warn); }
 .toast.error { border-left-color: var(--bad); }

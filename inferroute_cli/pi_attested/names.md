@@ -71,7 +71,8 @@ The founder is not a lawyer. Write for them, in this order:
    classes, and its reason in plain words. Classes: either every class the tool lists for
    the mark, or only the shared ones written as "overlaps your classes 7, 21"; never a few
    of its classes written as if they were all of them. Then its reason: same spelling, sounds alike, one letter
-   different, spelled closely, contains your name, shares a word; plus "in your classes"
+   different, spelled closely, has your whole name inside it, is part of your name, shares a word
+   (copy the tool's own words for these two: they point in opposite directions); plus "in your classes"
    or "outside your classes". Then how many other close marks each search found. Do not
    copy the other results: the matter page lists every search in full.
 4. `## What you can do next`, these three lines:

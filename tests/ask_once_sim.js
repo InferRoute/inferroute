@@ -16,12 +16,12 @@ const $ = () => ({ get value() { return inputValue; }, set value(v) { inputValue
 const api = async (path, body) => { posted.push(body.text); return { ok: true }; };
 
 const mk = () => new Function(
-  "api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout",
+  "api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout", "searchIsOffline",
   `${src.slice(a, b)}
    flashWaiting = flashWaitingSpy;
    return { send, outstanding };`
 )(api, false, $, () => {}, () => {}, (m, k) => toasts.push(m), waiting,
-  (t) => flashed.push(t), (f) => f);
+  (t) => flashed.push(t), (f) => f, false);   // search is up: the offline choice is a separate sim
 
 let bad = 0; const fail = (m) => { console.error("FAIL: " + m); bad++; };
 const Q = "Open US-2018146899-A1: read that document and show me what it discloses";
@@ -47,7 +47,7 @@ if (posted.length !== 3) fail("after it is answered, the same question may be as
 
 // A failed POST must not leave the question un-askable forever.
 posted = [];
-const failing = new Function("api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout",
+const failing = new Function("api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout", "searchIsOffline",
   `${src.slice(a, b)}\n flashWaiting = flashWaitingSpy;\n return { send, outstanding };`
 )(async () => { throw new Error("offline"); }, false, $, () => {}, () => {}, (m) => toasts.push(m), waiting, () => {}, (f) => f);
 try { await failing.send("Q-fails"); } catch { /* handled inside */ }

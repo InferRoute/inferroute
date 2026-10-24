@@ -3,7 +3,7 @@
 // branches must REPLACE the sentence, and the connection case must win over the verification case.
 import fs from "fs";
 const src = fs.readFileSync("inferroute_cli/probant_web/app.js", "utf8");
-const a = src.indexOf("  function plainRefusal(text) {");
+const a = src.indexOf("  function searchWasOffline(text) {");
 const b = src.indexOf("\n  // Parallel requests slip together", a);
 if (a < 0 || b < 0) { console.error("HARNESS: plainRefusal moved"); process.exit(2); }
 const plainRefusal = new Function("text", `${src.slice(a, b)}\n return plainRefusal(text);`);
@@ -16,5 +16,7 @@ console.log(JSON.stringify({
   // a REAL verification failure must keep saying so
   real: plainRefusal("the search enclave did not verify (container policy: HOST_DATA is not the pinned policy)"),
   declined: plainRefusal("the user declined this search"),
+  // the extension's own line when the search machine is offline
+  offline: plainRefusal("Patent search is offline right now, so nothing was sent. Do not search again: tell the user search is offline and that their text stayed on this computer."),
   unknown: plainRefusal("something nobody anticipated"),
 }));

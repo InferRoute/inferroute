@@ -196,3 +196,45 @@ def test_a_timestamp_that_fails_to_download_stops_the_setup_rather_than_keeping_
     monkeypatch.setattr(SS, "_get_optional", broken)
     with pytest.raises(SS.SetupError):
         SS.setup(now=NOW)
+
+
+def test_setup_claims_only_what_it_checked_and_says_when_the_machine_is_offline(site, capsys, monkeypatch):
+    """0.9.124: the installer printed "Patent search is set up" for a search machine whose name did not resolve.
+    Setup checks InferRoute's signed files, not the machine; it says so, and then says whether anything answers."""
+    files, key, pub, tmp = site
+    files["/probant/search.json"] = json.dumps({"enclave": "http://search.invalid:8000"}).encode()
+    monkeypatch.setattr(SS, "reachable", lambda enclave: "unknown-host")
+    assert SS.main_setup() == 0
+    out = capsys.readouterr().out
+    assert "Patent search is set up" not in out
+    assert "signed reference was checked" in out and "checked before each search" in out
+    assert "not answering right now" in out and "offline" in out
+    monkeypatch.setattr(SS, "reachable", lambda enclave: "up")
+    SS.main_setup(force=True)
+    assert "answering right now" in capsys.readouterr().out
+
+
+def test_the_unresolvable_address_is_probed_for_real(site, monkeypatch):
+    """The probe is the home page's own: an address that does not resolve reads as such, never as up."""
+    from inferroute_cli import probant_home as H
+    monkeypatch.setattr(H, "_search_probe", {"at": 0.0, "state": "unreachable"})
+    assert SS.reachable("http://search.invalid:8000") == "unknown-host"
+
+
+@pytest.mark.parametrize("published,kept", [
+    ({"mode": "scheduled", "window": [13, 15], "tz": "Europe/Paris"},
+     {"mode": "scheduled", "window": [13, 15], "tz": "Europe/Paris"}),
+    ({"mode": "always"}, None),
+    ({"mode": "scheduled", "window": ["13", 15], "tz": "Europe/Paris"}, None),
+    ({"mode": "scheduled", "window": [13, 15], "tz": "<b>Paris</b>"}, None),
+    (None, None),
+])
+def test_published_hours_reach_the_configuration_only_when_well_formed(site, published, kept):
+    """If InferRoute publishes the search machine's hours, the home page can show them when it is offline."""
+    files, key, pub, tmp = site
+    where = {"enclave": "http://203.0.113.9:8000"}
+    if published is not None:
+        where["availability"] = published
+    files["/probant/search.json"] = json.dumps(where).encode()
+    SS.setup(force=True, now=NOW)
+    assert cfg(tmp).get("availability") == kept

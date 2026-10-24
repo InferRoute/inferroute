@@ -37,7 +37,7 @@ def test_spelling_and_accents_and_spacing_do_not_hide_a_mark(index):
     by_number = {h["number"]: h for h in r["hits"]}
     assert by_number["8"]["reasons"][0] == "same spelling"                 # Antériora, accent folded
     assert "shares the word “anteriora”" in "; ".join(by_number["5"]["reasons"])
-    assert "spelled closely" in by_number["3"]["reasons"] and "is contained in your name" in by_number["3"]["reasons"]
+    assert "spelled closely" in by_number["3"]["reasons"] and "is part of your name" in by_number["3"]["reasons"]
     assert "7" not in by_number                                             # ZEBRA is not close
 
 
@@ -243,3 +243,14 @@ def test_the_page_keeps_more_marks_than_the_assistant_reads(index, tmp_path, mon
     logged = T.logged_searches(tmp_path / "records")[0]
     assert len(logged["hits"]) > len(r["hits"])
     assert len(r["hits"]) + r["more"] == len(logged["hits"]) + logged["more"]
+
+
+def test_containment_says_which_way_round(tmp_path):
+    """0.9.124 report: "DEVEL … contains your name" for the name Tidevell, which is backwards. The two reasons are
+    now worded so they cannot be swapped, and each points the right way."""
+    rows = [("FR", "1", "DEVEL", "registered", ["9"], "2020-01-01"), ("US", "2", "TIDEVELL BOTTLES", "pending", ["21"], "2021-01-01")]
+    path = tmp_path / "tm.sqlite"
+    T.build(iter(rows), path, "2026-09-30", ["test register"])
+    hits = {h["number"]: h["reasons"] for h in T.Index(path).search("Tidevell")["hits"]}
+    assert "is part of your name" in hits["1"] and "has your whole name inside it" not in hits["1"]
+    assert "has your whole name inside it" in hits["2"]

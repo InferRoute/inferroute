@@ -125,7 +125,11 @@
   const VERDICT_WORD = { private: "Connections checked", limited: "Partly checked", blocked: "Not opened" };
   const VERDICT_SEAL = { private: "✓", limited: "!", blocked: "✗" };
   const DOT = { ok: "✓", warn: "!", fail: "✗", off: "", info: "" };   // inside a filled dot, a plain mark reads best
+  // Whether the latest check found the patent search machine offline (not reached at all). Used to say so
+  // before a search is asked for, rather than after the assistant has tried (0.9.124 test).
+  let searchIsOffline = false;
   function renderTrust(t) {
+    searchIsOffline = (t.items || []).some((i) => i.key === "search" && i.offline);
     const body = $("trust-body");
     clear(body);
     const pill = $("verdict");
@@ -1695,11 +1699,17 @@
   //
   // Ordering matters: "nothing answered" is checked BEFORE the verification branch, because the composed
   // string contains both and the first match wins. The verifier now says which of the two happened.
+  // AN OUTAGE IS NOT A REFUSAL (0.9.124 test): the machine was not reached, so the card is neutral, not red.
+  // The first two phrases are the extension's own line for it, the last two the verifier's.
+  function searchWasOffline(text) {
+    const t = String(text || "").toLowerCase();
+    return t.includes("offline right now") || t.includes("nothing answered") || t.includes("no connection");
+  }
   function plainRefusal(text) {
     const t = String(text || "").toLowerCase();
     if (t.includes("declined")) return "You didn't allow this search, so nothing was sent.";
-    if (t.includes("nothing answered") || t.includes("no connection"))
-      return "The search machine isn't running, so nothing was sent. Nothing about your text left this computer.";
+    if (searchWasOffline(t))
+      return "Patent search is offline right now, so nothing was sent. Nothing about your text left this computer.";
     if (t.includes("did not answer") || t.includes("unreachable") || t.includes("timed out"))
       return "The search machine isn't answering, so nothing was sent. It may not be running right now.";
     // Something WAS listening and its answer was not a usable offer — that is trust-relevant, and the
@@ -1938,7 +1948,7 @@
     }
     if (!ev.ok || !d.ok) {
       sub.textContent = "not sent";
-      body.append(el("div", "card-note bad", plainRefusal(ev.text || d.refusal)));
+      body.append(el("div", `card-note ${searchWasOffline(ev.text || d.refusal) ? "off" : "bad"}`, plainRefusal(ev.text || d.refusal)));
       setCollapsed(entry, false);                 // a refusal is short and worth reading; never fold it away
       entry.failed = true;
       renumber();                                 // not sent, so not a search: its number goes to the next one
@@ -2191,6 +2201,7 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && openDialog) {
       const ev = openDialog;
+      if (ev.local) { ev.cancel(); return; }      // the page's own question: nothing to tell the assistant
       $("dialog").hidden = true;
       openDialog = null;
       api("/api/dialog", ev.method === "confirm" ? { id: ev.id, confirmed: false } : { id: ev.id, cancelled: true }).catch(() => {});
@@ -2339,9 +2350,39 @@
   // would leave the agent holding the copies and answering each one in turn.
   const outstanding = new Set();
 
+  // A message that asks for a patent search: the page's own search buttons, or a typed request for a survey.
+  function asksForSearch(t) {
+    return [SURVEY, DEEP, DEEP_FOCUSED, DEEPER, LEAVE_OUT, IDEAS[1]].includes(t) || /^Find documents like /.test(t)
+      || /\bprior[- ]art (survey|search)/i.test(t);
+  }
+  // Said BEFORE the request goes, and the person chooses: the assistant can still talk about the disclosure.
+  function offlineChoice() {
+    return new Promise((resolve) => {
+      if (!$("dialog").hidden || openDialog) { resolve(true); return; }      // never over another question
+      openDialog = { id: "search-offline", local: true, cancel: () => done(false) };
+      $("dialog-title").textContent = "Patent search is offline right now";
+      const body = $("dialog-body");
+      clear(body);
+      body.append(el("p", "", "The assistant can't search until it is back. You can still send this: the assistant "
+        + "will work with what it has and tell you it could not search. Nothing is sent to the search machine while it is offline."));
+      const actions = $("dialog-actions");
+      clear(actions);
+      const done = (v) => { $("dialog").hidden = true; openDialog = null; resolve(v); showNextDialog(); };
+      const no = el("button", "ghost", "Not now");
+      const yes = el("button", "primary", "Send it anyway");
+      no.type = yes.type = "button";
+      no.addEventListener("click", () => done(false));
+      yes.addEventListener("click", () => done(true));
+      actions.append(no, yes);
+      $("dialog").hidden = false;
+      setTimeout(() => no.focus(), 0);
+    });
+  }
+
   async function send(text) {
     const t = String(text || "").trim();
     if (!t || ended) return;
+    if (searchIsOffline && !nameSession && !readingSession && asksForSearch(t) && !(await offlineChoice())) return;
     // ASK ONCE. Henry, 2026-10-01, with nine queued questions of which seven were identical: clicking a
     // patent that is not yet read queues "Open <key>…", and nothing visibly happens until the assistant
     // gets to it — so the natural response is to click again. Each click was a real sealed request and a

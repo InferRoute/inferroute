@@ -1835,7 +1835,9 @@ def test_a_connection_failure_is_not_shown_as_a_verification_failure():
     assert r.returncode == 0, r.stderr[-800:]
     out = json.loads(r.stdout.strip().splitlines()[-1])
 
-    assert "isn't running" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
+    assert "offline right now" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
+    # 0.9.124: the extension's own outage line reads as an outage too, never as a refusal
+    assert "offline right now" in out["offline"] and "verif" not in out["offline"].lower(), out["offline"]
     assert "left this computer" in out["absent"], "say plainly that nothing was sent"
     assert "not a sealed search machine" in out["junk"], out["junk"]
     # the one that must NOT be blunted
@@ -2953,3 +2955,57 @@ def test_a_reply_pi_writes_again_after_a_cut_is_folded_away_and_kept_as_cut(clie
     assert 'lastCut = ev.stopped === "error"' in js
     home = (STATIC / "home.js").read_text()
     assert "row.cut" in home and 'row.kind === "redone"' in home
+
+
+def test_a_search_asked_for_while_search_is_offline_is_said_first_and_the_person_chooses():
+    """0.9.124 end-to-end test: with the search machine offline, "Run a prior-art survey" was still offered and
+    sent, and the person learned of the outage from the assistant's failed attempts. The page now says so first,
+    from the trust panel's own outage flag, and only for messages that ask for a search."""
+    import shutil, subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "offline_choice_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr[-800:]
+    out = json.loads(r.stdout.strip().splitlines()[-1])
+    assert out["survey"] and out["typed"] and out["like"]
+    assert not out["chat"], "a message that does not ask for a search goes straight through"
+    assert out["gated"] and out["fromTrust"]
+
+
+def test_below_980_the_page_scrolls_so_the_panel_never_covers_the_message_box():
+    """0.9.124 end-to-end test: between 761 and 980 px the checks panel, as a second grid row, covered the message
+    box (at 768 Send was under it; at 900 the box was hidden). Below 980 the page scrolls instead, with the
+    message box pinned. Checked in a real browser at 390/768/900/1024/1280/1440; this pins the rule itself."""
+    css = (STATIC / "app.css").read_text()
+    block = css[css.index("@media (max-width: 980px) {"):]
+    block = block[:block.index("\n}\n")]
+    assert ".layout { display: block; }" in block
+    assert "position: sticky" in block and ".composer" in block
+    assert "html, body { height: auto;" in block
+
+
+def test_a_retry_notice_is_shown_only_while_something_was_asked(tmp_path):
+    """0.9.124 end-to-end test: "The AI machine didn't answer; retrying…" popped up after the report was done, about
+    a retry of Pi's own between turns. With no turn and no tool running, the notice is dropped; during a turn it
+    is still shown, because then the person is waiting on it."""
+    b = _bridge(tmp_path)
+    notices = lambda: [e for e in b.history if e.get("kind") == "notify"]
+    for out in W.normalize({"type": "auto_retry_start"}):
+        b.publish(out, agent=True)
+    assert notices() == []
+    b.publish({"kind": "busy", "value": True}, agent=True)
+    for out in W.normalize({"type": "auto_retry_start"}):
+        b.publish(out, agent=True)
+    assert [n["message"] for n in notices()] == ["The AI machine didn't answer; retrying…"]
+
+
+def test_notices_never_stand_between_a_person_and_a_button():
+    """0.9.124 end-to-end test: notices stacked bottom right, over "Export and check the record". They now sit at
+    the top and let clicks through (checked in a browser at 390/900/1280 px: no button under a notice is blocked)."""
+    css = (STATIC / "app.css").read_text()
+    rule = css[css.index(".toasts {"):]
+    rule = rule[:rule.index("}")]
+    assert "pointer-events: none" in rule and "top:" in rule and "bottom:" not in rule

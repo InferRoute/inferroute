@@ -480,9 +480,18 @@
     ], [button("Cancel", "ghost", closeDialog), save]);
   }
 
+  // What a draft was read from (0.9.124 test: a repository draft said "Created from your document"). Drafts made
+  // before the record said so are told apart by the git location only a repository draft carries.
+  const draftSource = (m) => {
+    const o = m.intake_origin || {};
+    return o.source_kind === "repo" || o.repo ? "repository" : "document";
+  };
+
   // ── starting a session ──
   const watching = new Map();       // launch id → timer
-  function launchBox(matterId, launch, onChange) {
+  // `reading`: the launch is a document or repository reading, not a session on a matter; `finished` says the
+  // reading itself is done while its session stays open for questions.
+  function launchBox(matterId, launch, onChange, reading) {
     const box = el("div", "launch");
     const paint = (l) => {
       clear(box);
@@ -505,8 +514,14 @@
         }
         box.className = "launch ready";
         const since = l.started_at ? new Date(l.started_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : "";
-        box.append(el("div", "", el("b", "", "A session is open on this matter. "),
-            `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session.`),
+        // A reading is not "a session on this matter" (0.9.124 test): it is said as a reading, and once the reading
+        // is done it says so, rather than reading as still at work.
+        const lead = !reading ? "A session is open on this matter. "
+          : reading.finished ? "Reading done. " : "Reading in progress. ";
+        const rest = reading && reading.finished
+          ? "Its session is still open, so you can ask about the drafts; end it when you are done."
+          : `${since ? `Running since ${since}. ` : ""}Opening it takes you back into that session.`;
+        box.append(el("div", "", el("b", "", lead), rest),
           el("div", "row actions",
             button("Open the session", "primary", () => openLocal(l.url)),
             // END IT FROM HERE. Without this a session could only be ended from inside its own tab, so one
@@ -565,7 +580,22 @@
     return box;
   }
 
-  async function startSession(matterId, onChange) {
+  // Is patent search offline right now? Asked when a patent session is about to start, so the answer is current
+  // (the server keeps a probe for 30 seconds). Unknown counts as not offline: this only decides whether to warn.
+  async function searchOfflineNow() {
+    try {
+      const d = await api("/api/search-status");
+      return Boolean(d.configured && !d.reachable);
+    } catch (_) { return false; }
+  }
+
+  async function startSession(matterId, onChange, kind) {
+    // A prior-art session with the search machine offline: say so first, and let the person choose (0.9.124 test:
+    // it started as usual and the outage surfaced as failed searches). A name check never uses it.
+    if (kind && kind !== "name" && await searchOfflineNow()
+        && !(await confirmBox("Patent search is offline right now",
+          "You can still open a session and work on the disclosure with the assistant. It can't search until patent "
+          + "search is back, and nothing is sent to the search machine while it is offline.", "Open the session anyway"))) return;
     try {
       await api("/api/sessions", { id: matterId });
       onChange();
@@ -641,6 +671,7 @@
     return m ? `in ${h} h ${m} min` : `in ${h} h`;
   }
   function searchStatusBar(d) {
+    const STILL_WORKS = "Name checks and readings still work.";
     // The window in Paris, and the same instant where the reader is — shown only when they differ.
     const parisOpen = hourAt(d.opens_at, d.tz), parisClose = hourAt(d.closes_at, d.tz);
     const hereOpen = hourAt(d.opens_at), hereClose = hourAt(d.closes_at);
@@ -659,32 +690,26 @@
         dot = "open";
         head = "Patent search is available";
         sub = "";
-      } else if (d.found === false) {
-        dot = "trouble";
-        head = "Patent search is not available from this computer";
-        sub = "The search machine cannot be found at the address this computer is set up to use. "
-          + "It needs looking at. Everything else on this page works as usual.";
       } else {
-        dot = "trouble";
-        head = "Patent search is not answering";
-        sub = "It runs continuously, so this is not a closing time — try again in a few minutes. "
-          + "Nothing is lost if a search cannot start.";
+        // OFFLINE, SAID AS AN OUTAGE (0.9.124 test: "cannot be found… it needs looking at" read as breakage,
+        // with no times and nobody to ask). Not found and not answering are the same news to the reader: no
+        // search for now, everything else works. This machine keeps no published hours, so the line names who
+        // to ask instead of inventing a time.
+        dot = "closed";
+        head = "Patent search is offline right now";
+        sub = `${STILL_WORKS} Questions: support@inferroute.ai.`;
       }
     } else if (d.open_now && d.reachable) {
       dot = "open";
       head = `Patent search is open until ${parisClose} Paris time`;
       sub = (elsewhere ? `That is ${hereClose} where you are. ` : "") + `Open ${timetable}.`;
-    } else if (d.found === false) {
-      // Not "closed until 13:00": this machine's address cannot be found at all, so an opening time would
-      // be an invention. A person told a comforting timetable waits; a person told this asks.
-      dot = "trouble";
-      head = "Patent search is not available from this computer";
-      sub = "The search machine cannot be found at the address this computer is set up to use. This is not "
-        + "the timetable — it needs looking at. Everything else on this page works as usual.";
-    } else if (d.open_now && !d.reachable) {
-      dot = "trouble";
-      head = "Patent search should be open now, but it is not answering";
-      sub = `It is scheduled ${timetable}. Try again in a few minutes; nothing is lost if a search cannot start.`;
+    } else if (d.found === false || (d.open_now && !d.reachable)) {
+      // Offline when it should not be. Its published hours are given, and who to ask if it stays that way:
+      // its address not being found may mean it is not coming back on its own, so the hours alone could leave
+      // a person waiting for an opening that does not come.
+      dot = "closed";
+      head = "Patent search is offline right now";
+      sub = `${STILL_WORKS} It is scheduled ${timetable}. If it stays offline, write to support@inferroute.ai.`;
     } else if (d.reachable) {
       dot = "open";
       head = "Patent search is answering, outside its usual hours";
@@ -725,7 +750,7 @@
       : starting ? button("Starting…", "primary start-session", (ev) => { ev.stopPropagation(); open(); })
       : button(m.needs_review ? "Review draft" : m.kind === "name" ? "Check the names" : "Start a session", "primary start-session", (ev) => {
       ev.stopPropagation();
-      if (m.needs_review) open(); else startSession(m.id, open);
+      if (m.needs_review) open(); else startSession(m.id, open, m.kind || "invention");
     });
     // What KIND of work each card is, at a glance (Henry, 22 Oct: name checks and patent matters looked the same).
     const kindKey = m.needs_review ? "draft" : m.kind === "name" ? "name" : "invention";
@@ -843,7 +868,8 @@
       const row = el("button", "session-row",
         el("span", "when", localTime(s.started_at)),
         withMatter ? el("span", "matter-of", matterId) : null,
-        el("span", "how", s.surface === "browser" ? "browser" : s.surface === "terminal" ? "terminal" : "—"),
+        // Where it ran, in words (0.9.124 test: a bare "browser" read like a column of jargon).
+        el("span", "how", s.surface === "browser" ? "in the browser" : s.surface === "terminal" ? "in the terminal" : ""),
         el("span", "", plural(s.searches, "search", "searches")),
         el("span", "", plural(s.documents, "document", "documents")),
         s.__live ? el("span", "live-text", "● open now")
@@ -917,7 +943,7 @@
         : isName && m.running && m.running.state === "ready" ? null
         : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
         : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
-        : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh)),
+        : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh, isName ? "name" : "invention")),
       button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh, isName)),
       button("Export the record", "ghost", async (ev) => {
         const b = ev.currentTarget;
@@ -931,7 +957,7 @@
       })));
     if (!words) p.append(el("p", "warn-text", isName ? "This matter lists no names yet. Add the product and the names, then check them."
       : "This matter has no disclosure yet. Write it before starting a session, so the assistant has something to survey."));
-    if (m.needs_review) p.append(el("p", "warn-text", "Created from your document. Review the disclosure and date before starting a search."));
+    if (m.needs_review) p.append(el("p", "warn-text", `Created from your ${draftSource(m)}. Review the disclosure and date before starting a search.`));
     if (m.running) p.append(launchBox(m.id, m.running, refresh));
 
     if (isName) {
@@ -1626,11 +1652,11 @@
       // The reading is done: what it made, and what to do next (22 Oct test: nothing changed when it finished).
       const n = (d.drafts || []).length;
       p.append(el("div", "card key-card", el("p", "", el("b", "", `Reading finished at ${localTime(d.finished.at)} · ${n} draft matter${n === 1 ? "" : "s"}. `),
-        "Next: open each draft below, check its description against its passage, confirm the priority date, then start a prior-art survey from it."),
-        d.running ? el("p", "sub", "The session stays open so you can ask about the drafts; end it when you are done.") : null));
+        "Next: open each draft below, check its description against its passage, confirm the priority date, then start a prior-art survey from it.")));
     }
     if (d.running) {
-      p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id)));
+      p.append(launchBox(d.running.matter || `document · ${d.meta.source_name}`, d.running, () => renderDocument(id),
+        { finished: Boolean(d.finished) }));
       // What the wait really is (22 Oct test: "a few minutes" against 14 before the first finding).
       const listMin = 5 + Math.round((d.meta.chars || 0) / 4000);
       if (!d.finished) p.append(el("p", "sub", `The AI first lists the inventions it finds (about ${listMin} minutes for ${(d.meta.chars || 0).toLocaleString()} characters), `
@@ -2055,11 +2081,16 @@
   }
 
   // ── routing ──
+  // A new page opens at its top. The page is one scrolling document, so the scroll position of the list was
+  // carried into the matter it opened, which then showed its bottom (0.9.124 test). A redraw of the SAME page
+  // (coming back to the tab) keeps the place the person was reading.
+  let lastRoute = null;
   async function route() {
     stopWatching();
     closeDialog();
     clearToasts();
     const h = location.hash || "#/";
+    if (h !== lastRoute) { lastRoute = h; window.scrollTo(0, 0); }
     const parts = h.replace(/^#\/?/, "").split("/").map((x) => decodeURIComponent(x));
     const here = parts[0] === "help" ? "#/help" : parts[0] === "sharing" ? "#/sharing" : "#/";
     for (const b of document.querySelectorAll("#nav button")) b.classList.toggle("active", b.dataset.route === here);

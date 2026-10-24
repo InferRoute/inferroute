@@ -1123,3 +1123,49 @@ def test_an_earlier_session_says_which_replies_were_cut_off(monkeypatch):
     assert "**The assistant:** 1. A sealed *(stopped by the professional here)*" in notes
     assert "**The assistant:** the amount of *(cut off here by an error)*" in notes
     assert "**The assistant:** The whole answer.\n" in notes
+
+
+def test_the_home_page_says_an_offline_search_machine_is_offline_calmly():
+    """0.9.124 end-to-end test: with the search machine's name not resolving, Home said it "cannot be found… It
+    needs looking at", with no hours and nobody to ask. Runs the page's own searchStatusBar() over every state
+    (tests/availability_mode_sim.js): offline is said as offline, with what still works, the hours when the
+    service publishes them, and the support address otherwise."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "availability_mode_sim.js")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, (r.stdout + r.stderr)[-1200:]
+
+
+def test_a_patent_session_asks_before_starting_while_search_is_offline():
+    """The Home page asks before a prior-art session starts with search offline, and only for a patent matter."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    fn = src[src.index("  async function startSession(matterId, onChange, kind) {"):src.index("    try {", src.index("  async function startSession("))]
+    assert 'kind !== "name" && await searchOfflineNow()' in fn and "Patent search is offline right now" in fn
+    assert 'startSession(m.id, open, m.kind || "invention")' in src
+    assert 'startSession(m.id, refresh, isName ? "name" : "invention")' in src
+
+
+def test_opening_a_matter_starts_at_the_top_of_its_page():
+    """0.9.124 end-to-end test: opening a matter from a scrolled list landed at the bottom of the matter page, because
+    the page is one scrolling document and the router kept the list's position. A new route scrolls to the top
+    (checked in a browser at 390 and 1280 px); a redraw of the same route keeps the reader's place."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    fn = src[src.index("  async function route() {"):src.index("  function showNoKey()")]
+    assert "if (h !== lastRoute) { lastRoute = h; window.scrollTo(0, 0); }" in fn
+    assert fn.index("window.scrollTo(0, 0)") < fn.index("return renderMatter(")
+
+
+def test_readings_and_drafts_are_named_for_what_they_are():
+    """0.9.124 end-to-end test: a repository draft said "Created from your document"; a reading said "A session is
+    open on this matter" and still looked at work once it had finished; the sessions list showed a bare "browser"."""
+    src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    assert "Created from your ${draftSource(m)}" in src
+    assert 'o.source_kind === "repo" || o.repo ? "repository" : "document"' in src
+    assert '"Reading done. " : "Reading in progress. "' in src
+    assert "{ finished: Boolean(d.finished) }" in src
+    assert '? "browser" :' not in src and '"in the browser"' in src

@@ -138,7 +138,7 @@ def test_a_past_session_shows_signed_searches_marks_and_the_kept_conversation(ho
     m = c.get("/api/matter", params={"id": "Acme/cooling"}).json()
     assert m["sessions"][0] == {"id": SID, "started_at": "2026-09-17T16:37:34Z", "surface": "browser", "searches": 1,
                                 "documents": 2, "ai_verified": True, "boxed": True, "unanswered": 1,
-                                "checked": False, "conversation": True}
+                                "failed": False, "failure": "", "checked": False, "conversation": True}
     d = c.get("/api/session", params={"id": "Acme/cooling", "sid": SID}).json()
     assert [x["query"] for x in d["searches"]] == ["a wrist device"]          # the unsigned row is not a search
     assert d["unanswered"] == 1 and d["marks"] == {"WO-1-A1": "relevant"}
@@ -343,9 +343,11 @@ def test_an_unrecognised_failure_is_plain_words_and_keeps_what_it_said_in_the_de
 
 
 def test_a_failed_start_is_not_refreshed_off_the_screen():
+    # The page re-renders from the server's one state, and the server keeps reporting a failed start until it is
+    # dismissed (Launches.shown_for), so the reason no longer flashes and vanishes when the page refreshes.
     js = (STATIC / "home.js").read_text()
-    assert 'if (l.state !== "failed") onChange();' in js
-    assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost"' in js
+    assert "home.launches.shown_for(mid)" in (Path(H.__file__)).read_text()
+    assert 'button("Try again", "primary"' in js and 'button("Dismiss", "ghost", () => { dismissLaunch(l.id)' in js
 
 
 def test_the_card_the_matter_page_and_the_footer_count_one_session_the_same_way(home):

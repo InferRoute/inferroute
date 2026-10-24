@@ -2230,6 +2230,19 @@
     clear(box);
     const kb = (n) => `${Math.round((Number(n) || 0) / 1024)} KB`;
     const did = Number(summary.requests) > 0;
+    if (summary.failed) {
+      // The assistant program stopped by itself (it crashed as it started, or mid-session). Said as a failure,
+      // with its cause and what to do, never as a quiet "Session closed. Nothing was asked".
+      box.className = "ended failed";
+      box.append(el("div", "", el("b", "", "The session didn't run. "), summary.failed.message || "The assistant stopped by itself."));
+      if (did) box.append(el("div", "", `${summary.requests} request${summary.requests === 1 ? "" : "s"} reached the AI machine before it stopped. Export the record to keep what was done.`));
+      wayOut(box);
+      box.hidden = false;
+      $("composer").hidden = true;
+      $("end").hidden = true;
+      $("mark-steps").hidden = true;
+      return;
+    }
     box.append(el("div", "", el("b", "", "Session closed. "),
       did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} sealed here · plaintext that left this computer: 0 bytes.`
           : "Nothing was asked in this session, so there is nothing to export."));
@@ -2429,6 +2442,13 @@
     searchOffered = Boolean(s.search);
     readingSession = s.mode === "intake";
     nameSession = s.mode === "names";
+    if (nameSession) {
+      // A name check's record holds trademark searches run on this computer: nothing outside it signed them, so
+      // the panel says what its check can show rather than promising a signed record and a verifier.
+      const intro = document.querySelector(".prove > p.sub");
+      if (intro) intro.textContent = "Export the record: your notes, the report and every trademark search, with a "
+        + "check that its files are unchanged. The searches ran on this computer, so nothing outside it signed them.";
+    }
     const scope = $("audit").querySelector("#audit-scope");      // made by auditOffer, not in the HTML
     if (scope) scope.textContent = auditScope();
     intakeId = String(s.intake_id || "");
@@ -2729,7 +2749,8 @@
     const out = $("export-result");
     clear(out);
     out.hidden = false;
-    out.append(el("p", "sub", "Writing the signed record, then running its own verifier. This takes a few seconds."));
+    out.append(el("p", "sub", nameSession ? "Writing the record, then checking its files. This takes a few seconds."
+      : "Writing the signed record, then running its own verifier. This takes a few seconds."));
     try {
       const r = await api("/api/prove", {});
       const copy = el("button", "small", "Copy folder path");
@@ -2742,7 +2763,9 @@
       auditOffer($("audit"), (r.check || {}).plain);
       clear(out);
       out.append(verdict,
-        el("div", "export-where", el("b", "", "The record"), " holds the disclosure in plain text: store it like the client file. Open record.html in:"),
+        el("div", "export-where", el("b", "", "The record"), nameSession
+          ? " holds your notes and the report in plain text. Open record.html in:"
+          : " holds the disclosure in plain text: store it like the client file. Open record.html in:"),
         el("span", "mono", r.path), copy);
     } catch (e) { clear(out); out.hidden = true; toast(e.message, "error"); }
     finally { b.disabled = false; b.textContent = "Export and check the record"; }

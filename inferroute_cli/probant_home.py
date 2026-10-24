@@ -34,7 +34,7 @@ from fastapi import Request
 
 from . import probant_trust
 from . import probant as S
-from .probant_web import BRAND_FONTS, ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
+from .probant_web import AGENT_STOPPED_MARK, BRAND_FONTS, ENDED_MARK, STATIC, PageFiles, disclosure_info, install_guard, launch_browser, strip_ansi
 
 # ── when the search machine is meant to be up ──────────────────────────────────────────────────────────
 # The search enclave is a sealed machine that costs money to keep running, so it is scheduled rather than
@@ -230,6 +230,41 @@ def _signed_searches(rows: List[dict]) -> List[dict]:
             and str((r.get("statement") or {}).get("kind") or "search") != "document"]
 
 
+# Exit codes a session ended BY SOMEONE leaves behind (SIGINT, SIGKILL, SIGTERM, as a negative code or as 128+n).
+# Only for records written before a record said who ended it: those carry an exit code and nothing else.
+_ASKED_EXIT = {-2, -9, -15, 130, 137, 143}
+
+
+def session_failure(rec: dict) -> str:
+    """Why a session did not run, in the page's words, or "" when it did (or is still running).
+
+    The record's own ending decides it: a session whose assistant stopped by itself with a failing code, or before
+    a single answer, did not run — whatever its AI check says. Built without this, the list showed "✓ checked ·
+    0 searches" for three sessions whose assistant had exited 127 as it started (23 Oct)."""
+    if "exit_code" not in rec:
+        return ""
+    code, turns, by = rec.get("exit_code"), rec.get("turns"), rec.get("ended_by")
+    if by == "person":
+        return ""
+    if by == "itself":
+        if code == 0 and (turns or 0) > 0:
+            return ""
+    elif code in (0, None) or code in _ASKED_EXIT:
+        return ""
+    from .probant_web import _EXIT_CAUSES
+    cause = _EXIT_CAUSES.get(code) if isinstance(code, int) else None
+    head = ("The assistant stopped as the session began, so nothing was asked." if not turns
+            else "The assistant stopped unexpectedly during this session.")
+    why = f" Cause: {cause} (code {code})." if cause else (f" It ended with code {code}." if code else "")
+    return head + why + " Start a new session; if it stops the same way, tell InferRoute."
+
+
+def _name_session_searches(rdir: Path, sid: str, rec: dict) -> List[Dict[str, Any]]:
+    from . import tm_search
+    return tm_search.session_searches(rdir, sid, str(rec.get("started_at") or _stamp_of(sid)),
+                                      str(rec.get("ended_at") or ""))
+
+
 def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
     rdir = S.records_dir(client, matter)
     out = []
@@ -245,24 +280,40 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
         kept = (rdir / f"{sid}.conversation.jsonl").exists()
         ai_verified, boxed = bool(model.get("verified")), probant_trust.closed_box(rec.get("confinement"))
         unanswered = sum(1 for r in rows if r.get("kind") == "unanswered")
-        out.append({"id": sid, "started_at": _stamp_of(sid), "surface": rec.get("surface") or ("browser" if kept else ""),
-                    "searches": len(searches), "documents": len(keys), "ai_verified": ai_verified,
-                    "boxed": boxed, "unanswered": unanswered,
-                    # The list row's "✓ checked" reads EVERY line the session page shows under its checks, here,
-                    # once: it said "✓ checked" beside a session whose page said a search was never answered.
-                    "checked": ai_verified and boxed and not unanswered,
-                    "conversation": kept})
+        failure = session_failure(rec)
+        row = {"id": sid, "started_at": _stamp_of(sid), "surface": rec.get("surface") or ("browser" if kept else ""),
+               "searches": len(searches), "documents": len(keys), "ai_verified": ai_verified,
+               "boxed": boxed, "unanswered": unanswered, "failed": bool(failure), "failure": failure,
+               # The list row's "✓ checked" reads EVERY line the session page shows under its checks, here,
+               # once: it said "✓ checked" beside a session whose page said a search was never answered, and
+               # beside sessions whose assistant never started.
+               "checked": ai_verified and boxed and not unanswered and not failure,
+               "conversation": kept}
+        if rec.get("mode") == "names":
+            # A name check's searches are trademark searches, logged matter-wide; its own are counted here. Counted
+            # as sealed patent searches it read "0 searches · 0 documents" after eight searches (23 Oct).
+            tm = _name_session_searches(rdir, sid, rec)
+            row.update(kind="names", searches=len(tm), documents=0, tm_searches=len(tm),
+                       names=len({str(e.get("name") or "").strip().lower() for e in tm if e.get("name")}))
+        out.append(row)
     out.sort(key=lambda s: s["id"], reverse=True)
     return out
 
 
 def list_exports(client: str, matter: str) -> List[Dict[str, Any]]:
+    """This matter's exported records: by folder name, and then by the matter the record says it was made from
+    (probant_export.export_belongs_to), so a new matter never shows an older same-named matter's records."""
+    from .probant_export import NAME_RECORD, PATENT_RECORD, export_belongs_to
     root = S.probant_root() / client / "exports"
-    pattern = re.compile(rf"^{re.escape(matter)}-prior-art-record-(\d{{8}}T\d{{6}}Z)$")
+    pattern = re.compile(rf"^{re.escape(matter)}-(?:{PATENT_RECORD}|{NAME_RECORD})-(\d{{8}}T\d{{6}}Z)$")
+    try:
+        rec = S.load_record(client, matter)
+    except Exception:                                          # noqa: BLE001
+        rec = {}
     out = []
     for d in (root.iterdir() if root.is_dir() else []):
         m = pattern.match(d.name)
-        if d.is_dir() and m and (d / "record.html").is_file():
+        if d.is_dir() and m and (d / "record.html").is_file() and export_belongs_to(rec, d):
             out.append({"name": d.name, "made_at": _stamp_of(m.group(1) + "-00000000"), "folder": str(d)})
     out.sort(key=lambda e: e["name"], reverse=True)
     return out
@@ -328,10 +379,16 @@ def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any
     model = rec.get("model_lane") or {}
     conv_file = rdir / f"{sid}.conversation.jsonl"
     summary = next((s for s in list_sessions(client, matter) if s["id"] == sid), {})
+    extra: Dict[str, Any] = {}
+    if rec.get("mode") == "names":
+        extra["trademark_searches"] = [
+            {"n": n, "at": e.get("at"), "name": str(e.get("name") or ""), "classes": list(e.get("classes") or []),
+             "marks": len(e.get("hits") or []) + int(e.get("more") or 0)}
+            for n, e in enumerate(_name_session_searches(rdir, sid, rec), 1)]
     return {"id": sid, "matter": f"{client}/{matter}", **summary,
             "model": {"verified": bool(model.get("verified")), "checks": model.get("checks"), "name": model.get("model")},
             "conversation": _jsonl(conv_file) if conv_file.exists() else None,
-            "searches": searches, "marks": matter_marks(client, matter)}
+            "searches": searches, "marks": matter_marks(client, matter), **extra}
 
 
 def _sealed_once(prompt: str, *, timeout: float = 240.0) -> str:
@@ -386,10 +443,13 @@ class Launches:
         # A first session on a computer without the assistant program installs it (pi_runtime) before anything
         # else: say so, rather than let "checking the sealed machines" run for a minute longer than it says.
         setup = it["state"] == "starting" and any(SETUP_MARK in ln for ln in list(it["tail"]))
+        failed = it["state"] == "failed"
         return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
                 "started_at": int(it["started"]), "elapsed": int(time.time() - it["started"]), "message": it["message"],
                 "phase": "setup" if setup else "",
-                "detail": it.get("detail", "") if it["state"] == "failed" else ""}
+                "detail": it.get("detail", "") if failed else "",
+                # The page offers "Replace key" right in the failure when the key is the cause.
+                "key_problem": key_problem_in(list(it.get("tail") or [])) if failed else ""}
 
     def running_intake(self, ident: str) -> Optional[Dict[str, Any]]:
         with self.lock:
@@ -419,6 +479,20 @@ class Launches:
             for it in self.items.values():
                 if it["matter"] == matter_id and it["state"] in ("starting", "ready") and it["proc"].poll() is None:
                     return it
+        return None
+
+    def shown_for(self, matter_id: str, keep_failed: float = 1800.0) -> Optional[Dict[str, Any]]:
+        """What the matter page shows about starting a session: the running launch, or else the newest launch if
+        it FAILED within `keep_failed` seconds. One state for the button, the box and the report line, which the
+        page re-renders from; a failure kept here survives that re-render instead of flashing away."""
+        live = self.running_for(matter_id)
+        if live:
+            return live
+        with self.lock:
+            mine = [it for it in self.items.values() if it["matter"] == matter_id and not it.get("intake_id")]
+        newest = max(mine, key=lambda it: it["started"], default=None)
+        if newest and newest["state"] == "failed" and time.time() - newest["started"] < keep_failed:
+            return newest
         return None
 
     def stop_running(self, matter_id: str) -> bool:
@@ -502,6 +576,13 @@ class Launches:
             m = SESSION_URL.search(raw)
             if m and it["state"] == "starting":
                 it["url"], it["state"] = m.group(1), "ready"
+            # The link prints BEFORE the assistant program starts, so "ready" is a promise. When the program then
+            # stops by itself, the session did not run: say so, rather than "A session is open… Running since"
+            # and then a closed page reading "Nothing was asked" (23 Oct: Pi exited 127, three times).
+            if AGENT_STOPPED_MARK in line and it["state"] in ("starting", "ready"):
+                it["state"], it["agent_stopped"] = "failed", True
+                it["message"] = agent_stopped_message(list(it["tail"]))
+                it["detail"] = stopped_detail(list(it["tail"]))
             # The session is OVER although its process lives on for a while, keeping the page up for exporting.
             # Counting it as running offered "Open the session" onto a closed session — and made "Start a session"
             # on that matter return the ended one until the window closed (19 Sep).
@@ -510,12 +591,49 @@ class Launches:
         proc.wait()
         if it["state"] == "ready":
             it["state"], it["message"] = "ended", "The session has ended."
-        else:
+        elif it["state"] == "starting":
             it["state"], it["message"] = "failed", failure_message(list(it["tail"]))
             it["detail"] = failure_detail(list(it["tail"]))
 
 
 SETUP_MARK = "Setting up the assistant program"
+
+
+_STOPPED = re.compile(r"\(exit code (-?\d+), (\d+) answers?\)")
+
+
+def stopped_detail(tail: List[str]) -> str:
+    """The technical lines for a stopped assistant: the first line that names an error (a stack trace buries it
+    under twenty `at …` lines), then the last few lines, made safe by failure_detail."""
+    lines = [ln for ln in tail if not ln.strip().startswith("at ")]
+    first = next((ln for ln in lines if re.search(r"(?i)\berror\b", ln)), "")
+    rest = failure_detail(lines, limit=6)
+    head = failure_detail([first]) if first else ""
+    return rest if not head or head in rest else f"{head}\n{rest}"
+
+
+def agent_stopped_message(tail: List[str]) -> str:
+    """The home page's words for a session whose assistant program stopped by itself (AGENT_STOPPED_MARK):
+    what happened, the cause where the code or the output names one, and what to do."""
+    from .probant_web import _EXIT_CAUSES
+    text = " ".join(tail)
+    m = _STOPPED.search(text)
+    code, answers = (int(m.group(1)), int(m.group(2))) if m else (None, 0)
+    low = text.lower()
+    if "eacces" in low or "permission denied" in low:
+        cause = "it was not allowed to write its own files on this computer (permission denied)"
+    elif code is not None and code in _EXIT_CAUSES:
+        cause = _EXIT_CAUSES[code]
+    else:
+        cause = ""
+    head = ("The assistant stopped as the session began, so nothing was asked and nothing was sent."
+            if not answers else "The assistant stopped unexpectedly. What it answered before that is kept.")
+    why = (f" Cause: {cause}" + (f" (code {code})." if code is not None else ".")) if cause else (
+        f" It ended with code {code}." if code not in (None, 0) else "")
+    return (head + why + " Try once more. If it stops the same way, open “Technical details” below and send "
+            "InferRoute what it says.")
+
+
 NEEDS_KEY_WORDS = "Add your InferRoute key first — the box at the top of the Matters page."
 
 
@@ -627,8 +745,14 @@ def session_stop_wait() -> float:
 def failure_message(tail: List[str]) -> str:
     text = " ".join(tail)
     low = text.lower()
-    if "no inferroute key" in low or "run `ir login`" in low:
-        return "No InferRoute key is saved on this computer. Add it in the box at the top of the Matters page, then try again. Nothing was sent."
+    # A REFUSED key before a MISSING one: the refusal's own line ends "run `ir login`", and matched as "no key"
+    # it told someone whose key was saved but revoked to add a key in a box that is shown only when none is
+    # saved (23 Oct). Neither message names a terminal command.
+    problem = key_problem_in(tail)
+    if problem == "refused":
+        return KEY_REFUSED_WORDS
+    if problem == "missing":
+        return KEY_MISSING_WORDS
     # The account answered before anything opened (22 Oct). BEFORE the "refused" branch below, and in the
     # words anteriora_billing chose, so the buy link is in the message and not under "Technical details".
     from .anteriora_billing import DEVICE_LIMIT_WORDS, NO_UNITS_WORDS
@@ -664,8 +788,8 @@ def failure_message(tail: List[str]) -> str:
                 + next((ln.strip() for ln in reversed(tail) if "vm" in ln.lower()), "").strip())
     if "not opened" in low or "refused" in low or "could not open the confidential session" in low:
         return "The AI machine could not be verified, so the session was not opened and nothing was sent. Try again in a minute."
-    if "cannot reach the carrier" in low or "key was refused" in low:
-        return "Couldn't reach InferRoute to open the session. Check the connection (or `ir login`) and try again."
+    if "cannot reach the carrier" in low:
+        return "Couldn't reach InferRoute to open the session. Check the internet connection and try again. Nothing was sent."
     if "workspace is missing" in low:
         return "This matter's folder is missing, so the session was not opened."
     # The session tried to install the assistant program itself (pi_runtime) and could not: its own words.
@@ -687,6 +811,23 @@ def failure_message(tail: List[str]) -> str:
     if not [ln for ln in tail if ln.strip() and not ln.lower().startswith(("opening ", "traceback"))]:
         return "It stopped before printing anything. Nothing was sent."
     return GENERIC_FAILURE
+
+
+KEY_REFUSED_WORDS = ("InferRoute did not accept the key saved on this computer: it may have been copied wrong, "
+                     "replaced or withdrawn. Press Replace key and paste the key InferRoute sent you, then try "
+                     "again. Nothing was sent.")
+KEY_MISSING_WORDS = ("No InferRoute key is saved on this computer. Add it with the box on the Matters page, then try "
+                     "again. Nothing was sent.")
+
+
+def key_problem_in(tail: List[str]) -> str:
+    """"refused" when InferRoute turned the saved key down, "missing" when there is none, else ""."""
+    low = " ".join(tail).lower()
+    if "key was refused" in low or re.search(r"carrier answered 40[13]\b", low):
+        return "refused"
+    if "no inferroute key" in low or "no api key" in low:
+        return "missing"
+    return ""
 
 
 GENERIC_FAILURE = ("Something went wrong while starting it, and nothing was sent. Try once more. If it happens "
@@ -900,7 +1041,7 @@ class Home:
             ws = Path(str(rec.get("workspace") or ""))
             exports = [{**e, "view": home.record_link(mid, e["name"])}
                        for e in list_exports(client, matter)]
-            running = home.launches.running_for(mid)
+            running = home.launches.shown_for(mid)
             return {"id": mid, "client": client, "matter": matter, "date_bound": rec.get("date_bound"),
                     "kind": rec.get("kind") or "invention",
                     "needs_review": bool(rec.get("needs_review")), "intake_origin": rec.get("intake_origin"),

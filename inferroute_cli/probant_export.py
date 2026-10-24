@@ -393,11 +393,42 @@ def _load_sessions(S, client: str, matter: str) -> list:
 # ───────────────────────────── the bundle ─────────────────────────────
 
 
+NAME_RECORD = "name-check-record"
+PATENT_RECORD = "prior-art-record"
+
+
+def record_folder_kind(rec: dict) -> str:
+    """The word an exported record's folder carries: what the record IS. A name check exported as a
+    "prior-art-record" read as a patent record with nothing in it (23 Oct)."""
+    return NAME_RECORD if rec.get("kind") == "name" else PATENT_RECORD
+
+
+def export_belongs_to(rec: dict, folder: Path) -> bool:
+    """Whether an exported record was made from THIS matter, not merely from one with the same name.
+
+    A record's folder is named after its matter, so a new matter took over the records of an older, deleted
+    matter of the same name (23 Oct: "heat-pipe-bottle", created 19:06, showed a record exported two days
+    earlier). The manifest names the matter it was made from by its creation stamp; a record from before
+    manifests carried one belongs only if it was made after the matter existed. A folder with no readable
+    manifest cannot be told apart, and is kept."""
+    created = str(rec.get("created_at") or "")
+    try:
+        manifest = json.loads((folder / "MANIFEST.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = {}
+    if isinstance(manifest, dict) and manifest.get("matter_created_at"):
+        return manifest["matter_created_at"] == created
+    made = str(manifest.get("generated_at") or "") if isinstance(manifest, dict) else ""
+    return not created or not made or made >= created
+
+
 def build_bundle(client: str, matter: str) -> Dict[str, Any]:
     """Assemble everything: the HTML, the machine record, and the evidence files, from host-held files.
     Returns {"html": str, "searches": list, "evidence": {sha: json_str}, "matter_cutoff": int|None}."""
     from . import probant as S
     rec = S.load_record(client, matter)
+    if rec.get("kind") == "name":
+        return build_name_bundle(client, matter, rec)
     ws = Path(rec["workspace"])
     try:
         state = json.loads(S.state_path(client, matter).read_text())
@@ -678,6 +709,190 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
             "sessions": sessions}
 
 
+def _name_session_failure(r: dict) -> str:
+    from .probant_home import session_failure
+    return session_failure(r or {})
+
+
+def build_name_bundle(client: str, matter: str, rec: dict) -> Dict[str, Any]:
+    """A NAME CHECK's record: the names and the product, the report, every trademark search each session ran,
+    and what the record can and cannot show — in a name check's words.
+
+    It used to be built by the patent record's code: titled "Prior-art research record", it said "No sealed
+    search completed for this matter", gave a priority date, printed "contract ?, preamble ?", and carried
+    neither the eight trademark searches nor the report (23 Oct). A name check's searches run on this computer,
+    so nothing outside it signs their results: this record says so, and claims only what this computer recorded."""
+    from . import probant as S, tm_search
+    from .probant_home import _name_session_searches
+    ws = Path(rec["workspace"])
+    rdir = S.records_dir(client, matter)
+    sessions = _load_sessions(S, client, matter)
+    notes = ""
+    try:
+        notes = (ws / "disclosure.md").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        pass
+    reports: List[Tuple[str, str, str]] = []                     # (file name, written at, text), newest first
+    for q in [ws / S.NAME_CHECK, *S.earlier_name_checks(ws)]:
+        try:
+            reports.append((q.name, dt.datetime.fromtimestamp(q.stat().st_mtime, dt.timezone.utc)
+                            .strftime("%Y-%m-%dT%H:%M:%SZ"), q.read_text(encoding="utf-8", errors="replace")))
+        except OSError:
+            continue
+    tm_rows: List[Dict[str, Any]] = []
+    per_session: Dict[str, List[Dict[str, Any]]] = {}
+    for s in sessions:
+        rows = _name_session_searches(rdir, s["session_id"], s.get("record") or {})
+        per_session[s["session_id"]] = rows
+        tm_rows += [{"session_id": s["session_id"], **r} for r in rows]
+    names = sorted({str(r.get("name") or "").strip() for r in tm_rows if r.get("name")}, key=str.lower)
+    try:
+        from . import tm_install
+        cov = tm_search.coverage(tm_install.INDEX.get("sources", ""))
+        data = str(tm_install.INDEX.get("data") or "")
+    except Exception:                                          # noqa: BLE001
+        cov, data = {"searched": [], "not_searched": []}, ""
+
+    out: List[str] = []
+    A = out.append
+    A("<!doctype html><html lang=en><head><meta charset=utf-8>")
+    A(f"<title>Name check record — {_e(client)}/{_e(matter)}</title>")
+    A("<style>"
+      "body{font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#15222c;background:#faf8f4}"
+      "h1{font:500 1.6rem/1.2 'Iowan Old Style',Palatino,Georgia,serif;margin:.2rem 0}h2{font:500 1.2rem/1.3 'Iowan Old Style',Palatino,Georgia,serif;border-bottom:1px solid #d6d3cb;padding-bottom:.25rem;margin-top:2rem}"
+      ".brandline{display:flex;align-items:center;gap:.45rem;font:500 1.05rem 'Iowan Old Style',Palatino,Georgia,serif;color:#15222c;margin-bottom:1rem}.brandline svg{height:15px}"
+      ".sub{color:#4f6a80}table{border-collapse:collapse;width:100%;margin:.5rem 0}th,td{border:1px solid #d6d3cb;padding:.4rem .6rem;text-align:left;vertical-align:top}"
+      "th{background:#f1eee6}code,pre{font-family:ui-monospace,Menlo,monospace}pre{background:#f1eee6;padding:.8rem;border-radius:6px;overflow:auto;font-size:12px;white-space:pre-wrap}"
+      ".ok{color:#376e4c}.warn{color:#90531e;font-weight:600}.bad{color:#9e3f37;font-weight:600}"
+      ".note{color:#4f6a80;font-size:13px}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}"
+      ".glance{background:#e6f0e8;border:1px solid #c9dccd;border-radius:8px;padding:.6rem 1.2rem 1rem;margin:1.2rem 0}"
+      ".glance h2{border:0;margin:.4rem 0 .2rem}.glance ul{margin:.3rem 0;padding-left:1.2rem}.glance li{margin:.35rem 0}"
+      ".who{color:#4f6a80;font-size:12px}"
+      "</style></head><body>")
+    A('<div class=brandline><svg viewBox="6 21 47 32" fill="none" stroke-linecap="round" aria-hidden="true">'
+      '<circle cx="13" cy="40" r="4" fill="#b0873a"/><circle cx="37" cy="37" r="12" stroke="#15222c" stroke-width="4"/>'
+      '<line x1="49" y1="24" x2="49" y2="49" stroke="#15222c" stroke-width="4"/></svg>Anteriora</div>')
+    A("<h1>Name check record</h1>")
+    A(f"<div class=sub>{_e(client)} / {_e(matter)} · made with InferRoute Anteriora</div>")
+
+    ran = [s for s in sessions if not _name_session_failure(s.get("record") or {})]
+    models = [bool(((s.get("record") or {}).get("model_lane") or {}).get("verified")) for s in ran]
+    confs = [str((s.get("record") or {}).get("confinement") or "") for s in ran]
+    items = []
+    if tm_rows:
+        items.append(f"<li><b>{len(tm_rows)} trademark search{'es' if len(tm_rows) != 1 else ''} for "
+                     f"{len(names)} name{'s' if len(names) != 1 else ''}</b>, run on this computer against a local copy of "
+                     f"the trademark registers{(' (' + _e(data) + ')') if data else ''}. The names were not sent to any "
+                     "register, search engine or website. <span class=who>As recorded by this computer.</span></li>")
+    else:
+        items.append("<li>No trademark search is recorded for this matter yet.</li>")
+    items.append(f"<li><b>Report</b>: {'included below' if reports else 'none written yet'}.</li>")
+    if ran:
+        if all(models):
+            items.append("<li><b>The assistant that read your notes ran on a machine this computer checked</b> before "
+                         "sending it anything. <span class=who>As reported by this computer.</span></li>")
+        else:
+            items.append(f"<li class=bad>The assistant's machine was not checked in {models.count(False)} of "
+                         f"{len(ran)} sessions. <span class=who>As reported by this computer.</span></li>")
+        if confs and all(probant_trust.closed_box(c) for c in confs):
+            items.append("<li><b>The assistant worked in a closed box</b>: no internet, and no files beyond this matter's "
+                         "folder. <span class=who>As reported by this computer.</span></li>")
+        else:
+            items.append("<li class=warn>The assistant was not fully boxed in at least one session; see the sessions "
+                         "below. <span class=who>As reported by this computer.</span></li>")
+    failed = len(sessions) - len(ran)
+    if failed:
+        items.append(f"<li class=warn>{failed} session{'s' if failed != 1 else ''} did not run (the assistant stopped "
+                     "as it started); listed below.</li>")
+    items.append("<li><b>Not claimed</b>: that a name is free to use or to register. That is a legal judgement, and "
+                 "registers this check did not search can still hold a name.</li>")
+    A("<div class=glance><h2>At a glance</h2><ul>" + "".join(items) + "</ul>"
+      "<p class=note><b>How to check</b>: in this folder, <code>sha256sum -c SHA256SUMS</code> shows whether any file "
+      "changed after this record was exported. It cannot show more than that: see the last section.</p></div>")
+
+    A("<h2>Names and product</h2>")
+    A("<p class=note>Your notes (<code>disclosure.md</code> in the matter folder) as they stood at export time.</p>")
+    A(f"<pre>{_e(notes) or '<span class=note>(no notes in the matter folder)</span>'}</pre>")
+
+    A("<h2>Report</h2>")
+    if not reports:
+        A("<p class=note>No report has been written for this matter yet.</p>")
+    for i, (fname, at, text) in enumerate(reports):
+        label = "The latest report" if i == 0 and fname == S.NAME_CHECK else "An earlier report"
+        A(f"<h3>{label} <span class=note>({_e(fname)}, written {_e(at)})</span></h3>")
+        A("<p class=note>Written by the assistant from the searches below. Its wording is the assistant's; the marks "
+          "it names are in the search results, which this computer recorded as the searches returned them.</p>")
+        A(f"<pre>{_e(text)}</pre>")
+
+    A("<h2>What was searched</h2>")
+    if cov.get("searched"):
+        A(f"<p><b>Searched:</b> {_e('; '.join(cov['searched']))}.{(' Data: ' + _e(data) + '.') if data else ''}</p>")
+    if cov.get("not_searched"):
+        A(f"<p><b>Not searched:</b> {_e('; '.join(cov['not_searched']))}.</p>")
+
+    A("<h2>Sessions and their searches</h2>")
+    if not sessions:
+        A("<p class=note>No session has been recorded for this matter yet.</p>")
+    for s in sessions:
+        r = s.get("record") or {}
+        model = r.get("model_lane") or {}
+        A(f"<h3>Session of {_e(r.get('started_at') or s['session_id'])}</h3><table>")
+        if r.get("ended_at"):
+            A(f"<tr><th>Ended</th><td>{_e(r.get('ended_at'))}</td></tr>")
+        why = _name_session_failure(r)
+        if why:
+            A(f"<tr><th>Outcome</th><td class=bad>{_e(why)}</td></tr>")
+        checks = model.get("check_list") or []
+        rows = "".join(f"<tr><td class={'ok' if c.get('ok') else 'bad'}>{'✓' if c.get('ok') else '✗'}</td>"
+                       f"<td>{_e(c.get('label'))}</td><td class=note>{_e(c.get('why'))}</td></tr>" for c in checks)
+        head = "checked" if model.get("verified") else "not checked"
+        if model.get("checks"):
+            head += f" ({_e(model.get('checks'))} checks passed)"
+        if model.get("model"):
+            head += f" · model {_e(model.get('model'))}"
+        A(f"<tr><th>The assistant's machine</th><td class={'ok' if model.get('verified') else 'bad'}>{head}"
+          f"{('<details><summary class=note>Each check</summary><table>' + rows + '</table></details>') if rows else ''}"
+          "<p class=note>Checked by this computer before the session started; its receipt is in this folder when this "
+          "computer still had it.</p></td></tr>")
+        conf = str(r.get("confinement") or "")
+        if conf:
+            plain = ("Closed: no internet, and no files beyond this matter's folder." if probant_trust.closed_box(conf)
+                     else "Not fully closed in this session.")
+            A(f"<tr><th>The assistant's box</th><td>{plain} <span class=note>(as reported by this computer)</span>"
+              f"<details><summary class=note>As recorded</summary><span class=mono>{_e(conf)}</span></details></td></tr>")
+        mine = per_session.get(s["session_id"]) or []
+        A(f"<tr><th>Trademark searches</th><td>{len(mine) or 'none'}</td></tr></table>")
+        if mine:
+            A("<table><tr><th>#</th><th>When</th><th>Name</th><th>Classes</th><th>Similar marks found</th><th>Closest marks</th></tr>")
+            for n, e in enumerate(mine, 1):
+                hits = e.get("hits") or []
+                found = len(hits) + int(e.get("more") or 0)
+                top = "<br>".join(f"{_e(h.get('text'))} <span class=note>({_e(h.get('register'))} {_e(h.get('number'))}, "
+                                  f"{_e(h.get('status'))})</span>" for h in hits[:5])
+                A(f"<tr><td>{n}</td><td>{_e(e.get('at'))}</td><td>{_e(e.get('name'))}</td>"
+                  f"<td>{_e(', '.join(str(c) for c in (e.get('classes') or [])) or 'all')}</td><td>{found}</td><td>{top}</td></tr>")
+            A("</table>")
+    A("<p class=note>Every search with every mark it returned (up to 40 per search) is in "
+      "<code>trademark-searches.json</code> in this folder.</p>")
+
+    A("<h2>What this record can and cannot show</h2>")
+    A("<p class=note><b>What it shows</b>: what this computer recorded — the names searched, when, in which classes, and "
+      "the marks each search returned from the local copy of the registers; the report the assistant wrote; and that the "
+      "assistant ran on a machine this computer checked, in a closed box.</p>")
+    A("<p class=note><b>What it cannot show</b>: the searches ran on this computer, so no outside machine signed their "
+      "results. A reader who does not trust this computer should weigh every line accordingly. The file hashes "
+      "(<code>MANIFEST.json</code>, <code>SHA256SUMS</code>) show a change made after export, not that the export was "
+      "complete or honest.</p>")
+    A("<p class=note><b>Not claimed</b>: that a name is available, registrable or safe to use; that no other mark or "
+      "right exists. Registers and rights listed as not searched can still apply. Have a trademark professional review "
+      "the report before you file or launch.</p>")
+    A(f"<p class=note>Generated {_e(dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))} on the machine that made this record.</p>")
+    A("</body></html>")
+    return {"html": "".join(out), "searches": [], "evidence": {}, "matter_cutoff": None, "unanswered": [],
+            "sessions": sessions, "kind": "name", "trademark_searches": tm_rows,
+            "reports": {fname: text for fname, _, text in reports}}
+
+
 def _is_hosted(r) -> bool:
     """HOSTED (probant-hosted, not upstream yet): a session run by the hosted web page, with no agent and no model.
     Its record lines must not borrow the agent flow's words (confinement, model lane, contract)."""
@@ -811,16 +1026,22 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                                   "invention in plain text. Choose a local directory outside any synced folder.")
     else:
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        dest = S.probant_root() / client / "exports" / f"{matter}-prior-art-record-{stamp}"
+        dest = S.probant_root() / client / "exports" / f"{matter}-{record_folder_kind(rec)}-{stamp}"
     dest.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(dest, 0o700)
     except OSError:
         pass
 
-    files: Dict[str, bytes] = {"record.html": b["html"].encode("utf-8"),
-                               "searches.json": json.dumps(b["searches"], indent=1, ensure_ascii=False).encode("utf-8"),
-                               "VERIFY.md": VERIFY_MD.encode("utf-8")}
+    if b.get("kind") == "name":
+        files: Dict[str, bytes] = {
+            "record.html": b["html"].encode("utf-8"),
+            "trademark-searches.json": json.dumps(b["trademark_searches"], indent=1, ensure_ascii=False).encode("utf-8"),
+            **{f"report-{name}": text.encode("utf-8") for name, text in (b.get("reports") or {}).items()}}
+        return _write_name_bundle(dest, files, b, client, matter, rec)
+    files = {"record.html": b["html"].encode("utf-8"),
+             "searches.json": json.dumps(b["searches"], indent=1, ensure_ascii=False).encode("utf-8"),
+             "VERIFY.md": VERIFY_MD.encode("utf-8")}
     # The CONVERSATION's own proof, not only the searches' (Henry, 23 Sep: "can't it check that the part
     # that checks that the chat I had with the confidential AI was confidential?"). The record already
     # describes the model lane, verbatim from this device's receipt — but the receipt stayed on the device,
@@ -897,6 +1118,8 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                               "refusing to write a record that VERIFY.md tells the reader to verify with it")
     files["verify_record.py"] = verifier_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
+                # Which matter this was made from, beyond its name (export_belongs_to).
+                "matter_created_at": rec.get("created_at"),
                 "matter_cutoff": b["matter_cutoff"], "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "note": "an unsigned index of this bundle, not a seal; the enclave-signed statements in searches.json are the seal",
                 "reference_hint": _reference_hint(),
@@ -936,6 +1159,48 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         _anchor(dest / "MANIFEST.json")
     else:
         print("  to timestamp this record (open source, publishes only a hash): anteriora export ... --anchor, or `ots stamp MANIFEST.json`")
+    return dest
+
+
+def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], client: str, matter: str,
+                       rec: dict) -> Path:
+    """Write a name check's record: the page, its searches, its reports, each session's receipt where this
+    computer still has it, and the file hashes. No search verifier: nothing in a name check was signed outside
+    this computer, and the record says so instead of carrying a checker with nothing to check."""
+    notes = []
+    for sess in b.get("sessions") or []:
+        sid = sess["session_id"]
+        rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
+        try:
+            raw = Path(rp).read_bytes() if rp else None
+        except OSError:
+            raw = None
+        if raw is None:
+            notes.append({"session": sid, "receipt": "none" if not rp else "named but unreadable"})
+            continue
+        raw, _carried, _missing = _carry_served_evidence(raw, Path(rp).parent, files)
+        files[f"session-{sid}.receipt.json"] = raw
+        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json"})
+    manifest = {"schema": "inferroute.name-check-record/1", "kind": "name-check", "client": client, "matter": matter,
+                "matter_created_at": rec.get("created_at"),
+                "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "note": "an unsigned index of this bundle: it shows a file changed after export, not that the export "
+                        "was complete. The trademark searches ran on the computer that made it; nothing outside it "
+                        "signed them.",
+                "sessions": notes, "trademark_searches": len(b.get("trademark_searches") or []),
+                "files": {name: _sha256_hex(data) for name, data in sorted(files.items())}}
+    files["MANIFEST.json"] = json.dumps(manifest, indent=1).encode("utf-8")
+    files["SHA256SUMS"] = "".join(f"{sha}  {name}\n" for name, sha in sorted(manifest["files"].items())).encode("utf-8")
+    for name, data in files.items():
+        p = dest / name
+        p.write_bytes(data)
+        try:
+            os.chmod(p, 0o600)
+        except OSError:
+            pass
+    print(f"wrote {dest}")
+    print(f"  {manifest['trademark_searches']} trademark search(es), {len(b.get('reports') or {})} report(s)")
+    print("  contains your notes and the report in plain text — store it accordingly")
     return dest
 
 

@@ -489,6 +489,18 @@
 
   // ── starting a session ──
   const watching = new Map();       // launch id → timer
+  // A dismissed failure is not shown again on this tab; the server keeps reporting it for a while.
+  const DISMISSED = "anteriora-dismissed-launches";
+  function launchDismissed(id) {
+    try { return (JSON.parse(sessionStorage.getItem(DISMISSED) || "[]")).includes(id); } catch (_) { return false; }
+  }
+  function dismissLaunch(id) {
+    try {
+      const ids = JSON.parse(sessionStorage.getItem(DISMISSED) || "[]");
+      sessionStorage.setItem(DISMISSED, JSON.stringify([...ids, id].slice(-50)));
+    } catch (_) { /* storage off: it shows again on the next visit */ }
+  }
+
   // `reading`: the launch is a document or repository reading, not a session on a matter; `finished` says the
   // reading itself is done while its session stays open for questions.
   function launchBox(matterId, launch, onChange, reading) {
@@ -544,7 +556,8 @@
         // and vanished, leaving "nothing happened" as the only feedback.
         box.append(el("div", "row actions",
           button("Try again", "primary", () => { clear(box); box.remove(); startSession(matterId, onChange); }),
-          button("Dismiss", "ghost", () => { box.remove(); onChange(); })));
+          button("Dismiss", "ghost", () => { dismissLaunch(l.id); box.remove(); onChange(); })));
+        if (l.key_problem) box.append(replaceKeyButton(null, "primary"));
       } else {
         box.className = "launch";
         box.append(el("div", "", l.message || "The session has ended."));
@@ -559,7 +572,9 @@
           if (l.state !== "starting") {
             clearInterval(timer);
             watching.delete(launch.id);
-            if (l.state !== "failed") onChange();            // a failure stays on screen: see above
+            // The page re-renders from the server's one state. A failure survives that: the server keeps
+            // reporting it until it is dismissed (Launches.shown_for), so it no longer flashes and vanishes.
+            onChange();
           }
         } catch (_) { /* keep trying */ }
       }, 1500);
@@ -620,7 +635,7 @@
 
   // The first thing a computer without a key shows. The key is typed or pasted into a masked field, sent to
   // this computer's own page, checked with InferRoute, and saved here; it is never shown again.
-  function keyCard(done) {
+  function keyCard(done, replace) {
     const keyInput = input("password", "inf_…");
     keyInput.autocomplete = "off";
     keyInput.spellcheck = false;
@@ -631,19 +646,33 @@
       try {
         await api("/api/key", { key: keyInput.value });
         keyInput.value = "";
-        toast("Key saved. You can start sessions.", "info");
+        toast(replace ? "Key replaced. You can start sessions." : "Key saved. You can start sessions.", "info");
         done();
       } catch (e) { err.textContent = e.message; save.disabled = false; }
     });
     keyInput.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save.click(); });
     return el("div", "card key-card",
-      el("h2", "", "Add your InferRoute key"),
-      el("p", "", "Anteriora needs the key InferRoute sent you before it can run a session. Paste it here once; it "
+      el("h2", "", replace ? "Replace your InferRoute key" : "Add your InferRoute key"),
+      el("p", "", replace
+        ? "Paste the key InferRoute sent you. It is checked with InferRoute first, and replaces the saved one only if InferRoute accepts it."
+        : "Anteriora needs the key InferRoute sent you before it can run a session. Paste it here once; it "
         + "is kept on this computer only, in a file only you can read. Sharing and Help work without it."),
       // The pilot is onboarded by hand (22 Oct): someone without a key needs to know who to ask.
       el("p", "sub selectable", "No key yet? Write to support@inferroute.ai."),
       field("Your key", keyInput, "It starts with inf_. Nothing is sent anywhere until you press the button, and then only to InferRoute, to check it."),
       err, el("div", "dialog-actions", save));
+  }
+
+  // "Replace key", wherever a key can be the problem: under a failure caused by it, and in the settings on the
+  // Matters page. The box that takes a key used to show only when none was saved, so a wrong or withdrawn key
+  // was a dead end (23 Oct).
+  function replaceKeyButton(onDone, cls) {
+    const holder = el("div", "");
+    const b = button("Replace key", cls || "ghost", () => {
+      b.hidden = true;
+      holder.append(keyCard(() => { clear(holder); b.hidden = false; if (onDone) onDone(); }, true));
+    });
+    return el("div", "replace-key", b, holder);
   }
 
   // ── pages ──
@@ -795,6 +824,11 @@
     // No key, no sessions: say so FIRST, before anything the person could press and have fail. Sharing and
     // Help do not need one and stay as they are.
     if (data.key && !data.key.present) p.append(keyCard(() => refresh()));
+    const keySetting = data.key && data.key.present
+      ? el("details", "fold settings", el("summary", "", "Settings"),
+          el("p", "sub", "An InferRoute key is saved on this computer. Replace it if InferRoute sent you a new one, or if sessions say it was not accepted."),
+          replaceKeyButton(() => refresh()))
+      : null;
     mountSearchStatus(p);
     p.append(el("div", "card key-card",
       el("h2", "", "Check product names"),
@@ -837,6 +871,7 @@
         el("p", "", "Create a matter, then start a session. For an invention, paste its disclosure: the assistant surveys published patents for related art, in sealed machines this computer checks first. For names, list the names and say what the product does: the assistant checks them against registered trademarks, searched on this computer."),
         el("div", "row", button("Create your first matter", "primary", newMatterDialog), button("How it works", "ghost", () => { location.hash = "#/help"; }))));
       await renderDeleted(p);
+      if (keySetting) p.append(keySetting);
       return;
     }
     const grid = el("div", "matters");
@@ -847,6 +882,7 @@
       p.append(sessionTable(data.recent, true, liveMap(data.running)));
     }
     await renderDeleted(p);
+    if (keySetting) p.append(keySetting);
   }
 
   const liveMap = (launches) => Object.fromEntries((launches || []).filter((l) => l.state === "ready" && l.url).map((l) => [l.matter, l]));
@@ -856,6 +892,14 @@
   // session and marking that one "open" would send the person into the wrong place. `live` maps matter id -> its
   // running launch (state "ready").
   const sessionStartedAfter = (s, l) => Date.parse(s.started_at) / 1000 >= (l.started_at || 0) - 5;
+  // What a session did, counted the way its kind counts: a name check runs trademark searches on this computer,
+  // not sealed patent searches, and "0 searches · 0 documents" after eight of them read as a check that did nothing.
+  function sessionCounts(s) {
+    if (s.kind === "names") return [plural(s.tm_searches || 0, "trademark search", "trademark searches"), plural(s.names || 0, "name", "names")];
+    return [plural(typeof s.searches === "number" ? s.searches : (s.searches || []).length, "search", "searches"),
+      plural(s.documents || 0, "document", "documents")];
+  }
+
   function sessionTable(sessions, withMatter, live) {
     const t = el("div", "sessions");
     const newest = new Set();
@@ -870,9 +914,9 @@
         withMatter ? el("span", "matter-of", matterId) : null,
         // Where it ran, in words (0.9.124 test: a bare "browser" read like a column of jargon).
         el("span", "how", s.surface === "browser" ? "in the browser" : s.surface === "terminal" ? "in the terminal" : ""),
-        el("span", "", plural(s.searches, "search", "searches")),
-        el("span", "", plural(s.documents, "document", "documents")),
+        ...sessionCounts(s).map((c) => el("span", "", c)),
         s.__live ? el("span", "live-text", "● open now")
+          : s.failed ? el("span", "bad-text", "✗ didn't run")
           : el("span", s.checked ? "ok-text" : "warn-text", s.checked ? "✓ checked" : "◐ see details"));
       row.type = "button";
       // A session that is still open goes straight back INTO it; a finished one shows what it did, with a way to continue.
@@ -891,6 +935,11 @@
     try { m = await api(`/api/matter?id=${enc(matterId)}`); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
     clear(p);
     const refresh = () => renderMatter(matterId);
+    // ONE state for the whole page: the launch the server reports (starting, ready, or a failure not yet
+    // dismissed). The button, the box and the report line each read it, and any change re-renders the page:
+    // "Starting…" stood beside "The session didn't start" beside "The assistant is checking your names now" (23 Oct).
+    if (m.running && m.running.state === "failed" && launchDismissed(m.running.id)) m.running = null;
+    const runState = m.running ? m.running.state : "";
     p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; })));
     const words = m.disclosure.disclosure_words;
     const isName = m.kind === "name";
@@ -940,9 +989,11 @@
     p.append(el("div", "row actions",
       m.needs_review ? button("Review draft", "primary", () => reviewDraftDialog(m, refresh))
         // A name check's running session is opened from the box below; a second button here did the same thing.
-        : isName && m.running && m.running.state === "ready" ? null
-        : m.running && m.running.state === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
-        : m.running && m.running.state === "starting" ? button("Starting…", "primary", () => {})
+        : isName && runState === "ready" ? null
+        : runState === "ready" ? button("Open your running session", "primary", () => openLocal(m.running.url))
+        : runState === "starting" ? button("Starting…", "primary", () => {})
+        // A failed start is answered by the box below (Try again), not by a second start button.
+        : runState === "failed" ? null
         : button(isName ? "Check the names" : "Start a session", "primary", () => startSession(m.id, refresh, isName ? "name" : "invention")),
       button(isName ? "Edit names and product" : words ? "Edit disclosure" : "Write the disclosure", "ghost", () => editDisclosureDialog(m.id, refresh, isName)),
       button("Export the record", "ghost", async (ev) => {
@@ -967,7 +1018,9 @@
       const hasReport = Boolean(rep && rep.present);
       if (hasReport) {
         p.append(el("p", "sub", `Written by the assistant, ${localTime(rep.written_at)} · ${tilde(rep.file)}`), renderReport(rep.text));
-      } else if (m.running) {
+      } else if (runState === "starting") {
+        p.append(el("p", "", "The check is starting. The report appears here when it is written."));
+      } else if (runState === "ready") {
         p.append(el("p", "", "The assistant is checking your names now. The report appears here when it is written (usually 10 to 15 minutes); you can watch it work in the session."));
       } else if (rep && (rep.earlier || []).length) {
         p.append(el("p", "sub", "No report from the latest check yet. The earlier reports are below."));
@@ -1030,7 +1083,7 @@
       rows.unshift({ id: "", matter: m.id, started_at: new Date(live[m.id].started_at * 1000).toISOString(), surface: "browser",
                      searches: 0, documents: 0 });
     }
-    if (!rows.length && m.running) p.append(el("p", "sub", isName ? "The check now starting is listed here once it is open."
+    if (!rows.length && (runState === "starting" || runState === "ready")) p.append(el("p", "sub", isName ? "The check now starting is listed here once it is open."
       : "The session now starting is listed here once it is open."));
     else if (!rows.length) p.append(el("p", "sub", isName
       ? "No sessions yet. Start one: the assistant reads your product and names, searches registered trademarks on this computer, and writes its report to name-check.md in the matter folder."
@@ -1148,7 +1201,9 @@
     p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; }), el("span", "sub", " / "),
       button(matterId, "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
     p.append(el("div", "page-head", el("h1", "", `Session of ${localTime(s.started_at)}`),
-      el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${plural(s.searches.length, "search", "searches")} · ${plural(s.documents || 0, "document", "documents")}`)));
+      el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${sessionCounts(s.kind === "names" ? s : { ...s, searches: s.searches.length }).join(" · ")}`)));
+    // A session whose assistant never ran says so first, in plain words, and claims nothing below it.
+    if (s.failed) p.append(failureNote("This session didn't run.", s.failure, ""));
     // Continue: a finished session cannot be resumed (a stored transcript is never reopened in attested mode), so this
     // starts a NEW session that begins from this one: its conversation, searches and marks are put in the matter's
     // folder for the assistant to read. One session at a time per matter.
@@ -1159,7 +1214,7 @@
     if (running && running.state === "ready") {
       next.append(button("Open your running session", "primary", () => openLocal(running.url)),
         el("span", "sub", "A session is already open on this matter, so a new one cannot start."));
-    } else if (running) {
+    } else if (running && running.state === "starting") {
       next.append(button("Starting…", "primary", () => {}));
     } else if (isName) {
       // A name session keeps no conversation to continue from; what a founder wants next is a new check, which
@@ -1180,7 +1235,8 @@
 
     p.append(el("h2", "section", "Conversation"));
     if (!s.conversation) {
-      p.append(el("p", "sub", isName ? "A name check's conversation isn't kept. Its report and every search it ran are on the matter page."
+      p.append(el("p", "sub", s.failed ? "Nothing was said in this session."
+        : isName ? "This check's conversation wasn't kept (it ran before name checks kept theirs). Its report and every search it ran are on the matter page."
         : s.surface === "browser"
         ? "This session's conversation wasn't kept (it ran before conversations were kept)."
         : "Conversations aren't kept for terminal sessions. The searches below are."));
@@ -1206,6 +1262,23 @@
     }
 
     p.append(el("h2", "section", "Searches"));
+    if (s.kind === "names") {
+      // A name check's searches ran on this computer, against the local copy of the trademark registers.
+      const tm = s.trademark_searches || [];
+      if (!tm.length) p.append(el("p", "sub", "No trademark search ran in this session."));
+      else {
+        p.append(el("p", "sub", "Searched on this computer, in the local copy of the trademark registers. The marks each search found are listed on the matter page."));
+        const list = el("ol", "docs");
+        for (const x of tm) {
+          list.append(el("li", "doc past", el("span", "rank", String(x.n)),
+            el("div", "", el("span", "key", x.name), el("span", "year", localTime(x.at)),
+              el("div", "dtitle", `${plural(x.marks, "similar mark", "similar marks")}${x.classes.length ? ` · classes ${x.classes.join(", ")}` : ""}`)),
+            el("span", "")));
+        }
+        p.append(list);
+      }
+      return;
+    }
     if (!s.searches.length) p.append(el("p", "sub", "No sealed search completed in this session."));
     for (const x of s.searches) {
       // A past search folds like any card: the heading is the handle, and it starts open.

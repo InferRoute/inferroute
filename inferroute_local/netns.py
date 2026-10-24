@@ -269,12 +269,22 @@ def _symlink_chain(path: str, limit: int = 40) -> List[str]:
     return out
 
 
+# What wrap() binds read-only for every sandbox: a runtime under one of these is already there.
+SYSTEM_RO = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt")
+
+
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
 def runtime_ro_binds(*binaries: str) -> List[str]:
-    """Interpreter/runtime trees that live under $HOME and must be bound back into the emptied home. System
-    prefixes need no entry — /usr and friends are already bound read-only. Both the symlink path and the
-    resolved path are taken: a venv's python3 and the interpreter it points at are different prefixes, and
-    the sandbox needs both."""
-    home = os.path.realpath(os.path.expanduser("~")) + os.sep
+    """Interpreter/runtime trees the sandbox must bind back in, read-only: every one that is NOT already under
+    the system directories wrap() binds. That is a venv or uv's cpython under $HOME, and equally an interpreter
+    under /tmp (emptied inside), /nix, /snap, /home/linuxbrew or another user's home — rc 0.9.125 (D12): only
+    trees under the home folder were bound, so a Python anywhere else made every session fail with
+    "bwrap: execvp …/python". Both the symlink path and the resolved path are taken: a venv's python3 and the
+    interpreter it points at are different prefixes, and the sandbox needs both."""
+    home = os.path.realpath(os.path.expanduser("~"))
     out: List[str] = []
     candidates: List[str] = [sys.executable]
     for b in binaries:
@@ -283,11 +293,24 @@ def runtime_ro_binds(*binaries: str) -> List[str]:
     for cand in list(candidates):
         if cand and os.path.exists(cand):
             candidates.extend(_symlink_chain(cand))
+            candidates.append(os.path.realpath(cand))
     for cand in candidates:
-        if not cand or not cand.startswith(home):
+        if not cand or not os.path.isabs(cand) or not os.path.exists(cand):
             continue
-        prefix = _prefix_of(cand)
-        if prefix and prefix.startswith(home) and prefix not in out and os.path.isdir(prefix):
+        if any(_under(cand, root) for root in SYSTEM_RO):
+            continue
+        if cand.startswith("/nix/store/"):
+            # A Nix interpreter loads its libraries from other store paths; the store is read-only and public.
+            prefix = "/nix/store"
+        else:
+            prefix = _prefix_of(cand)
+            # Never a whole home folder, nor the root: a binary in ~/bin with a ~/lib beside it would bind
+            # everything the emptied home exists to hide. The binary's own directory is enough to run it.
+            if not prefix or prefix in (os.sep, home) or _under(home, prefix):
+                prefix = os.path.dirname(cand)
+            if prefix in (os.sep, home) or _under(home, prefix):
+                continue
+        if prefix not in out and os.path.isdir(prefix):
             out.append(prefix)
     return out
 
@@ -358,7 +381,7 @@ class NetnsSandbox:
         home = os.path.realpath(os.path.expanduser("~"))
         bwrap = shutil.which("bwrap") or "bwrap"
         cmd = [bwrap, "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent"]
-        for d in ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/opt"):
+        for d in SYSTEM_RO:
             if os.path.exists(d):
                 cmd += ["--ro-bind", d, d]
         cmd += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", home]

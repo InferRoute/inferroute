@@ -56,7 +56,8 @@ def installed(target: Path) -> bool:
     return ok
 
 
-def install(target: Path, url: Optional[str] = None, progress: Optional[Callable[[str], None]] = None) -> Path:
+def install(target: Path, url: Optional[str] = None, progress: Optional[Callable[[str], None]] = None,
+            on_connect: Optional[Callable[[], None]] = None) -> Path:
     say = progress or (lambda m: None)
     target = Path(target)
     if installed(target):
@@ -72,6 +73,8 @@ def install(target: Path, url: Optional[str] = None, progress: Optional[Callable
         # A named agent: Cloudflare refuses Python's default one ("Python-urllib/…") with a 403.
         request = urllib.request.Request(url or INDEX["url"], headers={"User-Agent": "anteriora-client (inferroute)"})
         with urllib.request.urlopen(request, timeout=60) as r, part.open("wb") as out:
+            if on_connect:
+                on_connect()     # the server answered: from here a slow download is progress, not a dead line
             while True:
                 block = r.read(CHUNK)
                 if not block:

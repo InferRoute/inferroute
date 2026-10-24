@@ -17,6 +17,6 @@ console.log(JSON.stringify({
   real: plainRefusal("the search enclave did not verify (container policy: HOST_DATA is not the pinned policy)"),
   declined: plainRefusal("the user declined this search"),
   // the extension's own line when the search machine is offline
-  offline: plainRefusal("Patent search is offline right now, so this search was not sent to the search machine. Do not search again: tell the user that patent search is offline right now and that they can try again later."),
+  offline: plainRefusal("Patent search is offline right now, so this search was not sent to the search machine. Do not search again: tell the user that patent search is offline right now and that they can try again later. Do not offer search steps or point to retry options: the page shows none while search is offline."),
   unknown: plainRefusal("something nobody anticipated"),
 }));

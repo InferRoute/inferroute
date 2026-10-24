@@ -3198,3 +3198,18 @@ def test_no_search_is_suggested_while_patent_search_is_offline():
     body = js[js.index("  function renderSteps() {"):js.index("  function renderMarkSteps()")]
     assert "if (searchIsOffline) {" in body
     assert "g.steps.filter(offerableWhileOffline)" in body
+
+
+def test_an_offline_survey_card_shows_the_plain_line_not_the_models_instruction():
+    # rc 0.9.125 re-test (N2): the survey card printed the tool's text, which is addressed to the model.
+    src = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "app.js").read_text()
+    block = src[src.index('e.sub.textContent = offline ? "patent search is offline"') - 400:][:1200]
+    assert "searchWasOffline(ev.text)" in block and "plainRefusal(ev.text)" in block
+    assert "Do not search again" not in src
+
+
+def test_a_name_check_that_ran_no_search_is_not_marked_checked():
+    # rc 0.9.125 re-test (N4): "0 trademark searches · ✓ checked".
+    src = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    names, checked = src.index('s.kind === "names" && !s.tm_searches'), src.index('"✓ checked" : "◐ see details"')
+    assert names < checked

@@ -95,6 +95,7 @@ def search_availability(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     return {"mode": "always"}
 SEARCH_PROBE_TIMEOUT = 2.5        # a page must not hang on a machine that is deliberately switched off
 SEARCH_PROBE_TTL = 30.0           # seconds a probe result stands for, so refreshing does not hammer it
+TM_CONNECT_BUDGET_S = 90.0         # a trademark download whose server never answers is reported, not waited on
 _search_probe: Dict[str, Any] = {"at": 0.0, "state": "unreachable"}
 _search_probe_lock = threading.Lock()
 
@@ -1011,13 +1012,39 @@ class Home:
             if tm_progress["running"]:
                 return problem("The trademark data is already being installed.", 409)
             tm_progress.update(running=True, line="starting the download")
-            try:
-                await asyncio.to_thread(tm_install.install, S.tm_index_path(),
-                                        None, lambda m: tm_progress.update(line=m.strip()))
-            except tm_install.InstallError as e:
-                return problem(str(e), 502)
-            finally:
-                tm_progress.update(running=False, line="")
+            connected = {"yes": False}
+            outcome: Dict[str, Any] = {}
+
+            def run():
+                # "running" is cleared by the THREAD when it really ends, not by this request, which may have
+                # given up on it below.
+                try:
+                    tm_install.install(S.tm_index_path(), None, lambda m: tm_progress.update(line=m.strip()),
+                                       lambda: connected.update(yes=True))
+                except tm_install.InstallError as e:
+                    outcome["error"] = str(e)
+                finally:
+                    tm_progress.update(running=False, line="")
+            # A thread of its own, not the loop's executor: an attempt given up on must not hold a worker (or the
+            # loop's shutdown) for as long as its sockets take to time out.
+            import threading
+            job = threading.Thread(target=run, name="tm-install", daemon=True)
+            job.start()
+            # A SERVER THAT NEVER ANSWERS IS AN ERROR (rc 0.9.125 re-test, N1): with the download host blocked,
+            # the connection hung (SYN-SENT; why it outlived the 60 s socket timeout is not established) and the page said "Downloading and checking…"
+            # for over ten minutes. Once connected, a slow download is progress and is waited for; before that,
+            # 90 s is the budget. The thread is left to end by itself (it writes only a .part file and installs
+            # nothing unverified); "running" stays set until it does, so a retry cannot start a second writer.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + TM_CONNECT_BUDGET_S
+            while job.is_alive():
+                await asyncio.sleep(0.25)
+                if job.is_alive() and not connected["yes"] and loop.time() > deadline:
+                    return problem("The trademark data server could not be reached from this computer, so nothing "
+                                   "was installed. Check the internet connection (or a firewall or VPN), then try "
+                                   "again in a minute.", 504)
+            if "error" in outcome:
+                return problem(outcome["error"], 502)
             return {"ok": True}
 
         @app.get("/api/name-check")

@@ -924,6 +924,9 @@
         ...sessionCounts(s).map((c) => el("span", "", c)),
         s.__live ? el("span", "live-text", "● open now")
           : s.failed ? el("span", "bad-text", "✗ didn't run")
+          // A name check that ran no search checked no name (rc 0.9.125 re-test, N4): "0 trademark searches ·
+          // ✓ checked" read as a clean result. The connection checks passing is not the check being done.
+          : s.kind === "names" && !s.tm_searches ? el("span", "warn-text", "◐ no search ran")
           : el("span", s.checked ? "ok-text" : "warn-text", s.checked ? "✓ checked" : "◐ see details"));
       row.type = "button";
       // A session that is still open goes straight back INTO it; a finished one shows what it did, with a way to continue.

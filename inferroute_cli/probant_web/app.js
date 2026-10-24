@@ -1859,11 +1859,15 @@
       // the whole result in `sub` — which lives in the head — meant a folded card either said nothing or
       // spilled the lot into its own title bar.
       if (!ev.ok) {
-        e.sub.textContent = "the survey did not complete";
-        e.sub.classList.add("warn");
-        if (e.outline) e.outline.text.textContent = "did not complete";
+        // An outage is not a failure, and the tool's text for it is addressed to the MODEL ("Do not search
+        // again: tell the user…", 0.9.125 re-test): show the plain line instead, in the neutral style.
+        const offline = searchWasOffline(ev.text);
+        e.sub.textContent = offline ? "patent search is offline" : "the survey did not complete";
+        e.sub.classList.add(offline ? "off" : "warn");
+        if (e.outline) e.outline.text.textContent = offline ? "offline" : "did not complete";
         clear(e.body);
-        e.body.append(el("div", "warn", String(ev.text || "the deep survey did not complete")));
+        e.body.append(offline ? el("div", "card-note off", plainRefusal(ev.text))
+          : el("div", "warn", String(ev.text || "the deep survey did not complete")));
         setCollapsed(e, false, false);          // a refusal opens itself, as a search's does
       } else {
         e.sub.textContent = "";

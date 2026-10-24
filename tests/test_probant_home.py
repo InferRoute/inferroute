@@ -1186,3 +1186,38 @@ def test_rc125_d11_name_counts_key_card_and_crumbs():
     i = js.index("if (l.key_problem) box.append(replaceKeyButton(")
     assert "dismissLaunch(l.id); box.remove();" in js[i:i + 200]
     assert 'el("span", "sub", " / "),\n      button(matterId' not in js and 'String(matterId).replace("/", " / ")' in js
+
+
+def test_a_trademark_server_that_never_answers_is_reported_not_waited_on(home, monkeypatch):
+    # rc 0.9.125 re-test (N1): with the download host blocked the page said "Downloading and checking…" for over
+    # ten minutes. Before the server answers, the install has a budget; after the budget, a plain error.
+    import threading
+    from inferroute_cli import tm_install
+    h, c, _ = home
+    release = threading.Event()
+
+    def never_connects(target, url=None, progress=None, on_connect=None):
+        release.wait(10)
+        raise tm_install.InstallError("could not install the trademark index: timed out")
+    monkeypatch.setattr(tm_install, "install", never_connects)
+    monkeypatch.setattr("inferroute_cli.probant_home.TM_CONNECT_BUDGET_S", 0.5)
+    r = c.post("/api/tm-index/install", json={})
+    assert r.status_code == 504 and "could not be reached" in r.json()["error"], r.text
+    # The abandoned attempt still holds the file: a second press waits for it instead of starting a second writer.
+    assert c.post("/api/tm-index/install", json={}).status_code == 409
+    release.set()
+
+
+def test_a_slow_trademark_download_that_has_connected_is_waited_for(home, monkeypatch):
+    import time
+    from inferroute_cli import tm_install
+    h, c, _ = home
+
+    def slow(target, url=None, progress=None, on_connect=None):
+        on_connect()
+        time.sleep(1.5)
+        return target
+    monkeypatch.setattr(tm_install, "install", slow)
+    monkeypatch.setattr("inferroute_cli.probant_home.TM_CONNECT_BUDGET_S", 0.5)
+    r = c.post("/api/tm-index/install", json={})
+    assert r.status_code == 200 and r.json() == {"ok": True}, r.text

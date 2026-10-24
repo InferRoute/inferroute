@@ -270,7 +270,7 @@ function searchOffline(v: SearchVerdict): boolean {
 }
 // What the model is told when that happens: one plain line, so it stops and tells the person instead of
 // reading "connection-level failure" in the verifier's words and trying four more searches (0.9.124 test).
-const SEARCH_OFFLINE_ERROR = "Patent search is offline right now, so nothing was sent. Do not search again: tell the user search is offline and that their text stayed on this computer.";
+const SEARCH_OFFLINE_ERROR = "Patent search is offline right now, so this search was not sent to the search machine. Do not search again: tell the user that patent search is offline right now and that they can try again later.";
 
 function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict): SearchProof {
 	return {

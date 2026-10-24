@@ -1838,7 +1838,9 @@ def test_a_connection_failure_is_not_shown_as_a_verification_failure():
     assert "offline right now" in out["absent"] and "verif" not in out["absent"].lower(), out["absent"]
     # 0.9.124: the extension's own outage line reads as an outage too, never as a refusal
     assert "offline right now" in out["offline"] and "verif" not in out["offline"].lower(), out["offline"]
-    assert "left this computer" in out["absent"], "say plainly that nothing was sent"
+    assert "not sent to the search machine" in out["absent"], "say plainly that nothing was sent"
+    # 24 Oct e2e: "nothing about your text left this computer" was false (the text had gone to the AI machine).
+    assert "left this computer" not in out["absent"] and "stayed on this computer" not in out["offline"]
     assert "not a sealed search machine" in out["junk"], out["junk"]
     # the one that must NOT be blunted
     assert "could not be verified" in out["real"], out["real"]

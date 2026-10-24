@@ -1709,7 +1709,7 @@
     const t = String(text || "").toLowerCase();
     if (t.includes("declined")) return "You didn't allow this search, so nothing was sent.";
     if (searchWasOffline(t))
-      return "Patent search is offline right now, so nothing was sent. Nothing about your text left this computer.";
+      return "Patent search is offline right now, so this search was not sent to the search machine. Try again when it is back.";
     if (t.includes("did not answer") || t.includes("unreachable") || t.includes("timed out"))
       return "The search machine isn't answering, so nothing was sent. It may not be running right now.";
     // Something WAS listening and its answer was not a usable offer — that is trust-relevant, and the

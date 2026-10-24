@@ -50,6 +50,14 @@ def test_the_template_never_reaches_for_privilege_or_the_shell_profile():
         assert forbidden not in text.replace("It does not use sudo, edit your shell profile", "")
 
 
+def test_the_uv_it_installs_does_not_edit_the_shell_profile_either():
+    """rc 0.9.125 e2e (D10): the header says the install does not edit your shell profile, but uv's own installer,
+    which it runs when uv is missing, does unless told not to (UV_NO_MODIFY_PATH, checked against astral's script)."""
+    text = (REPO / "scripts/install_anteriora.sh.in").read_text()
+    lines = [l for l in text.splitlines() if "astral.sh/uv/install.sh" in l and not l.lstrip().startswith("#")]
+    assert lines and all("| UV_NO_MODIFY_PATH=1 sh" in l for l in lines), lines
+
+
 def _run(tmp_path, base, home, extra_env=None):
     c, r = wheels(tmp_path)
     script = tmp_path / "install.sh"

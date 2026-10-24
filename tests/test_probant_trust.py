@@ -125,9 +125,11 @@ def test_no_search_at_all_is_MORE_private_and_must_not_read_as_degraded():
     assert "Partly checked" not in _text(s)
     head = s["headline"]
     assert "the AI model" in head and "the patent search service" not in head   # never claim a machine we did not check
-    assert "nothing can leave this computer for a search machine" in head
+    assert "so this session sends nothing to a search machine" in head
     # The item itself leads with what it protects, not with what is absent.
-    assert "nothing can leave" in _item(s, "search")["summary"]
+    assert "nothing is sent to a search machine" in _item(s, "search")["summary"]
+    # Precise, never absolute (claims-v3; rc 0.9.125 D10): no "nothing can leave this computer".
+    assert "can leave" not in _text(s) and "leave this computer" not in head
 
 
 def test_reading_a_document_offers_no_search_and_says_so_without_alarm():
@@ -282,3 +284,18 @@ def test_a_failed_check_after_the_machine_answered_is_never_an_outage():
     answer["steps"].append({"ok": False, "step": "hardware report", "detail": "bad signature"})
     assert not T.search_offline(answer)
     assert _item(T.build(_receipt(), answer, ADDRESS), "search")["state"] == T.FAIL
+
+
+def test_no_panel_or_session_end_makes_an_absolute_claim_about_this_computer():
+    """rc 0.9.125 e2e (D10): "plaintext that left this computer: 0 bytes" at session end and "nothing can leave this
+    computer for a search machine at all" in the reading panel. claims-v3: no absolute claims, never "nothing leaves
+    your computer"."""
+    from pathlib import Path
+    for mode in ("intake", "matter", "names"):
+        s = T.build(_receipt(), None, ADDRESS, mode=mode)
+        text = _text(s) + s["headline"]
+        assert "can leave" not in text and "at all" not in s["headline"], (mode, text)
+    web = Path(T.__file__).resolve().parent / "probant_web"
+    for name in ("app.js", "home.js"):
+        js = (web / name).read_text()
+        assert "plaintext that left this computer" not in js and "Nothing can leave this computer" not in js

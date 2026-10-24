@@ -70,7 +70,9 @@ for c in "$(command -v uv 2>/dev/null || true)" "$HOME/.local/bin/uv"; do
 done
 if [ -z "$UV" ]; then
   say "Installing uv (a Python installer; it keeps its own Python, apart from the system's) ..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || stop "could not install uv. Check the connection and run this again."
+  # UV_NO_MODIFY_PATH: uv's own installer otherwise adds itself to the shell profile, and the header above says this
+  # install does not edit it (rc 0.9.125 e2e, D10). uv is run by its full path below, so it needs no PATH entry.
+  curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh >/dev/null 2>&1 || stop "could not install uv. Check the connection and run this again."
   UV="$HOME/.local/bin/uv"
   [ -x "$UV" ] || stop "uv did not install where expected ($UV)."
 fi

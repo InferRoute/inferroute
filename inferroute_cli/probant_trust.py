@@ -218,14 +218,14 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
         # alarming: no search tool is offered in this mode, so none can be used.
         return {"key": "search", "state": INFO, "title": "Patent search",
                 "summary": "Not used while reading a document.",
-                "points": ["The assistant has no search tool in this mode, so nothing about the document can "
-                           "leave for a search machine."],
+                "points": ["The assistant has no search tool in this mode, so this session sends none of the "
+                           "document to a search machine."],
                 "more": ["Open a matter from what it proposes, and the search machine is checked then."],
                 "technical": []}
     if search is None:
         return {"key": "search", "state": OFF, "title": "Patent search",
-                "summary": "Not set up on this computer — nothing can leave for a search machine.",
-                "points": ["The assistant cannot search, and cannot send any of this matter anywhere."],
+                "summary": "Not set up on this computer, so nothing is sent to a search machine.",
+                "points": ["The assistant cannot search, so none of this matter is sent to a search machine."],
                 "more": ["You can still work with the assistant on the disclosure.",
                          "Set a search machine up when you want prior art; this computer will check it then."],
                 "technical": []}
@@ -415,9 +415,11 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
         else:
             missing = ("no patent search is set up on this computer" if states["search"] == OFF
                        else "no search tool is offered while reading a document")
+            # Said precisely (claims-v3: never an absolute "nothing leaves this computer"): this SESSION sends
+            # nothing to a search machine, because it has no way to. Text does go to the checked AI machine.
             headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this "
-                        f"computer to the verified machine; {missing}, so nothing can leave this "
-                        "computer for a search machine at all.")
+                        f"computer to the verified machine; {missing}, so this session sends nothing to a "
+                        "search machine.")
             if items[1].get("offline"):
                 headline = ("Sealed hardware checked for this session: the AI model. Text is sealed on this "
                             "computer to the verified machine. Patent search is offline right now, so "

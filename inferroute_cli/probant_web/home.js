@@ -709,7 +709,7 @@
     let dot = "closed", head = "", sub = "";
     if (!d.configured) {
       head = "Patent search is not set up on this computer";
-      sub = "Nothing can leave this computer until it is. You can still work on a disclosure.";
+      sub = "Nothing is sent to a search machine until it is. You can still work on a disclosure.";
     } else if (d.mode === "always") {
       // A MACHINE THAT KEEPS NO TIMETABLE IS NEVER GIVEN ONE. Every sentence below names opening hours,
       // and on 2026-10-01 the search enclave was deployed to run continuously while this page still had a

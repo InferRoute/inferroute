@@ -2297,7 +2297,9 @@
       return;
     }
     box.append(el("div", "", el("b", "", "Session closed. "),
-      did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} sealed here · plaintext that left this computer: 0 bytes.`
+      // Counts only, and what they mean (claims-v3, rc 0.9.125 D10): the old "plaintext that left … : 0 bytes"
+      // was a hard-coded zero dressed as a measurement, and an absolute claim the product does not make.
+      did ? `${summary.requests} request${summary.requests === 1 ? "" : "s"} to the AI machine · ${kb(summary.sealed_bytes)} sealed on this computer, each to the machine it checked first.`
           : "Nothing was asked in this session, so there is nothing to export."));
     box.append(el("div", "", did ? "Export the record to keep it (button on the right), then close this tab."
                                  : "Start another session when you are ready — a session is just a sitting, and the matter keeps everything."));

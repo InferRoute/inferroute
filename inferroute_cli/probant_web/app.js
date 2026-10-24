@@ -2392,6 +2392,11 @@
     });
   }
 
+  async function sendAuto(text) {
+    if (ended) return;
+    try { await api("/api/prompt", { text, auto: true }); } catch (_) { /* the person can still ask by hand */ }
+  }
+
   async function send(text) {
     const t = String(text || "").trim();
     if (!t || ended) return;
@@ -2460,15 +2465,14 @@
     // A continuation: the home page wrote a first message from the earlier session. It goes in the box for the
     // person to read and edit — nothing is sent until they press Send.
     // A name check started from the dialog: the app sends its first message itself, once, so the founder lands
-    // on a check already running. Marked in sessionStorage so a reload does not send it twice.
-    let autoSent = false;
-    try { autoSent = sessionStorage.getItem(`anteriora-autosent-${s.matter}`) === String(s.draft); } catch (_) { /* send once anyway */ }
+    // on a check already running. "Once" is decided by the SESSION, not this tab: s.autosend is true only while
+    // it was never sent, and the send itself is marked auto so the server refuses a second one from any tab
+    // (rc 0.9.125: a new tab's sessionStorage was empty and the whole check ran again).
     // Only ever this one fixed sentence: a continuation's draft (an earlier session's notes) is never sent for you.
     const NAMES_FIRST = "Check the names in my notes";
-    if (nameSession && s.autosend && String(s.draft) === NAMES_FIRST && !autoSent && !s.busy) {
-      try { sessionStorage.setItem(`anteriora-autosent-${s.matter}`, NAMES_FIRST); } catch (_) { /* ignore */ }
-      setTimeout(() => send(NAMES_FIRST), 800);
-    } else if (s.draft && !s.autosend && !$("input").value) {
+    if (nameSession && s.autosend && String(s.draft) === NAMES_FIRST && !s.busy) {
+      setTimeout(() => sendAuto(NAMES_FIRST), 800);
+    } else if (s.draft && !s.draft_auto && !$("input").value) {
       const box = $("input");
       box.value = String(s.draft);
       box.rows = Math.min(14, String(s.draft).split("\n").length + 1);

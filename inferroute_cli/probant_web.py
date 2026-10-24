@@ -274,7 +274,11 @@ def normalize(ev: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [{"kind": "reply_redone"},
                 {"kind": "notify", "level": "warning", "message": "The AI machine didn't answer; retrying…", "retry": True}]
     if t == "response" and ev.get("success") is False:
-        return [{"kind": "notify", "level": "error", "message": strip_ansi(ev.get("error") or "the request was refused")}]
+        error = strip_ansi(ev.get("error") or "the request was refused")
+        # Pi's own words for "busy" name its RPC options ("Specify streamingBehavior…"): never shown as they are.
+        if "already processing" in error.lower():
+            return [{"kind": "notify", "level": "info", "message": Bridge.STILL_WORKING}]
+        return [{"kind": "notify", "level": "error", "message": error}]
     return []
 
 
@@ -550,6 +554,18 @@ class Bridge:
         # real queue the same thing, and the delivery a decision this process makes at a moment it can see.
         self.pending_prompts: List[str] = []
         self._draining = False
+        # Prompts written to Pi, by the id we gave them, until Pi answers. Pi refuses a prompt that arrives while it
+        # is working ("Agent is already processing…"), and it can be working when this bridge thinks it is idle: the
+        # extension starts a turn of its own (the report reminder) as the last one settles. Such a refusal used to
+        # reach the page as Pi's raw error and the question was lost (rc 0.9.125 e2e, shot 21); now the question
+        # goes back into the queue and is sent when the turn finishes.
+        self._prompt_ids: Dict[str, str] = {}
+        self._prompt_no = 0
+        # THE FIRST MESSAGE OF A NAME CHECK IS SENT ONCE, EVER. It was guarded in the tab's sessionStorage, so the
+        # same session opened in a new tab sent "Check the names in my notes" again and re-ran (and re-billed) the
+        # whole check (rc 0.9.125 e2e). The guard is here now, and on disk with the matter's records.
+        self.autosend_text = ""
+        self._autosent = False
         self.readings: Dict[str, str] = {}
         self._readings_meta: Dict[str, Dict[str, Any]] = {}
         self._read_this_turn: List[str] = []
@@ -973,7 +989,7 @@ class Bridge:
             while self.pending_prompts and not self.busy and not self.ended:
                 text = self.pending_prompts.pop(0)
                 try:
-                    await self.send({"type": "prompt", "message": text})
+                    await self.send_prompt(text)
                 except RuntimeError:
                     self.pending_prompts.insert(0, text)
                     return
@@ -983,6 +999,76 @@ class Bridge:
                 return
         finally:
             self._draining = False
+
+    # ── the first message of a name check ──
+    AUTOSENT_MARK = "first-check-sent"
+
+    def _autosent_path(self) -> Optional[Path]:
+        return (self.records_dir / self.AUTOSENT_MARK) if self.records_dir else None
+
+    def autosend_pending(self) -> bool:
+        """Whether the app may still send this session's first message for the person. Never once it was sent,
+        from any tab or any earlier session on this matter, and never into a conversation that has begun."""
+        if not self.autosend_text or self._autosent:
+            return False
+        if any(e.get("kind") in ("user", "assistant_start", "assistant_end", "tool_start") for e in self.history):
+            return False
+        path = self._autosent_path()
+        if path is not None and path.exists():
+            return False
+        return True
+
+    def claim_autosend(self, text: str) -> bool:
+        """Take the one auto-send, atomically within this process and durably across processes. False means it
+        was already taken (or never offered): the caller sends nothing."""
+        if text != self.autosend_text or not self.autosend_pending():
+            return False
+        self._autosent = True
+        path = self._autosent_path()
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + "\n", encoding="utf-8")
+            except OSError:
+                pass                                # the in-process guard still holds for this session
+        return True
+
+    async def send_prompt(self, text: str) -> None:
+        """Write one prompt to Pi under an id of ours, so that Pi's answer to it can be matched (see _prompt_ids)."""
+        self._prompt_no += 1
+        pid = f"p{self._prompt_no}"
+        self._prompt_ids[pid] = text
+        try:
+            await self.send({"type": "prompt", "message": text, "id": pid})
+        except RuntimeError:
+            self._prompt_ids.pop(pid, None)
+            raise
+
+    BUSY_REFUSAL = "already processing"
+    STILL_WORKING = "The assistant is still working; your message will be sent when it finishes."
+
+    def _prompt_answered(self, ev: Dict[str, Any]) -> bool:
+        """Pi's answer to a prompt we sent. True when it was handled here and must not reach the page as is."""
+        text = self._prompt_ids.pop(str(ev.get("id") or ""), None)
+        if ev.get("success") is not False:
+            return False
+        error = str(ev.get("error") or "")
+        if self.BUSY_REFUSAL not in error.lower():
+            return False
+        if text is not None:
+            self.pending_prompts.insert(0, text)
+            self.publish({"kind": "queue_update", "waiting": len(self.pending_prompts)})
+            if not self.busy:
+                # Pi is working on a turn whose start we may not have seen yet; deliver once it settles, and in
+                # any case try again shortly, so the question can never be left behind an idle page.
+                asyncio.ensure_future(self._retry_pending())
+        self.publish({"kind": "notify", "level": "info", "message": self.STILL_WORKING})
+        return True
+
+    async def _retry_pending(self) -> None:
+        await asyncio.sleep(2.0)
+        if not self.busy and self.pending_prompts:
+            await self._drain_pending()
 
     async def open_with(self) -> None:
         """Send the opening instruction, once, when the agent is ready for one."""
@@ -998,7 +1084,7 @@ class Bridge:
         else:
             self.publish({"kind": "user", "text": text})
         try:
-            await self.send({"type": "prompt", "message": text})
+            await self.send_prompt(text)
         except RuntimeError:
             pass
 
@@ -1035,6 +1121,9 @@ class Bridge:
                     try:
                         ev = json.loads(line)
                     except ValueError:
+                        continue
+                    if ev.get("type") == "response" and ev.get("command") == "prompt" and self._prompt_answered(ev):
+                        self.last_agent = time.monotonic()
                         continue
                     outs = normalize(ev)
                     name = str(ev.get("type") or "?")[:60]
@@ -1168,7 +1257,10 @@ class Bridge:
                     # A session that continues an earlier one: the message the home page wrote from it. The page
                     # puts it in the message box for the person to read and edit; nothing is sent from here.
                     "draft": os.environ.get("IR_PROBANT_DRAFT", "")[:8000],
-                    "autosend": os.environ.get("IR_PROBANT_AUTOSEND") == "1"}
+                    "autosend": bridge.autosend_pending(),
+                    # The draft IS the app's own first message (sent or not): never put back in the box as a
+                    # continuation, which is what a second tab would otherwise show.
+                    "draft_auto": bool(bridge.autosend_text)}
 
         @app.get("/api/intake/drafts")
         async def intake_drafts():
@@ -1282,12 +1374,16 @@ class Bridge:
             # after it went idle and only moved when another message arrived — then both ran. The page
             # already shows these as waiting; now the thing it shows and the thing that is queued are the
             # same object, and this process decides when to deliver.
+            # The app's own first message of a name check: sent only if it never was, by any tab or any earlier
+            # session. A second tab (or a reopened one) gets "skipped" and sends nothing.
+            if data.get("auto") is True and not bridge.claim_autosend(text):
+                return {"ok": True, "skipped": True}
             if bridge.busy:
                 bridge.pending_prompts.append(text)
                 bridge.publish({"kind": "user", "text": text})
                 return {"ok": True, "waiting": len(bridge.pending_prompts)}
             try:
-                await bridge.send({"type": "prompt", "message": text})
+                await bridge.send_prompt(text)
             except RuntimeError as e:
                 return JSONResponse({"error": str(e)}, status_code=409)
             bridge.publish({"kind": "user", "text": text})
@@ -1613,6 +1709,8 @@ async def start(*, probant: Dict[str, Any], session: Any, search_endpoint: Optio
     from .probant import _irhome
     bridge.turn_log = (_irhome() / "confidential" / "turns" /
                        f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.getpid()}.jsonl")
+    if os.environ.get("IR_PROBANT_AUTOSEND") == "1" and mode == "names":
+        bridge.autosend_text = os.environ.get("IR_PROBANT_DRAFT", "")[:8000]
     if kept is not None:
         bridge.publish({"kind": "conversation_kept"})
     with socket.socket() as sock:

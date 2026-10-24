@@ -104,7 +104,7 @@ def test_only_prompt_abort_and_dialog_answers_ever_reach_the_agent(client):
     c.post("/api/prompt", json={"text": "x", "type": "bash", "command": "curl evil"})
     types = {line["type"] for line in b.proc.stdin.lines}
     assert types == {"prompt", "abort"}
-    assert all(set(line) <= {"type", "message", "streamingBehavior"} for line in b.proc.stdin.lines)
+    assert all(set(line) <= {"type", "message", "streamingBehavior", "id"} for line in b.proc.stdin.lines)
 
 
 def test_no_route_exposes_shell_model_or_session_commands(client):
@@ -2835,7 +2835,7 @@ def test_a_reading_shows_what_is_read_not_the_staging_file_and_the_model_still_g
     assert shown[0]["label"] == "the code of gadget (3 files)"
     assert shown[1]["text"] == "Read the code of gadget (3 files) and draft a matter for each invention in it."
     assert "document.txt" not in json.dumps(shown)
-    assert sent == [{"type": "prompt", "message": W.DRAFT_OPENING_INSTRUCTION}]
+    assert [{k: v for k, v in x.items() if k != "id"} for x in sent] == [{"type": "prompt", "message": W.DRAFT_OPENING_INSTRUCTION}]
     js = (STATIC / "app.js").read_text()
     assert 'case "reading": readingLabel' in js and 'name === "document.txt"' in js
 
@@ -3011,3 +3011,110 @@ def test_notices_never_stand_between_a_person_and_a_button():
     rule = css[css.index(".toasts {"):]
     rule = rule[:rule.index("}")]
     assert "pointer-events: none" in rule and "top:" in rule and "bottom:" not in rule
+
+
+# ── rc 0.9.125 end-to-end: the first message of a name check, and Pi's "already processing" ──
+
+def _names_bridge(tmp_path):
+    b = _bridge(tmp_path)
+    b.mode = "names"
+    b.records_dir = tmp_path / "records"
+    b.autosend_text = "Check the names in my notes"
+    return b
+
+
+def test_a_name_checks_first_message_is_sent_once_from_any_tab_and_after_a_reopen(tmp_path):
+    """rc 0.9.125 e2e (D1): opening a finished name check in a new tab sent "Check the names in my notes" again
+    and re-ran the whole check, because the only guard was the tab's sessionStorage. The session decides now."""
+    from fastapi.testclient import TestClient
+    b = _names_bridge(tmp_path)
+    c = TestClient(b.app(), base_url="http://127.0.0.1:43210")
+    c.headers.update({"authorization": f"Bearer {b.token}"})
+    assert c.get("/api/session").json()["autosend"] is True
+    assert c.post("/api/prompt", json={"text": "Check the names in my notes", "auto": True}).json() == {"ok": True}
+    # A second tab opening the same session: it is told not to send, and a send it makes anyway is refused.
+    s = c.get("/api/session").json()
+    assert s["autosend"] is False and s["draft_auto"] is True
+    assert c.post("/api/prompt", json={"text": "Check the names in my notes", "auto": True}).json()["skipped"] is True
+    prompts = [l for l in b.proc.stdin.lines if l["type"] == "prompt"]
+    assert [p["message"] for p in prompts] == ["Check the names in my notes"]
+    # A NEW session process on the same matter (a reopen) sees the mark on disk and never sends it.
+    b2 = _names_bridge(tmp_path)
+    assert b2.autosend_pending() is False and b2.claim_autosend("Check the names in my notes") is False
+    # The person can still type the same sentence by hand: only the app's automatic send is refused.
+    assert c.post("/api/prompt", json={"text": "Check the names in my notes"}).json() == {"ok": True}
+
+
+def test_a_session_with_a_conversation_never_gets_the_first_message_sent_for_it(tmp_path):
+    b = _names_bridge(tmp_path)
+    b.publish({"kind": "assistant_end", "text": "Done."})
+    assert b.autosend_pending() is False
+    assert b.claim_autosend("Check the names in my notes") is False
+    # And it is only ever that one sentence: anything else marked auto is not the app's to send.
+    (tmp_path / "other").mkdir()
+    b3 = _names_bridge(tmp_path / "other")
+    assert b3.claim_autosend("Delete everything") is False
+
+
+def test_pi_refusing_a_prompt_while_busy_requeues_it_and_never_shows_the_raw_error(tmp_path):
+    """rc 0.9.125 e2e (D1, shot 21): the page showed Pi's raw "Agent is already processing. Specify
+    streamingBehavior ('steer' or 'followUp')…", and the question was lost. Pi was working on a turn the
+    extension had started (the report reminder) while the bridge thought it idle."""
+    b = _bridge(tmp_path)
+    got = []
+    raw = "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message."
+
+    async def run():
+        b.subscribers.append(q := asyncio.Queue())
+        await b.send_prompt("Which classes did you use?")
+        pid = b.proc.stdin.lines[-1]["id"]
+        reader = asyncio.StreamReader()
+        reader.feed_data((json.dumps({"id": pid, "type": "response", "command": "prompt", "success": False,
+                                      "error": raw}) + "\n").encode())
+        reader.feed_data(b'{"type": "agent_start"}\n')
+        reader.feed_eof()
+
+        async def wait():
+            return 0
+        proc = SimpleNamespace(stdout=reader, stdin=b.proc.stdin, wait=wait, returncode=None)
+        b.proc = proc
+        held = []
+        orig = b.publish
+
+        def spy(e, **kw):
+            orig(e, **kw)
+            if e.get("kind") == "busy" and e.get("value") is True:
+                held.append(list(b.pending_prompts))
+        b.publish = spy
+        await b.pump(proc)
+        while not q.empty():
+            got.append(q.get_nowait())
+        return held
+    held = asyncio.run(run())
+    assert held == [["Which classes did you use?"]], "the refused question goes back into the queue"
+    shown = " ".join(str(e.get("message") or "") for e in got)
+    assert "streamingBehavior" not in shown and "already processing" not in shown
+    assert W.Bridge.STILL_WORKING in shown
+    # Any other path that would surface the raw text says it plainly too.
+    assert W.normalize({"type": "response", "success": False, "error": raw}) == [
+        {"kind": "notify", "level": "info", "message": W.Bridge.STILL_WORKING}]
+
+
+def test_a_refused_question_is_delivered_when_the_turn_that_refused_it_ends(tmp_path):
+    b = _bridge(tmp_path)
+    sent = []
+
+    async def go():
+        async def fake_send(obj):
+            sent.append(obj)
+        b.send = fake_send
+        await b.send_prompt("Q1")
+        b.publish({"kind": "busy", "value": True})
+        assert b._prompt_answered({"id": sent[0]["id"], "type": "response", "command": "prompt", "success": False,
+                                   "error": "Agent is already processing."}) is True
+        assert b.pending_prompts == ["Q1"]
+        b.publish({"kind": "busy", "value": False})
+        await asyncio.sleep(0.05)
+        assert [s["message"] for s in sent] == ["Q1", "Q1"]
+    asyncio.run(go())
+

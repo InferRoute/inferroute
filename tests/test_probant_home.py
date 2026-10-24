@@ -965,7 +965,7 @@ def test_the_pages_return_to_a_running_session_and_offer_to_continue_a_finished_
     assert 'send(String(s.draft))' not in app_js
     # The one exception (22 Oct, name checks started from the dialog): the app sends ONE fixed sentence, only on
     # a name session the home server started with auto=names, never a continuation's draft.
-    assert 'const NAMES_FIRST = "Check the names in my notes";' in app_js and "send(NAMES_FIRST)" in app_js
+    assert 'const NAMES_FIRST = "Check the names in my notes";' in app_js and "sendAuto(NAMES_FIRST)" in app_js
     home_py = (Path(__file__).resolve().parents[1] / "inferroute_cli" / "probant_home.py").read_text()
     assert 'NAMES_FIRST_MESSAGE = "Check the names in my notes"' in home_py
     assert 'str(d.get("auto") or "") == "names" and rec.get("kind") == "name" and not earlier' in home_py

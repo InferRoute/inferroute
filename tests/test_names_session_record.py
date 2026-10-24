@@ -71,7 +71,7 @@ def patch_launch(setattr_, agent_script: str, marker: str, how: str) -> None:
     setattr_(C, "_interactive", lambda *a: False)
     setattr_(macos_vm, "required_for", lambda *a: False)
     setattr_(server, "create_app", lambda *a, **k: FastAPI())
-    setattr_(agents, "binary_for", lambda *a: sys.executable)
+    setattr_(agents, "binary_for", lambda *a, **k: sys.executable)
     setattr_(agents, "put_agent_on_path", lambda *a, **k: None)
     setattr_(L, "_record_launch", lambda *a, **k: None)
     setattr_(probant_trust, "build", lambda *a, **k: {})

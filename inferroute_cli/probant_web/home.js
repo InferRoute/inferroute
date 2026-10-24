@@ -490,7 +490,9 @@
       if (l.state === "starting") {
         box.className = "launch starting";
         box.append(el("div", "", el("span", "dot"), el("b", "", " Starting a session… "),
-          `checking the sealed machines it uses from this computer (${l.elapsed} s; usually under a minute).`));
+          l.phase === "setup"
+            ? `setting up the assistant program on this computer first; this happens once (${l.elapsed} s; usually about a minute).`
+            : `checking the sealed machines it uses from this computer (${l.elapsed} s; usually under a minute).`));
       } else if (l.state === "ready") {
         // A name check started from the dialog opens itself once it is ready (UX review, 22 Oct: five clicks
         // and two pages before a search ran). Only that path sets the flag, and it is cleared on first use.

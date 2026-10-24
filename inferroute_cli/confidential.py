@@ -778,7 +778,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             return 2
         binary = ""                         # the guest owns its pinned Pi/Node
     else:
-        binary = agents_mod.binary_for(agent)
+        # An Anteriora session repairs a missing Pi itself (the pinned private install); `ir pi` only says how.
+        binary = agents_mod.binary_for(agent, repair=probant is not None)
     console = _console()
     # Resume (Claude Code only — the other agents manage their own sessions): `--resume <id>` or
     # `-c`. The resumed turns are sealed like fresh ones; a confidential session never silently

@@ -95,3 +95,7 @@ packages = ["inferroute_cli", "inferroute_local"]
 # What a Mac client trusts to start its VM: the key that signs the runtime manifest, and how the runner
 # executable must be vouched for. Without this file every Mac Probant session refuses before anything starts.
 "docs/trust/macos-vm-policy.json" = "inferroute_cli/trust/macos-vm-policy.json"
+# The pinned Pi release, as a lock with an integrity hash per package: the one the Mac guest is built from, and
+# what `anteriora setup-assistant` installs on Linux (inferroute_cli/pi_runtime.py). One file, two uses.
+"native/macos/guest/pi/package.json" = "inferroute_cli/pi_lock/package.json"
+"native/macos/guest/pi/package-lock.json" = "inferroute_cli/pi_lock/package-lock.json"

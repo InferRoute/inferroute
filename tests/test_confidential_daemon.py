@@ -126,7 +126,7 @@ def test_the_token_never_reaches_a_command_line(monkeypatch):
     monkeypatch.setattr(D.subprocess, "Popen", lambda argv, **k: (seen.__setitem__("argv", argv), _P())[1])
     D.start("kimi-k2.6")
     # Exact shape, not a heuristic: anything added to this list would be visible in `ps`.
-    assert seen["argv"][1:] == ["-m", "inferroute_cli", "confidential", "daemon", "serve",
+    assert seen["argv"][1:] == ["-I", "-m", "inferroute_cli", "confidential", "daemon", "serve",
                                 "--model", "kimi-k2.6"], seen["argv"]
 
 

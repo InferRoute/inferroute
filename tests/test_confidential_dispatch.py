@@ -131,7 +131,7 @@ def test_pi_launch_forwards_the_harness_header_pins_and_keeps_its_session_tag(tm
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "irhome"))
     monkeypatch.delenv("CLAUDECODE", raising=False)
     monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "x-inferroute-run-id: R9\nx-inferroute-no-hedge: 1\nx-inferroute-no-model-fallback: 1\nx-inferroute-session: spoof")
-    monkeypatch.setattr("inferroute_cli.agents.binary_for", lambda a: "/bin/pi")
+    monkeypatch.setattr("inferroute_cli.agents.binary_for", lambda a, **k: "/bin/pi")
     monkeypatch.setattr("inferroute_cli.launch._persist_session_link", lambda *a, **k: None)
     monkeypatch.setattr("inferroute_cli.launch._persist_last_model", lambda *a, **k: None)
     monkeypatch.setattr("inferroute_cli.launch._record_launch", lambda *a, **k: None)

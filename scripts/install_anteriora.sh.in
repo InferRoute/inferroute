@@ -11,8 +11,12 @@
 #      the exact list of every library it needs, checks each file against the fingerprint written into this
 #      script, and installs them there. Libraries are installed ONLY if they match that list byte for byte, so
 #      two installs of this version are the same program, today and in a year;
-#   4. sets up patent search from InferRoute's published, signed files (re-checked each time Anteriora starts);
-#   5. prints the next command.
+#   4. on Linux, installs the assistant program Anteriora runs (Pi, the release it is tested with) on its own copy
+#      of Node.js (the official release, checked against its fingerprint), inside ~/anteriora: about 56 MB to
+#      download. Your system's Node and npm, if any, are not used or changed. (On a Mac the assistant runs inside
+#      the virtual machine, which carries its own.);
+#   5. sets up patent search from InferRoute's published, signed files (re-checked each time Anteriora starts);
+#   6. prints the next command.
 # It does not use sudo, edit your shell profile, or install anything outside ~/anteriora, ~/.local/bin (uv, and a
 # link named `anteriora`) and uv's own Python folder. To remove it all:
 #   rm -rf ~/anteriora ~/Anteriora ~/.inferroute ~/.local/bin/anteriora
@@ -113,6 +117,17 @@ fi
 # The program that now exists must be exactly the one this script names — not whatever an older install left.
 GOT=$("$TARGET/bin/ir" --version 2>/dev/null | awk '{print $NF}')
 [ "$GOT" = "$VERSION" ] || stop "the installed program reports version '${GOT:-nothing}', not $VERSION."
+
+# The assistant program, Linux only: Pi at the version this client pins, on a pinned Node.js, both inside $TARGET
+# (Anteriora downloads Node from nodejs.org and refuses it unless its sha256 matches; Pi and each library it needs
+# are checked against the lock shipped in the client). No npm or Node on this computer is needed or touched. If it
+# cannot be done now (no connection, say), the install is still good: the first session sets it up instead.
+if [ "$OS" = "Linux" ]; then
+  say "Setting up the assistant program (about 56 MB to download, once) ..."
+  { "$TARGET/bin/ir" probant setup-assistant 2>&1; echo $? >"$WORK/assistant.rc"; } | sed 's/^ *//; s/^/  /'
+  [ "$(cat "$WORK/assistant.rc" 2>/dev/null)" = "0" ] \
+    || say "  It could not be set up now. Anteriora will try again when you start your first session."
+fi
 
 # Patent search: fetch InferRoute's signed reference and where the search machine is, and write the
 # configuration. Anteriora checks the reference's signature against a key built into the program. If this

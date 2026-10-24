@@ -58,10 +58,18 @@ def _run(tmp_path, base, home, extra_env=None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     uv = bin_dir / "uv"
+    # a stand-in `ir`: says its version, records every other call, and fails the assistant setup on request
+    (tmp_path / "ir-stub").write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        case "$1" in --version) echo ir 1.2.3; exit 0;; esac
+        echo "$@" >> {tmp_path}/ir.calls
+        case "$*" in *setup-assistant*) [ -n "${{IR_STUB_FAIL_ASSISTANT:-}}" ] && {{ echo "  could not download"; exit 1; }};; esac
+        exit 0
+        """))
     uv.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> {tmp_path}/uv.calls
-        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant"; cp "$last/bin/probant" "$last/bin/anteriora";; esac
+        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; cp {tmp_path}/ir-stub "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant"; cp "$last/bin/probant" "$last/bin/anteriora";; esac
         exit 0
         """))
     uv.chmod(0o755)
@@ -125,6 +133,30 @@ def test_the_installer_sets_up_search_and_survives_that_failing(tmp_path):
     # the stand-in `ir` exits 0; one that fails must not fail the install
     text = (REPO / "scripts/install_anteriora.sh.in").read_text()
     assert 'probant setup-search 2>&1 | sed' in text and "|| true" in text.split("setup-search")[1].split("\n")[0]
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_on_linux_the_installer_sets_up_the_assistant_and_survives_that_failing(tmp_path, fails):
+    """23 Oct: a fresh Linux install could start no session at all: nothing installed Pi, and the page told a
+    founder with no npm to run an npm command. The installer now has the client install its own pinned Pi on
+    its own Node; if that cannot be done now, the first session does it, so the install still succeeds."""
+    if sys.platform != "linux":
+        pytest.skip("Linux branch")
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    done = _run(tmp_path, site, tmp_path / "t", {"IR_STUB_FAIL_ASSISTANT": "1"} if fails else None)
+    assert done.returncode == 0, done.stderr
+    assert "probant setup-assistant" in (tmp_path / "ir.calls").read_text()
+    assert "Setting up the assistant program" in done.stdout and "npm" not in done.stdout
+    assert ("Anteriora will try again when you start your first session" in done.stdout) is fails
+    assert "Anteriora 1.2.3 is installed." in done.stdout
+
+
+def test_the_mac_branch_leaves_the_assistant_to_its_virtual_machine():
+    text = (REPO / "scripts/install_anteriora.sh.in").read_text()
+    block = text[text.index("setup-assistant") - 400:text.index("setup-assistant")]
+    assert 'if [ "$OS" = "Linux" ]; then' in block
 
 
 def test_the_lock_must_be_named_for_the_version_it_pins(tmp_path):

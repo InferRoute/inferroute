@@ -26,7 +26,8 @@ from pathlib import Path
 AGENTS = ("claude", "pi", "opencode", "goose", "openhands", "codewhale")
 INSTALL_HINT = {
     "goose": "Goose is an open-source agent from https://github.com/block/goose — one way: `pipx install goose-ai`",
-    "pi": "Pi is an open-source agent: `npm install -g @earendil-works/pi-coding-agent` (https://pi.dev)",
+    "pi": "Pi is an open-source agent (https://pi.dev). `anteriora setup-assistant` installs the release "
+          "this program is tested with, on its own Node, inside Anteriora's folder.",
     "opencode": "OpenCode is an open-source agent: `npm install -g opencode-ai` (https://opencode.ai)",
 }
 
@@ -122,18 +123,19 @@ def find_agent(agent: str) -> str | None:
     override = os.environ.get(f"IR_{agent.upper()}_BIN")
     if override and os.access(override, os.X_OK):
         return override
+    if agent == "pi":
+        # Anteriora's own pinned Pi on its own Node (pi_runtime), BEFORE anything on PATH: a Pi someone
+        # installed globally may be another release, and the Node beside it too old to run it.
+        from . import pi_runtime
+        private = pi_runtime.installed_binary()
+        if private:
+            return private
     found = shutil.which(agent)
     if found:
         return found
     home = Path.home()
     roots = [home / ".local" / "bin", Path("/usr/local/bin"), Path("/opt/homebrew/bin"),
              home / ".bun" / "bin", home / ".npm-global" / "bin", home / "node_modules" / ".bin"]
-    if agent == "pi":
-        # The Probant installer keeps a pinned Pi release in an app-managed prefix so it
-        # does not depend on a system-wide npm install. A home server launched directly
-        # (rather than through the `ir` wrapper) must still find that binary.
-        managed_pi = home / ".local" / "share"
-        roots = sorted((d / "bin" for d in managed_pi.glob("pi-test-*") if d.is_dir()), reverse=True) + roots
     nvm = Path(os.environ.get("NVM_DIR") or (home / ".nvm")) / "versions" / "node"
     if nvm.is_dir():
         # Newest node first, so a stale old install does not win over the one the person uses.
@@ -160,12 +162,24 @@ def put_agent_on_path(binary: str, env: dict) -> dict:
     return env
 
 
-def binary_for(agent: str) -> str:
+def binary_for(agent: str, *, repair: bool = False) -> str:
+    """The agent's program, or exit 127 with how to get it. With `repair` (an Anteriora session), a missing Pi
+    is installed on the spot from the same pins the installer uses, instead of sending a person to npm."""
     warn_clipboard_once()
     if agent == "claude":
         from .launch import _require_claude_binary
         return _require_claude_binary()
     b = find_agent(agent)
+    if not b and agent == "pi" and repair:
+        from . import pi_runtime
+        if pi_runtime.supported():
+            print(" Setting up the assistant program on this computer (once; about "
+                  f"{pi_runtime.DOWNLOAD_MB} MB to download) ...", flush=True)
+            try:
+                b = pi_runtime.install(lambda s: print(" " + s, flush=True))
+            except pi_runtime.SetupFailed as e:
+                sys.stderr.write(f"\n ❌ assistant setup failed: {e}\n    ({e.detail})\n\n")
+                sys.exit(127)
     if not b:
         sys.stderr.write(f"\n ❌ `{agent}` is not installed on this computer (PATH and the usual install "
                          f"directories were checked).\n    {INSTALL_HINT.get(agent, '')}\n\n")

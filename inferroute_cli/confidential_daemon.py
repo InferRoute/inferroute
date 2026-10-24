@@ -186,7 +186,7 @@ def start(model: str | None) -> int:
         print("  Stop it first with `ir confidential daemon stop`.\n")
         return 0
     clear_state()
-    argv = [sys.executable, "-m", "inferroute_cli", "confidential", "daemon", "serve"]
+    argv = [sys.executable, "-I", "-m", "inferroute_cli", "confidential", "daemon", "serve"]
     if model:
         argv += ["--model", model]
     log = open(log_path(), "ab", buffering=0)

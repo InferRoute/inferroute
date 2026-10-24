@@ -557,7 +557,9 @@
         box.append(el("div", "row actions",
           button("Try again", "primary", () => { clear(box); box.remove(); startSession(matterId, onChange); }),
           button("Dismiss", "ghost", () => { dismissLaunch(l.id); box.remove(); onChange(); })));
-        if (l.key_problem) box.append(replaceKeyButton(null, "primary"));
+        // Once the key is replaced the failure it explained is over: the red card goes with it (rc 0.9.125, shot 10:
+        // "Press Replace key" stayed on screen under the "Key replaced" notice).
+        if (l.key_problem) box.append(replaceKeyButton(() => { dismissLaunch(l.id); box.remove(); if (onChange) onChange(); }, "primary"));
       } else {
         box.className = "launch";
         box.append(el("div", "", l.message || "The session has ended."));
@@ -895,7 +897,12 @@
   // What a session did, counted the way its kind counts: a name check runs trademark searches on this computer,
   // not sealed patent searches, and "0 searches · 0 documents" after eight of them read as a check that did nothing.
   function sessionCounts(s) {
-    if (s.kind === "names") return [plural(s.tm_searches || 0, "trademark search", "trademark searches"), plural(s.names || 0, "name", "names")];
+    if (s.kind === "names") {
+      // Names, then the spellings searched for them when there were more (rc 0.9.125: "8 names" for 2 names).
+      const out = [plural(s.tm_searches || 0, "trademark search", "trademark searches"), plural(s.names || 0, "name", "names")];
+      if ((s.spellings || 0) > (s.names || 0)) out.push(plural(s.spellings, "spelling", "spellings"));
+      return out;
+    }
     return [plural(typeof s.searches === "number" ? s.searches : (s.searches || []).length, "search", "searches"),
       plural(s.documents || 0, "document", "documents")];
   }
@@ -1198,8 +1205,10 @@
     let s;
     try { s = await api(`/api/session?id=${enc(matterId)}&sid=${enc(sid)}`); } catch (e) { clear(p); p.append(el("p", "form-error", e.message)); return; }
     clear(p);
-    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; }), el("span", "sub", " / "),
-      button(matterId, "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
+    // "Matters › Personal / kettle-names": the crumb separator is not the "/" inside the matter's own name, which
+    // read as a stray slash ("← Matters / Personal/kettle-names", rc 0.9.125 reopened session).
+    p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; }), el("span", "sub", " › "),
+      button(String(matterId).replace("/", " / "), "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
     p.append(el("div", "page-head", el("h1", "", `Session of ${localTime(s.started_at)}`),
       el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${sessionCounts(s.kind === "names" ? s : { ...s, searches: s.searches.length }).join(" · ")}`)));
     // A session whose assistant never ran says so first, in plain words, and claims nothing below it.

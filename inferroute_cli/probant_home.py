@@ -59,6 +59,21 @@ SEARCH_WINDOW = (13, 15)          # [open, close) in that timezone, daily — us
 SHARE_FILE_LIMIT = 64_000_000
 
 
+def _fold_name(name: str) -> str:
+    return re.sub(r"[^0-9a-z]", "", name.casefold())
+
+
+def name_counts(searched: List[str], listed: List[str]) -> Dict[str, int]:
+    """How many NAMES a check covered, and how many spellings it searched for them. rc 0.9.125 e2e (D11): a check
+    of 2 names read "8 names", because every variant searched ("Brew Lio", "Brewlyo", "Brewlios") was counted as a
+    name. The names are the ones in the notes that a search covered (a spelling that folds to the same letters is
+    the same name); with no notes to go by, the distinct searched spellings are all there is."""
+    spellings = {s.strip().casefold() for s in searched if s.strip()}
+    folded = {_fold_name(s) for s in spellings}
+    names = sum(1 for n in {_fold_name(x) for x in listed} if n and n in folded)
+    return {"names": names or len(spellings), "spellings": len(spellings)}
+
+
 def _names_of(ws: Path) -> List[str]:
     try:
         return S.names_listed((ws / "disclosure.md").read_text(encoding="utf-8", errors="replace")[:50_000])
@@ -294,7 +309,7 @@ def list_sessions(client: str, matter: str) -> List[Dict[str, Any]]:
             # as sealed patent searches it read "0 searches · 0 documents" after eight searches (23 Oct).
             tm = _name_session_searches(rdir, sid, rec)
             row.update(kind="names", searches=len(tm), documents=0, tm_searches=len(tm),
-                       names=len({str(e.get("name") or "").strip().lower() for e in tm if e.get("name")}))
+                       **name_counts([str(e.get("name") or "") for e in tm], _names_of(S.workspace_path(client, matter))))
         out.append(row)
     out.sort(key=lambda s: s["id"], reverse=True)
     return out

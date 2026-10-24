@@ -1171,3 +1171,18 @@ def test_readings_and_drafts_are_named_for_what_they_are():
     assert '"Reading done. " : "Reading in progress. "' in src
     assert "{ finished: Boolean(d.finished) }" in src
     assert '? "browser" :' not in src and '"in the browser"' in src
+
+
+def test_rc125_d11_name_counts_key_card_and_crumbs():
+    """rc 0.9.125 e2e (D11): a check of 2 names read "8 names" (every spelling searched was counted); the red "Press
+    Replace key" card stayed after the key was replaced (shot 10); the reopened session's header read
+    "← Matters / Personal/kettle-names"."""
+    from inferroute_cli import probant_home as H
+    searched = ["Brewlio", "Brew Lio", "Brewlyo", "Brewlios", "Teavora", "Tea Vora", "Teavore", "Teavoras"] * 2
+    assert H.name_counts(searched, ["Brewlio", "Teavora"]) == {"names": 2, "spellings": 8}
+    assert H.name_counts(["Kwench"], []) == {"names": 1, "spellings": 1}          # no notes: the searches are all there is
+    js = (STATIC / "home.js").read_text()
+    assert 'plural(s.spellings, "spelling", "spellings")' in js
+    i = js.index("if (l.key_problem) box.append(replaceKeyButton(")
+    assert "dismissLaunch(l.id); box.remove();" in js[i:i + 200]
+    assert 'el("span", "sub", " / "),\n      button(matterId' not in js and 'String(matterId).replace("/", " / ")' in js

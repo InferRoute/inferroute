@@ -261,6 +261,7 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 .ended { margin: 0 max(20px, calc((100% - 820px) / 2)) 12px; padding: 12px 16px; border-radius: var(--radius); background: var(--accent-soft); color: var(--ink); }
 .ended b { color: var(--accent); }
 .ended.failed { background: var(--bad-soft); } .ended.failed b { color: var(--bad); }
+.launch.failed .key-card { color: var(--ink); } .launch.failed .key-card h2 { color: var(--ink); }
 .settings { margin-top: 28px; } .settings > summary { cursor: pointer; font-weight: 600; } .replace-key { margin-top: 10px; }
 
 /* the assistant went silent mid-answer: say so where the spinner was, in the same place the eye is already looking */

@@ -41,8 +41,14 @@
   }
 
   const recentToasts = new Map();   // message → element, so a repeated notice is shown once
+  // A notice is about NOW. Opening a session that already ran replays its whole history, and every notice in it
+  // popped up again: "retrying…" and "your report is ready" over a finished session (rc 0.9.125, 17b, 17d). While
+  // an event older than this page is being replayed, no toast is shown; the transcript itself carries the history.
+  let replaying = false;
+  let openedAt = 0;                 // the server's clock when this page loaded; older events are history
   function toast(message, level) {
     const text = String(message || "");
+    if (replaying) return;
     if (recentToasts.has(text)) return;
     const t = el("div", `toast ${level || "info"}`, text);
     $("toasts").append(t);
@@ -431,6 +437,7 @@
     current.text = ev.text || "";
     if (!ev.stopped && current.text.trim()) {
       failedTries = 0;
+      resolveErrors();
       // An answer got through, so the hiccup is over: clear the muted line and give the NEXT one a
       // full budget. Without this reset a single bad minute would leave every later blip loud.
       autoTries = 0;
@@ -627,6 +634,20 @@
     setTimeout(() => { if (!ended) send(RETRY_TEXT); }, 1500 * autoTries);
   }
 
+  // AN ANSWER GOT THROUGH, so the failures before it are over. Their "keeps failing… start a fresh session" hint
+  // and buttons stayed on screen above a reading that then succeeded (rc 0.9.125, shot 33): the advice was no
+  // longer true. Each earlier failure keeps its sentence and detail, and says it was followed by an answer.
+  let openErrors = [];
+  function resolveErrors() {
+    for (const node of openErrors) {
+      if (!node.isConnected) continue;
+      for (const n of Array.from(node.querySelectorAll(".err-actions, .err-hint"))) n.remove();
+      node.classList.add("resolved");
+      node.append(el("div", "sub", "The assistant answered after this, so it needs nothing from you."));
+    }
+    openErrors = [];
+  }
+
   function showError(detail) {
     // Counted BEFORE the quiet path can return: a failure shown discreetly is still a failure, so going
     // quiet must not push the "this session is stuck / start a fresh one" offer further away. Display and
@@ -665,7 +686,7 @@
     // simply grew too long, and sends someone to check their network over a full context.
     const terminal = isTerminal(detail);
     if (failedTries >= 2 || terminal) {
-      hint = el("p", "sub", terminal
+      hint = el("p", "sub err-hint", terminal
         ? "Trying again will not clear this one. A fresh session starts with an empty conversation; "
           + "your searches, marks and this conversation stay with the matter."
         : "This session keeps failing to reach the AI machine. A fresh session checks it again "
@@ -679,6 +700,7 @@
     }
     const node = el("div", "msg-error", el("div", "", plain, counter), detail ? more : null, hint, actions);
     log.append(node);
+    openErrors.push(node);
     lastError = { plain, node, counter, count: 1 };
   }
 
@@ -2274,6 +2296,10 @@
   }
 
   function handle(ev) {
+    replaying = Boolean(openedAt && ev.at && ev.at < openedAt - 1000);
+    try { handleEvent(ev); } finally { replaying = false; }
+  }
+  function handleEvent(ev) {
     if (ev.at) lastEventAt = ev.at;
     switch (ev.kind) {
       case "user": addUser(ev.text); break;
@@ -2462,6 +2488,7 @@
     let s;
     try { s = await api("/api/session"); } catch (e) { showNoKey(); return; }
     clockSkew = (Number(s.now) || Date.now()) - Date.now();
+    openedAt = Number(s.now) || 0;
     searchTiming = s.search_timing || null;
     searchOffered = Boolean(s.search);
     readingSession = s.mode === "intake";

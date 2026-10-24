@@ -3163,3 +3163,22 @@ def test_the_report_ready_card_waits_for_the_turn_to_end():
     assert "shown once, after the turn settled" in r.stdout
     js = (STATIC / "app.js").read_text()
     assert "if (!busy) reportTurnSettled();" in js and "may still be writing a short summary" not in js
+
+
+def test_a_reopened_session_does_not_replay_old_notices_and_an_answer_clears_the_failure_advice():
+    """rc 0.9.125 e2e (D8, shots 17b, 17d, 33): old toasts popped up again on a reopened session, two of them on top
+    of each other at 390 px, and a reading that succeeded still said "This session keeps failing to reach the AI
+    machine… Start a fresh session"."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "replay_toasts_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "an answer resolves the failures" in r.stdout
+    css = (STATIC / "app.css").read_text()
+    start = css.index(".toasts {")
+    rule = re.sub(r"/\*.*?\*/", "", css[start:css.index("}", start)], flags=re.S)
+    assert "flex-direction: column" in rule and "align-items: stretch" in rule and "max-content" not in rule

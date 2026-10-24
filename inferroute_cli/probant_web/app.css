@@ -412,12 +412,17 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 /* Notices sit at the top, under the header and centred over the conversation: bottom right they covered "Export
    and check the record" and the panel's other buttons (0.9.124 test). They hold text only and let clicks through,
    so even where one overlaps something it never stands between a person and a button. */
+/* Toasts STACK: one column of one width, each below the last, never drawn over another (rc 0.9.125, 17b/17d: at
+   390 px two notices of different widths sat on top of each other and the transcript). */
 .toasts { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column;
-  align-items: center; gap: 8px; z-index: 20; width: max-content; max-width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+  align-items: stretch; gap: 8px; z-index: 20; width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.toast { position: static; width: auto; }
 @media (max-width: 760px) { .toasts { top: 104px; } body.home .toasts { top: 124px; } }
 .toast { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; padding: 10px 14px; box-shadow: var(--shadow); font-size: 14px; white-space: pre-wrap; }
 .toast.warning { border-left-color: var(--warn); }
 .toast.error { border-left-color: var(--bad); }
+.msg-error.resolved { opacity: 0.75; }
+.err-hint { margin-top: 6px; }
 .nokey { max-width: 560px; margin: 12vh auto; padding: 0 24px; }
 .nokey h1 { font-size: 22px; }
 [hidden] { display: none !important; }

@@ -1863,3 +1863,18 @@ def test_an_offline_search_machine_gives_the_assistant_one_plain_line_to_stop_on
     assert ts.count("if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);") == 2
     assert "if (why === SEARCH_OFFLINE_ERROR) throw new Error(why);" in ts
     assert "offline right now/.test(why)) break;" in ts
+
+
+def test_a_search_outage_reads_neutrally_in_the_status_bar():
+    """rc 0.9.125 e2e (D7, shots 40, 43): a red "⛔ … the search machine isn't answering" in the status bar beside
+    a calm "(off)" in the trust panel. tests/search_offline_status_sim.ts runs the real searchStatus."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "search_offline_status_sim.ts")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "an outage is neutral" in r.stdout

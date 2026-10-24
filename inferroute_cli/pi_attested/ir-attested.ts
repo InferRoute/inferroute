@@ -407,12 +407,17 @@ function searchStatus(ctx: ExtensionContext, p: SearchProof): void {
 	const totals = sessionTotals.searches
 		? ` · ${sessionTotals.searches} search${sessionTotals.searches === 1 ? "" : "es"} · ${sessionTotals.documents} document${sessionTotals.documents === 1 ? "" : "s"} so far`
 		: "";
+	// AN OUTAGE IS NOT A REFUSAL (rc 0.9.125, D7, shots 40, 43): the status bar said "⛔ Search: the search machine
+	// isn't answering" in red while the trust panel and Home said it calmly. Nothing failed a check; the machine
+	// was not there. Same words as Home, in the neutral colour.
+	const offline = !p.ok && searchIsOffline(p.refusal);
 	const text = p.ok
 		? p.testRoots
 			? `◐ Search: TEST machine, not a real verification`
 			: `🔒 Search: ${p.ours ? "InferRoute's sealed machine" : "sealed machine"}, checked at ${hhmm(p.at)}${totals}`
-		: `⛔ Search: ${plainRefusal(p.refusal)}`;
-	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(p.ok && !p.testRoots ? "success" : p.ok ? "warning" : "error", text) : text);
+		: offline ? SEARCH_OFFLINE_STATUS : `⛔ Search: ${plainRefusal(p.refusal)}`;
+	const colour = p.ok && !p.testRoots ? "success" : p.ok ? "warning" : offline ? "dim" : "error";
+	ctx.ui.setStatus(SEARCH_STATUS_KEY, t ? t.fg(colour, text) : text);
 }
 
 // Same rule as probant_trust.search_is_inferroutes: the reference is authentic AND this enclave matched it.
@@ -423,6 +428,15 @@ function isInferRoutes(v: SearchVerdict): boolean {
 function fmtDate(yyyymmdd: number | string): string {
 	const d = String(yyyymmdd);
 	return /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d;
+}
+
+const SEARCH_OFFLINE_STATUS = "○ Patent search is offline right now";
+
+// The machine was not reached at all: no answer, no connection. Not a failed check.
+function searchIsOffline(refusal: string): boolean {
+	const r = String(refusal ?? "").toLowerCase();
+	return ["did not answer", "unreachable", "connection", "timed out", "timeout", "nothing answered", "offline right now"]
+		.some((m) => r.includes(m));
 }
 
 function plainRefusal(refusal: string): string {

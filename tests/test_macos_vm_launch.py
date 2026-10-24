@@ -7,6 +7,7 @@ from inferroute_local.macos_vm import runtime
 
 def test_mac_missing_runtime_refuses_before_pi_or_model(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CLAUDECODE", raising=False)  # run from a Claude session, the nested-session guard refuses first
     monkeypatch.setenv("IR_ATTESTED_CONFINE", "require")
     monkeypatch.setattr(macos_vm, "required_for", lambda *a: True)
     monkeypatch.setattr(confidential, "_need_extra", lambda: None)

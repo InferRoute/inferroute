@@ -3182,3 +3182,19 @@ def test_a_reopened_session_does_not_replay_old_notices_and_an_answer_clears_the
     start = css.index(".toasts {")
     rule = re.sub(r"/\*.*?\*/", "", css[start:css.index("}", start)], flags=re.S)
     assert "flex-direction: column" in rule and "align-items: stretch" in rule and "max-content" not in rule
+
+
+def test_no_search_is_suggested_while_patent_search_is_offline():
+    """rc 0.9.125 e2e (D9, shot 43)."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "offline_steps_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    js = (STATIC / "app.js").read_text()
+    body = js[js.index("  function renderSteps() {"):js.index("  function renderMarkSteps()")]
+    assert "if (searchIsOffline) {" in body
+    assert "g.steps.filter(offerableWhileOffline)" in body

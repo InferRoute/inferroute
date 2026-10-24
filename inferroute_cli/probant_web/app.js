@@ -935,6 +935,15 @@
     return false;
   }
 
+  // WITH PATENT SEARCH OFFLINE, NO SEARCH IS SUGGESTED (rc 0.9.125, D9, shot 43): the bar still offered "Search
+  // deeply…" and "Summarise what the searches have surfaced so far" beside a search that could not run. A step
+  // that asks for a search, or reads what searches found, is left out until search is back.
+  function offerableWhileOffline(step) {
+    const t = String(step || "");
+    return !(asksForSearch(t) || t === SUMMARISE_IDEA || /^(search|look deeper|find (more )?documents)\b/i.test(t)
+      || /\bsearch(es)? (have|has) (surfaced|found)\b/i.test(t));
+  }
+
   function renderSteps() {
     const bar = $("mark-steps");
     const list = $("mark-steps-list");
@@ -1002,6 +1011,10 @@
     if (searchOffered && !deepWouldRepeat
         && !groups.some((g) => g.steps.includes(DEEP) || g.steps.includes(DEEP_FOCUSED))) {
       groups.push({ title: "", steps: [deepStep] });
+    }
+    if (searchIsOffline) {
+      for (const g of groups) g.steps = g.steps.filter(offerableWhileOffline);
+      for (let i = groups.length - 1; i >= 0; i--) if (!groups[i].steps.length) groups.splice(i, 1);
     }
     // While the assistant works on a message, its steps for it are not written yet: an old list would be stale.
     if (!groups.length || busy || ended) { bar.hidden = true; return; }

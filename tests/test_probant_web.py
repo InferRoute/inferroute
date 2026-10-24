@@ -3148,3 +3148,18 @@ def test_a_reopened_conversation_says_a_reply_was_redone_only_after_a_cut_one():
     home = (STATIC / "home.js").read_text()
     i = home.index('row.kind === "redone"')
     assert 'before && before.kind === "assistant" && before.cut === "error"' in home[i:i + 400]
+
+
+def test_the_report_ready_card_waits_for_the_turn_to_end():
+    """rc 0.9.125 e2e (D3, shot 16): the card fired on the first draft, then the assistant rewrote the report."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, str(root / "tests" / "report_ready_sim.js")], cwd=root, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "shown once, after the turn settled" in r.stdout
+    js = (STATIC / "app.js").read_text()
+    assert "if (!busy) reportTurnSettled();" in js and "may still be writing a short summary" not in js

@@ -211,6 +211,7 @@
   let toolRunning = "";
   let tmSearches = 0;               // trademark searches started in this session (name checks)
   let reportCall = "";              // the tool call writing name-check.md, if one is under way
+  let reportWritten = false;        // name-check.md was written in this turn; announced when the turn has ended
 
   // One way out that always works, wherever it is offered from. The bridge escalates on its side; here the
   // button must never sit on "Ending…" for ever, so a failure is said out loud.
@@ -1767,8 +1768,7 @@
     open.addEventListener("click", () => goHome(matterRoute(matterId)));
     const card = el("div", "report-ready card-note",
       el("b", "", "Your report is ready. "),
-      "It lists the registered marks that resemble each name, and the questions to take to a trademark professional. "
-      + "The assistant may still be writing a short summary here; the report itself is complete. ",
+      "It lists the registered marks that resemble each name, and the questions to take to a trademark professional. ",
       open);
     log.append(card);
     // Bring it into view (video team, 22 Oct: on a phone it landed below the fold and nothing scrolled to it), and
@@ -1777,12 +1777,24 @@
     toast("Your name-check report is ready.", "info");
   }
 
+  // THE REPORT IS READY WHEN THE TURN IS OVER, not when the file is first written. rc 0.9.125 (shot 16): the card
+  // said "the report itself is complete" over a first draft the assistant then rewrote. A write only notes that
+  // the report exists; the card comes when the assistant has settled with nothing left running.
+  function reportWriteEnded(ok) {
+    if (ok) reportWritten = true;
+  }
+  function reportTurnSettled() {
+    if (!reportWritten || toolRunning || reportCall) return;
+    reportWritten = false;
+    reportReady();
+  }
+
   function toolEnd(ev) {
     toolRunning = "";
     updateActivity();
     if (reportCall && ev.call === reportCall) {
       reportCall = "";
-      if (ev.ok !== false) reportReady();
+      reportWriteEnded(ev.ok !== false);
     }
     if (ev.tool === "suggest_next_steps") {
       const steps = ev.ok && ev.details && Array.isArray(ev.details.steps) ? ev.details.steps : [];
@@ -2271,6 +2283,7 @@
         if (busy) showThinking(); else hideThinking();
         updateActivity();
         renderSteps();
+        if (!busy) reportTurnSettled();
         break;
       case "stall": showStalled(ev.value === true, ev.seconds); break;
       case "conversation_kept": $("kept-note").hidden = false; break;
@@ -2312,7 +2325,7 @@
       case "notify": toast(ev.message, ev.level); break;
       case "status": statuses.set(ev.key, ev.text); renderStatus(); break;
       case "trust": renderTrust(ev.trust); break;
-      case "ended": showEnded(ev.summary); break;
+      case "ended": reportTurnSettled(); showEnded(ev.summary); break;
       default: break;
     }
   }

@@ -24,6 +24,10 @@ SID = "20260917T163734Z-f973d8c0"
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
+    # A session starts only with a key on this computer. These tests used to pass on the developer's real key
+    # (~/.config/inferroute/credentials); conftest now gives every test its own credentials file.
+    from inferroute_cli import config
+    config.save("inf_" + "t" * 40, config.load().api_url)
     from fastapi.testclient import TestClient
     h = H.Home()
     h.port = 45678

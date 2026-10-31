@@ -1379,7 +1379,7 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
 def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Optional[Dict[str, Any]],
                            floor_pinned: bool, revocation_checked: bool, authenticated: bool,
                            record_ok: bool, committed: Optional[set] = None,
-                           production_roots: bool = False) -> None:
+                           production_roots: bool = False, tdx_searches: int = 0) -> None:
     """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
@@ -1393,6 +1393,15 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         return
     if not production_roots:
         print("  REFUSED — test or unestablished trust roots cannot license production claims.")
+        report_plain(-1)
+        return
+    if tdx_searches:
+        # Not graded, rather than graded by the AMD rules: those rules read a container policy, and an Intel
+        # TDX machine running InferRoute's own image has none. What its image permits has not been assessed
+        # by this program, so the honest output is no sentence at all, not the nearest AMD one.
+        print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX with InferRoute's own boot "
+              "image. The checks above establish which image and machine they were; this program does not yet "
+              "assess what that image permits, so it licenses no confidentiality sentence for this record.")
         report_plain(-1)
         return
     if not policies or committed is None or set(hd for hd, _ in policies) != committed:
@@ -1819,6 +1828,620 @@ def _counted(rows: List[Tuple[Any, str]]) -> str:
 # the same code. Two copies would drift, and the drift would be invisible: the live client would accept
 # an enclave the bundled verifier later rejects, or the reverse, and each would look right on its own.
 
+# ───────────────────────────── Intel TDX: a Google Confidential VM running InferRoute's own image ─────────────────────────────
+#
+# The second platform. Here there is no cloud provider's container layer: the confidential VM boots ONE file
+# InferRoute builds (a unified kernel image whose command line pins the root filesystem by dm-verity hash), so
+# what identifies the enclave is that file's hash, measured by the firmware into the TD's runtime registers.
+#
+#   intel     the TD quote's ECDSA P-256 signature verifies under the attestation key; that key is bound by the
+#             Quoting Enclave's report, which verifies under the PCK certificate; PCK ← Intel SGX PCK CA ←
+#             Intel SGX Root CA, whose public key is PINNED. Intel's signed TCB info and QE identity (carried in
+#             the evidence, signed under the same root) say this platform, TDX module and QE are UpToDate; the
+#             PCK and intermediate certificates are not on Intel's signed CRLs. All judged at the search's time.
+#   google    Google's signed launch endorsement (chained to the PINNED GCE-cc-tcb-root) lists the TD's MRTD:
+#             the firmware that booted is a build Google published (binary only; its source is not public).
+#   boot log  the in-TD event log (CCEL) replays to RTMR0..3 exactly; the first boot application measured is the
+#             image the reference names; nothing was measured into RTMR2 or RTMR3; RTMR0 (what the HOST supplies:
+#             ACPI tables, boot variables) is a value the reference pins for this machine shape.
+#   binding   REPORTDATA == SHA-256(runtime data) ‖ 32 zero bytes, as on the AMD path; TD debug is off.
+#
+# Nothing here fetches anything. The Intel and Google documents travel in the evidence as UNTRUSTED bytes; every
+# one is checked against the two pins below, so substituting any of them produces a FAIL.
+
+INTEL_SGX_ROOT_SPKI_SHA256 = "a0af031289f5d5d4132f9186068a7fc13628633ba235777472e29b6b6c67a49e"
+# SHA-256 over the SubjectPublicKeyInfo of "Intel SGX Root CA", as served at
+# https://certificates.trustedservices.intel.com/Intel_SGX_Provisioning_Certification_RootCA.pem (read 2026-10-31,
+# identical to the copy google/go-tdx-guest embeds).
+GCE_TCB_ROOT_SPKI_SHA256 = "910dcbe4b31f3d98d5179dca3b988611bb4b0cf9bc9e0ae8f23e411719544f1c"
+# SHA-256 over the SubjectPublicKeyInfo of Google's GCE-cc-tcb-root, https://pki.goog/cloud_integrity/GCE-cc-tcb-root_1.crt
+# (read 2026-10-31). It signs the launch endorsements in gs://gce_tcb_integrity.
+TDX_PINS = {"intel_root": INTEL_SGX_ROOT_SPKI_SHA256, "gce_root": GCE_TCB_ROOT_SPKI_SHA256}
+
+TDX_QUOTE_BODY = (("tee_tcb_svn", 16), ("mrseam", 48), ("mrsignerseam", 48), ("seam_attributes", 8),
+                  ("td_attributes", 8), ("xfam", 8), ("mrtd", 48), ("mrconfigid", 48), ("mrowner", 48),
+                  ("mrownerconfig", 48), ("rtmr0", 48), ("rtmr1", 48), ("rtmr2", 48), ("rtmr3", 48),
+                  ("report_data", 64))
+OID_SGX = "1.2.840.113741.1.13.1"
+INTEL_QE_VENDOR_ID = bytes.fromhex("939a7233f79c4ca9940a0db3957f0607")
+EV_EFI_BOOT_SERVICES_APPLICATION = 0x80000003
+EV_NO_ACTION = 0x00000003
+EV_EFI_VARIABLE_BOOT = 0x80000002
+_TCG_DIGEST_LEN = {0x0004: 20, 0x000B: 32, 0x000C: 48, 0x000D: 64, 0x0012: 32}
+ZERO48 = bytes(48)
+
+
+def is_tdx_offer(offer: Any) -> bool:
+    ev = (offer or {}).get("evidence") if isinstance(offer, dict) else None
+    return isinstance(ev, dict) and ev.get("tee") == "intel-tdx"
+
+
+def parse_tdx_quote(q: bytes) -> Dict[str, Any]:
+    """TDX quote v4 (Intel TDX DCAP Quote Generation Library, ECDSA-256-with-P-256, certification data type 6)."""
+    if len(q) < 636:
+        raise ValueError("quote shorter than a v4 header + body")
+    version, key_type, tee_type = struct.unpack_from("<HHI", q, 0)
+    if version != 4 or key_type != 2 or tee_type != 0x81:
+        raise ValueError(f"not a TDX v4 ECDSA-P256 quote (version {version}, key type {key_type}, tee {tee_type:#x})")
+    if q[12:28] != INTEL_QE_VENDOR_ID:
+        raise ValueError(f"quote names QE vendor {q[12:28].hex()}, not Intel's")
+    body, o = {}, 48
+    for name, n in TDX_QUOTE_BODY:
+        body[name] = q[o:o + n]
+        o += n
+    (sig_len,) = struct.unpack_from("<I", q, 632)
+    sd = q[636:636 + sig_len]
+    if len(sd) != sig_len or sig_len < 134:
+        raise ValueError("signature data truncated")
+    sig, att_key = sd[0:64], sd[64:128]
+    ctype, csize = struct.unpack_from("<HI", sd, 128)
+    cd = sd[134:134 + csize]
+    if ctype != 6 or len(cd) != csize:
+        raise ValueError(f"certification data type {ctype} (expected 6, QE report certification data)")
+    qe_report, qe_sig = cd[0:384], cd[384:448]
+    (auth_len,) = struct.unpack_from("<H", cd, 448)
+    qe_auth = cd[450:450 + auth_len]
+    p = 450 + auth_len
+    itype, isize = struct.unpack_from("<HI", cd, p)
+    chain = cd[p + 6:p + 6 + isize]
+    if itype != 5 or len(chain) != isize:
+        raise ValueError(f"inner certification data type {itype} (expected 5, PCK certificate chain)")
+    qe = {"cpusvn": qe_report[0:16], "miscselect": struct.unpack_from("<I", qe_report, 16)[0],
+          "attributes": qe_report[48:64], "mrenclave": qe_report[64:96], "mrsigner": qe_report[128:160],
+          "isvprodid": struct.unpack_from("<H", qe_report, 256)[0],
+          "isvsvn": struct.unpack_from("<H", qe_report, 258)[0], "report_data": qe_report[320:384]}
+    return {"header": q[0:48], "body": body, "signed": q[0:632], "signature": sig, "attestation_key": att_key,
+            "qe_report_raw": qe_report, "qe_report": qe, "qe_signature": qe_sig, "qe_auth_data": qe_auth,
+            "pck_chain_pem": chain}
+
+
+def _x509_quiet():
+    import warnings
+    from cryptography import x509
+    # Google's GCE-cc-tcb-root names its country "USA". cryptography warns about that (wording varies by
+    # version); the warning says nothing about trust, and printed to a reader it reads like a defect.
+    warnings.filterwarnings("ignore", message=".*Attribute's length.*")
+    warnings.filterwarnings("ignore", message=".*Country names should be two characters.*")
+    return x509
+
+
+def tdx_pck_chain(q: Dict[str, Any]) -> list:
+    x509 = _x509_quiet()
+    certs = x509.load_pem_x509_certificates(q["pck_chain_pem"].rstrip(b"\x00"))
+    if len(certs) != 3:
+        raise ValueError(f"PCK chain carries {len(certs)} certificates, expected leaf, intermediate, root")
+    return certs
+
+
+def _cn_issuer(cert) -> str:
+    from cryptography.x509.oid import NameOID
+    a = cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)
+    return str(a[0].value) if a else ""
+
+
+def _der_tlv(data: bytes, i: int) -> Tuple[int, bytes, int]:
+    tag, ln = data[i], data[i + 1]
+    i += 2
+    if ln & 0x80:
+        n = ln & 0x7F
+        ln = int.from_bytes(data[i:i + n], "big")
+        i += n
+    return tag, data[i:i + ln], i + ln
+
+
+def _der_seq(value: bytes) -> List[Tuple[int, bytes]]:
+    out, i = [], 0
+    while i < len(value):
+        t, v, i = _der_tlv(value, i)
+        out.append((t, v))
+    return out
+
+
+def _der_oid(v: bytes) -> str:
+    parts = [v[0] // 40, v[0] % 40]
+    n = 0
+    for b in v[1:]:
+        n = (n << 7) | (b & 0x7F)
+        if not b & 0x80:
+            parts.append(n)
+            n = 0
+    return ".".join(map(str, parts))
+
+
+def tdx_pck_extensions(cert) -> Dict[str, Any]:
+    """FMSPC, PCE-ID, PCESVN and the 16 CPUSVN components from Intel's SGX extension in the PCK certificate."""
+    from cryptography.x509 import ObjectIdentifier
+    raw = cert.extensions.get_extension_for_oid(ObjectIdentifier(OID_SGX)).value.value
+    _, top, _ = _der_tlv(raw, 0)
+    out: Dict[str, Any] = {}
+    for _t, item in _der_seq(top):
+        (_, oid), (vt, val) = _der_seq(item)[:2]
+        oid_s = _der_oid(oid)
+        if oid_s == OID_SGX + ".2":
+            comps: Dict[int, int] = {}
+            for _t2, sub in _der_seq(val):
+                (_, soid), (_, sval) = _der_seq(sub)[:2]
+                k = int(_der_oid(soid).rsplit(".", 1)[1])
+                if k <= 17:
+                    comps[k] = int.from_bytes(sval, "big")
+            out["sgx_tcb"] = [comps[k] for k in range(1, 17)]
+            out["pcesvn"] = comps[17]
+        elif oid_s == OID_SGX + ".3":
+            out["pceid"] = val.hex()
+        elif oid_s == OID_SGX + ".4":
+            out["fmspc"] = val.hex()
+    for k in ("sgx_tcb", "pcesvn", "pceid", "fmspc"):
+        if k not in out:
+            raise ValueError(f"PCK certificate SGX extension lacks {k}")
+    return out
+
+
+def _ecdsa_p256_raw_ok(public_key, sig64: bytes, message: bytes) -> bool:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    if len(sig64) != 64:
+        return False
+    der = encode_dss_signature(int.from_bytes(sig64[:32], "big"), int.from_bytes(sig64[32:], "big"))
+    try:
+        public_key.verify(der, message, ec.ECDSA(hashes.SHA256()))
+        return True
+    except InvalidSignature:
+        return False
+
+
+def _cert_ok_at(cert, at) -> bool:
+    return cert.not_valid_before_utc <= at <= cert.not_valid_after_utc
+
+
+def _issued_by(child, parent) -> bool:
+    try:
+        child.verify_directly_issued_by(parent)
+        return True
+    except Exception:                                   # noqa: BLE001 — any reason is "not issued by"
+        return False
+
+
+def _intel_signed_json(text: str, key: str) -> Tuple[Dict[str, Any], bytes, str]:
+    """Intel PCS signs the exact bytes of the `tcbInfo` / `enclaveIdentity` value as it appears in the response.
+    Re-serialising would change them, so the value is cut out of the document as written."""
+    # SIGNED == PARSED, by construction. The object checked is parsed from the very bytes the signature covers,
+    # and a duplicated key anywhere is refused: json.loads keeps the LAST of two equal keys, so a document
+    # carrying Intel's signed tcbInfo followed by a forged one once verified the first and evaluated the second
+    # (found by the adversarial review of 2026-10-31, demonstrated against the real fixture).
+    def _no_dupes(pairs):
+        keys = [k for k, _ in pairs]
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate key in an Intel document")
+        return dict(pairs)
+    doc = json.loads(text, object_pairs_hook=_no_dupes)
+    prefix = '{"' + key + '":'
+    if (not text.startswith(prefix) or set(doc) != {key, "signature"} or not isinstance(doc.get(key), dict)
+            or not isinstance(doc.get("signature"), str)):
+        raise ValueError(f"not an Intel {key} document")
+    _, end = json.JSONDecoder().raw_decode(text, len(prefix))
+    raw = text[len(prefix):end]
+    return json.loads(raw, object_pairs_hook=_no_dupes), raw.encode(), doc["signature"]
+
+
+def _tdx_tcb_status(tcb_info: Dict[str, Any], body: Dict[str, bytes], ext: Dict[str, Any]) -> Tuple[Optional[str], str]:
+    """Intel's matching rule (as google/go-tdx-guest implements it): the first TCB level whose SGX components,
+    PCESVN and TDX components are all ≤ this platform's; then the TDX module identity for the module's major
+    version. Returns (platform status or None, module status or a note)."""
+    svn = body["tee_tcb_svn"]
+    level = None
+    for lv in tcb_info.get("tcbLevels") or []:
+        t = lv.get("tcb") or {}
+        sgx = [int(c.get("svn", 0)) for c in t.get("sgxtcbcomponents") or []]
+        tdx = [int(c.get("svn", 0)) for c in t.get("tdxtcbcomponents") or []]
+        if len(sgx) != 16 or len(tdx) != 16:
+            continue
+        start = 2 if svn[1] > 0 else 0
+        if (all(a >= b for a, b in zip(ext["sgx_tcb"], sgx)) and ext["pcesvn"] >= int(t.get("pcesvn", 1 << 30))
+                and all(svn[i] >= tdx[i] for i in range(start, 16))):
+            level = lv
+            break
+    if level is None:
+        return None, "no TCB level of Intel's TCB info matches this platform"
+    module = "no TDX module identity applies (module major version 0)"
+    if svn[1] > 0:
+        want = "TDX_" + bytes([svn[1]]).hex().upper()
+        ident = next((m for m in tcb_info.get("tdxModuleIdentities") or [] if str(m.get("id", "")).upper() == want), None)
+        if ident is None:
+            module = f"Intel's TCB info carries no identity {want} for this TDX module"
+        else:
+            ml = next((x for x in ident.get("tcbLevels") or [] if svn[0] >= int((x.get("tcb") or {}).get("isvsvn", 1 << 30))), None)
+            module = str(ml.get("tcbStatus")) if ml else f"no {want} TCB level matches module SVN {svn[0]}"
+    return str(level.get("tcbStatus")), module
+
+
+def check_tdx_intel(c: "Checks", q: Dict[str, Any], intel: Dict[str, Any], at, root_pin: str) -> bool:
+    """Intel's half. Returns True only when every Intel row passed."""
+    from cryptography.hazmat.primitives import serialization
+    x509 = _x509_quiet()
+    start = len(c.failed)
+    try:
+        leaf, inter, root = tdx_pck_chain(q)
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "Intel PCK certificate chain", f"missing or unparsable ({type(exc).__name__}: {str(exc)[:80]})")
+        return False
+    root_spki = hashlib.sha256(root.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
+    names_ok = (_cn(root) == "Intel SGX Root CA" and _cn(inter) in ("Intel SGX PCK Platform CA", "Intel SGX PCK Processor CA")
+                and _cn(leaf) == "Intel SGX PCK Certificate")
+    chain_ok = (names_ok and root_spki == root_pin and _issued_by(root, root) and _issued_by(inter, root) and _issued_by(leaf, inter)
+                and all(_cert_ok_at(x, at) for x in (leaf, inter, root)))
+    c.add(chain_ok, "Intel PCK certificate chain",
+          f"PCK ← {_cn(inter)} ← {_cn(root)}; root public key SHA-256 {root_spki[:16]}… "
+          + ("is the pinned Intel SGX Root CA; all three valid at the time checked" if chain_ok else
+             ("is NOT the pinned Intel root" if root_spki != root_pin else
+              "a certificate does not carry the name Intel gives that role" if not names_ok else
+              "a link does not verify or a certificate is outside its validity")))
+    qe = q["qe_report"]
+    c.add(_ecdsa_p256_raw_ok(leaf.public_key(), q["qe_signature"], q["qe_report_raw"]), "Quoting Enclave report signed by the PCK key",
+          "ECDSA P-256 over the 384-byte QE report verifies under the PCK certificate")
+    bound = qe["report_data"] == hashlib.sha256(q["attestation_key"] + q["qe_auth_data"]).digest() + bytes(32)
+    c.add(bound, "attestation key bound by the Quoting Enclave",
+          "QE REPORTDATA == SHA-256(attestation key ‖ QE auth data) ‖ zeros" if bound else "the QE report does NOT bind this attestation key")
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        ak = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), b"\x04" + q["attestation_key"])
+        qs = _ecdsa_p256_raw_ok(ak, q["signature"], q["signed"])
+    except Exception:                                       # noqa: BLE001
+        qs = False
+    c.add(qs, "TD quote signature", "ECDSA P-256 over the quote header and TD report verifies under the bound attestation key"
+          if qs else "the quote's signature does NOT verify under its attestation key")
+    # Intel's collateral: TCB info, QE identity, CRLs — untrusted transport, Intel-signed content.
+    try:
+        ext = tdx_pck_extensions(leaf)
+        tcb_info, tcb_raw, tcb_sig = _intel_signed_json(intel["tcb_info"], "tcbInfo")
+        qe_id, qe_raw, qe_sig = _intel_signed_json(intel["qe_identity"], "enclaveIdentity")
+        signers = []
+        for chain_pem in (intel["tcb_info_issuer_chain"], intel["qe_identity_issuer_chain"]):
+            s = x509.load_pem_x509_certificates(chain_pem.encode())
+            signers.append(s)
+        root_crl = x509.load_der_x509_crl(base64.b64decode(intel["root_ca_crl"], validate=True))
+        pck_crl = x509.load_der_x509_crl(base64.b64decode(intel["pck_crl"], validate=True))
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "Intel collateral (TCB info, QE identity, CRLs)", f"missing or unparsable ({type(exc).__name__}: {str(exc)[:80]})")
+        return False
+
+    def _signer_ok(chain: list) -> Optional[Any]:
+        sgn = next((x for x in chain if _cn(x) == "Intel SGX TCB Signing"), None)
+        if sgn is None or not _issued_by(sgn, root) or not _cert_ok_at(sgn, at):
+            return None
+        if root_crl.get_revoked_certificate_by_serial_number(sgn.serial_number) is not None:
+            return None
+        return sgn
+
+    def _window(doc: Dict[str, Any]) -> bool:
+        a, b = _parse_time(doc.get("issueDate")), _parse_time(doc.get("nextUpdate"))
+        return a is not None and b is not None and a <= at <= b
+
+    s1 = _signer_ok(signers[0])
+    ok1 = (s1 is not None and _ecdsa_p256_raw_ok(s1.public_key(), bytes.fromhex(tcb_sig), tcb_raw)
+           and tcb_info.get("id") == "TDX" and int(tcb_info.get("version", 0)) == 3 and _window(tcb_info))
+    c.add(ok1, "Intel TCB info", f"signed by Intel SGX TCB Signing under the pinned root, TDX v3, issued {tcb_info.get('issueDate')}, "
+          f"next update {tcb_info.get('nextUpdate')}" + ("" if ok1 else " — signature, signer, kind or validity window does NOT hold at the time checked"))
+    s2 = _signer_ok(signers[1])
+    ok2 = (s2 is not None and _ecdsa_p256_raw_ok(s2.public_key(), bytes.fromhex(qe_sig), qe_raw)
+           and qe_id.get("id") == "TD_QE" and int(qe_id.get("version", 0)) == 2 and _window(qe_id))
+    c.add(ok2, "Intel QE identity", f"signed by Intel SGX TCB Signing under the pinned root, TD_QE v2, next update {qe_id.get('nextUpdate')}"
+          + ("" if ok2 else " — signature, signer, kind or validity window does NOT hold at the time checked"))
+    crl_ok = (root_crl.issuer == root.subject and root_crl.is_signature_valid(root.public_key())
+              and pck_crl.issuer == inter.subject and pck_crl.is_signature_valid(inter.public_key())
+              and all(x.last_update_utc <= at <= (x.next_update_utc or at) for x in (root_crl, pck_crl)))
+    revoked = [n for n, crl, cert in (("intermediate", root_crl, inter), ("PCK", pck_crl, leaf))
+               if crl.get_revoked_certificate_by_serial_number(cert.serial_number) is not None]
+    c.add(crl_ok and not revoked, "Intel revocation lists",
+          "Intel's root and PCK CRLs verify, were current at the time checked, and list neither the intermediate nor the PCK certificate"
+          if crl_ok and not revoked else ("REVOKED: " + ", ".join(revoked) if revoked else "a CRL does not verify, is not Intel's, or was not current at the time checked"))
+    body = q["body"]
+    plat = (ext["fmspc"].lower() == str(tcb_info.get("fmspc", "")).lower() and ext["pceid"].lower() == str(tcb_info.get("pceId", "")).lower())
+    tm = tcb_info.get("tdxModule") or {}
+    try:
+        seam_ok = (bytes.fromhex(tm.get("mrsigner", "")) == body["mrsignerseam"]
+                   and bytes(a & b for a, b in zip(bytes.fromhex(tm.get("attributesMask", "")), body["seam_attributes"]))
+                   == bytes.fromhex(tm.get("attributes", "")))
+    except ValueError:
+        seam_ok = False
+    status, module = _tdx_tcb_status(tcb_info, body, ext)
+    up = plat and seam_ok and status == "UpToDate" and module in ("UpToDate", "no TDX module identity applies (module major version 0)")
+    c.add(up, "Intel TCB status (platform, TDX module)",
+          f"FMSPC {ext['fmspc']}, platform {status or 'unmatched'}, TDX module {module}" + ("" if plat else "; the TCB info is for a DIFFERENT platform")
+          + ("" if seam_ok else "; the TDX module's signer or attributes are NOT Intel's"))
+    try:
+        mask = int.from_bytes(bytes.fromhex(qe_id["miscselectMask"]), "little")
+        qe_match = ((qe["miscselect"] & mask) == int.from_bytes(bytes.fromhex(qe_id["miscselect"]), "little")
+                    and bytes(a & b for a, b in zip(bytes.fromhex(qe_id["attributesMask"]), qe["attributes"])) == bytes.fromhex(qe_id["attributes"])
+                    and bytes.fromhex(qe_id["mrsigner"]) == qe["mrsigner"] and int(qe_id["isvprodid"]) == qe["isvprodid"])
+    except (KeyError, ValueError):
+        qe_match = False
+    qlv = next((x for x in qe_id.get("tcbLevels") or [] if int((x.get("tcb") or {}).get("isvsvn", 1 << 30)) <= qe["isvsvn"]), None)
+    qe_up = qe_match and qlv is not None and qlv.get("tcbStatus") == "UpToDate"
+    c.add(qe_up, "Intel Quoting Enclave identity and status",
+          f"QE is Intel's (MRSIGNER, product, attributes), ISVSVN {qe['isvsvn']}: {qlv.get('tcbStatus') if qlv else 'no matching level'}"
+          if qe_match else "the Quoting Enclave is NOT the one Intel's signed identity describes")
+    return len(c.failed) == start
+
+
+def _pb_fields(data: bytes) -> List[Tuple[int, int, Any]]:
+    """Minimal protobuf reader: (field, wire type, value) for varint (0) and length-delimited (2) fields."""
+    out, i = [], 0
+    def varint(j: int) -> Tuple[int, int]:
+        n = s = 0
+        while True:
+            b = data[j]
+            n |= (b & 0x7F) << s
+            j += 1
+            s += 7
+            if not b & 0x80:
+                return n, j
+    while i < len(data):
+        key, i = varint(i)
+        f, wt = key >> 3, key & 7
+        if wt == 0:
+            v, i = varint(i)
+        elif wt == 2:
+            ln, i = varint(i)
+            v, i = data[i:i + ln], i + ln
+            if len(v) != ln:
+                raise ValueError("truncated protobuf")
+        elif wt == 5:
+            v, i = data[i:i + 4], i + 4
+        elif wt == 1:
+            v, i = data[i:i + 8], i + 8
+        else:
+            raise ValueError(f"protobuf wire type {wt} not expected here")
+        out.append((f, wt, v))
+    return out
+
+
+def check_tdx_google(c: "Checks", mrtd: bytes, blob: bytes, at, root_pin: str) -> Optional[Dict[str, Any]]:
+    """Google's launch endorsement (gce-tcb-verifier's VMLaunchEndorsement): RSA-PSS SHA-256 over the serialized
+    golden measurement, under a certificate issued by the pinned GCE-cc-tcb-root; the TD's MRTD must be listed."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import padding
+    x509 = _x509_quiet()
+    try:
+        top = {f: v for f, _wt, v in _pb_fields(blob)}
+        golden_raw, sig = top[1], top[2]
+        golden = _pb_fields(golden_raw)
+        g = {f: v for f, _wt, v in golden}
+        cert = x509.load_der_x509_certificate(g[4])
+        roots = x509.load_der_x509_certificates(g[6]) if hasattr(x509, "load_der_x509_certificates") else []
+        if not roots:
+            roots = x509.load_pem_x509_certificates(g[6]) if g.get(6, b"").startswith(b"-----") else [x509.load_der_x509_certificate(g[6])]
+        tdx = {f: v for f, _wt, v in _pb_fields(g[8])} if 8 in g else {}
+        listed = []
+        for f, _wt, v in _pb_fields(g[8]) if 8 in g else []:
+            if f == 2:
+                m = {ff: vv for ff, _w, vv in _pb_fields(v)}
+                listed.append((m.get(1), m.get(3)))
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "Google launch endorsement", f"missing or unparsable ({type(exc).__name__}: {str(exc)[:80]})")
+        return None
+    root = next((r for r in roots if hashlib.sha256(r.public_key().public_bytes(
+        serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest() == root_pin), None)
+    try:
+        cert.public_key().verify(sig, golden_raw, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32), hashes.SHA256())
+        sig_ok = True
+    except (InvalidSignature, Exception):                   # noqa: BLE001
+        sig_ok = False
+    chain_ok = root is not None and _issued_by(cert, root) and _cert_ok_at(cert, at)
+    c.add(sig_ok and chain_ok, "Google launch endorsement",
+          f"RSA-PSS signature by {_cn(cert)}, issued by the pinned GCE-cc-tcb-root" if sig_ok and chain_ok else
+          ("the endorsement's signature does NOT verify" if not sig_ok else
+           "the signing certificate does NOT chain to the pinned GCE-cc-tcb-root, or was not valid at the time checked"))
+    found = [ram for ram, m in listed if m == mrtd]
+    c.add(bool(found) and sig_ok and chain_ok, "firmware (MRTD) is a build Google endorsed",
+          f"MRTD {mrtd.hex()[:16]}… is listed" + (f" (for {found[0]} GiB RAM)" if found[0] else "") + f", firmware SVN {tdx.get(1)}, firmware SHA-384 "
+          f"{(g.get(5) or b'').hex()[:16]}… — a binary Google published; its source is not public" if found else
+          f"MRTD {mrtd.hex()[:16]}… is NOT among the {len(listed)} measurements this endorsement lists")
+    return {"firmware_sha384": (g.get(5) or b"").hex(), "firmware_svn": tdx.get(1)} if found else None
+
+
+def tdx_replay_ccel(ccel: bytes) -> Tuple[List[bytes], List[Tuple[int, int, bytes]]]:
+    """Replay the TCG2 crypto-agile event log the firmware leaves in the CCEL table. MR index 1..4 = RTMR0..3."""
+    p = 0
+    def u32() -> int:
+        nonlocal p
+        (v,) = struct.unpack_from("<I", ccel, p)
+        p += 4
+        return v
+    u32(); u32(); p += 20
+    # `n = u32(); p += n`, never `p += u32()`: Python reads p BEFORE the call advances it, which silently
+    # desynchronises the parse (this exact slip cost a debugging round on 2026-10-31).
+    n = u32(); p += n                                       # the Spec ID event, in the old SHA-1 format
+    rt, events = [ZERO48] * 4, []
+    while p + 8 <= len(ccel):
+        mr, et = u32(), u32()
+        if mr == 0xFFFFFFFF or (mr == 0 and et == 0):
+            break
+        dg = None
+        for _ in range(u32()):
+            (alg,) = struct.unpack_from("<H", ccel, p)
+            p += 2
+            ln = _TCG_DIGEST_LEN.get(alg)
+            if ln is None:
+                raise ValueError(f"event log digest algorithm {alg:#x} not known")
+            if alg == 0x000C:
+                dg = ccel[p:p + ln]
+            p += ln
+        n = u32(); data = ccel[p:p + n]; p += n
+        if et == EV_NO_ACTION:
+            continue                                        # informational (SP800-155 events): never extended
+        if not 1 <= mr <= 4 or dg is None:
+            raise ValueError(f"event for MR index {mr} without a SHA-384 digest")
+        rt[mr - 1] = hashlib.sha384(rt[mr - 1] + dg).digest()
+        events.append((mr - 1, et, dg, data))
+    return rt, events
+
+
+# edk2's marker for a boot option it created itself (EFI_BOOT_MANAGER_AUTO_CREATED_GUID): the only optional data
+# a boot entry may carry here. Anything else would be handed to the image as its command line.
+EDK2_AUTO_CREATED_BOOT_OPTION = bytes.fromhex("4eac0881119f594d850ee21a522c59b2")
+
+
+def tdx_boot_options(events: List[Tuple[int, int, bytes, bytes]]) -> Tuple[bool, List[str]]:
+    """Every Boot#### variable the firmware measured: its logged bytes hash to the measured digest, and it carries
+    no load options beyond edk2's auto-created marker. Returns (ok, one line per entry)."""
+    lines, ok = [], True
+    for _i, et, dg, data in events:
+        if et != EV_EFI_VARIABLE_BOOT:
+            continue
+        try:
+            nl, dl = struct.unpack_from("<QQ", data, 16)
+            name = data[32:32 + 2 * nl].decode("utf-16-le")
+            vd = data[32 + 2 * nl:32 + 2 * nl + dl]
+        except Exception:                                   # noqa: BLE001
+            return False, ["a boot variable event is malformed"]
+        if hashlib.sha384(vd).digest() != dg:
+            ok = False
+            lines.append(f"{name}: logged bytes do NOT hash to the measured digest")
+            continue
+        if not re.fullmatch(r"Boot[0-9A-Fa-f]{4}", name):
+            continue
+        try:
+            fpl = struct.unpack_from("<H", vd, 4)[0]
+            j = 6
+            while vd[j:j + 2] != b"\0\0":
+                j += 2
+            desc = vd[6:j].decode("utf-16-le", "replace")
+            opt = vd[j + 2 + fpl:]
+        except Exception:                                   # noqa: BLE001
+            return False, [f"{name}: unparsable load option"]
+        clean = opt in (b"", EDK2_AUTO_CREATED_BOOT_OPTION)
+        ok = ok and clean
+        lines.append(f"{name} {desc!r}: " + ("no command line" if clean else f"CARRIES {len(opt)} bytes of load options"))
+    return ok and bool(lines), lines
+
+
+def check_tdx(c: "Checks", offer: Dict[str, Any], rd_bytes: bytes, *, at_iso: Optional[str],
+              pins: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+    """Every hardware and firmware check of a TDX offer. Returns what identity needs (image hash, RTMR0) or None."""
+    pins = pins or TDX_PINS
+    ev = offer.get("evidence") or {}
+    at = _parse_time(at_iso)
+    if at is None:
+        c.add(False, "time of the check", f"no parsable time ({at_iso!r}); Intel's and Google's documents cannot be judged current")
+        return None
+    try:
+        raw = base64.b64decode(ev["quote"], validate=True)
+        q = parse_tdx_quote(raw)
+        ccel = base64.b64decode(ev["ccel"], validate=True)
+        ends = offer.get("endorsements") if isinstance(offer.get("endorsements"), dict) else {}
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "TDX quote", f"missing or unparsable ({type(exc).__name__}: {str(exc)[:80]})")
+        return None
+    b = q["body"]
+    want = hashlib.sha256(rd_bytes).digest() + bytes(32)
+    bound = bool(rd_bytes) and b["report_data"] == want
+    c.add(bound, "REPORTDATA binds runtime data", "REPORTDATA == SHA-256(runtime data) ‖ zeros: the TD's quote covers this runtime data"
+          if bound else "REPORTDATA does NOT equal SHA-256(runtime data) ‖ zeros (or no runtime data)")
+    debug = b["td_attributes"][0] & 1
+    c.add(not debug, "TD debug disabled", f"TD attributes {b['td_attributes'].hex()}: DEBUG bit " + ("clear" if not debug else "SET — the host can read this TD's memory"))
+    # A malformed document must read as a refusal, never as a traceback the caller might treat as "no answer".
+    try:
+        check_tdx_intel(c, q, ends.get("intel") or {}, at, pins["intel_root"])
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "Intel collateral (TCB info, QE identity, CRLs)", f"malformed ({type(exc).__name__}: {str(exc)[:80]})")
+    fw = None
+    try:
+        gle = base64.b64decode(ends.get("google_launch_endorsement") or "", validate=True)
+        fw = check_tdx_google(c, b["mrtd"], gle, at, pins["gce_root"])
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "Google launch endorsement", f"malformed ({type(exc).__name__}: {str(exc)[:80]})")
+    try:
+        rt, events = tdx_replay_ccel(ccel)
+    except Exception as exc:                                # noqa: BLE001
+        c.add(False, "boot event log replays to the quote", f"unparsable event log ({type(exc).__name__}: {str(exc)[:80]})")
+        return None
+    replay = all(rt[i] == b[f"rtmr{i}"] for i in range(4))
+    c.add(replay, "boot event log replays to the quote", f"{len(events)} events replay to RTMR0-3 exactly" if replay else
+          "replaying the event log does NOT give the quote's RTMRs: " + ", ".join(f"RTMR{i}" for i in range(4) if rt[i] != b[f"rtmr{i}"]))
+    apps = [dg.hex() for i, et, dg, _d in events if et == EV_EFI_BOOT_SERVICES_APPLICATION]
+    late = [i for i, _et, _dg, _d in events if i in (2, 3)]
+    quiet = not late and b["rtmr2"] == ZERO48 and b["rtmr3"] == ZERO48
+    c.add(quiet, "nothing measured after the image", "RTMR2 and RTMR3 are empty: nothing extended them after the firmware handed over"
+          if quiet else f"{len(late)} event(s) in RTMR2/RTMR3, or a non-zero register: something beyond the image was measured")
+    opts_ok, opts = tdx_boot_options(events)
+    # The image's command line pins its root filesystem. A boot entry carrying load options could hand the image a
+    # different one; the entries are measured into RTMR0, and this reads what they say rather than trusting a pin.
+    c.add(opts_ok, "firmware boot entries pass no command line", "; ".join(opts) if opts else "no boot entry was measured")
+    c.add(len(apps) >= 1, "boot application measured", f"first EFI application {apps[0][:16]}… ({len(apps)} measured in total)"
+          if apps else "the firmware measured NO boot application")
+    return {"tee": "intel-tdx", "image_sha384": apps[0] if apps else None, "boot_apps": apps, "rtmr0": b["rtmr0"].hex(),
+            "mrtd": b["mrtd"].hex(), "mrowner": b["mrowner"].hex(), "firmware": fw,
+            "replayed": replay, "runtime_data_sha256": hashlib.sha256(rd_bytes).hexdigest()}
+
+
+def check_tdx_identity(c: "Checks", rd: Dict[str, Any], info: Optional[Dict[str, Any]],
+                       reference: Optional[Dict[str, Any]], at: Optional[str], live: bool = False) -> None:
+    """The TDX twin of check_identity: the image that booted, the host-supplied configuration (RTMR0) and the
+    index / encoder manifests, against the signed reference. Same refusals for no / development references."""
+    name = "enclave identity (InferRoute's image, host configuration, index, encoders)"
+    if isinstance(reference, dict) and reference.get("development"):
+        c.add(False, name, "this reference is marked DEVELOPMENT — it was signed by a key that is not the production "
+              "publication key, so it cannot establish that the enclave was InferRoute's.")
+        return
+    if reference is None:
+        c.add(False, name, "NO REFERENCE SUPPLIED — this proves a genuine Intel TDX machine booted SOME image, NOT "
+              "InferRoute's; obtain InferRoute's published reference out of band and rerun with --reference")
+        return
+    for field in ("tdx_image_sha384", "tdx_rtmr0", "index_manifest_sha256", "model_manifest_sha256"):
+        if not isinstance(reference.get(field) or [], list):
+            c.add(False, name, f"the reference's {field} is not a list of entries; it cannot identify anything")
+            return
+    img = (info or {}).get("image_sha384")
+    # Only the FIRST application identifies the image. Any later one would be code the image chose to load,
+    # which the image's own hash already decides; a reference cannot be satisfied by a second app.
+    img_ok, img_why = (_ref_match(_ref_entries(reference, "tdx_image_sha384"), img, at, live) if img else (False, "no image measured"))
+    # What the image may load after itself (its embedded kernel) is named by the same entry. A further EFI
+    # application -- an add-on picked up from the boot disk, say -- is code the reference never vouched for.
+    later = list((info or {}).get("boot_apps") or [])[1:]
+    allowed = [[str(x).lower() for x in (e.get("loads") or [])] for e in reference.get("tdx_image_sha384") or []
+               if isinstance(e, dict) and isinstance(e.get("loads") or [], list)
+               and str(e.get("value", "")).lower() == str(img).lower()]
+    if img_ok and later not in allowed:
+        img_ok, img_why = False, (f"{img_why}, but it then loaded {len(later)} EFI application(s) "
+                                  f"({', '.join(x[:12] + '…' for x in later) or 'none'}) that the reference entry does not name")
+    elif img_ok and later:
+        img_why += f", loading only what the reference names ({len(later)} application(s))"
+    host = (info or {}).get("rtmr0")
+    shapes = {str(e.get("value", "")).lower(): e.get("shape") for e in reference.get("tdx_rtmr0") or [] if isinstance(e, dict)}
+    h_ok, h_why = (_ref_match(_ref_entries(reference, "tdx_rtmr0"), host, at, live) if host else (False, "no RTMR0"))
+    if h_ok and shapes.get(str(host)):
+        h_why += f", machine shape {shapes[str(host)]}"
+    idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), rd.get("index_manifest_sha256"), at, live) if rd else (False, "no runtime data")
+    mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), rd.get("model_manifest_sha256"), at, live) if rd else (False, "no runtime data")
+    c.add(img_ok and h_ok and idx_ok and mdl_ok, name,
+          f"image: {img_why}; host configuration (RTMR0): {h_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — "
+          f"against reference {reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}")
+
+
 def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes, *, pins: Dict[str, str],
                    uvm_root: str, uvm_min_svn: int, policy_b64: Optional[str] = None,
                    min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
@@ -2079,7 +2702,7 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
                  uvm_min_svn: int = UVM_MIN_SVN, reference: Optional[Dict[str, Any]] = None,
                  policy_b64: Optional[str] = None, at: Optional[str] = None,
                  min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
-                 reference_key: Optional[str] = None) -> Checks:
+                 reference_key: Optional[str] = None, tdx_pins: Optional[Dict[str, str]] = None) -> Checks:
     """Everything checkable about an enclave BEFORE anything is sealed to it — the check a live client must
     pass before it sends a word of the invention.
 
@@ -2135,6 +2758,28 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     # only the wording was wrong, so this changes no verdict -- it stays a SKIP and points at the row
     # that did the work. (verify_search does not need this: it feeds the reference's floor straight in.)
     _ref_has_floor = isinstance(reference, dict) and "min_tcb" in reference
+    if is_tdx_offer(offer):
+        # Intel TDX: a different machine, judged by the same rule -- every check NOW, every failure means do
+        # not seal. The AMD-only rows (VCEK, utility VM, HOST_DATA, firmware floor) have no counterpart here
+        # and are not printed as passes; the reference's AMD floor is said not to apply rather than skipped silently.
+        now = at or _utc_now_iso()
+        info = check_tdx(c, offer, rd_bytes, at_iso=now, pins=tdx_pins)
+        check_tdx_identity(c, rd, info, reference, now, live=True)
+        if _ref_has_floor:
+            c.add(None, "reference firmware floor before sealing",
+                  "the reference's firmware floor names AMD product lines; this machine is Intel TDX, whose firmware "
+                  "and TDX module are judged by Intel's signed TCB status above")
+    else:
+        _verify_offer_snp(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
+                          reference=reference, policy_b64=policy_b64, at=at, min_tcb=min_tcb,
+                          ref_has_floor=_ref_has_floor)
+    _verify_offer_reference_auth(c, reference, reference_key)
+    return c
+
+
+def _verify_offer_snp(c: Checks, offer: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes, *, pins, uvm_root,
+                      uvm_min_svn, reference, policy_b64, at, min_tcb, ref_has_floor) -> None:
+    _ref_has_floor = ref_has_floor
     check_hardware(c, offer or {}, rd, rd_bytes, pins=pins or AMD_ARK_SPKI_SHA256,
                    uvm_root=uvm_root or MS_UVM_ROOT_SHA256_B64URL, uvm_min_svn=uvm_min_svn,
                    policy_b64=policy_b64, min_tcb=min_tcb,
@@ -2157,6 +2802,9 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     # morning. verify_search below deliberately keeps `at` as the search's own time.
     check_identity(c, rd, p, reference, at or _utc_now_iso(), live=True)
     check_reference_firmware_before_sealing(c, offer or {}, reference, pins=pins)
+
+
+def _verify_offer_reference_auth(c: Checks, reference: Optional[Dict[str, Any]], reference_key: Optional[str]) -> None:
     # WHO SAYS THAT REFERENCE IS OURS. Identity above compares the enclave to a FILE. If nobody checked
     # that the file was signed by the publication key, the comparison establishes only that the enclave
     # matches whatever the file says -- and if the file ever travels in the same bundle as the offer, the
@@ -2181,12 +2829,12 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
             c.add(None, "reference authenticated",
                   "this reference carries NO signature at all — identity above rests on an unsigned file, "
                   "which establishes only that the enclave matches what that file happens to say.")
-    return c
 
 
 def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[str, str], uvm_root: str,
                   uvm_min_svn: int, matter_cutoff: Optional[int], reference: Optional[Dict[str, Any]],
-                  min_tcb: Optional[Dict[str, Dict[str, int]]] = None) -> Checks:
+                  min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
+                  tdx_pins: Optional[Dict[str, str]] = None) -> Checks:
     """All checks for one sealed search. `row` is the searches.json entry; `evidence` the bundle it names;
     `reference` the values obtained from InferRoute out of band (None = identity cannot be established)."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -2243,10 +2891,16 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
                        if reference_floor is not None else min_tcb)
     floor_source = ("operator-declared authenticated reference" if reference_floor is not None
                     else "explicit verifier configuration")
-    p = check_hardware(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
-                       policy_b64=(evidence or {}).get("policy_b64"), min_tcb=operation_floor,
-                       floor_skip=floor_skip, floor_source=floor_source)
-    check_identity(c, rd, p, reference, at)
+    if is_tdx_offer(offer):
+        # Judged at the search's own time, like every other row here: Intel's TCB info, QE identity and CRLs,
+        # and Google's certificate, must have been current WHEN THE SEARCH RAN, not now.
+        info = check_tdx(c, offer, rd_bytes, at_iso=at, pins=tdx_pins)
+        check_tdx_identity(c, rd, info, reference, at)
+    else:
+        p = check_hardware(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
+                           policy_b64=(evidence or {}).get("policy_b64"), min_tcb=operation_floor,
+                           floor_skip=floor_skip, floor_source=floor_source)
+        check_identity(c, rd, p, reference, at)
 
     # 5. content bindings — what this operation was, and that the record shows exactly what was signed.
     rid = str(st.get("request_id") or "")
@@ -2469,6 +3123,16 @@ def extract(bundle_dir: str, out_dir: str, searches: List[Dict[str, Any]]) -> No
         offer = ev.get("offer") or {}
         d = os.path.join(out_dir, f"search-{i}")
         os.makedirs(d, exist_ok=True)
+        if is_tdx_offer(offer):
+            try:
+                open(os.path.join(d, "quote.bin"), "wb").write(base64.b64decode(offer["evidence"]["quote"], validate=True))
+                open(os.path.join(d, "ccel.bin"), "wb").write(base64.b64decode(offer["evidence"]["ccel"], validate=True))
+                open(os.path.join(d, "endorsements.json"), "w").write(json.dumps(offer.get("endorsements"), indent=1))
+                open(os.path.join(d, "runtime_data.json"), "wb").write(base64.b64decode(offer.get("runtime_data", ""), validate=True))
+                open(os.path.join(d, "statement.json"), "w").write(json.dumps(row.get("statement"), indent=1, sort_keys=True))
+            except Exception as exc:                        # noqa: BLE001
+                open(os.path.join(d, "EXTRACT-FAILED.txt"), "w").write(f"{type(exc).__name__}: {exc}\n")
+            continue
         try:
             open(os.path.join(d, "report.bin"), "wb").write(base64.b64decode(offer.get("evidence", ""), validate=True))
             certs = load_certs(base64.b64decode(offer.get("endorsements", ""), validate=True))
@@ -2531,6 +3195,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="also ask AMD whether the chip certificates are revoked (needs network; off by default "
                          "so an offline run stays deterministic)")
     ap.add_argument("--uvm-root", default=None, help="TEST ROOTS ONLY; requires --i-am-testing")
+    ap.add_argument("--tdx-pin", action="append", default=[], metavar="intel_root|gce_root=SPKI_SHA256_HEX",
+                    help="TEST ROOTS ONLY; requires --i-am-testing")
     ap.add_argument("--uvm-min-svn", type=int, default=UVM_MIN_SVN)
     ap.add_argument("--i-am-testing", action="store_true", help="acknowledge that pin overrides make this a TEST run, never a verification of Azure (exit 3 at best)")
     a = ap.parse_args(argv)
@@ -2545,9 +3211,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"REFUSED: cryptography {cryptography.__version__} is too old; this verifier needs >= {MIN_CRYPTOGRAPHY} (pip install -U cryptography). Not a verdict on the record.")
         return 2
 
-    test_roots = bool(a.amd_pin) or a.uvm_root is not None
+    test_roots = bool(a.amd_pin) or a.uvm_root is not None or bool(a.tdx_pin)
     if test_roots and not a.i_am_testing:
-        print("REFUSED: --amd-pin / --uvm-root replace the production roots; a run with them can never verify an Azure record. "
+        print("REFUSED: --amd-pin / --uvm-root / --tdx-pin replace the production roots; a run with them can never verify an Azure record. "
               "Add --i-am-testing if that is what you mean (the exit code will then be 3, not 0).")
         return 2
     pins = dict(AMD_ARK_SPKI_SHA256)
@@ -2555,6 +3221,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         k, _, v = kv.partition("=")
         pins[k] = v.lower()
     uvm_root = a.uvm_root or MS_UVM_ROOT_SHA256_B64URL
+    tdx_pins = dict(TDX_PINS)
+    for kv in a.tdx_pin:
+        k, _, v = kv.partition("=")
+        if k not in TDX_PINS:
+            print(f"REFUSED: --tdx-pin names {k!r}; expected intel_root or gce_root")
+            return 2
+        tdx_pins[k] = v.lower()
     reference = None
     if a.reference:
         try:
@@ -2569,7 +3242,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("Trust model: two root pins (AMD ARK per product line, Microsoft Supply Chain RSA Root CA 2022) plus signature links. "
           + ("Revocation: AMD's ARK-signed CRL is fetched and the ASK checked against it (--check-revocation). "
              if a.check_revocation else "No revocation checking (pass --check-revocation to fetch AMD's CRL). ")
-          + "No basicConstraints / keyUsage / path-length validation. Identity comes only from --reference.")
+          + "No basicConstraints / keyUsage / path-length validation. Identity comes only from --reference. "
+          "Intel TDX searches: Intel SGX Root CA and Google's GCE-cc-tcb-root pinned instead, with Intel's signed "
+          "TCB documents and CRLs carried in the evidence and judged at each search's time.")
     if test_roots:
         print("!!! NON-PRODUCTION ROOTS PINNED (--i-am-testing): this run verifies a TEST enclave, never Azure. Exit code 3 at best. !!!")
     c0, manifest = check_manifest(a.bundle)
@@ -2630,6 +3305,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     seen_policies: Dict[str, str] = {}
     seen_chains: Dict[Tuple[str, bytes], Tuple[str, Any, Any]] = {}
     seen_host_data: set = set()
+    tdx_searches = 0
     firmware_floor_results: List[bool] = []
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
@@ -2682,9 +3358,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     seen_policies[_hd] = ev["policy_b64"]
             except Exception:                               # noqa: BLE001 — a malformed policy is reported by the row below
                 pass
+        tdx_searches += int(is_tdx_offer(ev.get("offer")))
         try:
             c = verify_search(row, ev, pins=pins, uvm_root=uvm_root, uvm_min_svn=a.uvm_min_svn, matter_cutoff=cutoff,
-                              reference=reference, min_tcb=min_tcb)
+                              reference=reference, min_tcb=min_tcb, tdx_pins=tdx_pins)
         except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal, not a traceback
             print(f"  FAIL verifier error on this search: {type(exc).__name__}: {exc}")
             fails += 1
@@ -2752,7 +3429,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             authenticated=bool(isinstance(reference, dict) and reference.get("sig") and a.reference_key),
             record_ok=(fails == 0),
             committed=seen_host_data,
-            production_roots=not test_roots)
+            production_roots=not test_roots,
+            tdx_searches=tdx_searches)
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

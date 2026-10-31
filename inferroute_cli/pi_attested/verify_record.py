@@ -933,6 +933,32 @@ STATEMENT_CONFIDENTIAL = (
     "exclusive key custody, the application's handling of plaintext, all runtime output and retention "
     "channels, or the AI conversation's confidentiality.")
 
+# Intel TDX running InferRoute's own boot image. There is no container policy to read, so the AMD ladder's
+# level 1 (specified controls over the containers) has nothing to grade and is NOT reachable here. Level 0 is:
+# the statements are signed by a key the TD bound into its quote, the boot log replays, and the image, host
+# configuration, index and encoders match the signed reference -- all inside record_ok. What the IMAGE lets the
+# operator see (its console) or send out is a property of the image this program does not read, so it is said
+# as a gap, never left to silence: the first TDX test image writes its program's output to the serial console.
+STATEMENT_SEALED_TDX = (
+    "For the archived SEARCH operations checked here, statement signatures verify under keys bound "
+    "to Intel TDX quotes with debugging disabled, from machines whose boot log replays to the quote and "
+    "whose boot image, firmware-measured boot configuration (RTMR0), index and encoders match the supplied "
+    "reference, under the "
+    "configured production trust roots. This does not establish encryption on the user's device, "
+    "secrecy of private keys, or absence of other plaintext copies.")
+# The shared last blocker ends "closing the configuration gaps alone is insufficient", and its plain words end
+# "fixing the listed settings alone does not establish privacy". A TDX rendering lists no settings, so that
+# clause would cite something absent. Same gap, without the clause.
+TDX_NOT_ESTABLISHED = ("client-side sealing, exclusive key custody, runtime egress/retention and application "
+                       "non-disclosure were not established")
+# The reference's image_source names the AMD container image's source; no TDX entry names one. The generic
+# "does not name a source for the image" would contradict a reference that carries image_source.
+TDX_NO_SOURCE = "the reference does not name a source for the Intel TDX image; source-to-image verification is absent"
+TDX_IMAGE_UNASSESSED = (
+    "the Intel TDX image's own permissions were not assessed: these checks establish which signed image "
+    "and boot configuration booted, not what that image lets the machine's operator observe (its console "
+    "output, for one) or whether it can send data out")
+
 # The scope line matters as much as the sentences. This program checks the SEARCH lane (AMD SEV-SNP).
 # The conversation with the AI machine is a different machine on different hardware, attested in the
 # session receipts, which this program deliberately does not parse. An auditor on 25 Sep found three
@@ -1000,6 +1026,16 @@ PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confid
 # matters more: when a deployment closes stdio or resolves its fragments, the plain caveat shrinks by
 # itself. Nobody has to rewrite a sentence, which is the step where an overclaim gets reintroduced.
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
+    (TDX_NOT_ESTABLISHED,
+     "this verifier did not establish encryption before sending, who held the keys, or whether the "
+     "program disclosed or retained your text"),
+    (TDX_IMAGE_UNASSESSED,
+     "this verifier checked which program image the machine started, but not what that image lets "
+     "whoever runs the machine see (what it writes to the machine's console, for example) or whether it "
+     "can send data out; this record cannot tell whether either happened, or whether your text was involved"),
+    (TDX_NO_SOURCE,
+     "the supplied reference does not name the source code of the program image the machine started, and "
+     "this verifier did not verify a match between source code and that image"),
     ("the policy does not satisfy: policy denies host access to the enclave's stdio",
      "the checked settings do not establish that operator access to the program's input and output "
      "streams was disabled; this does not show that anyone accessed them or that they contained your text"),
@@ -1083,6 +1119,15 @@ PLAIN_ANSWER: Dict[int, str] = {
        "document records what each of the controls on the containers your provider controls was set to.",
 }
 
+# The AMD answer says the record "records what was permitted". A TDX record does not: it records WHICH image
+# and machine ran, and nothing about what that image permits (see TDX_IMAGE_UNASSESSED). Saying "permitted"
+# here would describe a document this record does not hold.
+PLAIN_ANSWER_TDX: Dict[int, str] = {
+    -1: PLAIN_ANSWER[-1],
+    0: "This record cannot tell you whether your text stayed private: it records which machine and which "
+       "program image ran your search, not whether anyone read your text, so on that question it says nothing.",
+}
+
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
                     "list of what it cannot see; the following are examples, not all of it. It never "
                     "sees how long your search took and how large it was, which someone outside the "
@@ -1145,6 +1190,10 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # provider can actually act on, so the ask moves to the next open gap instead of vanishing with the
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
+    ("the Intel TDX image's own permissions were not assessed",
+     "ask for a record made with a program image that sends nothing to a place whoever runs the machine "
+     "can read, such as the machine's console, and cannot send data out; that will not by itself remove "
+     "the other gaps"),
     ("policy denies host access to the enclave's stdio",
      "of the gaps listed above, the one your provider can most readily change is the setting "
      "that lets whoever runs the machine watch what goes into the program and what comes out; "
@@ -1177,7 +1226,7 @@ def _join_plain(items: List[str]) -> str:
 
 
 def report_plain(reach: int, blockers: Optional[List[str]] = None,
-                 closed: Optional[Dict[str, Optional[bool]]] = None) -> None:
+                 closed: Optional[Dict[str, Optional[bool]]] = None, tee: str = "amd-sev-snp") -> None:
     print()
     print("  In plain words, for a reader who will not read the table above")
     pair = plain_statement(reach)
@@ -1188,7 +1237,8 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         return
     headline, caveat = pair           # pair is still the LEVEL GUARD: an unwritten level prints nothing
     reasons = plain_blockers(blockers or [])
-    answer = PLAIN_ANSWER.get(reach)
+    tdx = tee == "intel-tdx"
+    answer = (PLAIN_ANSWER_TDX if tdx else PLAIN_ANSWER).get(reach)
     if answer is None:
         print(f"    No plain statement is written for reach level {reach}, so none is given. This is "
               "deliberate: the nearest available sentence would be a stronger claim than this level "
@@ -1198,7 +1248,10 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     if reach >= 0:
         print()
         print(f"    {PLAIN_NARROWER}")
-        shut = [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
+        # A TDX record has no container policy: no "document", no closed controls, no platform containers.
+        # Left ungated, closed={} reads as "not self-contained, unidentified" and the paragraph below
+        # describes dependencies of a document this record does not hold.
+        shut = [] if tdx else [w for k, w in PLAIN_CLOSED_WORDS if (closed or {}).get(k) is True]
         # Three states, not two. Every specific in the census prose -- a CLOUD PLATFORM, containers
         # permitted to attach to stdio, most running elevated -- is imported from PLATFORM_DEPENDENCIES.
         # Asserting it merely because the policy is not self-contained states those specifics about a
@@ -1206,7 +1259,8 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         _c = closed or {}
         platform_known = (_c.get("self_contained") is not True
                           and _c.get("dependencies_identified") is True)
-        platform_unknown = _c.get("self_contained") is not True and not platform_known
+        platform_unknown = not tdx and _c.get("self_contained") is not True and not platform_known
+        platform_known = platform_known and not tdx
         # THE PLATFORM WARNING IS NOT CONDITIONAL ON A CONTROL BEING CLOSED. It used to live inside
         # `if shut:`, so a policy with external dependencies and NOT ONE control closed printed no
         # plain mention of the platform's containers at all -- the warning vanished exactly when the
@@ -1264,10 +1318,16 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
         # A tested reader rejected "ask someone qualified" as the only step: "that costs money, and
         # I'd be paying someone to tell me the same can't-know". Lead with something free and real.
+        # The AMD clause is about AMD's certificates fetched on the day of the check. A TDX record fetches
+        # nothing: Intel's and Google's documents travel inside it and are judged as of the search's own
+        # time, so the only thing that can move the answer later is a newer reference (a withdrawn entry).
+        recheck = ("re-checking it later against a newer reference from InferRoute can give a different "
+                   "answer, if that reference withdraws an entry this record relied on" if tdx else
+                   "re-checking it later can give a different answer — the check asks the chip maker "
+                   "about certificates as they stand on the day you run it")
         print("    What you can do: keep this record with your filing papers. It sets down what was and "
               "was not established on the day it was made, and it costs nothing to keep. It is not a "
-              "clean bill of health, and re-checking it later can give a different answer — the check "
-              "asks the chip maker about certificates as they stand on the day you run it. If the "
+              f"clean bill of health, and {recheck}. If the "
               "uncertainty bears on what you are filing, that part is a question for someone qualified; "
               "this record cannot settle it either way.")
         if ask:
@@ -1296,7 +1356,10 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                     "Any gaps this verifier identifies are not")
           + " a complete list of risks or ways text could be disclosed.")
     print("    A shorter or empty list does not establish privacy.")
-    if reach >= 0:
+    if reach >= 0 and tdx:
+        # Nothing on the TDX ladder grades a control as enforced; "what was enforced" would presuppose it.
+        print("    Fixes to a future deployment do not change what this record established about these saved operations.")
+    elif reach >= 0:
         print("    Fixes to a future deployment do not change what was enforced for these saved operations.")
     else:
         print("    Fixes to a future deployment do not change what this record established, and this "
@@ -1376,10 +1439,30 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
     return (1 if controls_checked else 0), blockers
 
 
+def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool) -> Tuple[int, List[str]]:
+    """The TDX ladder: -1 when the record did not verify, otherwise 0. Never 1.
+
+    Level 1 grades a container policy's controls, and a TDX image has none to read; reaching it would need an
+    assessment of the image's own permissions that this program does not make. record_ok already carries
+    every TDX row (quote, Intel and Google documents, replay, boot entries, image / RTMR0 / index / encoders
+    against the reference at the search's time), so it is the whole of level 0's gate."""
+    if record_ok is not True:
+        return -1, ["this record did not verify — no sentence is licensed"]
+    blockers = [TDX_IMAGE_UNASSESSED]
+    if not authenticated:
+        blockers.append("the reference signature was not verified under a supplied key; independently "
+                        "establishing who owns that key remains the reader's responsibility")
+    # The reference's image_source names the AMD container image's source. No TDX entry names one.
+    blockers.append(TDX_NO_SOURCE)
+    blockers.append(TDX_NOT_ESTABLISHED)
+    return 0, blockers
+
+
 def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Optional[Dict[str, Any]],
                            floor_pinned: bool, revocation_checked: bool, authenticated: bool,
                            record_ok: bool, committed: Optional[set] = None,
-                           production_roots: bool = False, tdx_searches: int = 0) -> None:
+                           production_roots: bool = False, tdx_searches: int = 0,
+                           searches_total: Optional[int] = None) -> None:
     """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
@@ -1395,14 +1478,34 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         print("  REFUSED — test or unestablished trust roots cannot license production claims.")
         report_plain(-1)
         return
-    if tdx_searches:
-        # Not graded, rather than graded by the AMD rules: those rules read a container policy, and an Intel
-        # TDX machine running InferRoute's own image has none. What its image permits has not been assessed
-        # by this program, so the honest output is no sentence at all, not the nearest AMD one.
-        print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX with InferRoute's own boot "
-              "image. The checks above establish which image and machine they were; this program does not yet "
-              "assess what that image permits, so it licenses no confidentiality sentence for this record.")
+    if tdx_searches and (policies or searches_total is None or tdx_searches != searches_total):
+        # A record mixing AMD and Intel TDX searches: two ladders, and this program does not combine them.
+        # searches_total unknown counts as mixed -- an AMD search with no archived policy would otherwise
+        # be graded by the TDX rules.
+        print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX, and this record mixes, or "
+              "cannot be shown not to mix, them with searches graded by the AMD rules (an AMD policy is present, "
+              "or the count of searches does not match). This program does not combine the two, so it licenses "
+              "no confidentiality sentence for this record.")
         report_plain(-1)
+        return
+    if tdx_searches:
+        reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated)
+        print(f"  Intel TDX — {tdx_searches} search(es) ran on InferRoute's own boot image. There is no container "
+              "policy to read, so the policy rows of an AMD record do not appear and the strongest sentence an "
+              "AMD record can earn (specified controls) is not reachable.")
+        print()
+        print("  You may write:")
+        print(f"    1. {STATEMENT_SEALED_TDX}")
+        print("  You may NOT write that the text was never exposed, could not have been read, or remained "
+              "confidential. What is missing:")
+        for blocker in dict.fromkeys(blockers):
+            print(f"    - {blocker}")
+        print(f"  {STATEMENT_CONFIDENTIAL}")
+        print("  AI receipts require a separate verification and privacy argument. The following are necessary "
+              "binding checks, NOT a sufficient privacy checklist:")
+        for cond in AI_LANE_CONDITIONS:
+            print(f"    - {cond}")
+        report_plain(reach, blockers, None, tee="intel-tdx")
         return
     if not policies or committed is None or set(hd for hd, _ in policies) != committed:
         print("  REFUSED — archived policies do not cover every hardware policy commitment in this record.")
@@ -3430,7 +3533,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             record_ok=(fails == 0),
             committed=seen_host_data,
             production_roots=not test_roots,
-            tdx_searches=tdx_searches)
+            tdx_searches=tdx_searches, searches_total=len(searches))
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

@@ -136,6 +136,35 @@ def covered_of(body):
     return parse_covered(line), line
 
 
+# What can be established FROM A PACK, per claim, when the pack carries no more than today's packs do. A claim whose
+# ceiling is VERIFIED IN PART cannot be VERIFIED by any auditor, however careful: the missing piece is not in the
+# folder. Scored against these, 2 of 7 audit rounds on 4 Oct overclaimed claim 3 and 1 overclaimed claim 5. A
+# pack that carries the missing evidence says so in MANIFEST "claim_ceilings" ({"3": {"verdict": ..., "why": ...}}),
+# which replaces the default for that claim: the table follows the product's versions, not this file.
+DEFAULT_CEILINGS = {
+    3: ("VERIFIED IN PART", "the reference's origin cannot be established from the pack (no engagement-letter copy) and the "
+                            "build from published source to the running image is not published"),
+    5: ("VERIFIED IN PART", "a record cannot show operations dropped from the end of an enclave's lifetime, or a whole lifetime "
+                            "left out"),
+    7: ("VERIFIED IN PART", "the conversation receipt is not signed to the searches, and the online Intel and NVIDIA checks "
+                            "are not redone from the pack"),
+}
+
+
+def ceiling_of(manifest, n):
+    """(verdict, why) the claim cannot exceed from this pack, or None."""
+    over = (manifest.get("claim_ceilings") or {}).get(str(n))
+    if isinstance(over, dict) and over.get("verdict"):
+        return (over["verdict"], over.get("why") or "")
+    if isinstance(manifest.get("claim_ceilings"), dict) and str(n) in manifest["claim_ceilings"]:
+        return None                                     # the pack says this claim has no ceiling
+    return DEFAULT_CEILINGS.get(n)
+
+
+NOTHING_LED = re.compile(r"^\W*(nothing|none|n/?a|no limit)\b", re.I)
+LIMIT_LINE = re.compile(r"(?im)^\W*limitations?\b|\*\*limitations?\b")
+
+
 def labelled(body, *labels):
     """The text after the first bold label that starts with any of `labels`, up to the next bold label."""
     for label in labels:
@@ -221,6 +250,29 @@ def check_report(pack, report_path):
         if v == "VERIFIED" and (not none_left or reached != total):
             problems.append((where, f"VERIFIED, but your numbers leave something out (tool {cov['tool']}, own {cov['own']} of {total}; neither: {cov['neither'][:60] or 'blank'})",
                              "VERIFIED needs one of tool/own to equal the total and 'neither: none'; otherwise it is VERIFIED IN PART"))
+        cap = ceiling_of(manifest, n)
+        if v == "VERIFIED" and cap and cap[0] != "VERIFIED":
+            problems.append((where, f"VERIFIED, but this pack cannot establish claim {n} fully: {cap[1]}",
+                             f"write {cap[0]} and name what stays open; if the pack really does carry what is missing, say so "
+                             "in 'What I computed myself'"))
+        if v == "VERIFIED":
+            # The counts line says "neither: none" and the paragraph below it says what could not be reached: two
+            # places, and an auditor can satisfy the first and contradict it in the second. On 4 Oct two audits
+            # rated claim 3 VERIFIED while that paragraph listed limits (a reference that is not independent, no
+            # engagement letter), and the result file, which keeps limits only for a claim that is not VERIFIED,
+            # would have dropped them from what the professional sees.
+            # Everything from the label to the end of the claim: it is the template's last field, and an auditor
+            # who adds a bold "Limitation:" line under it would otherwise end `labelled` early and hide it.
+            tail = re.search(r"(?is)\*\*What I could not[^*]*\*\*:?\s*(.*)\Z", body)
+            miss = tail.group(1).strip() if tail else ""
+            if miss and not NOTHING_LED.match(miss):
+                problems.append((where, "VERIFIED, but 'What I could not reach' names something you could not reach: "
+                                        f"{' '.join(miss.split())[:80]}",
+                                 "a claim with a stated limit is VERIFIED IN PART. If it is not a limit on this claim, take it out "
+                                 "of this paragraph and write 'Nothing.' here"))
+            elif miss and LIMIT_LINE.search(miss):
+                problems.append((where, "VERIFIED, but the 'could not reach' paragraph says 'Nothing' and then states a limitation",
+                                 "a claim with a stated limit is VERIFIED IN PART; move the limit's claim to that verdict"))
         if v == "VERIFIED IN PART" and not reached:
             problems.append((where, "VERIFIED IN PART, but tool and own are both 0",
                              "you reached none of it: that is NOT VERIFIED or COULD NOT CHECK — or fill in what the tool read"))
@@ -330,8 +382,29 @@ def cross_check(report_info, data):
 
 # ── making the result from the report ───────────────────────────────────────────────────────────────────────
 def _bullets(text):
-    items = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", ln).strip() for ln in text.splitlines()]
-    items = [i for i in items if i]
+    """The items of a "could not reach" section. A bullet starts an item; the lines under it, wrapped at 80
+    columns or not, belong to it; a blank line ends it. Text with no bullets is read as paragraphs. Splitting
+    on every line, as this once did, turned one wrapped sentence into four limitations (found 2026-10-04, in a
+    report an auditor wrote with hard-wrapped paragraphs)."""
+    items, cur = [], []
+
+    def flush():
+        if cur:
+            items.append(" ".join(cur))
+            cur.clear()
+
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            flush()
+            continue
+        m = re.match(r"^(?:[-*\u2022]|\d+[.)])\s+(.*)$", s)
+        if m:
+            flush()
+            cur.append(m.group(1).strip())
+        else:
+            cur.append(s)
+    flush()
     return items or ([text.strip()] if text.strip() else [])
 
 

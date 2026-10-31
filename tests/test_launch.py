@@ -375,3 +375,11 @@ def test_is_premium_anthropic_auto_route_decision():
     assert not _is_premium_anthropic("haiku")
     assert not _is_premium_anthropic("claude-haiku-4-5")
     assert not _is_premium_anthropic("")
+
+
+def test_stream_idle_timeout_is_raised_above_the_five_minute_default_and_the_users_value_wins():
+    from inferroute_cli.launch import _apply_stream_idle_env, STREAM_IDLE_TIMEOUT_MS
+    assert int(STREAM_IDLE_TIMEOUT_MS) > 5 * 60 * 1000
+    env = _apply_stream_idle_env({})
+    assert env["CLAUDE_STREAM_IDLE_TIMEOUT_MS"] == STREAM_IDLE_TIMEOUT_MS
+    assert _apply_stream_idle_env({"CLAUDE_STREAM_IDLE_TIMEOUT_MS": "60000"})["CLAUDE_STREAM_IDLE_TIMEOUT_MS"] == "60000"

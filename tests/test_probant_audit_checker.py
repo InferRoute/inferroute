@@ -50,9 +50,10 @@ def filled_report(pack, verdicts=None, covered=None, closing="Seven operations w
         total = C.claim_total(m, n)
         # A claim the pack holds nothing for (no receipts, no document reads in the synthetic pack) cannot be
         # verified: COULD NOT CHECK is the honest answer, and the client refuses anything else.
-        v = verdicts.get(n, "VERIFIED" if total else "COULD NOT CHECK")
+        capped = bool(total) and n in C.DEFAULT_CEILINGS          # claims 3 and 5 cannot be VERIFIED from a pack like this
+        v = verdicts.get(n, ("VERIFIED IN PART" if capped else "VERIFIED") if total else "COULD NOT CHECK")
         cov = covered.get(n, f"tool: {total} of {total} operations · my own recomputation: {1 if total else 0} of {total} · neither: "
-                             f"{'none' if total else 'the pack holds none'}")
+                             f"{'the reference origin' if capped else ('none' if total else 'the pack holds none')}")
         block = re.compile(rf"(## Claim {n} — .*?)\*\*Verdict:\*\* _\(.*?\)_\n\n\*\*Covered by:\*\* _\(.*?\)_\n\n"
                            r"\*\*What I computed myself:\*\* \n\n\*\*What I could not reach, and why:\*\* \n", re.S)
         assert block.search(text), n
@@ -81,7 +82,7 @@ def test_a_correctly_filled_report_and_the_result_made_from_it_pass_and_the_clie
     assert C.check_result(str(pack), data) == [] and C.cross_check(info, data) == []
     accepted = R.validate(copy.deepcopy(data), pack, R.identity(pack))               # the PROFESSIONAL's client agrees
     assert accepted["auditor"] == {"name": "an auditor", "model": "kimi-k2.6"}
-    assert [c["verdict"] for c in accepted["claims"]] == ["VERIFIED"] * 6 + ["COULD NOT CHECK"] * 2
+    assert [c["verdict"] for c in accepted["claims"]] == ["VERIFIED", "VERIFIED", "VERIFIED IN PART", "VERIFIED", "VERIFIED IN PART", "VERIFIED"] + ["COULD NOT CHECK"] * 2
 
 
 def test_the_unfilled_template_is_refused_with_what_to_fix(pack):
@@ -287,3 +288,176 @@ def test_the_brief_warns_against_reading_an_exit_code_from_the_end_of_a_pipe():
     that about the verifier. The verifier had caught both tampers; the shell had hidden its exit code."""
     head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
     assert "never from the end of a pipe" in head and 'echo "exit $?"' in head
+
+
+def test_the_brief_warns_that_printed_evidence_may_have_been_shortened_on_the_way():
+    """4 Oct: a service between an agent and its model replaces large tool output with markers like <<ccr:...>>
+    and shortens the rest, without telling the agent. Evidence must be computed from the file, not copied out of
+    printed output, and a marker or a short read must be reported."""
+    head = E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")]
+    assert "may have been shortened on its way to you" in head and "<<ccr:" in head
+    assert "compute from it" in head and "could not check" in head
+
+
+def test_the_brief_tells_the_auditor_to_keep_raw_evidence_out_of_its_context():
+    """4 Oct: an auditor read three evidence files whole (70k to 99k characters of hex each) and its context was
+    summarised twice in the first four minutes. The remedy is to compute in code and print only fields."""
+    head = " ".join(E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")].split())      # the brief wraps its lines
+    assert "Do not read an evidence file whole into your conversation" in head
+    assert "print only the fields you need" in head and "re-read your report file" in head
+
+
+def test_the_brief_says_which_bytes_the_runtime_data_hash_covers():
+    """4 Oct, final K2.6 run: the auditor could not reproduce the runtime_data hash and filed claim 2 as verified
+    only in part. The hash is over the base64-decoded bytes exactly as they decode; a re-serialisation (or the
+    base64 text) gives a different value."""
+    brief = " ".join(E.VERIFY_MD.split())            # the record's own guide, which the auditor is pointed to
+    assert "base64-DECODED content of `offer.runtime_data`, exactly as decoded" in brief
+    assert "do not parse and re-serialise them" in brief
+
+
+def _with_could_not_reach(text, n, replacement):
+    """The report with claim n's 'What I could not reach' paragraph replaced."""
+    start = text.index(f"## Claim {n} — ")
+    end = text.find("\n## ", start + 1)
+    end = len(text) if end < 0 else end
+    block = text[start:end]
+    block = re.sub(r"(\*\*What I could not reach, and why:\*\* ).*\Z", lambda mo: mo.group(1) + replacement + "\n", block, flags=re.S)
+    return text[:start] + block + text[end:]
+
+
+def test_a_verified_claim_cannot_list_something_it_could_not_reach(pack, tmp_path):
+    """4 Oct: two audits rated claim 3 VERIFIED while its 'could not reach' paragraph named limits (a reference
+    that is not independent, no engagement letter). The counts line said 'neither: none', so the old check passed it,
+    and the result file drops the limits of a VERIFIED claim, so the professional would never have seen them.
+    Claim 1 is used here: claims 3 and 5 cannot be VERIFIED at all (see the ceiling test below)."""
+    base = filled_report(pack)
+    bad = _with_could_not_reach(base, 1, "The AMD revocation list is not available per chip, so I did not check it.")
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "bad.md", bad)))
+    assert any(w == "claim 1" and "names something you could not reach" in why for w, why, _ in problems), problems
+    # 'Nothing' followed by a bold limitation is the same contradiction, one line lower
+    sly = _with_could_not_reach(base, 1, "Nothing. The checks passed.\n\n**Limitation:** the chain is only as old as its dates.")
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "sly.md", sly)))
+    assert any(w == "claim 1" and "then states a limitation" in why for w, why, _ in problems), problems
+    # the honest forms still pass: nothing left out, or the verdict that says something was
+    ok = _with_could_not_reach(base, 1, "Nothing. Every operation was read and recomputed.")
+    assert C.check_report(str(pack), str(write(tmp_path, "ok.md", ok)))[0] == []
+    part = _with_could_not_reach(base, 3, "The reference is not independent of InferRoute.")      # claim 3 is VERIFIED IN PART by default
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "part.md", part)))
+    assert problems == [], problems
+    data = C.make_json(str(pack), str(write(tmp_path, "part2.md", part)), "an auditor", "kimi-k2.6")
+    assert any("not independent" in lim for c in data["claims"] if c["id"] == 3 for lim in c["limitations"])
+
+
+def test_claims_3_and_5_cannot_be_verified_from_a_pack_like_this_and_a_pack_can_lift_the_ceiling(pack, tmp_path):
+    """Scored against what a pack can establish, 3 of 7 audit rounds on 4 Oct overclaimed claim 3 or 5. The ceiling is
+    deterministic, so it is enforced; a pack that carries the missing evidence says so in its manifest."""
+    over = filled_report(pack, verdicts={3: "VERIFIED", 5: "VERIFIED"},
+                         covered={3: "tool: 1 of 1 operations · my own recomputation: 1 of 1 · neither: none",
+                                  5: "tool: 1 of 1 operations · my own recomputation: 1 of 1 · neither: none"})
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "over.md", over)))
+    flagged = sorted(w for w, why, _ in problems if "cannot establish" in why)
+    assert flagged == ["claim 3", "claim 5"], problems
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    m["claim_ceilings"] = {"3": None}                      # the product later ships what claim 3 was missing
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    problems, _ = C.check_report(str(pack), str(write(tmp_path, "over2.md", over)))
+    assert sorted(w for w, why, _ in problems if "cannot establish" in why) == ["claim 5"], problems
+    m["claim_ceilings"] = {"5": {"verdict": "NOT VERIFIED", "why": "x"}}
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    assert C.ceiling_of(m, 5) == ("NOT VERIFIED", "x") and C.ceiling_of(m, 3) is not None
+
+
+def test_the_brief_names_the_three_claims_that_cannot_be_verified_and_what_claim_6_asserts():
+    head = " ".join(E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")].split())
+    assert "Three claims cannot be VERIFIED" in head and "**claim 3**" in head and "**claim 5**" in head and "**claim 7**" in head
+    assert "Claim 6** is about what the signed statements say" in head.replace("**Claim 6**", "Claim 6**") or "**Claim 6** is about what the signed statements say" in head
+    assert "no per-chip revocation list for Genoa" in head
+
+
+def test_the_brief_says_a_verified_claim_leaves_nothing_under_could_not_reach():
+    head = " ".join(E.AUDIT_MD[:E.AUDIT_MD.index("## What this folder is")].split())
+    assert 'A claim is VERIFIED only when nothing is left under "What I could not reach"' in head
+    assert "withheld on purpose" in head and "belong in the closing section" in head
+
+
+def test_the_report_template_prints_the_ceiling_and_the_not_limits_under_each_claim_heading(pack):
+    """4 Oct: auditors filed by-design notes as limits and rated claims 1, 2 and 6 in part, despite the brief. The note now sits
+    under the heading, where the auditor writes. Claims 3, 5 and 7 say they cannot be VERIFIED; a pack's manifest can lift that."""
+    t = E.report_template()
+    def section(n):
+        i = t.index(f"## Claim {n} — ")
+        j = t.find("\n## ", i + 1)
+        return t[i:j]
+    for n in (3, 5, 7):
+        assert "cannot be VERIFIED from a pack like this one" in section(n), n
+    for n in (1, 2, 4, 6, 8):
+        assert "Not limits on this claim" in section(n), n
+    assert "per-chip revocation list for Genoa" in section(1) and "relying on the verifier" in section(2)
+    assert "that the enclave's behaviour matches its report" in section(6)
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    m["claim_ceilings"] = {"3": None}
+    (pack / "MANIFEST.json").write_text(json.dumps(m))
+    lifted = E.report_template(pack)
+    assert "cannot be VERIFIED" not in lifted[lifted.index("## Claim 3 — "):lifted.index("## Claim 4 — ")]
+    assert "cannot be VERIFIED" in lifted[lifted.index("## Claim 5 — "):lifted.index("## Claim 6 — ")]
+
+
+def _key_script():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_key_check", Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested" / "check_key_attestation.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_pack_ships_a_key_attestation_check_that_is_the_one_in_the_client_and_is_declared(pack):
+    src = Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested" / "check_key_attestation.py"
+    shipped = pack / "stationery" / "check_key_attestation.py"
+    assert shipped.read_bytes() == src.read_bytes() and (shipped.stat().st_mode & 0o777) == 0o500
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert "MAKES NETWORK CALLS" in m["stationery"]["stationery/check_key_attestation.py"]
+    assert "check_key_attestation.py" in E.VERIFY_MD
+    assert "check_key_attestation.py" in E.report_template(pack)[E.report_template(pack).index("## Claim 3 — "):
+                                                                  E.report_template(pack).index("## Claim 4 — ")]
+
+
+def test_the_key_check_says_pass_fail_or_could_not_run_and_decides_nothing_it_could_not_run(tmp_path, monkeypatch, capsys):
+    mod = _key_script()
+    pk = tmp_path / "pack"
+    (pk / "trust-anchors").mkdir(parents=True)
+    # no attestation in the pack: an absence, not a failure
+    assert mod.main(["--pack", str(pk)]) == 3 and "COULD NOT RUN" in capsys.readouterr().out
+    (pk / "trust-anchors" / "publication-key-attestation.json").write_text(json.dumps({"publication_key": "ab" * 32}))
+    (pk / "trust-anchors" / "publication-key-attestation.bundle").write_text("{}")
+    (pk / "trust-anchors" / "reference.json").write_text(json.dumps({"publication_key": "cd" * 32}))
+    monkeypatch.setattr(mod.shutil, "which", lambda name: "/x/cosign" if name == "cosign" else None)
+    calls = []
+    monkeypatch.setattr(mod, "_run", lambda cmd, timeout=240: (calls.append(cmd) or (0, "Verified OK")))
+    assert mod.main(["--pack", str(pk)]) == 0
+    out = capsys.readouterr().out
+    assert "KEY ATTESTATION: PASS" in out and "a DIFFERENT key" in out                   # a reference naming another key is said
+    assert calls[0][:2] == ["cosign", "verify-blob"] and "henry@inferroute.ai" in calls[0]
+    assert mod.main(["--pack", str(pk), "--identity", "other@example.com"]) == 0 and "other@example.com" in calls[-1]
+    monkeypatch.setattr(mod, "_run", lambda cmd, timeout=240: (1, "no matching CertificateIdentity found"))
+    assert mod.main(["--pack", str(pk)]) == 1 and "KEY ATTESTATION: FAIL" in capsys.readouterr().out
+    monkeypatch.setattr(mod.shutil, "which", lambda name: None)
+    monkeypatch.setattr(mod, "_venv_run", lambda sig: (3, "no network"))
+    assert mod.main(["--pack", str(pk)]) == 3 and "COULD NOT RUN" in capsys.readouterr().out
+
+
+def test_a_wrapped_limitation_stays_one_item_and_bullets_stay_separate():
+    # An auditor who hard-wraps its paragraphs got ONE limitation split into four result items (2026-10-04).
+    _bullets = C._bullets
+    wrapped = ("A manifest-versus-source rebuild chain: the deployment template needed to run\n"
+               "acipolicygen is NOT shipped in this pack; build_inputs is empty.\n"
+               "\n"
+               "The 97 enclave operations before seq 98 are not in this record.\n")
+    assert _bullets(wrapped) == [
+        "A manifest-versus-source rebuild chain: the deployment template needed to run "
+        "acipolicygen is NOT shipped in this pack; build_inputs is empty.",
+        "The 97 enclave operations before seq 98 are not in this record."]
+    assert _bullets("- first thing\n  continued here\n- second thing\n* third\n1. fourth") == [
+        "first thing continued here", "second thing", "third", "fourth"]
+    assert _bullets("   \n") == []

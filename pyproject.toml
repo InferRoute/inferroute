@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "inferroute"
-version = "0.9.101"
+version = "0.9.108"
 description = "Launch Claude Code through inferroute — typed less, routed smarter"
 readme = "README.md"
 license = "MIT"
@@ -66,6 +66,8 @@ local = [
 
 [project.scripts]
 ir = "inferroute_cli.main:main"
+# `probant` alone opens Probant's home page; `probant <anything>` is `ir probant <anything>`.
+probant = "inferroute_cli.probant:cli_main"
 # Internal entry point used by the systemd user unit installed via
 # `ir add recording`. Not surfaced in `ir help`; power users and
 # debugging only.

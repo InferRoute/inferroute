@@ -90,6 +90,16 @@ def _limits(value, name: str, *, required: bool = False) -> list:
     return [_text(v, name, limit=2000) for v in value]
 
 
+def _ceiling(manifest: dict, n: int):
+    """(verdict, why) claim n cannot exceed from this pack, from the one table the pack's checker also uses."""
+    import importlib.util
+    path = Path(__file__).resolve().parent / "pi_attested" / "check_report.py"
+    spec = importlib.util.spec_from_file_location("_probant_check_report", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.ceiling_of(manifest, n)
+
+
 def validate(data, pack: Path, expected: dict) -> dict:
     """Validate association and completeness. This does not validate the auditor's reasoning."""
     if not isinstance(data, dict) or data.get("schema") != SCHEMA:
@@ -116,6 +126,12 @@ def validate(data, pack: Path, expected: dict) -> dict:
         verdict = claim.get("verdict")
         if verdict not in VERDICTS:
             raise ValueError(f"claim {wanted['id']} has no valid verdict")
+        # The pack's own checker refuses this, but a result file can be written without running it. The client holds the
+        # same table (one source: the checker file), so an overclaim cannot reach the professional's screen either way.
+        cap = _ceiling(manifest, wanted["id"])
+        if verdict == "VERIFIED" and cap and cap[0] != "VERIFIED":
+            raise ValueError(f"claim {wanted['id']} is VERIFIED, but this pack cannot establish it fully: {cap[1]}. "
+                             f"Ask the auditor to rate it {cap[0]} and name what stays open")
         coverage = claim.get("coverage")
         if not isinstance(coverage, dict):
             raise ValueError("coverage is missing")

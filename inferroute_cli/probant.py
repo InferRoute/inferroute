@@ -512,6 +512,22 @@ def cmd_proof(spec: str) -> int:
     return 0 if live.get("ok") else 1
 
 
+def _this_computer() -> str:
+    """The processor and system version in one line, e.g. `arm64 · macOS 26.5`: what we need to know about a Mac, sent
+    back with the public key. Nothing leaves the computer from here; the person copies it."""
+    import platform
+    mac = platform.mac_ver()[0]
+    system = f"macOS {mac}" if mac else f"{platform.system()} {platform.release()}".strip()
+    return f"{platform.machine() or 'unknown'} · {system}"
+
+
+def cli_main() -> int:
+    """The `probant` command. Typed alone it opens the home page, which is what every new user wants first; with
+    arguments it is exactly `ir probant ...`."""
+    args = sys.argv[1:]
+    return main(args if args else ["home"])
+
+
 def main(argv: list[str] | None = None) -> int:
     # Everything a Probant command writes, and everything it starts (the search verifier, Pi), is created
     # owner-only: records hold search text and results, receipts and state hold the matter's history. A
@@ -714,6 +730,7 @@ def cmd_identity(add: str = "", card_file: str = "", show: bool = False) -> int:
     if first or show:
         print("\n  ── your public key — copy everything between the lines and send it back ──\n")
         print(json.dumps(card, indent=1))
+        print(f"\n  this computer: {_this_computer()}")
         print("\n  ── end ──")
         print("\n  It holds public keys only. Anyone who reads it learns nothing and can decrypt nothing.")
     known = SH.contacts()

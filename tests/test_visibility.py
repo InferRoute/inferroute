@@ -108,6 +108,24 @@ def test_forward_keeps_run_id_header():
     assert "x-unrelated" not in out
 
 
+def test_forward_keeps_the_per_request_model_pins():
+    # A caller that must stay on ONE model sets x-inferroute-no-hedge and x-inferroute-no-model-fallback.
+    # The cloud honours both; the daemon used to strip them (2026-10-04, found when a K3-only audit through
+    # the daemon was partly answered by K2.6 and GLM-5.1 with nothing saying so).
+    from inferroute_local.proxy import _forward_headers
+    out = _forward_headers({
+        "authorization": "Bearer k",
+        "x-inferroute-no-hedge": "1",
+        "x-inferroute-no-model-fallback": "1",
+        "x-inferroute-no-compress": "1",
+        "x-inferroute-something-else": "still dropped",
+    })
+    assert out["x-inferroute-no-hedge"] == "1"
+    assert out["x-inferroute-no-model-fallback"] == "1"
+    assert out["x-inferroute-no-compress"] == "1"
+    assert "x-inferroute-something-else" not in out
+
+
 def test_forward_merges_visibility_headers_over_allowlist(tmp_path):
     # _forward must merge the daemon's headers in (the allow-list would otherwise
     # strip them). Verify via the same merge the method does.

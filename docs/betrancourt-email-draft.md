@@ -161,14 +161,16 @@ ne s'installe pas encore : dites-le-moi simplement, avant d'aller plus loin.
 
 ```
 curl -LsSf https://inferroute.ai/install-probant.sh | sh
-~/probant/bin/ir probant identity
+~/probant/bin/probant identity
 ```
 
 La première ligne installe le programme dans un dossier à lui, `~/probant`, ainsi que la petite machine
 virtuelle dans laquelle l'agent travaille. Elle ne demande aucun mot de passe, ne modifie rien d'autre sur
 votre Mac, et vérifie chaque fichier téléchargé contre une empreinte avant de s'en servir. Pour tout retirer
-ensuite : `rm -rf ~/probant ~/Probant ~/.inferroute`. Le script est lisible à la même adresse, avant de
+ensuite : `rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant`. Le script est lisible à la même adresse, avant de
 l'exécuter, si vous préférez le lire d'abord.
+
+Ensuite, dans une nouvelle fenêtre du Terminal, il suffit de taper `probant` pour ouvrir l'application ; elle vous demandera votre clé InferRoute, que je vous communique à part.
 
 Vous me renvoyez ce qu'affiche la seconde ligne. Cette clé ne contient que des clés publiques : elle ne permet rien
 d'autre que de vous adresser l'envoi. Nous vérifierons l'empreinte de vive voix avant que quoi que ce soit
@@ -180,10 +182,10 @@ propre IA — l'empreinte de chaque fichier, et les questions à poser au code :
 
 ```
 # la copie installée, celle qui s'exécute chez vous
-~/probant/bin/ir probant audit-client
+~/probant/bin/probant audit-client
 
 # le fichier publié, tel qu'il est distribué (la même adresse que ci-dessus)
-~/probant/bin/ir probant audit-client --url https://inferroute.ai/client/inferroute-0.9.101-py3-none-any.whl
+~/probant/bin/probant audit-client --url https://inferroute.ai/client/inferroute-0.9.108-py3-none-any.whl
 ```
 
 Les deux ensemble disent quelque chose qu'aucune ne dit seule : que ce qui tourne chez vous est bien ce

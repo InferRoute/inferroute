@@ -1,7 +1,9 @@
 """The one-line installer: what it is filled with, and what it refuses."""
 import importlib.util
 import os
+import platform
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -59,7 +61,7 @@ def _run(tmp_path, base, home, extra_env=None):
     uv.write_text(textwrap.dedent(f"""\
         #!/bin/sh
         echo "$@" >> {tmp_path}/uv.calls
-        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir";; esac
+        case "$1" in venv) shift; for a; do last="$a"; done; mkdir -p "$last/bin"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/python"; chmod +x "$last/bin/python"; printf '#!/bin/sh\\necho ir 1.2.3\\n' > "$last/bin/ir"; chmod +x "$last/bin/ir"; printf '#!/bin/sh\\nexit 0\\n' > "$last/bin/probant"; chmod +x "$last/bin/probant";; esac
         exit 0
         """))
     uv.chmod(0o755)
@@ -155,3 +157,103 @@ def test_the_installed_version_must_be_exactly_the_one_the_script_names(tmp_path
     bad = script_text.replace('VERSION="1.2.3"', 'VERSION="9.9.9"')
     assert 'stop "the installed program reports version' in script_text
     assert bad != script_text
+
+
+def test_a_dropped_download_resumes_instead_of_failing_the_install(tmp_path):
+    # A weak connection (2026-10-04, a 69 MB runtime cut at 42%) used to fail the whole install. The stand-in curl
+    # delivers half of each file and dies, then completes it only when asked to continue (-C -).
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "curl").write_text(textwrap.dedent(f"""\
+        #!/bin/sh
+        resume=0
+        while [ $# -gt 0 ]; do
+          case "$1" in -o) out="$2"; shift;; -C) resume=1; shift;; esac
+          last="$1"; shift
+        done
+        src="${{last#file://}}"
+        echo "resume=$resume $(basename "$src")" >> {tmp_path}/curl.calls
+        if [ ! -f "$out" ]; then
+          head -c $(( $(wc -c < "$src") / 2 )) "$src" > "$out"; exit 56
+        fi
+        have=$(wc -c < "$out"); tail -c +$((have + 1)) "$src" >> "$out"; exit 0
+        """))
+    (bin_dir / "curl").chmod(0o755)
+    done = _run(tmp_path, site, tmp_path / "home-target")
+    assert done.returncode == 0, done.stderr
+    assert "continuing from where it stopped" in done.stdout
+    calls = (tmp_path / "curl.calls").read_text().splitlines()
+    assert calls and all(c.startswith("resume=1") for c in calls)
+
+
+def test_the_installer_links_a_bare_probant_command_and_says_how_to_start_it(tmp_path):
+    """4 Oct: the first client should type `probant`, not a path into a private environment. The link goes in ~/.local/bin."""
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    target = tmp_path / "home-target"
+    done = _run(tmp_path, site, target)
+    assert done.returncode == 0, done.stderr
+    link = tmp_path / "home" / ".local" / "bin" / "probant"
+    assert link.is_symlink() and link.resolve() == (target / "bin" / "probant").resolve()
+    assert "Start it:            probant" in done.stdout and "command not found" in done.stdout
+    assert "rm -rf ~/probant ~/Probant ~/.inferroute ~/.local/bin/probant" in (site.parent / "install.sh").read_text()
+
+
+def test_a_program_already_named_probant_is_never_overwritten_and_the_message_gives_the_full_path(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    other = tmp_path / "home" / ".local" / "bin"
+    other.mkdir(parents=True)
+    (other / "probant").write_text("#!/bin/sh\necho someone else's program\n")
+    (other / "probant").chmod(0o755)
+    target = tmp_path / "home-target"
+    done = _run(tmp_path, site, target)
+    assert done.returncode == 0, done.stderr
+    assert not (other / "probant").is_symlink() and "someone else" in (other / "probant").read_text()
+    assert f"{target}/bin/probant" in done.stdout and "Start it:            probant " not in done.stdout
+
+
+def test_the_probant_command_alone_opens_home_and_with_arguments_is_ir_probant(monkeypatch):
+    from inferroute_cli import probant as P
+    seen = []
+    monkeypatch.setattr(P, "main", lambda argv=None: seen.append(argv) or 0)
+    monkeypatch.setattr(sys, "argv", ["probant"])
+    assert P.cli_main() == 0 and seen[-1] == ["home"]
+    monkeypatch.setattr(sys, "argv", ["probant", "identity", "--show"])
+    assert P.cli_main() == 0 and seen[-1] == ["identity", "--show"]
+
+
+def test_the_installer_prints_what_this_computer_is_at_the_end_and_when_it_stops(tmp_path):
+    """4 Oct: we need the processor and the system version from each Mac, sent back with the public key."""
+    site = tmp_path / "site"
+    site.mkdir()
+    wheels(site)
+    done = _run(tmp_path, site, tmp_path / "home-target")
+    assert done.returncode == 0, done.stderr
+    assert "This computer:" in done.stdout and "send it back with your public key" in done.stdout.replace("copy this line and ", "")
+    assert platform.machine() in done.stdout                                            # the real uname -m, not a placeholder
+    bad = tmp_path / "site2"
+    bad.mkdir()
+    c, _ = wheels(bad)
+    (bad / c.name).write_bytes(b"TAMPERED")
+    refused = _run(tmp_path / "again", bad, tmp_path / "home-target2") if (tmp_path / "again").mkdir() is None else None
+    assert refused.returncode != 0 and "This computer:" in refused.stderr               # a refusal still says what the computer is
+
+
+def test_probant_identity_prints_this_computer_inside_the_block_the_person_copies(tmp_path, monkeypatch, capsys):
+    from inferroute_cli import probant as P
+    monkeypatch.setenv("HOME", str(tmp_path / "h"))
+    (tmp_path / "h").mkdir()
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
+    monkeypatch.setattr(P.Path, "home", classmethod(lambda cls: tmp_path / "h"))
+    assert P.main(["identity", "--show"]) == 0
+    out = capsys.readouterr().out
+    block = out[out.index("copy everything between the lines"):out.index("── end ──")]
+    assert "this computer: " + P._this_computer() in block and platform.machine() in block
+    assert '"mlkem_pub"' in block                                                       # the card is still in the same block
+

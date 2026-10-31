@@ -1221,15 +1221,54 @@
   }
 
   function openShareDialog() {
-    const path = input("text", "/home/you/probant-corpus-for-you-….probant-share");
+    // The file is chosen with the system's file chooser and read HERE: a page is never given a file's path, so the bytes
+    // travel instead. Typing a path remains for anyone who prefers it.
+    const path = input("text", "…or type its path, e.g. /home/you/probant-corpus-for-you-….probant-share");
     const client = input("text", "e.g. Henry");
     const err = el("p", "form-error");
     const preview = el("div", "share-result");
     preview.hidden = true;
+    const chosen = el("p", "sub");
+    let picked = null;                       // { name, b64 } once a file has been chosen
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.accept = ".probant-share,application/octet-stream";
+    picker.addEventListener("change", () => {
+      const f = picker.files && picker.files[0];
+      if (!f) return;
+      err.textContent = "";
+      if (f.size > 64000000) {
+        err.textContent = "This file is larger than a share is. Check that it is the file you were sent.";
+        picker.value = "";
+        return;
+      }
+      const rd = new FileReader();
+      rd.addEventListener("load", () => {
+        const url = String(rd.result || "");
+        picked = { name: f.name, b64: url.slice(url.indexOf(",") + 1) };
+        path.value = "";
+        chosen.textContent = `${f.name} \u00b7 ${Math.max(1, Math.round(f.size / 1000)).toLocaleString()} KB`;
+        clear(preview);
+        preview.hidden = true;
+      });
+      rd.addEventListener("error", () => { err.textContent = "Could not open that file. Try choosing it again."; });
+      rd.readAsDataURL(f);
+    });
+    path.addEventListener("input", () => { if (path.value.trim()) { picked = null; chosen.textContent = ""; picker.value = ""; } });
+    // The typed path is the way through when a desktop's file chooser does not work (one hung on a Linux desktop whose file
+    // portal was stuck). Most people never need it, so it stays out of sight until asked for.
+    const pathField = field("Type its path", path);
+    pathField.hidden = true;
+    const typeLink = button("Can\u2019t use the chooser? Type the file\u2019s path instead", "ghost small", () => {
+      pathField.hidden = false;
+      typeLink.hidden = true;
+      path.focus();
+    });
+    const source = (extra) => (picked ? { data_b64: picked.b64, ...extra } : { path: path.value, ...extra });
     const look = button("Look at it", "ghost", async () => {
       err.textContent = "";
       try {
-        const r = await api("/api/sharing/open", { path: path.value });
+        const r = await api("/api/sharing/open", source({}));
         clear(preview);
         preview.hidden = false;
         preview.append(el("div", "", el("b", "", `Signed by ${r.from_name || "an UNKNOWN sender"}`),
@@ -1257,7 +1296,7 @@
       err.textContent = "";
       go.disabled = true;
       try {
-        const r = await api("/api/sharing/open", { path: path.value, client: client.value });
+        const r = await api("/api/sharing/open", source({ client: client.value }));
         closeDialog();
         const extra = (r.documents || []).length ? ` and ${r.documents.length} document(s) in ${r.corpus_dir}` : "";
         toast(`Opened ${r.opened.length} matter(s)${extra}.`, "info");
@@ -1268,7 +1307,9 @@
       el("p", "", "A file someone sealed to your fingerprint. Look at it first: who signed it, and what is "
         + "inside. Opening it creates one matter of your own per matter in the share, each with the date "
         + "bound the sender set."),
-      field("The file", path),
+      el("div", "row", button("Choose the file\u2026", "ghost small", () => picker.click()), chosen),
+      typeLink,
+      pathField,
       field("Open them under this client name", client, "Yours to choose — e.g. the sender's name."),
       err, preview,
     ], [button("Cancel", "ghost", closeDialog), look, go]);

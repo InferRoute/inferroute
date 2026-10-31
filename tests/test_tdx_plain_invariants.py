@@ -71,7 +71,7 @@ def test_the_tdx_image_gap_carries_its_neutraliser(V):
     for r, text in _renderings(V):
         if "console" in text:
             gap = next(line for line in text.splitlines() if "console" in line and "-" in line[:8])
-            assert "cannot tell whether either happened" in gap, gap
+            assert "cannot tell whether anyone looked or anything was sent" in gap, gap
 
 
 def test_the_tdx_answer_states_both_bounds_and_leaves_a_next_step(V):

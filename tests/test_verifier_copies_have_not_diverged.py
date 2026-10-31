@@ -36,6 +36,7 @@ CAPABILITIES: tuple[tuple[str, str], ...] = (
     ("windowed policy identity", "valid_from"),
     ("revocation fetch is SKIP, never 'revoked'", "check-revocation"),
     ("VCEK-only signing key", "VCEK"),
+    ("TDX confidentiality grade", "tdx_confidentiality_reach"),
     ("explicit stdio entries, not a Rego default", "allow_stdio_access"),
     ("runtime logging denial", "allow_runtime_logging"),
     ("platform fragment disclosure", "aci-cc-infra-fragment"),

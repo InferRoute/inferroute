@@ -39,7 +39,7 @@ _ABSENT_IN_TDX = ("settings above", "these settings", "listed settings", "record
                   "further containers", "records what was permitted", "was enforced for these saved operations",
                   "the containers your provider controls", "we control",
                   # a TDX record fetches nothing; "ask" must be a change, since the follow-on calls it one
-                  "chip maker", "ask your provider to show", "Intel program image")
+                  "chip maker", "ask your provider to show", "Intel program image", "cannot send data out")
 
 
 def test_every_tdx_rendering_is_exercised(V):

@@ -942,8 +942,8 @@ STATEMENT_CONFIDENTIAL = (
 STATEMENT_SEALED_TDX = (
     "For the archived SEARCH operations checked here, statement signatures verify under keys bound "
     "to Intel TDX quotes with debugging disabled, from machines whose boot log replays to the quote and "
-    "whose boot image, firmware-measured boot configuration (RTMR0), index and encoders match the supplied "
-    "reference, under the "
+    "whose boot image, host configuration (RTMR0, the boot configuration the firmware measured), index and "
+    "encoders match the supplied reference, under the "
     "configured production trust roots. This does not establish encryption on the user's device, "
     "secrecy of private keys, or absence of other plaintext copies.")
 # The shared last blocker ends "closing the configuration gaps alone is insufficient", and its plain words end
@@ -951,13 +951,14 @@ STATEMENT_SEALED_TDX = (
 # clause would cite something absent. Same gap, without the clause.
 TDX_NOT_ESTABLISHED = ("client-side sealing, exclusive key custody, runtime egress/retention and application "
                        "non-disclosure were not established")
-# The reference's image_source names the AMD container image's source; no TDX entry names one. The generic
-# "does not name a source for the image" would contradict a reference that carries image_source.
-TDX_NO_SOURCE = "the reference does not name a source for the Intel TDX image; source-to-image verification is absent"
+# image_source is a generic top-level field; nothing binds it to the TDX image and this verifier reads no TDX
+# source field. So the gap is stated as the verifier's limit, not as a fact about the reference's contents.
+TDX_NO_SOURCE = ("no field of the reference that this verifier reads names a source for the Intel TDX image; "
+                 "source-to-image verification is absent")
 TDX_IMAGE_UNASSESSED = (
     "the Intel TDX image's own permissions were not assessed: these checks establish which signed image "
     "and boot configuration booted, not what that image lets the machine's operator observe (its console "
-    "output, for one) or whether it can send data out")
+    "output, were it to write there) or where it can send data")
 
 # The scope line matters as much as the sentences. This program checks the SEARCH lane (AMD SEV-SNP).
 # The conversation with the AI machine is a different machine on different hardware, attested in the
@@ -1031,11 +1032,11 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "program disclosed or retained your text"),
     (TDX_IMAGE_UNASSESSED,
      "this verifier checked which program image the machine started, but not what that image lets "
-     "whoever runs the machine see (what it writes to the machine's console, for example) or whether it "
-     "can send data out; this record cannot tell whether either happened, or whether your text was involved"),
+     "whoever runs the machine see (anything it wrote to the machine's console, for example) or where it "
+     "can send data; this record cannot tell whether either happened, or whether your text was involved"),
     (TDX_NO_SOURCE,
-     "the supplied reference does not name the source code of the program image the machine started, and "
-     "this verifier did not verify a match between source code and that image"),
+     "this verifier reads nothing in the supplied reference that names the source code of the program image "
+     "the machine started, and it did not verify a match between source code and that image"),
     ("the policy does not satisfy: policy denies host access to the enclave's stdio",
      "the checked settings do not establish that operator access to the program's input and output "
      "streams was disabled; this does not show that anyone accessed them or that they contained your text"),
@@ -1191,9 +1192,10 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
     ("the Intel TDX image's own permissions were not assessed",
-     "ask for a record made with a program image that sends nothing to a place whoever runs the machine "
-     "can read, such as the machine's console, and cannot send data out; that will not by itself remove "
-     "the other gaps"),
+     "ask for a record made with a program image that sends your text nowhere except back to you as "
+     "results, and writes nothing where whoever runs the machine can read it, such as the machine's "
+     "console; this verifier does not itself check that, so your provider would have to show it another "
+     "way, and the other gaps stay open"),
     ("policy denies host access to the enclave's stdio",
      "of the gaps listed above, the one your provider can most readily change is the setting "
      "that lets whoever runs the machine watch what goes into the program and what comes out; "
@@ -1482,15 +1484,18 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         # A record mixing AMD and Intel TDX searches: two ladders, and this program does not combine them.
         # searches_total unknown counts as mixed -- an AMD search with no archived policy would otherwise
         # be graded by the TDX rules.
-        print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX, and this record mixes, or "
-              "cannot be shown not to mix, them with searches graded by the AMD rules (an AMD policy is present, "
-              "or the count of searches does not match). This program does not combine the two, so it licenses "
-              "no confidentiality sentence for this record.")
+        cause = ("an AMD container policy is archived with it" if policies else
+                 "the number of searches in the record was not supplied" if searches_total is None else
+                 f"{searches_total - tdx_searches} of its {searches_total} searches did not run on Intel TDX")
+        print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX, and {cause}. Intel TDX "
+              "and AMD searches are graded by different rules and this program does not combine them, so it "
+              "licenses no confidentiality sentence for this record.")
         report_plain(-1)
         return
     if tdx_searches:
         reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated)
-        print(f"  Intel TDX — {tdx_searches} search(es) ran on InferRoute's own boot image. There is no container "
+        print(f"  Intel TDX — {tdx_searches} search(es) ran on the boot image the supplied reference names as "
+              "InferRoute's. There is no container "
               "policy to read, so the policy rows of an AMD record do not appear and the strongest sentence an "
               "AMD record can earn (specified controls) is not reachable.")
         print()

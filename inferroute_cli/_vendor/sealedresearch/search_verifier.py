@@ -76,6 +76,7 @@ class Verifier:
         self.amd_pins = pins.get("amd")
         self.uvm_root = pins.get("uvm_root", cose.UVM_ROOT_SHA256_B64URL)
         self.uvm_min_svn = int(pins.get("uvm_min_svn", cose.UVM_MIN_SVN))
+        self.tdx_pins = pins.get("tdx")            # None = Intel's and Google's production roots
 
     # ---- transport: ciphertext and public evidence only
     def _call(self, method: str, path: str, body: Optional[bytes] = None) -> bytes:
@@ -118,14 +119,29 @@ class Verifier:
         steps.add(True, "search enclave reachable", f"offer received ({len(raw)} bytes)")
         if self.test_roots:
             steps.add(True, "roots", "NON-PRODUCTION ROOTS PINNED: this can only verify a test enclave, never Azure")
-        ev, info = aci_evidence.verify_combined(offer, rd_bytes, expect_host_data=self.expect_host_data,
-                                                amd_pins=self.amd_pins, uvm_root=self.uvm_root, uvm_min_svn=self.uvm_min_svn)
-        steps.extend(ev)
-        floor_checks = verify_record.Checks()
-        verify_record.check_reference_firmware_before_sealing(
-            floor_checks, offer, self.reference, pins=self.amd_pins)
-        for status, name, detail in floor_checks.rows:
-            steps.add(status == "PASS", name, detail)
+        tdx = verify_record.is_tdx_offer(offer)
+        if tdx:
+            # Intel TDX running InferRoute's own image: the record verifier's code, asked NOW. There is no
+            # container policy to pin, so the signed reference is the ONLY thing that says whose image this
+            # is -- without one this refuses, as the AMD path refuses without a pinned policy.
+            tc = verify_record.Checks()
+            info = verify_record.check_tdx(tc, offer, rd_bytes, at_iso=verify_record._utc_now_iso(),
+                                           pins=self.tdx_pins) or {}
+            for status, name, detail in tc.rows:
+                steps.add(True if status == "PASS" else None if status == "SKIP" else False, name, detail)
+            if self.reference is None:
+                steps.add(False, "enclave identity (InferRoute's image, host configuration, index, encoders)",
+                          "an Intel TDX enclave is identified only by InferRoute's signed reference, and none was "
+                          "supplied; refusing")
+        else:
+            ev, info = aci_evidence.verify_combined(offer, rd_bytes, expect_host_data=self.expect_host_data,
+                                                    amd_pins=self.amd_pins, uvm_root=self.uvm_root, uvm_min_svn=self.uvm_min_svn)
+            steps.extend(ev)
+            floor_checks = verify_record.Checks()
+            verify_record.check_reference_firmware_before_sealing(
+                floor_checks, offer, self.reference, pins=self.amd_pins)
+            for status, name, detail in floor_checks.rows:
+                steps.add(status == "PASS", name, detail)
         shape = (rd.get("v") == 1 and rd.get("kind") == KIND and bool(HEX16.match(str(rd.get("lifetime_id", ""))))
                  and all(HEX32.match(str(rd.get(k, ""))) for k in
                          ("enclave_x25519_pub", "statement_signer_pub", "index_manifest_sha256", "model_manifest_sha256"))
@@ -149,10 +165,13 @@ class Verifier:
             # The canonical identity predicate, live: policy (HOST_DATA) + index + encoder manifests against
             # the signed reference, at NOW. A FAIL here makes the whole verification fail, so nothing seals
             # to an enclave whose identity does not match InferRoute's published reference.
-            host_hex = info.get("host_data")
-            p = {"host_data": bytes.fromhex(host_hex)} if host_hex else None
             c = verify_record.Checks()
-            verify_record.check_identity(c, rd, p, self.reference, _now_iso())
+            if tdx:
+                verify_record.check_tdx_identity(c, rd, info, self.reference, _now_iso(), live=True)
+            else:
+                host_hex = info.get("host_data")
+                p = {"host_data": bytes.fromhex(host_hex)} if host_hex else None
+                verify_record.check_identity(c, rd, p, self.reference, _now_iso())
             for status, name, detail in c.rows:
                 steps.add(True if status == "PASS" else None if status == "SKIP" else False, name, detail)
         return steps, enclave, rd, rd_bytes, offer

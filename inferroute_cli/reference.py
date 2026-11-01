@@ -617,6 +617,101 @@ def _passphrase(var: Optional[str], prompt: bool = False, confirm: bool = False)
     return v.encode()
 
 
+# ───────────────────────── Intel TDX: InferRoute's own boot image on a Google Confidential VM ─────────────────────────
+#
+# A TDX enclave has no container policy. What identifies it is the unified kernel image the firmware boots (its
+# Authenticode SHA-384, measured into RTMR1), the kernel that image loads (measured next), and RTMR0, the HOST's
+# contribution (ACPI tables, boot variables), which differs per machine shape and is pinned per shape. The verifier
+# requires the first measured application to be the image and every later one to be listed in that entry's `loads`.
+
+TDX_FIELDS = ("tdx_image_sha384", "tdx_rtmr0")
+_HEX96 = re.compile(r"[0-9a-f]{96}")
+_SHAPE = re.compile(r"[a-z0-9][a-z0-9-]{1,62}")
+
+
+def pe_authenticode_sha384(pe: bytes) -> str:
+    """The digest UEFI firmware measures for an EFI application: Authenticode over the PE, SHA-384."""
+    import hashlib
+    import struct
+    pe_off = struct.unpack_from("<I", pe, 0x3C)[0]
+    if pe[pe_off:pe_off + 4] != b"PE\0\0":
+        raise ReferenceError("not a PE/COFF image")
+    opt = pe_off + 24
+    dd = opt + (112 if struct.unpack_from("<H", pe, opt)[0] == 0x20B else 96)
+    cert_entry = dd + 4 * 8
+    hdr_size = struct.unpack_from("<I", pe, opt + 60)[0]
+    h = hashlib.sha384(pe[:opt + 64] + pe[opt + 68:cert_entry] + pe[cert_entry + 8:hdr_size])
+    nsec = struct.unpack_from("<H", pe, pe_off + 6)[0]
+    st = opt + struct.unpack_from("<H", pe, pe_off + 20)[0]
+    end = hdr_size
+    for size, ptr in sorted((struct.unpack_from("<II", pe, st + 40 * i + 16) for i in range(nsec)), key=lambda x: x[1]):
+        if size:
+            h.update(pe[ptr:ptr + size])
+            end = ptr + size
+    _off, cert_len = struct.unpack_from("<II", pe, cert_entry)
+    tail = len(pe) - cert_len if cert_len else len(pe)
+    if tail > end:
+        h.update(pe[end:tail])
+    return h.hexdigest()
+
+
+def uki_section(pe: bytes, name: str) -> bytes:
+    """A section of a unified kernel image, by name, at its virtual size (how systemd-stub hands it on)."""
+    import struct
+    pe_off = struct.unpack_from("<I", pe, 0x3C)[0]
+    nsec = struct.unpack_from("<H", pe, pe_off + 6)[0]
+    st = pe_off + 24 + struct.unpack_from("<H", pe, pe_off + 20)[0]
+    for i in range(nsec):
+        if pe[st + 40 * i:st + 40 * i + 8].rstrip(b"\0").decode("ascii", "replace") == name:
+            vsize, _va, _rsize, ptr = struct.unpack_from("<IIII", pe, st + 40 * i + 8)
+            return pe[ptr:ptr + vsize]
+    raise ReferenceError(f"this image has no {name} section; is it a unified kernel image?")
+
+
+def add_tdx(ref: Dict[str, Any], image: bytes, rtmr0: Dict[str, str], *, valid_from: Optional[str] = None,
+            valid_to: Optional[str] = None, supersede: bool = False) -> Dict[str, Any]:
+    """Add one TDX image (and the RTMR0 of each machine shape it was observed on) to a reference.
+
+    The kernel the image loads is computed from the image itself, never typed. `supersede` closes every open
+    tdx_image_sha384 window at `valid_from`, as `build --supersede` does for the container fields."""
+    _require_time(valid_from, "--valid-from")
+    _require_time(valid_to, "--valid-to")
+    if supersede and not valid_from:
+        raise ReferenceError("--supersede needs --valid-from: there must be a moment to close the old image at")
+    if not rtmr0:
+        raise ReferenceError("give at least one --rtmr0 SHAPE=HEX: without one no machine can match the reference")
+    pins = {}
+    for shape, value in rtmr0.items():
+        if not _SHAPE.fullmatch(shape or "") or not _HEX96.fullmatch((value or "").lower()):
+            raise ReferenceError(f"--rtmr0 {shape}={value}: expected a machine shape and 96 hex digits (RTMR0)")
+        if value.lower() == "0" * 96:
+            raise ReferenceError(f"--rtmr0 {shape}: an all-zero RTMR0 names nothing")
+        pins[shape] = value.lower()
+    img = pe_authenticode_sha384(image)
+    kernel = pe_authenticode_sha384(uki_section(image, ".linux"))
+    out = dict(ref)
+    out.pop("sig", None)
+    out.pop("publication_key", None)
+    window = {k: v for k, v in (("valid_from", valid_from), ("valid_to", valid_to)) if v}
+    images = _entries(out, "tdx_image_sha384")
+    if supersede:
+        for e in images:
+            if not e.get("retired") and (parse_time(e.get("valid_to")) is None or parse_time(valid_from) < parse_time(e["valid_to"])):
+                e["valid_to"] = valid_from
+    fresh = {"value": img, "loads": [kernel], **window}
+    if not any(e == fresh for e in images):
+        images.append(fresh)
+    out["tdx_image_sha384"] = images
+    hosts = _entries(out, "tdx_rtmr0")
+    for shape, value in sorted(pins.items()):
+        e = {"value": value, "shape": shape, **window}
+        if not any(x == e for x in hosts):
+            hosts.append(e)
+    out["tdx_rtmr0"] = hosts
+    out["schema"] = "inferroute.enclave-reference/1"
+    return out
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
     p = argparse.ArgumentParser(prog="ir probant reference", description=__doc__.split("\n\n")[0])
@@ -646,6 +741,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="where the program that ran can be read; naming it does NOT verify a build")
     b.add_argument("--note", default=None)
     b.add_argument("--out", default=None)
+
+    t = sub.add_parser("add-tdx", help="add an Intel TDX boot image (and its machine shapes' RTMR0) to a reference")
+    t.add_argument("--merge", required=True, metavar="FILE", help="the reference to extend")
+    t.add_argument("--image", required=True, metavar="UKI.efi", help="the unified kernel image the TDX VM boots")
+    t.add_argument("--rtmr0", action="append", default=[], metavar="SHAPE=HEX",
+                   help="RTMR0 observed on that machine shape (repeatable); confirm it on a second instance first")
+    t.add_argument("--valid-from", default=None)
+    t.add_argument("--valid-to", default=None)
+    t.add_argument("--supersede", action="store_true", help="close every still-open image window at --valid-from")
+    t.add_argument("--out", default=None)
 
     r = sub.add_parser("retire", help="withdraw an entry — an explicit act, never a silent swap")
     r.add_argument("--in", dest="inp", required=True)
@@ -701,6 +806,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             _write(ref, a.out)
             if a.from_offer:
                 print(f"  derived from {a.from_offer}: policy_sha256 is HOST_DATA as the hardware reported it")
+            print("  this reference is UNSIGNED — sign it on the offline machine before publishing")
+            return 0
+
+        if a.cmd == "add-tdx":
+            pins = {}
+            for kv in a.rtmr0:
+                shape, _, value = kv.partition("=")
+                pins[shape.strip()] = value.strip()
+            with open(a.image, "rb") as fh:
+                image = fh.read()
+            ref = add_tdx(_read(a.merge), image, pins, valid_from=a.valid_from, valid_to=a.valid_to,
+                          supersede=a.supersede)
+            _write(ref, a.out or a.merge)
+            img = ref["tdx_image_sha384"][-1]
+            print(f"  image {img['value'][:16]}… loads kernel {img['loads'][0][:16]}…; RTMR0 pinned for "
+                  f"{', '.join(sorted(pins))}")
             print("  this reference is UNSIGNED — sign it on the offline machine before publishing")
             return 0
 

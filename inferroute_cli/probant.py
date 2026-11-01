@@ -1,9 +1,9 @@
 """`anteriora` — the user's entry to the attested prior-art assistant. One matter at a time, in a
 folder confined to that matter, with the date bound and approvals held where the agent cannot reach them.
 
-    anteriora new <client> <matter> [--priority-date YYYY-MM-DD]   create a matter (default bound = today)
-    anteriora set-date <client>/<matter> YYYY-MM-DD                 change the date bound (human, out of session)
-    anteriora open <client>/<matter>                               open the attested session on the matter
+    anteriora new <matter> [--priority-date YYYY-MM-DD]            create a matter (default bound = today)
+    anteriora set-date <matter> YYYY-MM-DD                          change the date bound (human, out of session)
+    anteriora open <matter>                                        open the attested session on the matter
     anteriora list                                                 list matters
 
 The split that keeps it safe (decision record S1/S2):
@@ -138,9 +138,13 @@ def _write_record(client: str, matter: str, rec: dict) -> None:
     os.replace(tmp, p)
 
 
+DEFAULT_CLIENT = "Personal"
+
+
 def _split_matter(spec: str) -> tuple[str, str]:
+    """`<matter>` (filed under the default folder) or, for matters made before 1 Nov 2026, `<client>/<matter>`."""
     if "/" not in spec:
-        raise ProbantError(f"give the matter as <client>/<matter>, not {spec!r}")
+        return DEFAULT_CLIENT, sanitize(spec, "matter")
     client, matter = spec.split("/", 1)
     return sanitize(client, "client"), sanitize(matter, "matter")
 
@@ -260,7 +264,7 @@ def cmd_list() -> int:
             shown += 1
     if not shown:
         # An emptied directory used to print nothing at all, which reads as a broken command.
-        print("no matters yet — create one: anteriora new <client> <matter> --priority-date YYYY-MM-DD")
+        print("no matters yet — create one: anteriora new <matter> --priority-date YYYY-MM-DD")
     _print_corpora()
     return 0
 
@@ -293,7 +297,7 @@ def _print_corpora() -> None:
             print(f"      matters:   {', '.join(c['matters'])}")
         if not sent:
             print(f"      a matter of your own, tied to it but not part of it:\n"
-                  f"        anteriora new <client> <matter> --from-corpus {c.get('id')}")
+                  f"        anteriora new <matter> --from-corpus {c.get('id')}")
 
 
 def disclosure_has_content(workspace: Path) -> bool:
@@ -583,7 +587,7 @@ def cmd_proposals(ident: str) -> int:
         print(f"      from the document: “{r['quote'][:160]}{'…' if len(r['quote']) > 160 else ''}”\n")
     if dropped:
         print(f"  ({dropped} further proposal(s) discarded: the quote was not in the document)\n")
-    print(f"  open one:  anteriora from-proposal {ident} 0 <client> <matter>")
+    print(f"  open one:  anteriora from-proposal {ident} 0 <matter>")
     return 0
 
 
@@ -684,14 +688,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(
             "\n  Anteriora — prior-art research, one matter at a time, on this computer.\n\n"
             "  Start here:      anteriora home         opens the page where everything happens\n\n"
-            "  Or from here:    anteriora new <client> <matter> --priority-date YYYY-MM-DD\n"
+            "  Or from here:    anteriora new <matter> --priority-date YYYY-MM-DD\n"
             "                   anteriora list\n"
             "                   anteriora identity     your key card, to receive sealed matters\n\n"
             "  Every command:   anteriora --help\n\n")
         return 2
     p = argparse.ArgumentParser(prog="anteriora", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
-    n = sub.add_parser("new"); n.add_argument("client"); n.add_argument("matter"); n.add_argument("--priority-date", default=None)
+    n = sub.add_parser("new"); n.add_argument("client", metavar="matter", help="the matter's name")
+    n.add_argument("matter", nargs="?", default=None, help=argparse.SUPPRESS); n.add_argument("--priority-date", default=None)
     n.add_argument("--from-corpus", default="", help="tie this matter to a corpus you received, without making it part of it")
     n.add_argument("--kind", choices=KINDS, default="invention",
                    help="invention (prior-art search, the default) or name (trademark name check)")
@@ -768,7 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     pr = sub.add_parser("proposals", help="what a reading session proposed")
     pr.add_argument("id")
     fp = sub.add_parser("from-proposal", help="open a matter from one of a reading session's proposals")
-    fp.add_argument("id"); fp.add_argument("index", type=int); fp.add_argument("client"); fp.add_argument("matter")
+    fp.add_argument("id"); fp.add_argument("index", type=int); fp.add_argument("client", metavar="matter")
+    fp.add_argument("matter", nargs="?", default=None, help=argparse.SUPPRESS)
     fp.add_argument("--priority-date", default=None)
     dl = sub.add_parser("delete", help="delete a matter: restorable from Anteriora home for 30 days, then erased")
     dl.add_argument("matter"); dl.add_argument("--yes", action="store_true", help="do not ask to type the matter name")
@@ -789,7 +795,9 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         if a.cmd == "new":
-            return cmd_new(a.client, a.matter, a.priority_date, a.from_corpus, a.kind)
+            # `new <matter>`; the two-argument `new <client> <matter>` still works for scripts written before 1 Nov.
+            client, matter = (DEFAULT_CLIENT, a.client) if a.matter is None else (a.client, a.matter)
+            return cmd_new(client, matter, a.priority_date, a.from_corpus, a.kind)
         if a.cmd == "set-date":
             return cmd_set_date(a.matter, a.date)
         if a.cmd == "open":
@@ -832,7 +840,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "proposals":
             return cmd_proposals(a.id)
         if a.cmd == "from-proposal":
-            return cmd_from_proposal(a.id, a.index, a.client, a.matter, a.priority_date)
+            client, matter = (DEFAULT_CLIENT, a.client) if a.matter is None else (a.client, a.matter)
+            return cmd_from_proposal(a.id, a.index, client, matter, a.priority_date)
         if a.cmd == "delete":
             from . import probant_delete
             return probant_delete.cmd_delete(a.matter, yes=a.yes)
@@ -940,7 +949,7 @@ def cmd_share(to: str, out: str = "", matters: Optional[List[str]] = None, clust
                 client, m = _split_matter(row)
                 entries.append(SH.matter_payload(client, m, include_marks=include_marks))
     if not entries:
-        raise ProbantError("say what to share: --matter <client>/<matter> (repeatable), --cluster <id>, or --all")
+        raise ProbantError("say what to share: --matter <matter> (repeatable), --cluster <id>, or --all")
     # Side documents travel INSIDE the seal. A matter list and a reading guide quote every filing and the
     # unfiled surplus; as email attachments they would be the disclosure this product exists to prevent.
     extra = SH.corpus_files([Path(f).expanduser() for f in (files or [])])
@@ -1017,7 +1026,7 @@ def cmd_open_share(path: str, client: str) -> int:
             print(f"      {n}")
         print(f"\n  This delivery is corpus {written['id']}. A matter you create yourself while reading it")
         print(f"  can be tied to it without becoming part of it:")
-        print(f"      anteriora new <client> <matter> --from-corpus {written['id']}")
+        print(f"      anteriora new <matter> --from-corpus {written['id']}")
     return 0
 
 

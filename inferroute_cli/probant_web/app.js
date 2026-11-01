@@ -5,6 +5,13 @@
 // has no network; this page runs in a browser that does, so it must never become the agent's way out.
 // tests/test_probant_web.py greps this file for the constructs that would break that rule.
 "use strict";
+// "Personal/cooling" shows as "cooling": there is no client for the user to choose (1 Nov 2026). A matter filed
+// under another client before then keeps it, as "Acme · cooling".
+function matterName(id) {
+  const [c, ...m] = String(id || "").split("/");
+  if (!m.length) return c;
+  return c === "Personal" ? m.join("/") : `${c} · ${m.join("/")}`;
+}
 
 (() => {
   const KEY_STORE = "probant-session-key";
@@ -2524,7 +2531,7 @@
     intakeId = String(s.intake_id || "");
     $("layout").hidden = false;
     document.title = `Anteriora · ${s.matter}`;
-    $("matter").textContent = String(s.matter || "").replace("/", " / ");
+    $("matter").textContent = matterName(s.matter);
     if (s.date_bound) { $("bound").textContent = s.date_bound; $("bound-wrap").hidden = false; }
     renderTrust(s.trust);
     // A continuation: the home page wrote a first message from the earlier session. It goes in the box for the
@@ -2555,7 +2562,7 @@
       back.addEventListener("click", () => goHome(readingSession ? `/document/${intakeId}` : matterRoute(matterId)));
     }
     const d = s.disclosure || {};
-    $("welcome-title").textContent = `Ready to work on ${String(s.matter || "").replace("/", " / ")}`;
+    $("welcome-title").textContent = `Ready to work on ${matterName(s.matter)}`;
     const line = $("disclosure-line");
     if (readingSession) {
       $("welcome-title").textContent = "Reading your document";

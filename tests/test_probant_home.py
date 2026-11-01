@@ -1185,7 +1185,8 @@ def test_rc125_d11_name_counts_key_card_and_crumbs():
     assert 'plural(s.spellings, "spelling", "spellings")' in js
     i = js.index("if (l.key_problem) box.append(replaceKeyButton(")
     assert "dismissLaunch(l.id); box.remove();" in js[i:i + 200]
-    assert 'el("span", "sub", " / "),\n      button(matterId' not in js and 'String(matterId).replace("/", " / ")' in js
+    # 1 Nov 2026: the crumb names the matter as the home page does (no "Personal /"; an older client as "Acme · x")
+    assert 'el("span", "sub", " / "),\n      button(matterId' not in js and 'matterLabel({ client: c, matter: m.join("/") })' in js
 
 
 def test_a_trademark_server_that_never_answers_is_reported_not_waited_on(home, monkeypatch):

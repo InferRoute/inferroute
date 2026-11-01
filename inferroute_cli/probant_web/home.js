@@ -290,6 +290,13 @@
     return svg;
   }
 
+  // There is no "client" for the user to choose any more (Henry, 1 Nov): new matters are filed under the default
+  // "Personal" folder, and anyone who wants a source or a client names it in the matter. Older matters filed
+  // under another client keep it, shown as a prefix so two matters of the same name stay distinguishable.
+  function matterLabel(m) {
+    return m.client && m.client !== "Personal" ? `${m.client} · ${m.matter}` : m.matter;
+  }
+
   function newMatterDialog(opts) {
     const client = input("text", "e.g. Acme");
     client.value = "Personal";
@@ -361,8 +368,7 @@
     dialog("New matter", [
       el("p", "", "A matter is one thing you research: an invention, or the names you are considering. It keeps its folder, its sessions and its records."),
       field("What are you checking?", kind, KIND_HINT.invention),
-      validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
-      validation.field("matter", "Matter", "Required. A short name for this matter."),
+      validation.field("matter", "Matter", "Required. A short name for this matter. Put a client or a source in it if you want one, e.g. acme-cooling."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Leave empty to use today until you know it."),
       validation.field("disclosure", "Disclosure", "Saved as written. The AI reads it when you start a session."),
       nameBox,
@@ -788,7 +794,8 @@
     const kindLabel = { name: "Name check", invention: "Prior-art search", draft: "Draft from a reading" }[kindKey];
     const body = el("div", "matter-body",
       el("div", `kind-chip kind-${kindKey}`, kindIcon(kindKey), el("span", "", kindLabel)),
-      el("div", "matter-title", el("span", "client", m.client), el("span", "", " / "), el("b", "", m.matter)),
+      el("div", "matter-title", ...(m.client && m.client !== "Personal"
+        ? [el("span", "client", m.client), el("span", "", " · ")] : []), el("b", "", m.matter)),
       m.kind === "name" ? el("div", "sub", !m.report_at ? "no report yet" : m.report_at.earlier ? `earlier report · ${localTime(m.report_at.at)}` : `report ready · ${localTime(m.report_at.at)}`)
         : el("div", "sub", `date bound ${m.date_bound || "—"}`),
       m.needs_review ? el("div", "warn-text", "Draft · needs disclosure and date review") : null,
@@ -807,7 +814,7 @@
     const cardNode = el("div", `matter-card clickable kind-${kindKey}`, body, el("div", "matter-foot", start));
     cardNode.tabIndex = 0;
     cardNode.setAttribute("role", "link");
-    cardNode.setAttribute("aria-label", `Open ${m.client} / ${m.matter}`);
+    cardNode.setAttribute("aria-label", `Open ${matterLabel(m)}`);
     body.addEventListener("click", open);
     cardNode.addEventListener("keydown", (e) => {
       if (e.target === cardNode && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); }
@@ -954,7 +961,7 @@
     const words = m.disclosure.disclosure_words;
     const isName = m.kind === "name";
     p.append(el("div", "page-head",
-      el("h1", "", `${m.client} / ${m.matter}`),
+      el("h1", "", matterLabel(m)),
       el("p", "sub", isName ? `Name check · created ${localTime(m.created_at)}`
         : `Date bound ${m.date_bound}${m.pre_filing_default ? " (today's date, until you set the real priority date)" : ""} · created ${localTime(m.created_at)}`)));
     let ix = null;
@@ -1147,14 +1154,14 @@
       try {
         const r = await api("/api/matter/delete", { id: m.id, confirm: typed.value });
         closeDialog();
-        toast(`${m.client} / ${m.matter} deleted. Restore it from Recently deleted within ${r.days} days.`, "info");
+        toast(`${matterLabel(m)} deleted. Restore it from Recently deleted within ${r.days} days.`, "info");
         for (const left of r.left_in_place || []) toast(`Left in place, outside the Anteriora folder: ${left}`, "info");
         location.hash = "#/";
       } catch (e) { err.textContent = e.message; } finally { go.disabled = false; }
     });
     go.disabled = true;
     typed.addEventListener("input", () => { go.disabled = typed.value.trim() !== m.matter; });
-    dialog(`Delete ${m.client} / ${m.matter}?`, [
+    dialog(`Delete ${matterLabel(m)}?`, [
       el("p", "", "This moves the matter's disclosure, sessions, marks and exported records out of Anteriora. "
         + "They stay in Recently deleted for 30 days, where you can restore them, then they are erased."),
       field("Type the matter's name to confirm", typed),
@@ -1211,7 +1218,8 @@
     // "Matters › Personal / kettle-names": the crumb separator is not the "/" inside the matter's own name, which
     // read as a stray slash ("← Matters / Personal/kettle-names", rc 0.9.125 reopened session).
     p.append(el("div", "crumbs", button("← Matters", "link", () => { location.hash = "#/"; }), el("span", "sub", " › "),
-      button(String(matterId).replace("/", " / "), "link", () => { location.hash = `#/matter/${enc(matterId)}`; })));
+      button((([c, ...m]) => matterLabel({ client: c, matter: m.join("/") }))(String(matterId).split("/")), "link",
+        () => { location.hash = `#/matter/${enc(matterId)}`; })));
     p.append(el("div", "page-head", el("h1", "", `Session of ${localTime(s.started_at)}`),
       el("p", "sub", `${s.surface === "browser" ? "In the browser" : s.surface === "terminal" ? "In the terminal" : "Screen not recorded"} · ${sessionCounts(s.kind === "names" ? s : { ...s, searches: s.searches.length }).join(" · ")}`)));
     // A session whose assistant never ran says so first, in plain words, and claims nothing below it.
@@ -1336,7 +1344,7 @@
         para("A matter is one thing you research: an invention, or the names for a product. It keeps its notes, its sessions and its records in a folder on this computer."),
         list("For an invention: describe it in plain technical terms. Its date bound limits searches to documents published before it; leave today's date until you know your filing date.",
           "For names: say what the product does and list the names. Where you will sell it helps the assistant choose the classes.",
-          "Use Personal as the client if the work is your own.")),
+          "Name each matter as you like; put a client or a source in the name if you keep work for several.")),
       sec("2. Start a session",
         para("Start a session from the matter, then open it. Before any text is sent, this computer checks the sealed machine that runs the AI assistant, and for inventions the sealed patent search machine, then seals your text on this computer to them."),
         list("The panel on the right says what was checked, in plain words, with the technical detail one click away. If a check fails, nothing is sent to that machine.",
@@ -1374,10 +1382,10 @@
           "The name check covers the US and France only; EU marks are not included yet.")),
       sec("In the terminal",
         para("Everything here also works in a terminal:"),
-        list("anteriora new <client> <matter> --priority-date YYYY-MM-DD",
-          "anteriora open <client>/<matter>   (add --web for the browser)",
+        list("anteriora new <matter> --priority-date YYYY-MM-DD",
+          "anteriora open <matter>   (add --web for the browser)",
           "In a session: /relevant <number>, /not-relevant, /known, /marks, /next <n>, /proof, /quit",
-          "anteriora export <client>/<matter>, and anteriora proof <client>/<matter> for the technical detail")));
+          "anteriora export <matter>, and anteriora proof <matter> for the technical detail")));
   }
 
   // ── reading a document: the professional gives it, a sealed session reads it, they open what it proposes ──
@@ -1442,7 +1450,6 @@
     dialog("Read a document", [
       el("p", "", "The AI reads your document and creates one draft matter per invention, with a complete summary and supporting passage. "
         + "You review each disclosure and date before searching. No searches start automatically."),
-      field("Create drafts under this client", client, "Use Personal for your own work. Existing matters are kept."),
       field("Document", file, "A .txt or .md file. Read locally, then sealed on this computer to the verified AI machine. No patent search runs during reading."),
       chosen,
       field("Or paste it", text),
@@ -1705,7 +1712,6 @@
     dialog("Read a repository", [
       el("p", "", "The AI reads one commit of your code and creates one draft matter per technical idea it finds, with a summary and the passage it came from. "
         + "Each draft is located in your code and dated from your git history on this computer. You review every draft before searching."),
-      field("Create drafts under this client", client, "Use Personal for your own work."),
       el("div", "segs", segGh, segFolder),
       ghPane, folderPane, urlPane, pathPane, el("div", "row", urlLink, typeLink),
       field("Only these folders", only, "Optional. Separate with spaces. Use this for a large repository. Test code is left out unless you name its folder here."),
@@ -1819,7 +1825,6 @@
     });
     dialog(`Open "${proposal.title}" as a matter`, [
       el("p", "", "The AI's draft summary becomes the disclosure, with its source passage. Review it before starting a search."),
-      validation.field("client", "Client", "Required. Use Personal if this is for yourself."),
       validation.field("matter", "Matter", "Required. You can change the suggested name."),
       validation.field("priority_date", "Priority date", "Only documents published before this date are searched. Check any date suggested by the AI."),
       err,

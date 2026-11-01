@@ -941,7 +941,10 @@ STATEMENT_CONFIDENTIAL = (
 # as a gap, never left to silence: the first TDX test image writes its program's output to the serial console.
 STATEMENT_SEALED_TDX = (
     "For the archived SEARCH operations checked here, statement signatures verify under keys bound "
-    "to Intel TDX quotes with debugging disabled, from machines whose boot log replays to the quote and "
+    "to Intel TDX quotes reporting the debug attribute off (one route by which whoever runs the machine could read "
+    "its memory, Intel's debug interface, was not enabled; the attribute says nothing about any other route, and "
+    "does not limit what the image itself writes to its console or sends over the network), from machines whose "
+    "boot log replays to the quote and "
     "whose boot image, host-supplied boot configuration (RTMR0, as the firmware measured it), index and "
     "encoders match the supplied reference, under the "
     "configured production trust roots. This does not establish encryption on the user's device, "
@@ -1344,6 +1347,8 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     # The licensed technical sentence still reaches this reader. It restates the answer above in the
     # verifier's own terms, which is mild redundancy -- and the alternative was editing another
     # session's failing tests to fit my change, which is how a gate gets weakened.
+    if tdx:   # "a protected computer" primes "protected" before the negation; a TDX reader gets the machine named
+        headline = headline.replace("for a protected computer", "from an Intel TDX machine")
     print(f"    {headline}")
     print(f"    {caveat}")
     # "These are gaps" cited a list that reach -1 never prints: report_plain(-1) is called from four
@@ -1376,7 +1381,9 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         # abstract disclaimer into something a reader can actually picture.
     if True:  # printed whether or not there are blockers: an EMPTY list is the strongest invitation
               # to read it as a census, so the warning must not disappear with it.
-        print("    " + PLAIN_CANNOT_SEE)
+        # D5's reason applies here too: "protected" primes before the reader reaches what is not established.
+        print("    " + (PLAIN_CANNOT_SEE.replace("the layer underneath the protected machine", "the layer underneath the machine")
+                        if tdx else PLAIN_CANNOT_SEE))
 
 
 def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: bool,
@@ -1485,8 +1492,14 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         # A record mixing AMD and Intel TDX searches: two ladders, and this program does not combine them.
         # searches_total unknown counts as mixed -- an AMD search with no archived policy would otherwise
         # be graded by the TDX rules.
+        if searches_total is None and not policies:
+            print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX, and this program was "
+                  "not told how many searches the record holds, so it cannot rule out others that ran on AMD "
+                  "machines, which are graded by different rules. It licenses no confidentiality sentence for "
+                  "this record.")
+            report_plain(-1)
+            return
         cause = ("an AMD container policy is archived with it" if policies else
-                 "this program was not told how many searches the record holds" if searches_total is None else
                  f"{searches_total - tdx_searches} of its {searches_total} searches did not run on Intel TDX")
         print(f"  NOT GRADED — {tdx_searches} search(es) in this record ran on Intel TDX, and {cause}. Intel TDX "
               "and AMD searches are graded by different rules and this program does not combine them, so it "
@@ -1497,8 +1510,9 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated)
         print(f"  Intel TDX — {tdx_searches} search(es) ran on a boot image the supplied reference names as "
               "InferRoute's. There is no container "
-              "policy to read, so the policy rows of an AMD record do not appear and the strongest sentence an "
-              "AMD record can earn (specified controls) is not reachable.")
+              "policy to read, so this record has none of the policy rows an AMD record shows and cannot earn the "
+              "sentence those rows can license. That is a difference in what this program can read, not a finding "
+              "that either kind of machine keeps text more private.")
         print()
         print("  You may write:")
         print(f"    1. {STATEMENT_SEALED_TDX}")

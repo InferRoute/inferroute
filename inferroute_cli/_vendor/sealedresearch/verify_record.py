@@ -3006,6 +3006,8 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
     # 3-4. hardware and identity, asked by the same code the live client asks them with. `at` is this
     # statement's own time: a reference entry's window must have been current WHEN THE SEARCH RAN, not now.
     at = st.get("started_utc") if isinstance(st.get("started_utc"), str) else None
+    _clock_ok, _clock_why = clocks_agree(st)
+    c.add(_clock_ok, "machine clock agrees with the client's", _clock_why)
     # The floor is resolved AT THIS STATEMENT'S TIME. A floor signed after a search ran did not
     # constrain it, so it must SKIP rather than PASS: measured 2026-09-28, the live signed reference
     # carried a FLAT floor and every delivered search predates it by three days.
@@ -3106,6 +3108,31 @@ def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
     if isinstance(k, int) and isinstance(hits, int):
         c.add(hits <= k, "at most k results", f"{hits} hit(s) against k={k}"
               if hits <= k else f"{hits} hit(s) exceeds the k={k} this statement asked for")
+
+
+CLOCK_TOLERANCE_SECONDS = 300
+
+
+def clocks_agree(st: Dict[str, Any]) -> Tuple[Optional[bool], str]:
+    """Did the machine's clock (started_utc, set by whoever hosts it) agree with the client's (client_utc, which
+    the client put in its sealed request and the enclave signed back)? Everything time-scoped in this record is
+    judged at started_utc, so a host that set the machine's clock back could have a search judged against a
+    reference entry or an Intel document that had already been withdrawn. None = this statement does not carry
+    the client's time (an older enclave build)."""
+    cu, su = st.get("client_utc"), st.get("started_utc")
+    if cu is None:
+        return None, ("this statement does not carry the client's clock (the client or the enclave build predates the "
+                      "field): nothing here rules out a machine clock set wrong by whoever hosts it")
+    a, b = _parse_time(cu), _parse_time(su)
+    if a is None or b is None:
+        return False, f"cannot compare the clocks (client {cu!r}, machine {su!r})"
+    skew = abs((b - a).total_seconds())
+    if skew <= CLOCK_TOLERANCE_SECONDS:
+        return True, (f"the machine's clock ({su}) was within {int(skew)} s of the client's ({cu}): every time-scoped "
+                      "check here is judged at the machine's time, and the client's own clock agreed with it")
+    return False, (f"the machine's clock ({su}) differs from the client's ({cu}) by {int(skew)} s, more than "
+                   f"{CLOCK_TOLERANCE_SECONDS} s: every time-scoped check here is judged at the machine's time, and "
+                   "the client's clock did not agree with it; one of the two was wrong and this record cannot say which")
 
 
 def check_recipient(c: Checks, st: Dict[str, Any], row: Dict[str, Any]) -> None:

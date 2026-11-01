@@ -151,11 +151,22 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
         raise SetupError("the published reference is not signed by InferRoute's publication key, so it was not used "
                          f"({why}). Nothing was changed.")
     at = now or dt.datetime.now(dt.timezone.utc)
-    current = ref_mod.current_entries(ref, "policy_sha256", at)
-    if not current:
-        raise SetupError("the published reference names no search build that is current right now. Nothing was changed.")
     where = _json(f"{SITE}/probant/search.json")
     enclave = fixed_endpoint(where.get("enclave"))
+    # Which kind of machine answers at that address. Intel TDX (from 1 Nov 2026, when the Azure/AMD lane was shut
+    # down) has no container policy: the signed reference names the boot image instead, and the verifier checks the
+    # quote against it before any text is sent. The field is routing information like the address: claiming TDX
+    # for an AMD machine (or the reverse) makes the check fail, never pass.
+    tdx = where.get("tee") == "intel-tdx"
+    if tdx:
+        if not ref_mod.current_entries(ref, "tdx_image_sha384", at):
+            raise SetupError("the published reference names no Intel TDX search image that is current right now. "
+                             "Nothing was changed.")
+        current = []
+    else:
+        current = ref_mod.current_entries(ref, "policy_sha256", at)
+        if not current:
+            raise SetupError("the published reference names no search build that is current right now. Nothing was changed.")
 
     policy_path = None
     for entry in current:
@@ -168,7 +179,7 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
         policy_path = conf_dir / f"search-policy-{sha[:16]}.b64"
         _atomic(policy_path, base64.b64encode(rego))
         break
-    if policy_path is None:
+    if policy_path is None and not tdx:
         raise SetupError("the published reference names no usable policy. Nothing was changed.")
 
     ref_path = conf_dir / "reference.json"
@@ -176,8 +187,9 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     # The independent date for the reference. Optional on the site (an unanchored reference simply has none),
     # and it must be the proof for THESE bytes: a stale one beside a newer reference is removed, not kept.
     ots = _get_optional(f"{SITE}/reference/current.json.ots")
-    wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key,
-              "policy_file": str(policy_path), "provisioned_by": MARK}
+    wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key, "provisioned_by": MARK}
+    if policy_path is not None:
+        wanted["policy_file"] = str(policy_path)
     hours = published_hours(where)
     if hours:
         wanted["availability"] = hours

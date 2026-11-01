@@ -56,6 +56,29 @@ def _utcnow() -> str:
 
 CLIENT = "sealed-search 0.1"
 
+# Request size, said in buckets. The sealed request travels as plain HTTP through the relay and the host, whose
+# length would otherwise tell them how long the query was. Padding happens INSIDE the sealed plaintext, outside
+# every signed or hashed field (the query hash is over job["query"]), so it changes nothing a record checks.
+REQUEST_BUCKET = 4096
+
+
+def padded_plain(payload: Dict[str, Any]) -> Tuple[bytes, str]:
+    """The payload with this computer's own clock (`client_utc`, which the enclave signs back: a host that sets
+    the machine's clock wrong is caught when this computer's clock was right and the gap exceeds the tolerance),
+    padded to the next power-of-two bucket. Returns the plaintext and the client_utc sent, so the answer's echo
+    can be compared with it. Requests above 4 KiB (a long survey disclosure) land in larger buckets: their
+    length class remains visible."""
+    sent = _utcnow()
+    payload = {**payload, "client_utc": sent, "pad": ""}
+    base = len(json.dumps(payload).encode())
+    target = REQUEST_BUCKET
+    while target < base:
+        target *= 2
+    if target <= search.MAX_PLAINTEXT:
+        payload["pad"] = "0" * (target - base)
+    return json.dumps(payload).encode(), sent
+
+
 
 class Verifier:
     def __init__(self, enclave_url: str, *, expect_host_data: Optional[str], pins: Optional[Dict[str, Any]] = None,
@@ -198,7 +221,7 @@ class Verifier:
         payload = {"kind": "search", "query": text, "k": k, "cutoff_date": cutoff_date, "legs": None,
                    "from_date": from_date, "offices": offices, "session_id": self.session_id,
                    "meta": {"client": CLIENT}, "reply_to": reply_pub.hex(), "request_id": request_id}
-        plain = json.dumps(payload).encode()
+        plain, sent_utc = padded_plain(payload)
         try:
             search.validate(plain)
         except search.RefusedPayload as exc:
@@ -237,7 +260,7 @@ class Verifier:
         # a recipient, and nothing is deployed that predates the field — so refuse. In a BUNDLE the same
         # absence gets a SKIP, because a record already made cannot be re-run and failing it retroactively
         # would punish the attorney for our version history. Same fact, different remedy, both stated.
-        self._bind_checks(steps, st, rd, rd_bytes, reply_pub, request_id)
+        self._bind_checks(steps, st, rd, rd_bytes, reply_pub, request_id, sent_utc)
         if not steps.ok:
             return self._verdict(steps, enclave)
         if st.get("outcome") != "answered":
@@ -255,7 +278,7 @@ class Verifier:
                              _reply_to=reply_pub.hex())
 
     def _bind_checks(self, steps: Steps, st: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes,
-                     reply_pub: bytes, request_id: str) -> None:
+                     reply_pub: bytes, request_id: str, sent_utc: Optional[str] = None) -> None:
         """The three checks common to any answered operation (search or read): the enclave signed which
         key it sealed to (no second recipient), the statement's signature verifies under the hardware-bound
         signer, and the statement is about THIS request and this enclave's commitments. One copy, so a
@@ -282,6 +305,20 @@ class Verifier:
                 and st.get("model_manifest_sha256") == rd["model_manifest_sha256"])
         steps.add(same, "statement is about this request", "same request, enclave lifetime, runtime data, index and encoders"
                   if same else "the statement names a different request, lifetime or commitment")
+        # An enclave build that signs the client's clock must sign back EXACTLY the value this computer sent:
+        # signing anything else (its own clock, say) would defeat the record's clock check, so that fails closed.
+        # A clock DIFFERENCE does not fail the live search: the answer is already made, and the likeliest cause
+        # is this computer's own clock; the record check reports the difference. A build that predates the field
+        # is not faulted live (the record check reports its absence as a SKIP).
+        if "client_utc" in st:
+            echoed = sent_utc is not None and st.get("client_utc") == sent_utc
+            steps.add(echoed, "enclave signed this computer's clock",
+                      "the statement carries exactly the time this computer sent" if echoed else
+                      "the statement carries a different client time than this computer sent")
+            if echoed:
+                agrees = verify_record.clocks_agree(st)
+                steps.add(True, "machine clock compared with this computer's",
+                          agrees[1] if agrees[0] else agrees[1] + " (check this computer's clock first)")
 
     def document(self, key: str, cutoff_date: Optional[int] = None,
                  expect_lifetime_id: Optional[str] = None) -> Dict[str, Any]:
@@ -303,7 +340,7 @@ class Verifier:
         request_id = os.urandom(16).hex()
         payload = {"kind": "document", "key": key, "cutoff_date": cutoff_date, "session_id": self.session_id,
                    "meta": {"client": CLIENT}, "reply_to": reply_pub.hex(), "request_id": request_id}
-        plain = json.dumps(payload).encode()
+        plain, sent_utc = padded_plain(payload)
         try:
             search.validate(plain)
         except search.RefusedPayload as exc:
@@ -328,7 +365,7 @@ class Verifier:
             steps.add(False, "answer opens for this request", f"it does not ({type(exc).__name__}): not sealed to this request's key")
             return self._verdict(steps, enclave)
         steps.add(True, "answer opens for this request", "sealed to the reply key made on this machine for this read")
-        self._bind_checks(steps, st, rd, rd_bytes, reply_pub, request_id)
+        self._bind_checks(steps, st, rd, rd_bytes, reply_pub, request_id, sent_utc)
         if not steps.ok:
             return self._verdict(steps, enclave)
         if st.get("outcome") != "answered":
@@ -890,12 +927,15 @@ def main(argv: Optional[list] = None) -> int:
             raise SystemExit("refusing to serve: the signed reference did not verify — " + "; ".join(why))
         at = _now_iso()
         pol = _current_ref_value(reference, "policy_sha256", at)
-        if not pol:
-            raise SystemExit("refusing to serve: the reference carries no policy_sha256 entry current now")
-        if a.expect_host_data and a.expect_host_data.lower() != pol:
+        # An Intel TDX lane has no container policy: the reference names a boot image instead, checked against
+        # the quote by verify_offer. A reference with neither current cannot anchor any machine.
+        tdx_img = _current_ref_value(reference, "tdx_image_sha384", at)
+        if not pol and not tdx_img:
+            raise SystemExit("refusing to serve: the reference carries no policy_sha256 or tdx_image_sha384 entry current now")
+        if pol and a.expect_host_data and a.expect_host_data.lower() != pol:
             raise SystemExit("refusing to serve: --expect-host-data contradicts the signed reference "
                              f"(flag {a.expect_host_data[:16]}… vs reference {pol[:16]}…) — drop the flag and trust the reference")
-        a.expect_host_data = pol
+        a.expect_host_data = pol or a.expect_host_data
         reference_info = {"ok": True, "source": reference.get("source"),
                           "published": reference.get("published_at") or reference.get("published"),
                           "key_prefix": (a.reference_key or "")[:16]}

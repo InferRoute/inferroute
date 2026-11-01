@@ -238,3 +238,32 @@ def test_published_hours_reach_the_configuration_only_when_well_formed(site, pub
     files["/probant/search.json"] = json.dumps(where).encode()
     SS.setup(force=True, now=NOW)
     assert cfg(tmp).get("availability") == kept
+
+
+def _tdx_site(files, key, *, image=True):
+    pub = key.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()
+    body = {"schema": "inferroute.enclave-reference/1", "published_at": "2026-10-01T00:00:00Z", "publication_key": pub}
+    if image:
+        body["tdx_image_sha384"] = [{"value": "ab" * 48, "loads": ["cd" * 48], "valid_from": "2026-01-01T00:00:00Z"}]
+        body["tdx_rtmr0"] = [{"shape": "c3-standard-22-nodisk", "value": "ef" * 48, "valid_from": "2026-01-01T00:00:00Z"}]
+    ref = {**body, "sig": key.sign(R.canonical(body)).hex()}
+    files["/reference/current.json"] = json.dumps(ref).encode()
+    files["/probant/search.json"] = json.dumps({"enclave": "http://203.0.113.9:8000", "tee": "intel-tdx"}).encode()
+
+
+def test_an_intel_tdx_search_machine_is_set_up_without_a_container_policy(site):
+    """1 Nov 2026: Azure/AMD shut down; the search machine is Intel TDX, which has no container policy."""
+    files, key, pub, tmp = site
+    _tdx_site(files, key)
+    state, _ = SS.setup(now=NOW)
+    c = cfg(tmp)
+    assert state == "configured" and c["enclave"] == "http://203.0.113.9:8000" and "policy_file" not in c
+    assert json.loads((tmp / "ir/confidential/reference.json").read_bytes())["tdx_image_sha384"][0]["value"] == "ab" * 48
+
+
+def test_a_tdx_location_with_no_current_tdx_image_in_the_reference_is_refused(site):
+    files, key, pub, tmp = site
+    _tdx_site(files, key, image=False)
+    with pytest.raises(SS.SetupError, match="no Intel TDX search image"):
+        SS.setup(now=NOW)
+    assert not (tmp / "ir/confidential/search.json").exists()

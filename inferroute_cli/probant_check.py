@@ -74,7 +74,7 @@ CONSEQUENCE: Dict[str, Tuple[str, str]] = {
 VERDICTS: Dict[int, Tuple[str, str, str]] = {
     0: ("passed", "Everything checked out.",
         "This record is what it says it is: a sealed search, run inside a machine that proved what software "
-        "it was running, and unchanged since."),
+        "it was running, and unchanged since. It does not show whether anyone read your text."),
     1: ("failed", "Something did not check out.",
         "One or more checks failed. What that means for you depends on which — see below."),
     2: ("refused", "The check could not be run.",

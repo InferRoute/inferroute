@@ -80,3 +80,9 @@ def test_the_tdx_answer_states_both_bounds_and_leaves_a_next_step(V):
             assert "cannot tell you whether your text stayed private" in text
             assert "What you can do:" in text
             assert "For future searches:" in text and "cannot change this record" in text
+
+
+def test_the_app_pass_summary_says_what_it_cannot_show():
+    """'Everything checked out.' appears in ad screenshots; without its limit it reads as a privacy verdict."""
+    from inferroute_cli import probant_check
+    assert "does not show whether anyone read your text" in probant_check.VERDICTS[0][2]

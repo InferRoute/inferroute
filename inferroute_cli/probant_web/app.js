@@ -30,6 +30,15 @@ function matterName(id) {
   }
 
   const { el, clear, markdown, renderCheck } = window.ProbantUI;
+  // A Chinese, Japanese, Korean or Taiwanese hit stands for a whole patent family; say how many publications
+  // (the list is in the tooltip). Built from text nodes like everything else here.
+  function familyOf(doc) {
+    const f = Array.isArray(doc && doc.family) ? doc.family : [];
+    if (f.length < 2) return null;
+    const n = el("span", "year", `family of ${f.length} publications`);
+    n.title = f.join(", ");
+    return n;
+  }
 
   // ── talking to the bridge ──
   async function api(path, body) {
@@ -1946,7 +1955,7 @@ function matterName(id) {
                 el("span", "rank", String(idx + 1)),
                 relBar(doc.score, _llo, _lhi),
                 el("div", "", docLink(keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
-                  doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
+                  doc.alsoIn ? seenIn(doc.alsoIn) : null, familyOf(doc), title),
                 markButtons(keyNo, e.card));
               title.addEventListener("click", () => row.classList.toggle("open"));
               list.append(row);
@@ -2037,7 +2046,7 @@ function matterName(id) {
         el("span", "rank", String(idx + 1)),
         relBar(doc.score, _lo, _hi),
         el("div", "", keyEl, doc.year ? el("span", "year", String(doc.year)) : null,
-          doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
+          doc.alsoIn ? seenIn(doc.alsoIn) : null, familyOf(doc), title),
         markButtons(keyNo, card));
       title.addEventListener("click", () => row.classList.toggle("open"));
       list.append(row);

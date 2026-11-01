@@ -240,7 +240,7 @@ interface SearchProof {
 	// was told numbers, years and titles and said so ("nothing from the texts"), and a like-query was
 	// composed from ~60 characters of title when 1,227 characters of abstract had already been sealed,
 	// transmitted and decrypted on this machine.
-	docs: { key: string; year?: number; title?: string; text?: string; alsoIn?: number; score?: number }[];
+	docs: { key: string; year?: number; title?: string; text?: string; alsoIn?: number; score?: number; family?: string[] }[];
 	// What this search was, as the professional sees it on the card: its number in the session, the feature it
 	// covered, the document it looked for neighbours of, and how many references were asked for.
 	searchNo?: number;
@@ -288,7 +288,11 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?
 		hits: Number(out.statement?.hits_n ?? 0),
 		docs: (out.result?.hits ?? []).map((h) => ({ key: String(h.key), year: h.year, title: h.title,
 			text: typeof (h as { text?: unknown }).text === "string" ? String((h as { text?: string }).text) : undefined,
-			score: h.score })),
+			score: h.score,
+			// A CN/JP/KR/TW hit is a DOCDB family with no US/EP/WO member; the engine lists its member
+			// publications (asia-2611, 1 Nov 2026). Shown so the user sees every publication the row stands for.
+			family: Array.isArray((h as { family_members?: unknown }).family_members)
+				? ((h as { family_members: unknown[] }).family_members).slice(0, 200).map(String) : undefined })),
 		at: new Date().toISOString(),
 	};
 }

@@ -354,7 +354,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     # Audit 1102-ai-r2: no corporate "confirmed", the key binding is stated, Chutes is a seller not InferRoute's operator,
     # and the search link is always stated with what it rests on.
     assert "nvidia confirmed" not in low and "confirm nothing" not in low and "runs these machines for inferroute" not in low
-    assert "fingerprint of the public key" in t and "necessarily reads every message in plain text" in t and "gateway" in t and "legally responsible" in t and "nothing from the machines shows that they received yours" in t
+    assert "of the public key that messages to it are encrypted to" in t and "necessarily reads every message in plain text" in t and "gateway" in t and "legally responsible" in t and "nothing from the machines shows that they received yours" in t
     assert "and it is the key the app says it used" not in t  # audit r3: no welding of measurement to the app's word
     assert V.plain_ai_lane(0).endswith(V.PLAIN_AI_SEARCHES_NONE)
     # Independent review (fable, 2 Nov): the paragraph carries this session's own numbers, says where the private key

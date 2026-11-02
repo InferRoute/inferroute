@@ -2971,17 +2971,16 @@ PLAIN_AI_OPEN_EMPTY = (
     "remote machines. What follows describes the machine(s) it had checked and was prepared to use; no text of yours "
     "reached any of them in this conversation, by the app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
-    "By the app's own count, this conversation began sending {requests} request(s) (by InferRoute's account, a "
-    "request the relay or gateway then refused still counts) (InferRoute states that each request carries the "
-    "conversation so far) {window}; the app selected {machines} distinct machine(s) for it{credit}. This receipt is "
-    "designed to contain no message text, but it does show when the conversation ran, which machine(s) the app "
-    "selected for it, the identities of their graphics chips, any machines the receipt records as examined and "
-    "rejected, how much was sent (byte and token counts), a cost estimate, error counts and a self-reported, "
-    "timestamped log of the app's own checks, switches and retries (not signed by anyone, though this check confirmed"
-    " it is consistent with the evidence files and counts above), though not the words; these times and identifiers "
-    "could be matched against the relay's or the operator's own logs. The app writes the end time when it last "
-    "touched the record, which can be after the last message or, if the app was closed while a reply was arriving, "
-    "before that reply.")
+    "By the app's own count, this conversation began sending {requests} request(s) {window}; InferRoute states that "
+    "each request carries the whole conversation so far, and that a request the relay or gateway then refused is "
+    "still counted; the app selected {machines} distinct machine(s) for it{credit}. This receipt is designed to "
+    "contain no message text, but it does show when the conversation ran, which machine(s) the app selected for it, "
+    "the identities of their graphics chips, any machines the receipt records as examined and rejected, how much was "
+    "sent (byte and token counts), a cost estimate, error counts and a self-reported, timestamped log of the app's "
+    "own checks, switches and retries (not signed by anyone, though this check confirmed it is consistent with the "
+    "evidence files and counts above), though not the words; these times and identifiers could be matched against the"
+    " relay's or the operator's own logs. The app writes the end time when it last touched the record, which can be "
+    "after the last message or, if the app was closed while a reply was arriving, before that reply.")
 PLAIN_AI_SESSION_EMPTY = (
     "By the app's own count it sent no request in this conversation, which ran {window}; the app selected {machines} "
     "distinct machine(s) for it. This receipt is designed to contain no message text, but it does show when the "
@@ -2999,7 +2998,8 @@ PLAIN_AI_REFUSED = (
     "timer when the app is idle; if that re-check fails, by InferRoute's account the app still sends that request and"
     " the next on the older evidence, and stops only at the third failure in a row. For a machine the app kept after "
     "a re-check, the record carries only the first check's evidence; a machine selected after a re-check has its own "
-    "row and its own check above. Requests sent after that moment carry none of the app's notes to the program.")
+    "row and its own check above. By InferRoute's account, requests sent after that moment carry none of the app's "
+    "notes to the program; this record does not check what they carry.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint (a short code computed from the key, not a biometric) of the "
@@ -3076,10 +3076,10 @@ PLAIN_AI_PATH_RELAY = (
     "InferRoute operates a relay and, by InferRoute's account, the AI operator a gateway that the app says {carried} "
     "your encrypted messages. By InferRoute's account of how the app and relay work, which no row here checks, the "
     "relay could see which InferRoute account sent them, from which network address, and this conversation's id, and "
-    "both, as could whoever runs the physical machine, could see when, how much, which AI model and which machine; "
-    "after each reply the relay also receives from the app a billing report (the conversation's id, the model, the "
-    "machine, counts of the word-pieces sent and received, and the reply time), and this record checks none of that, "
-    "nor whether either logs it, or for how long, nor where the relay and gateway are.")
+    "both could see when, how much, which AI model and which machine; after each reply the relay also receives from "
+    "the app a billing report (the conversation's id, the model, the machine, counts of the word-pieces sent and "
+    "received, and the reply time), and this record checks none of that, nor whether either logs it, or for how long,"
+    " nor where the relay and gateway are.")
 PLAIN_AI_PATH_OTHER = (
     "The app's record names the carrier of the encrypted messages as '{carrier}'; this record checks nothing about who "
     "carried them or what they could see.")
@@ -3090,8 +3090,7 @@ PLAIN_AI_PATH_DIRECT = (
     "see which account sent them, from which network address (the app contacts the gateway directly from your "
     "computer, both to find and check machines and to send requests, so the gateway sees the address even when no "
     "request is sent), when, how much, which AI model and which machine, and this record checks none of that, nor "
-    "whether it logs it, or for how long, nor where it is. Whoever runs the physical machine could also see when and "
-    "how much was sent.")
+    "whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
@@ -3107,8 +3106,8 @@ PLAIN_AI_STOPPED = (
     "and on a timer when the app is idle; if that re-check fails, by InferRoute's account the app still sends that "
     "request and the next on the older evidence, and stops only at the third failure in a row. For a machine the app "
     "kept after a re-check, the record carries only the first check's evidence; a machine selected after a re-check "
-    "has its own row and its own check above. Requests sent after that moment carry none of the app's notes to the "
-    "program.")
+    "has its own row and its own check above. By InferRoute's account, requests sent after that moment carry none of "
+    "the app's notes to the program; this record does not check what they carry.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked NVIDIA's online service, and Intel's unless it had asked Intel about"
     " the same hardware family within the previous ten minutes, from your computer (this check requires, by the app's"
@@ -3136,7 +3135,10 @@ PLAIN_AI_HOSTS = (
     "the AI operator's decentralised network, which calls them miners) who host the physical hardware for the AI "
     "operator. Intel's hardware protection, which this record shows the machines had, closes one way those hosts "
     "could read a machine's memory, but does not rule out others, such as measuring the chips' behaviour from outside"
-    " or physically tampering with the hardware, and this record does not say which country the machines were in.")
+    " or physically tampering with the hardware, and this record does not say which country the machines were in. "
+    "Whoever runs a physical machine could see when and how much encrypted traffic reached it; by InferRoute's "
+    "account that traffic arrives from the AI operator's gateway, not from your computer, so the host would not see "
+    "your network address unless the gateway passes it on, which this record does not check.")
 PLAIN_AI_SUMMARY = (
     "In short: this record does not establish whether {text} was exposed or protected; nothing in it shows that "
     "{text} was exposed, and nothing in it shows that it was not. What it establishes is about the machines, not "
@@ -3150,13 +3152,15 @@ PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, this record does not "
     "say, and InferRoute has not stated in it, the following, so ask the AI operator and InferRoute directly: how "
     "long they keep any copy of your messages or of their timing, whether messages are used to train AI models, "
-    "whether backups are kept and where, in which country {places} were, who hosted the physical machines, and which "
-    "of them is legally responsible for your messages under data-protection law and what rights you have to copies or"
-    " erasure, {agreement}, and whether you will be told if any of them finds that your messages or their timing were"
-    " accessed without authority. If the answer to any of these is that they do not know or will not say, this record"
-    " offers nothing against that answer. Intel and NVIDIA may keep a log of the lookups the app made; ask them if "
-    "that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer, in plain"
-    " text, where other programs on that computer and any backup or sync service you use could read it; ask "
+    "whether backups are kept and where, in which country {places} were, who hosted the physical machines, whether a "
+    "data-processing agreement or standard contractual clauses cover the transfer of your messages to the countries "
+    "where the machines, relay or gateway are, and whether the hosts are treated as sub-processors under it, and "
+    "which of them is legally responsible for your messages under data-protection law and what rights you have to "
+    "copies or erasure, {agreement}, and whether you will be told if any of them finds that your messages or their "
+    "timing were accessed without authority. If the answer to any of these is that they do not know or will not say, "
+    "this record offers nothing against that answer. Intel and NVIDIA may keep a log of the lookups the app made; ask"
+    " them if that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer,"
+    " in plain text, where other programs on that computer and any backup or sync service you use could read it; ask "
     "InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "

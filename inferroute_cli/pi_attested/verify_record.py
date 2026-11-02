@@ -2980,12 +2980,13 @@ PLAIN_AI_REFUSED = (
     "by its own record; this record checks only that the event lies inside the conversation's time window.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
-    " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this"
-    " record checks that fingerprint against the key the app says it used; the report contains a fingerprint that "
-    "fixes that public key, but does not show where the matching private key was made or kept. Each report also "
-    "answered a challenge the app says it drew for this conversation, so it is not a report made before that "
-    "challenge existed. Whether the app really encrypted your messages to that key is again only the app's claim, and"
-    " no machine signs anything per message, so nothing from the machines shows that they received yours.")
+    " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
+    " with the app's challenge for this conversation, and this record checks that fingerprint against the key the app"
+    " says it used; the report contains a fingerprint that fixes that public key, but does not show where the "
+    "matching private key was made or kept. Each report also answered a challenge the app says it drew for this "
+    "conversation, so it is not a report made before that challenge existed. Whether the app really encrypted your "
+    "messages to that key is again only the app's claim, and no machine signs anything per message, so nothing from "
+    "the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3078,10 +3079,11 @@ PLAIN_AI_HOSTS = (
 PLAIN_AI_SUMMARY = (
     "In short: nothing in this record shows that {text} was exposed, and nothing in it shows that it was not. What it"
     " establishes is about the machines, not about {text}: they were genuine Intel TDX machines with debug mode off, "
-    "their starting software matched measurements InferRoute supplied, and each machine's report, made in answer to "
-    "the app's challenge, carried the fingerprint of a public key that matched the key the app says it used; NVIDIA's"
-    " report on the graphics chips answered that challenge too. The debug modes being off rules out reading the "
-    "machines' memory through those modes, not by other means.")
+    "their starting software matched measurements {supplied}, and each machine's report, made in answer to the app's "
+    "challenge, carried the fingerprint of a public key that matched the key the app says it used; NVIDIA's report on"
+    " the graphics chips answered that challenge too. NVIDIA's report said nothing about the chips' "
+    "confidential-computing mode. The debug modes being off at the moment each report was made rules out reading the "
+    "machines' memory through those modes at that moment, not by other means.")
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI operator "
     "and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages are "
@@ -3224,7 +3226,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct
                                      else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")
                                      + (" " + PLAIN_AI_OPENED_EMPTY if empty else "")) + " " + PLAIN_AI_LOOKUPS,
-             PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
+             PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text",
+                                     supplied=("from a run-time record InferRoute signed, not from the list shipped inside this check"
+                                               if runtime_only else "InferRoute supplied")),
              PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=", and before the app stopped trusting a machine" if f["refused"] else "")
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches

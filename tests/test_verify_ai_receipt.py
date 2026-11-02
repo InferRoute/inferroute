@@ -98,7 +98,8 @@ def test_fresh_receipt_is_fully_rechecked_offline(tmp_path):
     assert "tee-vm-2026-09-20" in _detail(c, "recorded build") and "RTMR1+RTMR2+RTMR3 recomputed" in _detail(c, "recorded build")
     # The permanent limits are SKIP rows, printed every time, and never make the receipt 'incomplete'.
     assert rows["GPU confidential-computing mode"] == "SKIP" and rows["not recomputed"] == "SKIP"
-    assert [d for s, n, d in c.rows if n == "not recomputed"] == list(V.NOT_RECOMPUTED)
+    # The fixture predates preamble_path, so the older-client rows follow the permanent ones (Kimi round 22).
+    assert [d for s, n, d in c.rows if n == "not recomputed"] == list(V.NOT_RECOMPUTED) + list(V.OLDER_CLIENT_NOT_RECORDED)
 
 
 def test_legacy_receipt_rechecks_offline_rows_and_is_incomplete_not_failed(tmp_path):

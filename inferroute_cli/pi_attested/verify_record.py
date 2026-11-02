@@ -3003,13 +3003,13 @@ PLAIN_AI_WHO_CHECKS = (
     "machines are compared with were supplied by InferRoute, which also makes the app{relay}; so for most of what "
     "follows you rely on InferRoute's own records and code.")
 PLAIN_AI_MACHINE = (
-    "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
-    "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
-    "with its debug mode off (a mode that company could otherwise use to read the machine's memory); by Intel's "
-    "design that setting cannot change for the life of that virtual machine. It shows that the software the machine "
-    "started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's own "
-    "published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
-    "certificates were checked.")
+    "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off; by Intel's "
+    "design that setting cannot change for the life of that virtual machine. That kind of machine has its memory "
+    "encrypted by Intel's hardware against the company running the physical machine, and debug mode is a way that "
+    "company could otherwise read it; but this record does not show that {text} was protected by that encryption, and"
+    " the limits are described below. It shows that the software the machine started from matched four measurements "
+    "(fingerprints of its start-up software) {provenance} Intel's own published status for this hardware was "
+    "'{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation.")
@@ -3021,11 +3021,12 @@ PLAIN_AI_BUILD_RUNTIME = (
     "InferRoute obtained them.")
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
-    "configuration) was not compared by this record; the app compared it only against the AI operator's own published"
-    " list. The AI operator is, by InferRoute's account, the company that operates these machines and from which "
-    "InferRoute buys access to them; the rows above show a name in the certificate that signed each machine's "
-    "evidence, a name this check reads but does not verify. The machine's report commits to the key behind that "
-    "certificate, as it does to the encryption key; where its private half was kept is, again, not shown.")
+    "configuration) was not compared by this record (see the 'not recomputed' rows above); the app compared it only "
+    "against the AI operator's own published list. The AI operator is, by InferRoute's account, the company that "
+    "operates these machines and from which InferRoute buys access to them; the rows above show a name in the "
+    "certificate that signed each machine's evidence, a name this check reads but does not verify. The machine's "
+    "report commits to the key behind that certificate, as it does to the encryption key; where its private half was "
+    "kept is, again, not shown.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
@@ -3223,8 +3224,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     empty = f["requests"] == 0
     new_client = f["preamble_path"] == "home-relative"
     rotation = ("a machine that later offered a new key got a new entry, with its own check" if new_client else
-                "this record was written by a version of the app that did not record a machine's later change of key, "
-                "so messages sent after such a change would have been encrypted to a key this record does not show")
+                "as a 'not recomputed' row above states, the older version of the app that wrote this record did not "
+                "record a machine's later change of key, so messages sent after such a change would have been encrypted "
+                "to a key this record does not show")
     path_words = ("the AI operator's gateway" if "direct" in str(f.get("transport") or "").lower()
                   else "InferRoute's relay and the AI operator's gateway")
     opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
@@ -3236,9 +3238,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         window=_plain_window(f["start"], f["end"]),
         credit="" if not f["requests"] else f" and credits those requests to {f['credited']} of them", **f)
     if not new_client and f["requests"] is not None:
-        session += (" The version of the app that wrote this record saved the request count only after a reply "
-                    "finished, so a conversation cut off mid-reply can show fewer requests than were sent"
-                    + (", including none" if empty else "") + ".")
+        session += (" As the 'not recomputed' rows above state, the older version of the app that wrote this record "
+                    "saved the request count only after a reply finished, so a conversation cut off mid-reply can show "
+                    "fewer requests than were sent" + (", including none" if empty else "") + ".")
     direct = "direct" in str(f.get("transport") or "").lower()
     runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
     mixed = any(k == "runtime" for k, _ in f["builds"]) and not runtime_only
@@ -3260,7 +3262,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                               else ", and operates the relay the app says your traffic passed through")
                         if "relay" in str(f.get("transport") or "").lower()
                         else ", and operates the relay InferRoute states carries this traffic")),
-             " ".join(x for x in (PLAIN_AI_MACHINE.format(
+             " ".join(x for x in (PLAIN_AI_MACHINE.format(text="any text" if empty else "your text", 
                  provenance=(PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_MIXED if mixed
                              else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),

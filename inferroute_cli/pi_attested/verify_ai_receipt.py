@@ -137,6 +137,18 @@ NOT_RECOMPUTED = (
     "what the machine's software did with the text after decrypting it: the measured image does not cover the code the "
     "model is served with, and no attestation reaches retention",
     "the GPUs' confidential-computing mode: NVIDIA's verdict carries no claim for it",
+    "the machine's boot configuration (RTMR0): supplied by the company running the physical machine and different per "
+    "host; this check compares MRTD and RTMR1-3 only (the app compared all five with the operator's published list)",
+)
+# Rows for receipts written before the client recorded 'preamble_path' (the 2 Nov fixes): what that client did not
+# record, stated as rows so the plain words rest on a row rather than on InferRoute's prose (Kimi round 22).
+OLDER_CLIENT_NOT_RECORDED = (
+    "older app version (no 'preamble_path' field): it saved the request count only after a reply finished, so a "
+    "conversation cut off mid-reply can show fewer requests than were sent (InferRoute's account of that version)",
+    "older app version: a later change of key on the same machine was not recorded, so requests after such a change "
+    "would have been sealed to a key this receipt does not show (InferRoute's account of that version)",
+    "older app version: the note sent with every request named this receipt by its full path, normally including the "
+    "account name (InferRoute's account of that version)",
 )
 
 
@@ -1021,6 +1033,9 @@ def verify_receipt(receipt: dict, *, bundle_dir: Optional[str] = None, searches:
     check_receipt_consistency(c, receipt, infos, list(searches or []))
     for n in NOT_RECOMPUTED:
         c.add(None, "not recomputed", n)
+    if receipt.get("preamble_path") != "home-relative":
+        for n in OLDER_CLIENT_NOT_RECORDED:
+            c.add(None, "not recomputed", n)
     return c, (not c.failed and not blocking_skips(c))
 
 

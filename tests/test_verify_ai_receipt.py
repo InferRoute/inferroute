@@ -342,9 +342,11 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     spec = importlib.util.spec_from_file_location("vr_ai_plain", p); V = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(V)
     t = V.PLAIN_AI_LANE
-    assert "this computer's own account" in t and "does not say whether the processors ran in their confidential mode" in t
-    assert "not measured" in t and "holds the key" in t and "Chutes" in t and "not recomputed" in t
+    assert "the app vouching for itself" in t and "did not confirm the chips were in their protected mode" in t
+    assert "does not even say which program it was" in t and "held the key" in t and "Chutes" in t
+    assert "only compared with its own earlier record" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
-    for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "protected"):
+    for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "was protected.",
+                "is protected", "are protected"):
         assert bad not in low, bad

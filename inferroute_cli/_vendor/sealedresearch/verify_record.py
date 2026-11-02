@@ -1064,8 +1064,8 @@ TDX_PRESEAL = ("before the firewall and seal are installed the program fetches i
 
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_RANKER_CLOSED,
-     "the private ranking part of the program is identified by its fingerprint but cannot be read by you, so "
-     "what it does with your search cannot be checked"),
+     "the ranking part of the program is secret: its exact version is pinned, but you cannot read it, so what it "
+     "does with your search cannot be checked"),
     (TDX_RUNS_PRIVILEGED,
      "the search program runs with full control inside the machine"),
     (TDX_TRUSTED_BASE,
@@ -1080,8 +1080,8 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "the physical machine is Google's and the virtual machine on it is InferRoute's; this record does not show "
      "what either could see, and the reference it was checked against is InferRoute's own"),
     (TDX_PRESEAL,
-     "before it closes its network the program fetches its index, and its private ranking part has already run "
-     "with full control of the machine"),
+     "the program shuts its network only after downloading its index and running its secret ranking part with the "
+     "network open and full control of the machine, so that part was not locked in when it ran"),
     (TDX_OWN_KEY,
      "which program counts as InferRoute's rests on InferRoute's own signature, and nobody outside InferRoute "
      "has rebuilt it"),
@@ -1189,16 +1189,16 @@ PLAIN_ANSWER_TDX: Dict[int, str] = {
     -1: PLAIN_ANSWER[-1],
     0: "This record cannot tell you whether your text stayed private: it records which machine and which "
        "program image ran your search, not whether anyone read your text, so on that question it says nothing.",
-    1: "This record cannot prove that nobody read your text. What it adds is a check of the image the search "
-       "machine started from. The image is the one InferRoute published, byte for byte. Inside it, the search "
-       "program's own source files match the source InferRoute publishes; its ranking modules are fixed by "
-       "fingerprint but their source is not published, so what they do with your search cannot be read; and the "
-       "operating system and library files underneath were matched to nothing but that published image. As "
-       "published, before it accepts its first search the program installs a firewall and a seal that admit "
-       "nothing outbound except replies to requests and one port used for its network address, and its screen "
-       "output is discarded. Before that point it fetches its index over the network, and its ranking modules "
-       "have already run with full control of the machine. All of this is read from the published files; none of "
-       "it is an observation of what the program did.",
+    1: "Everything below is about which program the search machine started with. None of it is about what "
+       "happened to your text, and on that question this record says no more than the shorter version does. What it "
+       "adds: the program the machine started is exactly the one InferRoute published. Inside it, the search "
+       "program's own code matches the code InferRoute publishes; its ranking part is secret (its exact version is "
+       "pinned, but you cannot read it); and the operating system was compared only with InferRoute's own published "
+       "copy, not with anything independent. As published, the program shuts off its network connections, except "
+       "replies to searches and one used to keep its network address, before it takes its first search. It does that "
+       "only after it has downloaded its search index and run its secret ranking part with the network open and full "
+       "control of the machine. All of this is InferRoute checking its own work against its own published list: "
+       "nobody outside InferRoute has confirmed it.",
 }
 PLAIN_TDX_HEADLINE_1 = ("The saved search statements have valid signatures linked to hardware evidence from an Intel "
                         "TDX machine, and the image that machine started from was checked against the files "
@@ -1267,6 +1267,11 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # provider can actually act on, so the ask moves to the next open gap instead of vanishing with the
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
+    # Level 1 (image checked). Naive reader, 2 Nov: level 1 had lost the one thing a reader can act on.
+    (TDX_PRESEAL,
+     "ask for a record made with a program that shuts its network before its secret ranking part runs, and whose "
+     "program someone outside InferRoute has rebuilt and confirmed (this verifier would show the first; your "
+     "provider would have to show the second, and the other gaps stay open)"),
     ("the Intel TDX image's own permissions were not assessed",
      "ask for a record made with a program image that sends nothing from your search anywhere except the "
      "results back to you, and writes nothing where whoever runs the machine can read it, such as the "
@@ -2943,19 +2948,20 @@ def _load_ai_receipt_verifier():
 # marked as this computer's own account, or names what nothing here establishes. Printed only when every receipt
 # in the record was fully re-checked offline.
 PLAIN_AI_LANE = (
-    "This computer reports that it sent your conversation with the AI assistant only to the machines this record "
-    "names, and that it sealed each message, on this computer, to a key named in each machine's hardware report. The "
-    "machines sign nothing per message, so that part rests on this computer's own account. For each machine named, "
-    "the record does show: it was a genuine Intel TDX machine with its debug interface off; the measurements of what "
-    "it loaded after its firmware were recomputed by InferRoute from files the operator, Chutes, publishes, while the "
-    "firmware measurement itself was matched to a value InferRoute had recorded, not recomputed; and NVIDIA's "
-    "attestation service issued a token, under NVIDIA keys this program pins and for this session's nonce, that the "
-    "graphics processors' identity and firmware matched NVIDIA's reference. That token does not say whether the "
-    "processors ran in their confidential mode, so protection of your text while it was on them is not established. "
-    "The machines belong to third-party hosts, and the program on them is chosen by Chutes. That program, fetched "
-    "after the hardware report was made, is what reads your messages and holds the key they were sealed to, and it "
-    "is not measured: this record cannot tell you what it did with your text or that key, or whether it kept them. "
-    "InferRoute's relay, which carried the traffic, could see when and how much you sent.")
+    "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of your "
+    "messages so that only the machines named here could read them, and sent them only to those machines. That is "
+    "the app vouching for itself: the machines confirm nothing per message. For each machine, this record does show "
+    "that it was a real Intel confidential machine with one inspection door (Intel's debug interface) switched off, "
+    "which closes one way of reading its memory and says nothing about the others; that the software it started from "
+    "matches files published by Chutes, the company that runs these machines for InferRoute (InferRoute recomputed "
+    "most of these values itself; one firmware value it only compared with its own earlier record); and that NVIDIA "
+    "confirmed the graphics chips were genuine with the expected firmware. NVIDIA did not confirm the chips were in "
+    "their protected mode, so whether your text was protected while those chips held it is unknown. The AI program "
+    "that actually read your messages, and that held the key to decrypt them, is chosen by Chutes and loaded after "
+    "the machine's report was made, so the report does not even say which program it was: this record cannot tell "
+    "you what it did with your text or whether it kept it. The machines themselves belong to other companies that "
+    "host them for Chutes. InferRoute's relay, which passed the encrypted traffic along, could see when and how much "
+    "you sent.")
 _AI_LANE_VERIFIED = False
 
 

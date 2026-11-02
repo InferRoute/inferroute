@@ -3088,9 +3088,10 @@ PLAIN_AI_PATH_DIRECT = (
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
     "InferRoute's relay. By InferRoute's account of how the app works, which no row here checks, the gateway could "
     "see which account sent them, from which network address (the app contacts the gateway directly from your "
-    "computer, both to find and check machines and to send requests, so the gateway sees the address even when no "
-    "request is sent), when, how much, which AI model and which machine, and this record checks none of that, nor "
-    "whether it logs it, or for how long, nor where it is.")
+    "computer to find machines, fetch their evidence and send requests, and checks that evidence with Intel's and "
+    "NVIDIA's services itself, so the gateway sees the address even when no request is sent), when, how much, which "
+    "AI model and which machine, and this record checks none of that, nor whether it logs it, or for how long, nor "
+    "where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
@@ -3145,9 +3146,10 @@ PLAIN_AI_SUMMARY = (
     "about {text}: they were genuine Intel TDX machines with debug mode off, their starting software matched "
     "measurements {supplied}, and each machine's report, made in answer to the app's challenge, carried the "
     "fingerprint of a public key that matched the key the app says it used; NVIDIA's report on the graphics chips "
-    "answered that challenge too. NVIDIA's report said nothing about the chips' confidential-computing mode. Intel's "
-    "debug mode being off for each machine (for its whole life, by Intel's design), and the chips' debug mode being "
-    "off when NVIDIA reported, rule out reading memory through those modes, not by other means.")
+    "carried a value derived from that challenge and that key, which this record checks. NVIDIA's report said nothing"
+    " about the chips' confidential-computing mode. Intel's debug mode being off for each machine (for its whole "
+    "life, by Intel's design), and the chips' debug mode being off when NVIDIA reported, rule out reading memory "
+    "through those modes, not by other means.")
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, this record does not "
     "say, and InferRoute has not stated in it, the following, so ask the AI operator and InferRoute directly: how "
@@ -3295,7 +3297,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                f"it, and was addressed only to those machines (on the way it passes through {path_words}, described below)"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]),
-        credit="" if not f["requests"] else f" and records {f['credited']} of them as the machine(s) it addressed those requests to", **f)
+        credit=("" if not f["requests"] else
+                (", and addressed its requests to that machine" if f["machines"] == 1 and f["credited"] == 1 else
+                 f" and records {f['credited']} of them as the machine(s) it addressed those requests to")), **f)
     if empty:
         session = PLAIN_AI_SESSION_EMPTY.format(window=_plain_window(f["start"], f["end"]), **f)
     if f["first_pin"] and f["requests"]:

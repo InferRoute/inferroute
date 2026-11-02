@@ -231,7 +231,9 @@ def test_a_signed_build_is_our_record_an_unsigned_one_is_only_pending(signing):
     builds.absorb_remote([_sign(signing, _row(id="signed-one"))])
     builds.absorb_remote([_row(id="unsigned-one", mrtd="11" * 48)])
     by_id = {e["id"]: e for e in builds._EXTRA}
-    assert by_id["signed-one"]["status"] == "signed"
+    assert by_id["signed-one"]["origin"] == "signed" and by_id["signed-one"]["status"] == ""
+    # The absorbed row must still verify, or every receipt that carries it fails offline (verify_ai_receipt._row_signed).
+    assert builds.verify_signature(by_id["signed-one"])
     assert by_id["unsigned-one"]["status"] == "pending"
 
 

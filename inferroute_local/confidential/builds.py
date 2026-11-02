@@ -245,7 +245,10 @@ def absorb_remote(rows, origin: str = "relay") -> int:
         refusal = signed and str(b.get("status", "")).lower() == "refused"
         if k in have and not refusal:
             continue
-        _EXTRA.append({**b, "status": "refused" if refusal else ("signed" if signed else "pending"),
+        # A signed row keeps the status it was signed with: the signature covers `status`, and the receipt carries this
+        # row, so rewriting it to "signed" made every receipt from that build fail its offline re-check (found 2 Nov by
+        # the code-reading audit; tee-vm-2026-10-11 was signed as "observed"). Trust is `origin`, not `status`.
+        _EXTRA.append({**b, "status": str(b.get("status", "")).lower() if signed else "pending",
                        "origin": ("signed" if signed else origin)})
         have.add(k)
         n += 1

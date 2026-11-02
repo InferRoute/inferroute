@@ -3056,10 +3056,11 @@ PLAIN_AI_GPU = (
     "{text} while the chips processed it, and this record cannot tell you whether it was on.")
 PLAIN_AI_PROGRAM = (
     "The AI program your messages {were} addressed to, and that holds the key to decrypt them, is chosen by the AI "
-    "operator and is not among the software the machine's report measures, so the report does not say which program "
-    "it was, and the operator can change it at any time without anything in this kind of record showing the change. "
-    "That program necessarily reads every message in plain text in order to answer it; by InferRoute's account of how"
-    " the app works, which no row here checks, with every request sent while the app still rated this conversation "
+    "operator and is not among the software the machine's report measures (by InferRoute's account the operator loads"
+    " it after the machine's start-up measurements were taken), so the report does not say which program it was, and "
+    "the operator can change it at any time without anything in this kind of record showing the change. That program "
+    "necessarily reads every message in plain text in order to answer it; by InferRoute's account of how the app "
+    "works, which no row here checks, with every request sent while the app still rated this conversation "
     "confidential, the app {sends} it a note of its own, naming the machine, the AI model and {record_file}, and "
     "because the AI operator chooses it, the operator could make it keep or send on that text; this record cannot "
     "tell you what it {did} or whether it kept it.")
@@ -3081,10 +3082,11 @@ PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
     "InferRoute's relay. By InferRoute's account of how the app works, which no row here checks, the gateway could "
-    "see which account sent them, from which network address (the app's machine check also came from your computer, "
-    "so the gateway would have seen the address even if no request had been sent), when, how much, which AI model and"
-    " which machine, and this record checks none of that, nor whether it logs it, or for how long, nor where it is. "
-    "Whoever runs the physical machine could also see when and how much was sent.")
+    "see which account sent them, from which network address (the app contacts the gateway directly from your "
+    "computer, both to find and check machines and to send requests, so the gateway sees the address even when no "
+    "request is sent), when, how much, which AI model and which machine, and this record checks none of that, nor "
+    "whether it logs it, or for how long, nor where it is. Whoever runs the physical machine could also see when and "
+    "how much was sent.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")

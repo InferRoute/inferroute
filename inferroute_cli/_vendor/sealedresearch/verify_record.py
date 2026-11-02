@@ -2969,7 +2969,7 @@ PLAIN_AI_OPEN_EMPTY = (
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
     "carries the conversation so far) to {machines} distinct machine(s), {window}. This record is designed to contain"
-    " no message text, but it does show when the conversation ran and which machines were checked for it.")
+    " no message text, but it does show when the conversation ran and which machine(s) the app checked for it.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) checked for it.")
@@ -2981,25 +2981,24 @@ PLAIN_AI_KEY = (
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this"
     " record checks that fingerprint against the key the app says it used; the report commits to that public key, but"
     " does not show where the matching private key was made or kept. Each report also answered a challenge the app "
-    "recorded for this conversation, so it is not a report made before that challenge existed. Whether the app really"
-    " encrypted your messages to that key is again only the app's claim, and no machine signs anything per message, "
-    "so nothing from the machines shows that they received yours.")
+    "says it drew for this conversation, so it is not a report made before that challenge existed. Whether the app "
+    "really encrypted your messages to that key is again only the app's claim, and no machine signs anything per "
+    "message, so nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
-    "are checked against copies of Intel's and NVIDIA's root certificates that InferRoute built into this check (for "
-    "NVIDIA's attestation service, a copy of NVIDIA's intermediate certificate, to which the certificates the app "
-    "kept are tied) (anyone can compare them with the ones Intel and NVIDIA publish), and the expected software "
-    "measurements the machines are compared with were supplied by InferRoute, which also operates {relay} and makes "
-    "the app; so for most of what follows you rely on InferRoute's own records and code.")
+    "are checked against fingerprints of Intel's and NVIDIA's root public keys that InferRoute built into this check "
+    "(for NVIDIA's attestation service, of an intermediate key, to which the certificates the app kept are tied) "
+    "(anyone can compare them with the ones Intel and NVIDIA publish), and the expected software measurements the "
+    "machines are compared with were supplied by InferRoute, which also makes the app{relay}; so for most of what "
+    "follows you rely on InferRoute's own records and code.")
 PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
     "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
     "with its debug mode off (a mode that company could otherwise use to read the machine's memory) at the moment its"
     " report was made. It shows that the software the machine started from matched four measurements (fingerprints of"
-    " its start-up software) InferRoute supplied, as InferRoute's list stood when this record was exported; a flaw "
-    "InferRoute finds in that software later will not show here. Intel's own published status for this hardware was "
-    "'{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
+    " its start-up software) {provenance} Intel's own published status for this hardware was '{tcb_word}' {tcb_scope}"
+    " at the time, and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation.")
@@ -3012,8 +3011,10 @@ PLAIN_AI_BUILD_RUNTIME = (
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
     "configuration) was not compared at all. The AI operator is, by InferRoute's account, the company that operates "
-    "these machines and from which InferRoute buys access to them; the rows above show a name in the certificate that signed each machine's evidence, "
-    "a name this check reads but does not verify.")
+    "these machines and from which InferRoute buys access to them; the rows above show a name in the certificate that"
+    " signed each machine's evidence, a name this check reads but does not verify. The key behind that certificate is"
+    " itself committed in the machine's report, so the evidence was signed from inside the machine; only the name is "
+    "unverified.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
@@ -3033,15 +3034,26 @@ PLAIN_AI_PROGRAM = (
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
+PLAIN_AI_PATH_RELAY = (
+    "InferRoute operates a relay and, by InferRoute's account, the AI operator a gateway that the app says {carried} your "
+    "encrypted messages; either could see which account sent them, when, and how much, and this record checks none of "
+    "that, nor whether either logs it, or for how long, nor where the relay and gateway are.")
+PLAIN_AI_PATH_DIRECT = (
+    "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway with a key of your own, "
+    "not through InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record "
+    "checks none of that, nor whether it logs it, or for how long, nor where it is.")
+PLAIN_AI_PROVENANCE_LIST = (
+    "InferRoute supplied, as InferRoute's list stood when this record was exported; a flaw InferRoute finds in that "
+    "software later will not show here.")
+PLAIN_AI_PROVENANCE_RUNTIME = (
+    "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute shipped "
+    "inside this check, so you cannot read it there.")
 PLAIN_AI_HOSTS = (
-    "The machines themselves belong to other companies or individuals (by InferRoute's account; the AI operator's network calls them miners) "
-    "who host the physical hardware for the AI operator. Intel's hardware protection, which this record shows the "
-    "machines had, closes one way those hosts could read a machine's memory, but does not rule out others, such as "
-    "measuring the chips' behaviour from outside or physically tampering with the hardware, and this record does not "
-    "say which country the machines were in. InferRoute operates a relay and, by InferRoute's account, the AI operator a "
-    "gateway that the app says {carried} your encrypted messages; either could see which account sent them, when, and "
-    "how much, and this "
-    "record checks none of that, nor whether either logs it, or for how long, nor where the relay and gateway are.")
+    "The machines themselves belong to other companies or individuals (by InferRoute's account; the AI operator's "
+    "network calls them miners) who host the physical hardware for the AI operator. Intel's hardware protection, "
+    "which this record shows the machines had, closes one way those hosts could read a machine's memory, but does not"
+    " rule out others, such as measuring the chips' behaviour from outside or physically tampering with the hardware,"
+    " and this record does not say which country the machines were in.")
 PLAIN_AI_SUMMARY = (
     "In short: nothing in this record shows that {text} was exposed, and nothing in it shows that it was not. What it"
     " establishes is about the machines, not about {text}: they were genuine Intel TDX machines with debug mode off, "
@@ -3052,19 +3064,21 @@ PLAIN_AI_SUMMARY = (
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI operator "
     "and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages are "
-    "used to train AI models, whether backups are kept and where, in which country the machines, the relay and the "
-    "gateway were, and which of them is legally responsible for your messages under data-protection law and what "
-    "rights you have to copies or erasure, whether your agreement is with InferRoute alone, and whether you will be "
-    "told if any of them finds that your messages or their timing were accessed without authority. If the answer to "
-    "any of these is that they do not know or will not say, this record offers nothing against that answer. The app "
-    "also keeps the conversation on your own computer; ask InferRoute where, and how to delete it.")
+    "used to train AI models, whether backups are kept and where, in which country the machines, the relay (where one"
+    " was used) and the gateway were, and which of them is legally responsible for your messages under "
+    "data-protection law and what rights you have to copies or erasure, whether your agreement is with InferRoute "
+    "alone, and whether you will be told if any of them finds that your messages or their timing were accessed "
+    "without authority. If the answer to any of these is that they do not know or will not say, this record offers "
+    "nothing against that answer. By InferRoute's account, the app also keeps the conversation on your own computer; "
+    "ask InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
-    "that their times, as the app recorded them, fall within the period in which the app says a checked machine was in "
-    "use (or within five minutes after it ended), not that they came from the conversation.")
+    "that their times, as the app recorded them, fall within the period in which the app says a checked machine was "
+    "in use (or within five minutes after it ended, and before any refusal), not that they came from the "
+    "conversation.")
 
 
 def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
@@ -3088,10 +3102,8 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
             m = re.search(r"status (\w+)", detail)
             if m:
                 statuses.add(m.group(1))
-        if name.endswith("Intel Quoting Enclave identity and status"):
-            m = re.match(r"(\w+):", detail)
-            if m:
-                statuses.add(m.group(1))
+        # Only the platform status feeds the plain words (review 5): the QE status is a different property, and pooling
+        # the two scoped "for at least one machine" wrongly. A QE outside UpToDate/SWHardeningNeeded FAILS anyway.
     return {"requests": reqs, "machines": len(distinct) or 1, "refused": refused, "refused_at": refused_at,
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
             "start": str(receipt.get("started_at") or "?"),
@@ -3151,6 +3163,8 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                "it, and went only to those machines"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]), **f)
+    direct = "direct" in str(f.get("transport") or "").lower()
+    runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
     tcb = f["tcb"] or []
     tcb_word = ("up to date" if tcb and all(t == "UpToDate" for t in tcb)
                 else "software hardening needed" if "SWHardeningNeeded" in tcb else "not stated in these rows")
@@ -3158,14 +3172,19 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                                   if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
     parts = [opening + " " + session + refusal,
              PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS.format(
-                 relay="the relay the app says your traffic passed through" if "relay" in f["transport"].lower()
-                 else "the relay InferRoute states carries this traffic"),
-             " ".join(x for x in (PLAIN_AI_MACHINE.format(tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
+                 relay=(" (by the app's record this conversation did not pass through InferRoute's relay)" if direct
+                        else ", and operates the relay the app says your traffic passed through"
+                        if "relay" in str(f.get("transport") or "").lower()
+                        else ", and operates the relay InferRoute states carries this traffic")),
+             " ".join(x for x in (PLAIN_AI_MACHINE.format(
+                 provenance=PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_LIST, tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty else "your text"),
              PLAIN_AI_PROGRAM.format(were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
-             PLAIN_AI_HOSTS.format(carried="would have carried" if empty else "carried"), PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
+             PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct
+                                     else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")),
+             PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
              PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches)
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches

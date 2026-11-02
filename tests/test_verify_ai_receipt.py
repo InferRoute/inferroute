@@ -372,6 +372,12 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     bare = V.plain_ai_lane(0, dict(f, refused=True, refused_at=""))
     assert V.PLAIN_AI_VERDICT_ONLY in bare and "lies inside the conversation's time window" not in bare
     assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
+    # Review 5 (MATERIAL x2): a direct carrier names no InferRoute relay; a run-time build claims no shipped list.
+    direct = V.plain_ai_lane(0, dict(f, transport="direct to the enclave operator (your own key — InferRoute is not in the path)"))
+    assert "InferRoute operates a relay" not in direct and "straight to the AI operator's gateway" in direct
+    assert "InferRoute operates a relay" in up and "straight to" not in up
+    rt2 = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
+    assert "as InferRoute's list stood" not in rt2 and "carried in a row InferRoute signed" in rt2
     assert "for every machine" in up and "for at least one machine" in V.plain_ai_lane(0, dict(f, tcb=["UpToDate", "SWHardeningNeeded"], tcb_uniform=False))
     nocount = V.plain_ai_lane(0, dict(f, requests=None))
     assert "carries no count of requests" in nocount and "? request" not in nocount

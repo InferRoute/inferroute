@@ -1117,6 +1117,12 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         raise S.ProbantError("the independent verifier (pi_attested/verify_record.py) is missing from this installation; "
                               "refusing to write a record that VERIFY.md tells the reader to verify with it")
     files["verify_record.py"] = verifier_src.read_bytes()
+    # The AI-receipt re-checker travels beside it: verify_record.py imports it from its own directory and prints its rows
+    # as an optional section. Shipped whenever this installation has it; its absence in a record is reported by
+    # verify_record.py as "NOT re-checked", never as a pass.
+    ai_src = verifier_src.with_name("verify_ai_receipt.py")
+    if ai_src.exists():
+        files["verify_ai_receipt.py"] = ai_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
                 # Which matter this was made from, beyond its name (export_belongs_to).
                 "matter_created_at": rec.get("created_at"),
@@ -2784,8 +2790,15 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         # version that knows what belongs in it.
         "verify_record.py": _installed_verifier(),
     }
+    # The AI-receipt re-checker beside the verifier, from THIS installation like verify_record.py above.
+    _ai = Path(__file__).resolve().parent / "pi_attested" / "verify_ai_receipt.py"
+    if _ai.is_file():
+        files["verify_ai_receipt.py"] = _ai.read_bytes()
     for name in sorted(p.name for p in src.iterdir()):
-        if name.endswith(".evidence.json") or name == "unanswered.json":
+        # *.attestation.json: the per-machine evidence rows the receipts' served_by point at — measurements, the
+        # device's challenge, public keys and the vendors' signed answers; no text. Without them the pack names
+        # evidence it does not carry, and the offline re-check can only reach the last machine of each session.
+        if name.endswith(".evidence.json") or name.endswith(".attestation.json") or name == "unanswered.json":
             files[name] = (src / name).read_bytes()
     # 23 Sep: claim 7 told the auditor to read `session-*.receipt.json` and the pack did not carry it, so
     # the brief named a file the folder did not contain — the same "our own word, nothing beside it" gap

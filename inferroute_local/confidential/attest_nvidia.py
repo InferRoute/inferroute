@@ -93,6 +93,14 @@ class GpuVerdict:
     vbios: str = ""
     warnings: list = field(default_factory=list)
     per_gpu: dict = field(default_factory=dict)
+    # NVIDIA's answer AS RETURNED (the EAT JWTs, overall and per GPU) and the JWKS entries that sign them,
+    # so a receipt can carry NVIDIA's verdict rather than this device's summary of it. Added 2026-11-02:
+    # before this, `gpu_verified: True` in a receipt was a sentence nobody could recompute.
+    raw: object = None
+    jwks_used: dict = field(default_factory=dict)
+    challenge: str = ""
+    arch: str = ""
+    fetched_at: float = 0.0
 
 
 def evaluate(resp, jwks: dict, expected_nonce: str) -> GpuVerdict:
@@ -175,7 +183,47 @@ async def attest_gpus(http, gpu_evidence: list, nonce: str, e2e_pubkey_b64: str,
     r = await http.post(f"{NRAS}/v3/attest/gpu", json=payload, headers={"User-Agent": UA}, timeout=timeout)
     if r.status_code != 200:
         return GpuVerdict(False, f"NVIDIA attestation service answered {r.status_code}: {r.text[:120]}")
-    return evaluate(r.json(), jwks, expected)
+    resp = r.json()
+    v = evaluate(resp, jwks, expected)
+    v.raw, v.challenge, v.arch, v.fetched_at = resp, expected, arch, time.time()
+    v.jwks_used = jwks_for(resp, jwks)
+    return v
+
+
+def jwks_for(resp, jwks: dict) -> dict:
+    """The JWKS entries (by kid) that the tokens in `resp` name -- the whole JWKS is ~200 rotating keys
+    with certificate chains, far too much to keep per receipt; the two or three that matter are kept."""
+    kids: list[str] = []
+    try:
+        toks = [resp[0][1]] + list((resp[1] or {}).values())
+    except Exception:
+        return {}
+    for t in toks:
+        try:
+            kid = jwt_parts(t)[0].get("kid")
+        except Exception:
+            continue
+        if kid and kid not in kids:
+            kids.append(kid)
+    by_kid = {k.get("kid"): k for k in (jwks.get("keys") or []) if isinstance(k, dict)}
+    return {k: by_kid[k] for k in kids if k in by_kid}
+
+
+def record(v: GpuVerdict) -> dict:
+    """JSON-safe copy of NVIDIA's verdict as fetched, for the receipt. Nothing secret: GPU measurements and
+    identities, the challenge (a hash of our nonce and the instance's public key), and NVIDIA's signing keys."""
+    import datetime as dt
+    return {
+        "source": "NVIDIA Remote Attestation Service (nras.attestation.nvidia.com) v3, fetched by this device directly from NVIDIA",
+        "fetched_at": dt.datetime.fromtimestamp(v.fetched_at, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if v.fetched_at else "",
+        "challenge": v.challenge,
+        "arch": v.arch,
+        "claims_version": "3.0",
+        "response": v.raw,
+        "jwks_used": v.jwks_used,
+        "jwks_note": "the entries of NVIDIA's published JWKS that sign these tokens, each with its x5c chain; "
+                     "the chain's last certificate is a NVIDIA Attestation Service intermediate the verifier pins",
+    }
 
 
 def check_from(v: GpuVerdict) -> Check:

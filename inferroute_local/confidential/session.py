@@ -19,8 +19,8 @@ from typing import AsyncIterator, Callable
 
 import httpx
 
-from . import attest, e2ee, translate
-from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, _now, lane_preamble
+from . import attest, builds, e2ee, translate
+from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, _now, lane_preamble, receipts_dir
 from .transport import Transport
 
 logger = logging.getLogger("inferroute_local.confidential")
@@ -277,6 +277,18 @@ class ConfidentialSession:
             "e2e_pubkey_sha256": _sha256_b64(p.pubkey_b64),
             "recompute": "sha256((challenge + e2e_pubkey).encode()) == the quote's report_data[0:32]",
         }
+        # THE THIRD PARTIES' WORDS, VERBATIM. The online checks (Intel TCB/QE/CRLs, NVIDIA's per-GPU verdict)
+        # used to survive only as this device's one-line summaries. A verifier reading the receipt later had
+        # Intel's and NVIDIA's names on rows it could not redo. Kept here, with their own note, so an auditor
+        # can tell the three authors apart: the operator's evidence, our challenge, and the vendors' answers.
+        self.receipt.attestation["collateral"] = {
+            "note": "Intel's and NVIDIA's signed answers as this device fetched them, verbatim — neither ours nor "
+                    "the operator's. verify_ai_receipt.py re-checks the online rows from these with no network.",
+            **dict(r.collateral or {}),
+        }
+        # The build row this device matched, including any offline signature it carried, so the verifier can
+        # recompute `build_recorded` for a run-time (signed) row that a released verifier does not bundle.
+        self.receipt.attestation["build"] = dict(builds.lookup(r.mrtd, r.rtmrs) or {}) if r.mrtd else {}
         # Session-specific caveats first: they are the ones a reader most needs, and they are the
         # ones that used to exist only on screen.
         self.receipt.limitations = [{"id": k, "text": t} for k, t in
@@ -312,7 +324,11 @@ class ConfidentialSession:
             try:
                 blob = json.dumps(att, sort_keys=True).encode()
                 sha = hashlib.sha256(blob).hexdigest()
-                store = Path(self.receipt.path).parent / "evidence" if self.receipt.path else None
+                # The receipt has no path until its first save(), and the first pin happens before it: a session
+                # that pinned once and never re-pinned wrote NO evidence file for its only machine (found 2026-11-02
+                # building a fixture: served_by named a sha256 nothing on disk carried). Fall back to the
+                # receipts directory, which is where save() will put the receipt anyway.
+                store = (Path(self.receipt.path).parent if self.receipt.path else receipts_dir()) / "evidence"
                 if store is not None:
                     store.mkdir(parents=True, exist_ok=True)
                     f = store / f"{sha}.json"

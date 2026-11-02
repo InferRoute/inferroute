@@ -150,7 +150,11 @@ def test_opens_confidential_and_pins_a_verified_sealable_instance(world):
     # It is the row the fleet was verified FROM, not a summary of it: whatever the evidence service sent
     # for this instance is what a reader gets, so every field the checks read is there by construction.
     assert ev is not r.instance and set(ev) >= {"instance_id"}
-    operator_part = {k: v for k, v in ev.items() if k != "checked_with"}
+    # Three keys are THIS DEVICE's additions to the operator's row: our side of the exchange, the vendors' answers
+    # as fetched, and the build row matched. Everything else must be the operator's bytes.
+    operator_part = {k: v for k, v in ev.items() if k not in ("checked_with", "collateral", "build")}
+    assert "note" in ev["collateral"] and "verbatim" in ev["collateral"]["note"], "the vendors' answers are labelled as theirs"
+    assert isinstance(ev.get("build"), dict), "the build row this device matched travels in the receipt"
     assert any(row.get("instance_id") == "i-a" and row == operator_part for row in s._raw_evidence), \
         "the receipt's evidence is not the row this device actually verified"
     assert not any(lim["id"] == "attributed-key" for lim in r.limitations), "the key binding is a check, not a limitation"

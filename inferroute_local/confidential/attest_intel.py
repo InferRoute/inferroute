@@ -225,6 +225,40 @@ class Collateral:
     pck_crl: object = None
     root_crl: object = None
     fetched_at: float = field(default_factory=time.time)
+    # THE BYTES BEHIND THE VERDICTS, kept so a receipt can carry them. Until 2026-11-02 the receipt held only
+    # the words "tcb_current: Intel TCB status UpToDate" -- this device's reading of documents nobody else
+    # could re-read, because the documents were thrown away. These are Intel's responses verbatim (the
+    # signed JSON texts, the issuer chains from the response headers, the two CRLs), so a third party can
+    # re-run the same checks offline, at the session's time, from the receipt alone.
+    ca: str = "platform"
+    tcb_text: str = ""
+    qe_text: str = ""
+    tcb_chain_pem: str = ""
+    qe_chain_pem: str = ""
+    pck_crl_pem: bytes = b""
+    root_crl_der: bytes = b""
+
+    def as_record(self) -> dict:
+        """JSON-safe copy of the collateral as fetched: what a verifier needs to redo tcb_current /
+        qe_current / not_revoked / root_pinned with no network. `pck_crl` and `root_ca_crl` are base64 DER
+        (the shape verify_record.py already reads for the search lane). Nothing here is secret: it is
+        Intel's published, signed material plus the platform family id in the PCK certificate."""
+        import base64
+        import datetime as dt
+        from cryptography.hazmat.primitives import serialization
+        pck_der = self.pck_crl.public_bytes(serialization.Encoding.DER) if self.pck_crl is not None else b""
+        return {
+            "source": "Intel PCS (api.trustedservices.intel.com), fetched by this device directly from Intel",
+            "fetched_at": dt.datetime.fromtimestamp(self.fetched_at, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "fmspc": self.fmspc,
+            "ca": self.ca,
+            "tcb_info": self.tcb_text,
+            "qe_identity": self.qe_text,
+            "tcb_info_issuer_chain": self.tcb_chain_pem,
+            "qe_identity_issuer_chain": self.qe_chain_pem,
+            "pck_crl": base64.b64encode(pck_der).decode(),
+            "root_ca_crl": base64.b64encode(self.root_crl_der).decode(),
+        }
 
 
 def _raw_object(text: str, key: str) -> bytes:
@@ -292,6 +326,10 @@ async def fetch_collateral(http, fmspc: str, ca: str = "platform", timeout: floa
         qe_identity=qe["enclaveIdentity"], qe_raw=_raw_object(q.text, "enclaveIdentity"), qe_sig=bytes.fromhex(qe["signature"]),
         qe_chain=_chain_from_header(q.headers.get("SGX-Enclave-Identity-Issuer-Chain", "")),
         pck_crl=x509.load_pem_x509_crl(c.content), root_crl=x509.load_der_x509_crl(rc.content),
+        ca=ca, tcb_text=tcb_text, qe_text=q.text,
+        tcb_chain_pem=urllib.parse.unquote(r.headers.get("TCB-Info-Issuer-Chain", "")),
+        qe_chain_pem=urllib.parse.unquote(q.headers.get("SGX-Enclave-Identity-Issuer-Chain", "")),
+        pck_crl_pem=bytes(c.content), root_crl_der=bytes(rc.content),
     )
     _CACHE[fmspc] = col
     return col

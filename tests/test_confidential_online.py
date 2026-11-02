@@ -113,12 +113,16 @@ def intel(monkeypatch):
         text = '{"' + key_name + '":' + raw + ',"signature":"' + _sig64(tcb_k, raw.encode()).hex() + '"}'
         return text
     nxt = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    tcb_info = {"id": "TDX", "version": 3, "fmspc": FMSPC, "nextUpdate": nxt, "tcbLevels": [
+    # issueDate, pceId, tdxModule and the QE identity's version are what Intel's real documents carry; the
+    # offline re-checker (verify_ai_receipt.py) reads them, so the synthetic documents carry them too.
+    issued = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tcb_info = {"id": "TDX", "version": 3, "fmspc": FMSPC, "pceId": "0000", "issueDate": issued, "nextUpdate": nxt,
+                "tdxModule": {"mrsigner": "00" * 48, "attributes": "00" * 8, "attributesMask": "00" * 8}, "tcbLevels": [
         {"tcb": {"sgxtcbcomponents": [{"svn": v} for v in cpusvn], "pcesvn": 13, "tdxtcbcomponents": [{"svn": v} for v in tee_tcb_svn]},
          "tcbDate": "2025-08-13T00:00:00Z", "tcbStatus": "UpToDate"},
         {"tcb": {"sgxtcbcomponents": [{"svn": 0}] * 16, "pcesvn": 0, "tdxtcbcomponents": [{"svn": 0}] * 16},
          "tcbDate": "2020-01-01T00:00:00Z", "tcbStatus": "OutOfDate", "advisoryIDs": ["INTEL-SA-00000"]}]}
-    qe_id = {"id": "TD_QE", "nextUpdate": nxt, "mrsigner": "DC9E2A7C6F948F17474E34A7FC43ED030F7C1563F1BABDDF6340C82E0E54A8C5", "isvprodid": 2,
+    qe_id = {"id": "TD_QE", "version": 2, "issueDate": issued, "nextUpdate": nxt, "mrsigner": "DC9E2A7C6F948F17474E34A7FC43ED030F7C1563F1BABDDF6340C82E0E54A8C5", "isvprodid": 2,
              "attributes": "11000000000000000000000000000000", "attributesMask": "FBFFFFFFFFFFFFFF0000000000000000",
              "miscselect": "00000000", "miscselectMask": "FFFFFFFF",
              "tcbLevels": [{"tcb": {"isvsvn": 8}, "tcbDate": "2025-01-01T00:00:00Z", "tcbStatus": "UpToDate"},
@@ -312,3 +316,115 @@ def test_operator_profile_is_required_and_is_only_a_locator():
     assert h["X-IR-Fleet"] == "F" and h["X-IR-Stream"] == "true" and h["X-IR-Path"] == T.INVOKE_PATH
     h2 = T.invoke_headers(p.headers, fleet_id="F", instance_id="I", nonce="N", stream=False)
     assert h2["X-Op-Fleet"] == "F", "direct mode uses the profile's own header names"
+
+
+# ───────────────────────── what the receipt keeps for the offline re-check ─────────────────────────
+
+def _col_with_text(intel):
+    """The fixture's Collateral as fetch_collateral now fills it: the signed texts and chains it was built from."""
+    col = intel["col"]
+    pck, ca, root = intel["certs"]
+    col.tcb_text = '{"tcbInfo":' + col.tcb_raw.decode() + ',"signature":"' + col.tcb_sig.hex() + '"}'
+    col.qe_text = '{"enclaveIdentity":' + col.qe_raw.decode() + ',"signature":"' + col.qe_sig.hex() + '"}'
+    col.tcb_chain_pem = "".join(c.public_bytes(serialization.Encoding.PEM).decode() for c in col.tcb_chain)
+    col.qe_chain_pem = col.tcb_chain_pem
+    col.pck_crl_pem = col.pck_crl.public_bytes(serialization.Encoding.PEM)
+    col.root_crl_der = col.root_crl.public_bytes(serialization.Encoding.DER)
+    col.ca = "platform"
+    return col
+
+
+def test_collateral_record_round_trips_into_the_offline_verifier(intel, monkeypatch):
+    """What the client WRITES (Collateral.as_record) is what verify_ai_receipt.py READS: every Intel row of the
+    offline re-check passes on the record alone, under the test-pinned root, and fails when the record is edited."""
+    import sys
+    from pathlib import Path
+    pi = Path(__file__).resolve().parents[1] / "inferroute_cli" / "pi_attested"
+    if str(pi) not in sys.path:
+        sys.path.insert(0, str(pi))
+    import verify_ai_receipt as V
+    col = _col_with_text(intel)
+    rec = col.as_record()
+    assert set(rec) >= {"fetched_at", "fmspc", "ca", "tcb_info", "qe_identity", "tcb_info_issuer_chain", "qe_identity_issuer_chain", "pck_crl", "root_ca_crl"}
+    json.dumps(rec)                                            # JSON-safe
+    monkeypatch.setattr(V, "INTEL_SGX_ROOT_SPKI_SHA256", AI._spki_sha256(intel["certs"][2]))
+    q = V.parse_quote(intel["quote"])
+    certs = V._pem_chain(q["pck_chain_pem"])
+    c = V.Checks()
+    V.check_intel_collateral(c, q, certs, rec, dt.datetime.now(dt.timezone.utc))
+    assert not c.failed, c.rows
+    assert {n for _, n, _ in c.rows} == {"Intel TCB info", "Intel QE identity", "Intel revocation lists", "Intel TCB status (platform)",
+                                         "Intel Quoting Enclave identity and status"}
+    # an edited TCB document no longer carries Intel's signature
+    bad = dict(rec, tcb_info=rec["tcb_info"].replace('"UpToDate"', '"UpToDATE"', 1))
+    c = V.Checks()
+    V.check_intel_collateral(c, q, certs, bad, dt.datetime.now(dt.timezone.utc))
+    assert "Intel TCB info" in c.failed
+    # and no collateral at all is a SKIP, never a PASS
+    c = V.Checks()
+    V.check_intel_collateral(c, q, certs, None, dt.datetime.now(dt.timezone.utc))
+    assert [s for s, _, _ in c.rows] == ["SKIP"]
+
+
+def test_nvidia_verdict_is_kept_verbatim_with_the_keys_that_sign_it(nras):
+    import asyncio
+    exp = AN.challenge(NONCE, "PK")
+    resp = nras["resp"](exp, n=2)
+
+    class Http:
+        async def get(self, url, **k):
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self): return nras["jwks"]
+            return R()
+        async def post(self, url, json=None, **k):
+            class R:
+                status_code = 200
+                text = ""
+                def json(self): return resp
+            return R()
+    AN._JWKS, AN._JWKS_AT = {}, 0.0
+    v = asyncio.run(AN.attest_gpus(Http(), [{"arch": "BLACKWELL", "evidence": "A", "certificate": "B"}], NONCE, "PK"))
+    assert v.ok and v.raw == resp and v.challenge == exp and v.arch == "BLACKWELL" and v.fetched_at > 0
+    assert list(v.jwks_used) == ["nv-eat-kid-test"], "only the JWKS entries the tokens name are kept"
+    rec = AN.record(v)
+    assert rec["response"] == resp and rec["jwks_used"] == v.jwks_used and rec["challenge"] == exp and rec["fetched_at"].endswith("Z")
+    json.dumps(rec)
+    assert AN.jwks_for("not a response", nras["jwks"]) == {}
+
+
+def test_verify_online_attaches_the_collateral_it_read(intel, monkeypatch, nras):
+    import asyncio
+    import base64 as b64
+    q = intel["quote"]
+    gpu = [{"arch": "BLACKWELL", "evidence": "AAAA", "certificate": "BBBB"}]
+    inner = json.dumps({"evidence": {"tdx_quote": b64.b64encode(q).decode(), "nvtrust_evidence": json.dumps(gpu)}, "nonce": NONCE}).encode()
+    inst = {"quote": b64.b64encode(q).decode(), "attested_body": b64.b64encode(inner).decode(), "gpu_evidence": gpu}
+    rep = A.InstanceReport("i-1", {k: A.Check(True, "x") for k in A.REQUIRED}, 1, "aa", [], True, e2e_pubkey="PK")
+    col = _col_with_text(intel)
+
+    async def fake_fetch(http, fmspc, ca="platform", timeout=60.0):
+        return col
+    monkeypatch.setattr(AI, "fetch_collateral", fake_fetch)
+    exp = AN.challenge(NONCE, "PK")
+    resp = nras["resp"](exp, n=1)
+
+    class Http:
+        async def get(self, url, **k):
+            class R:
+                status_code = 200
+                def raise_for_status(self): pass
+                def json(self): return nras["jwks"]
+            return R()
+        async def post(self, url, json=None, **k):
+            class R:
+                status_code = 200
+                text = ""
+                def json(self): return resp
+            return R()
+    AN._JWKS, AN._JWKS_AT = {}, 0.0
+    out = asyncio.run(A.verify_online(rep, inst, NONCE, Http()))
+    assert out.verified, {k: c.why for k, c in out.checks.items() if not c.ok}
+    assert set(out.collateral) == {"intel", "nvidia"}
+    assert out.collateral["intel"]["fmspc"] == FMSPC and out.collateral["nvidia"]["response"] == resp

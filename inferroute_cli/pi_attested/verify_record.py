@@ -2813,6 +2813,62 @@ def check_reference_firmware_before_sealing(c: Checks, offer: Dict[str, Any],
         c.add(False, name, f"refusing to seal: firmware requirement or evidence is invalid ({type(exc).__name__})")
 
 
+def _load_ai_receipt_verifier():
+    """verify_ai_receipt.py, when it sits beside this program (in a record) or in this package. None otherwise."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    try:
+        import verify_ai_receipt                          # type: ignore
+        return verify_ai_receipt
+    except Exception:                                   # noqa: BLE001 — absent or unimportable: say so, never guess
+        return None
+
+
+def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Print verify_ai_receipt.py's rows for every session-*.receipt.json in the bundle, as an OPTIONAL section.
+
+    Returns {"receipts": n, "ok": k, "failed": f} or None when nothing could be run. Deliberately NOT folded into
+    this program's exit code or its confidentiality statements: those grade the search lane, and the AI lane's
+    wording has its own review to pass. What this section establishes is stated by its own rows."""
+    v = _load_ai_receipt_verifier()
+    try:
+        names = sorted(n for n in os.listdir(bundle_dir) if n.startswith("session-") and n.endswith(".receipt.json"))
+    except OSError:
+        names = []
+    if not names:
+        return None
+    print("\nAI session receipts — offline re-check (OPTIONAL section: these rows do not change the exit code or the "
+          "statements below)")
+    if v is None:
+        print("  NOTE verify_ai_receipt.py is not beside this program, so the receipts were NOT re-checked here. "
+              "They remain the professional's own device reporting on the AI machine.")
+        return None
+    try:
+        results = v.verify_bundle(bundle_dir, searches)
+    except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal, not a traceback
+        print(f"  FAIL AI receipts: verifier error: {type(exc).__name__}: {str(exc)[:120]}")
+        return {"receipts": len(names), "ok": 0, "failed": len(names)}
+    ok_n = failed_n = 0
+    for name, c, ok in results:
+        print(f"  {name}")
+        c.dump(indent="    ")
+        if c.failed:
+            failed_n += 1
+            print(f"    → FAILED: {len(c.failed)} row(s) contradict the receipt")
+        elif ok:
+            ok_n += 1
+            print("    → re-checked offline: Intel's and NVIDIA's signed answers, the quote, the key bindings and the "
+                  "recorded build all hold; SKIP rows name what no record can establish")
+        else:
+            print(f"    → INCOMPLETE: {len(v.blocking_skips(c))} row(s) could not be re-checked from this receipt (an older "
+                  "client did not keep the material); nothing in it contradicts")
+    print(f"  AI receipts: {ok_n} of {len(results)} fully re-checked offline, {failed_n} failed, "
+          f"{len(results) - ok_n - failed_n} incomplete. Per-request sealing, what the machine's software did with the text, "
+          "and retention remain the device's word; see each receipt's SKIP rows.")
+    return {"receipts": len(results), "ok": ok_n, "failed": failed_n}
+
+
 def _utc_now_iso() -> str:
     """Now, in the one format _parse_time accepts. For LIVE checks only, never for a record: a record is
     judged at the time its search ran, and dating one to "now" would let an entry retired since vouch for
@@ -3541,6 +3597,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             fails += len(cc.failed)
     if a.extract:
         extract(a.bundle, a.extract, [r for r in searches if isinstance(r, dict)])
+    # OPTIONAL: the AI session receipts, re-checked offline by verify_ai_receipt.py when it travels in the record.
+    # Rows only; no effect on `fails`, the exit code, or the confidentiality statements below (those still cover
+    # the SEARCH lane alone until the AI lane's wording is graded in its own right).
+    report_ai_receipts(a.bundle, [r for r in searches if isinstance(r, dict)])
     revocation_failed = False
     if searches and a.check_revocation:
         rc_checks = Checks()

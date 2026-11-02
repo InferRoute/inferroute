@@ -70,6 +70,12 @@ def test_standalone_has_no_inferroute_imports():
             if root == "urllib":
                 assert id(node) in fn_nodes, "urllib must not be imported at module level"
                 continue
+            if root == "verify_ai_receipt":
+                # The sibling that re-checks AI receipts, shipped beside this file in every record. Imported inside
+                # a function, by name, from this file's own directory; absent, the section says NOT re-checked.
+                # It is held to the same rule by tests/test_verify_ai_receipt.py (stdlib + cryptography, nothing of ours).
+                assert id(node) in fn_nodes, "verify_ai_receipt must be imported inside a function, never at module level"
+                continue
             assert root in allowed, name
 
 

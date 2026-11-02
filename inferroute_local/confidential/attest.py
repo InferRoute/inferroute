@@ -174,6 +174,9 @@ class InstanceReport:
     chain: str = ""
     e2e_pubkey: str = ""     # the ML-KEM key (base64) the quote was found to commit to; "" if unchecked
     gpus: dict = field(default_factory=dict)   # per-GPU {hwmodel, ueid, driver, vbios} once NVIDIA verified them
+    # What the online pass READ, verbatim (Intel's signed collateral, NVIDIA's verdict tokens), so the
+    # receipt can carry it and a third party can redo the online checks offline. {} until verify_online ran.
+    collateral: dict = field(default_factory=dict)
 
     @property
     def failing(self) -> list[str]:
@@ -613,6 +616,10 @@ async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, ti
         else:
             col = await attest_intel.fetch_collateral(http, ext["fmspc"], attest_intel.ca_kind(certs), timeout=timeout)
             ck.update(attest_intel.platform_checks(quote_b, certs, col))
+            try:
+                report.collateral["intel"] = col.as_record()
+            except Exception as e:                           # noqa: BLE001 — the record is best-effort; the checks are not
+                report.collateral["intel_unavailable"] = f"{type(e).__name__}: {str(e)[:80]}"
     except Exception as e:
         for k in ("quote_sig", "root_pinned", "not_revoked", "tcb_current", "qe_current"):
             ck.setdefault(k, Check(False, f"Intel collateral unavailable: {type(e).__name__}: {str(e)[:80]}"))
@@ -631,6 +638,8 @@ async def verify_online(report: InstanceReport, inst: dict, nonce: str, http, ti
         v = await attest_nvidia.attest_gpus(http, signed_gpu, nonce, report.e2e_pubkey, timeout=timeout)
         ck["gpu_verified"] = attest_nvidia.check_from(v)
         report.gpus = v.per_gpu if v.ok else {}
+        if v.raw is not None:
+            report.collateral["nvidia"] = attest_nvidia.record(v)
     except Exception as e:
         ck["gpu_verified"] = Check(False, f"NVIDIA attestation service unavailable: {type(e).__name__}: {str(e)[:80]}")
     report.verified = all(ck[k].ok for k in REQUIRED + REQUIRED_ONLINE if k in ck) and report.online_done

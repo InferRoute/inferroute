@@ -72,6 +72,9 @@ def test_export_writes_a_verifiable_bundle(matter):
     # the bundle's own verifier is the real standalone file, unmodified
     src = (Path(S.__file__).resolve().parent / "pi_attested" / "verify_record.py").read_bytes()
     assert (out / "verify_record.py").read_bytes() == src
+    # and the AI-receipt re-checker beside it, the same bytes, so verify_record.py finds it in the record
+    ai = (Path(S.__file__).resolve().parent / "pi_attested" / "verify_ai_receipt.py").read_bytes()
+    assert "verify_ai_receipt.py" in names and (out / "verify_ai_receipt.py").read_bytes() == ai
     # MANIFEST covers every file and carries the matter's date bound
     m = json.loads((out / "MANIFEST.json").read_text())
     assert m["matter_cutoff"] == 20200115

@@ -3037,10 +3037,10 @@ PLAIN_AI_PROGRAM = (
     "The AI program your messages {were} addressed to, and that holds the key to decrypt them, is chosen by the AI "
     "operator and is not among the software the machine's report measures, so the report does not say which program "
     "it was, and the operator can change it at any time without anything in this kind of record showing the change. "
-    "That program necessarily reads every message in plain text in order to answer it; with every request the app "
-    "also sends it a note of its own, naming the machine, the AI model and {record_file}, and because the AI operator"
-    " chooses it, the operator could make it keep or send on that text; this record cannot tell you what it {did} or "
-    "whether it kept it.")
+    "That program necessarily reads every message in plain text in order to answer it; by InferRoute's account of how"
+    " the app works, which no row here checks, with every request the app also sends it a note of its own, naming the"
+    " machine, the AI model and {record_file}, and because the AI operator chooses it, the operator could make it "
+    "keep or send on that text; this record cannot tell you what it {did} or whether it kept it.")
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
@@ -3074,8 +3074,8 @@ PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires both answers to have been fetched within a quarter-hour of the moment the machine was selected), so "
     "each saw your computer's address and the time, and NVIDIA also received the identities of the chips in each "
-    "machine the app had found genuine and might use, so it could tell which machines you might use; neither received"
-    " any message text.")
+    "machine the app had found genuine and might use, which could let it tell which machines you might use; neither "
+    "received any message text.")
 PLAIN_AI_OPENED_EMPTY = (
     "By InferRoute's account, even with no request sent the relay saw this conversation being opened from your "
     "InferRoute account.")
@@ -3099,13 +3099,12 @@ PLAIN_AI_SUMMARY = (
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI operator "
     "and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages are "
-    "used to train AI models, whether backups are kept and where, in which country the machines, the relay (where one"
-    " was used) and the gateway were, and which of them is legally responsible for your messages under "
-    "data-protection law and what rights you have to copies or erasure, whether your agreement is with InferRoute "
-    "alone, and whether you will be told if any of them finds that your messages or their timing were accessed "
-    "without authority. If the answer to any of these is that they do not know or will not say, this record offers "
-    "nothing against that answer. By InferRoute's account, the app also keeps the conversation on your own computer; "
-    "ask InferRoute where, and how to delete it.")
+    "used to train AI models, whether backups are kept and where, in which country {places} were, and which of them "
+    "is legally responsible for your messages under data-protection law and what rights you have to copies or "
+    "erasure, {agreement}, and whether you will be told if any of them finds that your messages or their timing were "
+    "accessed without authority. If the answer to any of these is that they do not know or will not say, this record "
+    "offers nothing against that answer. By InferRoute's account, the app also keeps the conversation on your own "
+    "computer; ask InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")
@@ -3252,7 +3251,10 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
              PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text",
                                      supplied=("from a run-time record InferRoute signed, not from the list shipped inside this check"
                                                if runtime_only else "InferRoute supplied")),
-             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=", and before the app stopped trusting a machine" if f["refused"] else "")
+             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened",
+                                 places="the machines and the gateway" if direct else "the machines, the relay and the gateway",
+                                 agreement=("which agreement covers this conversation, since you used your own account with the AI operator"
+                                            if direct else "whether your agreement is with InferRoute alone")) + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=", and before the app stopped trusting a machine" if f["refused"] else "")
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches
                                    else PLAIN_AI_SEARCHES_NONE)]

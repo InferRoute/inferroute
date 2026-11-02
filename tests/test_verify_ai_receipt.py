@@ -361,7 +361,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "does not show where the matching private key was made or kept" in t and "which InferRoute account sent them" in t
     f = {"requests": 3, "machines": 2, "start": "2026-11-02T09:00:00Z", "end": "2026-11-02T09:05:00Z", "tcb": ["UpToDate"]}
     up = V.plain_ai_lane(0, f)
-    assert "this conversation sent 3 request(s)" in up and "the app checked 2 distinct machine(s) for it" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    assert "this conversation sent 3 request(s)" in up and "the app selected 2 distinct machine(s) for it" in up and V.PLAIN_AI_TCB_HARDENING not in up
     # Second code-reading review: no "actually read" for an empty session; refusal surfaced; build sentence from the row;
     # a missing counter is said, not printed as "?"; a run-time signed row claims no recalculation.
     empty = V.plain_ai_lane(0, dict(f, requests=0))
@@ -372,10 +372,14 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     bare = V.plain_ai_lane(0, dict(f, refused=True, refused_at=""))
     assert V.PLAIN_AI_VERDICT_ONLY in bare and "lies inside the conversation's time window" not in bare
     assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
+    # Review 7 (MATERIAL x2): credited machines are distinct instances, never more than selected.
+    re_pin = V.ai_session_facts({"counters": {"requests": 4}, "served_by": [{"instance": {"id": "i-a"}, "attestation_sha256": "x", "requests": 2},
+                                {"instance": {"id": "i-a"}, "attestation_sha256": "y", "requests": 2}], "verdict": "confidential"}, [])
+    assert re_pin["machines"] == 1 and re_pin["credited"] == 1
     # Review 6 (MATERIAL x4): credited machines; the app's own stop reason and time; Intel/NVIDIA lookups from the
     # user's computer; the signing key is committed, not shown to be inside.
     cr = V.plain_ai_lane(0, dict(f, machines=3, credited=2))
-    assert "checked 3 distinct machine(s) for it and credits those requests to 2 of them" in cr
+    assert "selected 3 distinct machine(s) for it and credits those requests to 2 of them" in cr
     st = V.plain_ai_lane(0, dict(f, refused=True, why="the enclave could not be re-verified 3 times in a row.", stopped_at="2026-11-02T09:04:00Z"))
     assert "at 2 Nov 2026, 09:04:00 UTC because, by its own record, the enclave could not be re-verified 3 times in a row;" in st
     assert V.PLAIN_AI_LOOKUPS in up and "signed from inside the machine" not in up and "where its private half was kept is, again, not shown" in up
@@ -391,7 +395,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     rt = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
     assert V.PLAIN_AI_BUILD_RUNTIME in rt and "recalculated them itself" not in rt
     two = V.plain_ai_lane(0, dict(f, builds=[("bundled", ("RTMR1",))]))
-    assert "For one of the four measurements InferRoute states that it recalculated it itself" in two and "The firmware one, the third and the fourth InferRoute recorded without stating" in two
+    assert "For one of the four measurements InferRoute states that it recalculated it itself" in two and "The firmware measurement, measurement three and measurement four InferRoute recorded without stating" in two
     facts = V.ai_session_facts({"counters": {"requests": 2}, "served_by": [{"attestation_sha256": "a"}, {"attestation_sha256": "b"},
                                 {"attestation_sha256": "a"}], "verdict": "confidential", "started_at": "s", "last_activity_at": "e"},
                                [("PASS", "machine 1 (x) recorded build", "build b (current), recorded by InferRoute since d; RTMR1+RTMR2+RTMR3 recomputed by InferRoute from the operator's published artifacts; MRTD 1…"),
@@ -404,3 +408,17 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "links 2 of the patent searches" in two and "not that they came from the conversation" in two
     for tail in (V.PLAIN_AI_SEARCHES_NONE, V.PLAIN_AI_SEARCHES_LINKED):
         assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in tail.lower()]
+
+
+def test_a_stop_after_failed_rechecks_bounds_linked_searches():
+    """Code-reading audit 7: _reverify stops a session (verdict 'degraded') with 'reverify-failed' events and no
+    'refused' event; a search linked after the last of them must FAIL, as the plain words say the app stopped there."""
+    receipt = {"verdict": "degraded", "started_at": "2026-11-02T10:00:00Z", "last_activity_at": "2026-11-02T10:20:00Z",
+               "events": [{"kind": "pinned", "ts": "2026-11-02T10:00:05Z", "detail": "i-a"},
+                          {"kind": "reverify-failed", "ts": "2026-11-02T10:10:00Z", "detail": "x (1 in a row)"},
+                          {"kind": "reverify-failed", "ts": "2026-11-02T10:12:00Z", "detail": "x (3 in a row)"}]}
+    for at, ok in (("2026-11-02T10:11:00Z", True), ("2026-11-02T10:15:00Z", False)):
+        c = V.Checks()
+        V.check_receipt_consistency(c, receipt, [], [{"at": at, "session_id": "s"}])
+        row = [r for r in c.rows if r[1] == "searches inside the session's verified window"]
+        assert row and (row[0][0] == "PASS") is ok, (at, row)

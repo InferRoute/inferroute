@@ -432,6 +432,9 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
                    "InferRoute records the enclave builds"):
         assert needle in pre, needle
     assert "attributed" not in pre
+    # Code-reading audit 7: the model repeats this to the user; it must not claim what no check establishes.
+    assert "the words are private" not in pre and "confidential-computing GPUs" not in pre
+    assert "is not part of the report" in pre and "Never say the conversation, the words or the text are private" in pre
     # a refused session has no preamble to give (nothing verified)
     from inferroute_local.confidential.receipt import Receipt
     assert lane_preamble(Receipt(session_id="x", model_short="m", upstream_model="m", fleet_id="c", transport="t")) == ""

@@ -970,6 +970,11 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
     # Searches attributed to this session fall inside the window in which a verified machine was pinned.
     verdict = str(receipt.get("verdict") or "")
     refused_at = next((_parse_time(e.get("ts")) for e in events if e.get("kind") in ("refused", "no-eligible-instance")), None)
+    if refused_at is None and verdict not in ("", "confidential"):
+        # A stop after failed re-checks (session.py _reverify) writes no 'refused' event, only 'reverify-failed' ones and
+        # a verdict; the plain words say the app stopped at the last of those, so searches must end there too.
+        rever = [_parse_time(e.get("ts")) for e in events if e.get("kind") == "reverify-failed"]
+        refused_at = next((t for t in reversed(rever) if t is not None), None)
     first_pin = _parse_time(pins[0].get("ts")) if pins else verified
     if not searches:
         c.add(None, "searches inside the session's verified window", "no search in this record is attributed to this session")

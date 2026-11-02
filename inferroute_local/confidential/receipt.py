@@ -194,19 +194,26 @@ def lane_preamble(r: "Receipt") -> str:
     inst = r.instance or {}
     passed = [v.get("label", k) for k, v in (r.checks or {}).items() if v.get("ok")]
     lims = "; ".join(lim["text"].rstrip(".") for lim in r.limitations)
+    # Reviewed 2 Nov (code-reading audit 7): this used to tell the model "the words are private" and that the GPUs were
+    # in confidential-computing mode. Neither is verified, and the model repeats this note to the user. It now says
+    # only what the receipt's checks establish, the same limits as the record's plain words, and forbids the rest.
     return (
         "# Confidential session (InferRoute)\n"
-        f"The assistant in this session is {r.upstream_model}, running inside a hardware enclave (Intel TDX "
-        f"confidential VM with NVIDIA confidential-computing GPUs), instance {str(inst.get('id') or '')[:8]}, "
-        "reached through InferRoute's confidential lane. Before this session opened, the user's own machine verified the "
-        f"enclave's attestation against a fresh challenge ({', '.join(passed)}) and every request in this "
-        "session is encrypted on the user's machine to a key that hardware quote commits to (ML-KEM-768 + "
-        "ChaCha20-Poly1305); replies are encrypted back. InferRoute and the enclave operator relay ciphertext "
-        "and can see sizes, timing, model and instance id — not the words. This session is NOT running on Anthropic's "
-        "servers and is not subject to Anthropic's data policies; never say otherwise.\n"
-        "If asked whether or how this session is private, answer from the facts above, point to the panel "
-        "printed when the session opened, the receipt at "
+        f"The assistant in this session is {r.upstream_model}, reached through InferRoute's confidential lane, on machine "
+        f"{str(inst.get('id') or '')[:8]}: an Intel TDX virtual machine with NVIDIA GPUs. Before this session opened, the "
+        f"user's own computer checked that machine's hardware report against a fresh challenge ({', '.join(passed)}); "
+        "every request is encrypted on the user's computer to a key that report commits to (ML-KEM-768 + "
+        "ChaCha20-Poly1305), and replies are encrypted back. What that check does NOT cover: the program that decrypts "
+        "and answers these requests is chosen by the machine's operator and is not part of the report, so nothing "
+        "verified shows what happens to the text inside the machine, or whether it is kept; whether the GPUs were in "
+        "their confidential-computing mode is not checked; and nothing signed per request shows which machine answered. "
+        "InferRoute's relay and the operator's gateway carry the encrypted requests and can see sizes, timing, model and "
+        "instance id. This session is NOT running on Anthropic's servers and is not subject to Anthropic's data "
+        "policies; never say otherwise.\n"
+        "If asked whether or how this session is private, answer only from the facts above, point to the panel printed "
+        "when the session opened, the receipt at "
         f"{r.path or '~/.inferroute/confidential/receipts/'}, and `ir confidential show`; and state the "
-        f"limitations plainly: {lims}. Do not overstate: the words are private, the metadata is not.\n"
+        f"limitations plainly: {lims}. Never say the conversation, the words or the text are private, protected or "
+        "confidential; say what was checked and what was not.\n"
         "Otherwise behave exactly as you normally would; this note changes nothing about the task."
     )

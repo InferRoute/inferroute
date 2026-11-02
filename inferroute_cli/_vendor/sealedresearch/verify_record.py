@@ -2954,7 +2954,8 @@ def _load_ai_receipt_verifier():
 # sentence about THIS session (its numbers, its build rows, a refusal, Intel's status) is generated from that receipt
 # and its rows, so a sentence that is false for this receipt is not printed. Reviewed 2 Nov: Kimi K2.6 rounds 1-8 on
 # mac-papa and two independent code-reading reviews (fable).
-_FINGERPRINT_NAMES = {"MRTD": "the firmware one", "RTMR1": "the second", "RTMR2": "the third", "RTMR3": "the fourth"}
+_FINGERPRINT_NAMES = {"MRTD": "the firmware measurement", "RTMR1": "measurement two", "RTMR2": "measurement three",
+                      "RTMR3": "measurement four"}
 
 PLAIN_AI_OPEN = (
     "About your conversation with the AI assistant: the Anteriora app on your computer says {claim}. That is only the"
@@ -2968,12 +2969,13 @@ PLAIN_AI_OPEN_EMPTY = (
     "app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
-    "carries the conversation so far) {window}; the app checked {machines} distinct machine(s) for it and credits "
+    "carries the conversation so far) {window}; the app selected {machines} distinct machine(s) for it and credits "
     "those requests to {credited} of them. This receipt is designed to contain no message text, but it does show when"
-    " the conversation ran and which machine(s) the app checked for it.")
+    " the conversation ran, which machine(s) the app selected for it, and how much was sent (byte and token counts), "
+    "though not the words.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
-    "machine(s) checked for it.")
+    "machine(s) selected for it.")
 PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} "
     "by its own record; this record checks only that the event lies inside the conversation's time window.")
@@ -3048,8 +3050,9 @@ PLAIN_AI_PATH_DIRECT = (
     "InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record checks "
     "none of that, nor whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
-    "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
-    "finds in that software later will not show here.")
+    "InferRoute supplied ({status}; 'observed' means InferRoute has seen this software run and recorded its "
+    "measurements, not that it has examined the software), as InferRoute's list stood when this record was exported; "
+    "a flaw InferRoute finds in that software later will not show here.")
 PLAIN_AI_PROVENANCE_RUNTIME = (
     "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute shipped "
     "inside this check, so you cannot read it there.")
@@ -3058,7 +3061,9 @@ PLAIN_AI_STOPPED = (
     "only that those events lie inside the conversation's time window.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's and NVIDIA's online services from your computer, so each saw"
-    " your computer's address and the time; neither received any message text.")
+    " your computer's address and the time, and NVIDIA also received the chips' identities, so it could tell which "
+    "machine you were about to use; neither received any message text. The relay also receives from the app, for "
+    "billing, counts of the words sent and received.")
 PLAIN_AI_OPENED_EMPTY = (
     "Even with no request sent, the relay saw this conversation being opened from your InferRoute account.")
 PLAIN_AI_PROVENANCE_MIXED = (
@@ -3107,7 +3112,8 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
     stop = [e for e in events if isinstance(e, dict) and e.get("kind") in ("refused", "no-eligible-instance")]
     rever = [e for e in events if isinstance(e, dict) and e.get("kind") == "reverify-failed"]
     why = str(receipt.get("refusal") or "").strip()
-    credited = sum(1 for s in served if isinstance(s, dict) and int(s.get("requests") or 0) > 0)
+    credited = len({str((s.get("instance") or {}).get("id") or s.get("attestation_sha256") or i)
+                    for i, s in enumerate(served) if isinstance(s, dict) and int(s.get("requests") or 0) > 0})
     refused = str(receipt.get("verdict") or "") not in ("", "confidential") or bool(stop)
     refused_at = str(stop[0].get("ts") or "") if stop else ""
     builds, statuses, build_status = [], set(), set()
@@ -3209,7 +3215,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                  provenance=(PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_MIXED if mixed
                              else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
-             PLAIN_AI_GPU.format(text="any text sent to them" if empty else "your text"),
+             PLAIN_AI_GPU.format(text="any text sent to them" if empty or f["requests"] is None else "your text"),
              PLAIN_AI_PROGRAM.format(were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct

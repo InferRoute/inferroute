@@ -4,7 +4,9 @@ A TDX record proves which image booted (the UKI's Authenticode hash in RTMR1) an
 root filesystem (roothash= over a dm-verity tree). This module turns the PUBLISHED artefacts of that image into
 rows a verifier can print: that the published UKI is the one the quote names, that its command line is the closed
 one, that the root bytes hash to the roothash, and that the root's files are the published source, run under the
-published unit, with the published firewall rules and the seal ordered before the first request.
+published units (v13: two unprivileged services and a root quote helper), with the published firewall loaded before
+the network comes up and emptied of its fetch allowance before the search starts, and the seal ordered before the
+engine is imported and before the first request.
 
 Artefact directory layout (published per image):
     uki.efi        the unified kernel image, byte for byte (its Authenticode SHA-384 is the reference value)
@@ -42,7 +44,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 # inputs (SMBIOS OEM strings, files on the ESP) — v12.
 CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet", "loglevel=0", "panic=-1",
                     "accept_memory=eager", "systemd.import_credentials=no")
-CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"), re.compile(r"inferroute\.image=[A-Za-z0-9._-]+"))
+IMAGE_NAME = "ir-sealed-search-tdx-v13"          # the posture below is v13's; an older image fails row B by name
+CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"), re.compile(r"inferroute\.image=" + re.escape(IMAGE_NAME)))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.
 CMDLINE_FORBIDDEN_PREFIXES = ("console=", "root=", "init=", "systemd.unit=", "rd.", "systemd.debug_shell",
                               "systemd.import_credentials=yes", "systemd.import_credentials=1", "enforcing=",
@@ -51,19 +54,61 @@ CMDLINE_FORBIDDEN_PREFIXES = ("console=", "root=", "init=", "systemd.unit=", "rd
 UKI_SECTIONS = frozenset({".text", ".rodata", ".data", ".sbat", ".sdmagic", ".reloc", ".osrel", ".cmdline", ".uname",
                           ".initrd", ".linux"})
 
-# The image's own firewall, as the published entry point installs it (tdx_entry.EGRESS_RULES % (port, port)).
-# Output: nothing but replies on the search port, loopback and DHCP. v12 narrowed the old `ct state established`
-# rule to the search port: the broad rule kept any connection opened BEFORE the seal usable after it.
+# The image's firewall, /etc/nftables.conf, loaded by nftables.service before the NIC comes up (v13; v12 had the
+# search program install it, with egress open until then). Output: loopback; DHCP from networkd's uid only (v12
+# exempted the ports for every process); replies on the search port from the search uid only; and a `fetch` chain
+# holding the fetch uid's and the resolver's allowance, which ir_box.sh close-fetch EMPTIES before the search starts.
 EGRESS_OUTPUT_EXPECTED = ("type filter hook output priority 0; policy drop;", 'oif "lo" accept',
-                          "tcp sport {port} ct state established accept", "udp sport 68 udp dport 67 accept")
+                          'meta skuid "systemd-network" udp sport 68 udp dport 67 accept',
+                          'meta skuid "ir-search" tcp sport {port} ct state established accept', "jump fetch")
+EGRESS_FETCH_EXPECTED = ('meta skuid "ir-fetch" accept', 'meta skuid "systemd-resolve" udp dport 53 accept',
+                         'meta skuid "systemd-resolve" tcp dport 53 accept')
 EGRESS_INPUT_EXPECTED = ("type filter hook input priority 0; policy drop;", 'iif "lo" accept',
                          "ct state established,related accept", "udp sport 67 udp dport 68 accept",
                          "tcp dport {port} accept")
+FETCH_CLOSE_STEP = "+/bin/sh /opt/ir/app/ir_box.sh close-fetch"
+# What ir_box.sh's close-fetch step must do, line by line (the file is ALSO compared byte for byte with the source).
+FETCH_CLOSE_LINES = ("nft flush chain $TABLE fetch", '[ "$(fetch_rules)" -eq 0 ]', "ruleset_live",
+                     'mount -o remount,ro "$RAM"')
+NFT_TABLE_LINE = 'TABLE="inet ir_closed_box"'
 
-# The unit that runs the search, property by property (the file is ALSO compared byte for byte with the source).
-UNIT_REQUIRED = {"StandardOutput": "null", "StandardError": "null", "LimitCORE": "0",
-                 "ExecStart": "/opt/ir/venv/bin/python -u /opt/ir/app/tdx_entry.py", "Restart": "no"}
-UNIT_FORBIDDEN_KEYS = ("StandardInput", "TTYPath", "User")       # the service runs as root today; a User= would be a change to review
+# The sandbox every InferRoute service in the image shares: no capability, no new privilege, no device, read-only
+# system, kernel interfaces hidden, W^X, one syscall allowlist. Each unit then adds its own lines.
+SANDBOX_REQUIRED = {"NoNewPrivileges": "yes", "CapabilityBoundingSet": "", "AmbientCapabilities": "",
+                    "PrivateDevices": "yes", "ProtectSystem": "strict", "ProtectHome": "yes", "PrivateTmp": "yes",
+                    "ProtectKernelTunables": "yes", "ProtectKernelModules": "yes", "ProtectKernelLogs": "yes",
+                    "ProtectControlGroups": "yes", "ProtectClock": "yes", "LockPersonality": "yes",
+                    "MemoryDenyWriteExecute": "yes", "RestrictNamespaces": "yes", "RestrictRealtime": "yes",
+                    "RestrictSUIDSGID": "yes", "SystemCallArchitectures": "native", "SystemCallFilter": "@system-service",
+                    "StandardOutput": "null", "StandardError": "null", "LimitCORE": "0"}
+SEARCH_UNIT_REQUIRED = {**SANDBOX_REQUIRED, "User": "ir-search", "Group": "ir-search", "Restart": "no",
+                        "ExecStart": "/opt/ir/venv/bin/python -u /opt/ir/app/tdx_entry.py",
+                        "ExecStartPre": "+/bin/sh /opt/ir/app/ir_box.sh pre-search",
+                        "RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX", "ReadOnlyPaths": "/ram",
+                        "FailureAction": "poweroff-force"}
+FETCH_UNIT_REQUIRED = {**SANDBOX_REQUIRED, "User": "ir-fetch", "Group": "ir-fetch", "Type": "oneshot",
+                       "RemainAfterExit": "yes", "ExecStart": "/opt/ir/venv/bin/python -u /opt/ir/app/tdx_fetch.py",
+                       "ExecStartPre": "+/bin/sh /opt/ir/app/ir_box.sh pre-fetch", "ExecStartPost": FETCH_CLOSE_STEP,
+                       "RestrictAddressFamilies": "AF_INET AF_INET6 AF_UNIX", "ReadWritePaths": "/ram",
+                       "FailureAction": "poweroff-force"}
+QUOTE_UNIT_REQUIRED = {**SANDBOX_REQUIRED, "ExecStart": "/usr/bin/python3 -I /opt/ir/app/ir_quote.py",
+                       "PrivateNetwork": "yes", "RestrictAddressFamilies": "AF_UNIX",
+                       "ReadWritePaths": "/sys/kernel/config", "Restart": "no"}
+QUOTE_SOCKET_REQUIRED = {"ListenStream": "/run/ir-quote.sock", "SocketUser": "root", "SocketGroup": "ir-quote",
+                         "SocketMode": "0660"}
+# Unit -> (required properties, dependencies that must appear in Requires= AND After=).
+UNITS_EXPECTED = {
+    "ir-search.service": (SEARCH_UNIT_REQUIRED, ("ir-fetch.service", "ir-quote.socket")),
+    "ir-fetch.service": (FETCH_UNIT_REQUIRED, ("nftables.service", "network-online.target", "ir-quote.socket")),
+    "ir-quote.service": (QUOTE_UNIT_REQUIRED, ("ir-quote.socket", "sys-kernel-config.mount")),
+    "ir-quote.socket": (QUOTE_SOCKET_REQUIRED, ()),
+}
+UNIT_FORBIDDEN_KEYS = ("StandardInput", "TTYPath")
+# The accounts the units and the firewall name: present, no login shell, no password.
+ACCOUNTS_REQUIRED = ("ir-fetch", "ir-search")
+# The modules whose source is not published (the ranking engine): the TDX entry may import them only after the seal.
+CLOSED_MODULES = ("enclave.azure.m2_ranker", "enclave.azure.m2_searcher", "enclave.azure", "torch", "faiss",
+                  "sentence_transformers", "lightgbm")
 
 # Units that must be masked (/etc/systemd/system/<name> -> /dev/null): every console login path, the ESP automounts
 # (a writable, host-readable partition), and every timer or service that reaches the network on its own.
@@ -86,8 +131,8 @@ ENABLED_ALLOWED = {
     "timers.target.wants": {"dpkg-db-backup.timer", "e2scrub_all.timer", "fstrim.timer", "motd-news.timer",
                             "systemd-sysupdate-reboot.timer", "systemd-sysupdate.timer"},
     "systemd-journald.service.wants": {"systemd-journald-audit.socket"},
-    "sockets.target.wants": {"systemd-journald-audit.socket", "systemd-networkd.socket", "systemd-pcrextend.socket",
-                             "systemd-sysext.socket"},
+    "sockets.target.wants": {"ir-quote.socket", "systemd-journald-audit.socket", "systemd-networkd.socket",
+                             "systemd-pcrextend.socket", "systemd-sysext.socket"},
 }
 # Names that must not be enabled anywhere (vendor layer included).
 UNIT_FORBIDDEN_RE = re.compile(r"^(ssh|sshd|dropbear|debug-shell|google-.*|gce-.*|cloud-init.*|systemd-timesyncd|chrony.*|"
@@ -102,6 +147,8 @@ ESP_FORBIDDEN = (".extra.d", "addons", "credentials")
 
 # How the image tree was staged from the source tree (enclave/gcp-tdx/stage_app.sh + Dockerfile.m2's COPY list).
 STAGE_FIXED = {"tdx_entry.py": "enclave/gcp-tdx/app/tdx_entry.py", "tdx_attest.py": "enclave/gcp-tdx/app/tdx_attest.py",
+               "tdx_fetch.py": "enclave/gcp-tdx/app/tdx_fetch.py", "ir_quote.py": "enclave/gcp-tdx/app/ir_quote.py",
+               "ir_box.sh": "enclave/gcp-tdx/app/ir_box.sh",
                "sealedresearch/verify_record.py": "sealedresearch/verify_record.py",
                "sealedresearch/tdx_collateral.py": "sealedresearch/tdx_collateral.py"}
 REQUIREMENTS_SRC = "enclave/azure/requirements.txt"
@@ -117,7 +164,8 @@ REQUIRED_ROWS = (
     "D1. application files equal the source", "D1. image names its source commit",
     "D2. bytecode names its sources", "D2. bytecode recompiles identically",
     "D3. installed packages match their RECORDs", "D3. requirements equal the source",
-    "D4. search unit equals the source", "D4. search unit properties",
+    "D4. units and firewall files equal the source", "D4. search unit properties", "D4. fetch unit properties",
+    "D4. quote helper properties",
     "D5. unit census", "D5. listening sockets", "D5. accounts, mounts, repart, binaries",
     "D6. firewall rules", "D7. seal before serve",
     "D8. initrd",
@@ -520,28 +568,71 @@ def _parse_unit(text: str) -> Dict[str, List[str]]:
     return out
 
 
-def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
-    """D4: the search unit is the published one and has the closed-box properties."""
-    rel = "etc/systemd/system/ir-search.service"
-    p = os.path.join(tree, rel)
-    text = open(p, encoding="utf-8").read() if os.path.isfile(p) else None
-    if src is None:
-        rep.add(None, "D4. search unit equals the source", "no --source supplied")
-    else:
-        want = src.read(f"{MKOSI_EXTRA}/{rel}")
-        same = text is not None and want is not None and text.encode() == want
-        rep.add(same, "D4. search unit equals the source", f"/{rel} byte-equal to {MKOSI_EXTRA}/{rel}" if same else f"/{rel} differs or is missing")
-    if text is None:
-        rep.add(False, "D4. search unit properties", f"/{rel} missing")
-        return
-    u = _parse_unit(text)
-    problems = [f"{k}={u.get(k)} (want {v!r})" for k, v in UNIT_REQUIRED.items() if u.get(k) != [v]]
+def _unit_problems(u: Dict[str, List[str]], required: Dict[str, str], deps: Tuple[str, ...]) -> List[str]:
+    problems = [f"{k}={u.get(k)} (want {v!r})" for k, v in required.items() if u.get(k) != [v]]
     problems += [f"{k} present" for k in UNIT_FORBIDDEN_KEYS if k in u]
-    wanted = os.path.join(tree, "etc/systemd/system/multi-user.target.wants/ir-search.service")
-    if not os.path.islink(wanted):
-        problems.append("not wanted by multi-user.target")
-    rep.add(not problems, "D4. search unit properties",
-            "stdout and stderr to null, no core dumps, no restart, the published ExecStart, wanted by multi-user.target"
+    for dep in deps:
+        for key in ("Requires", "After"):
+            if not any(dep in v.split() for v in u.get(key, [])):
+                problems.append(f"{key}= lacks {dep}")
+    return problems
+
+
+def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
+    """D4: every file we put in the image's /etc and /usr (units, drop-ins, the firewall, the accounts) is the published
+    one, byte for byte; and the three units have the closed-box properties, property by property."""
+    if src is None:
+        rep.add(None, "D4. units and firewall files equal the source", "no --source supplied")
+    else:
+        diff, missing, same = [], [], 0
+        for rel in sorted(r for sub in ("etc", "usr") for r in src.list_dir(f"{MKOSI_EXTRA}/{sub}")):
+            if rel.startswith(f"{MKOSI_EXTRA}/opt/"):
+                continue
+            img_rel = os.path.relpath(rel, MKOSI_EXTRA)
+            p = os.path.join(tree, img_rel)
+            link = src.readlink(rel)
+            if link is not None:
+                ok = os.path.islink(p) and os.readlink(p) == link
+            else:
+                want = src.read(rel)
+                ok = os.path.isfile(p) and not os.path.islink(p) and open(p, "rb").read() == want
+            if not os.path.lexists(p):
+                missing.append(img_rel)
+            elif not ok:
+                diff.append(img_rel)
+            else:
+                same += 1
+        ok_all = not (diff or missing) and same > 0
+        rep.add(ok_all, "D4. units and firewall files equal the source",
+                f"{same} files under /etc and /usr byte-equal to {MKOSI_EXTRA}" if ok_all else
+                (f"DIFFER: {diff}" if diff else "") + (f" MISSING: {missing}" if missing else "") + ("" if same else " nothing compared"))
+    for unit, row in (("ir-search.service", "D4. search unit properties"), ("ir-fetch.service", "D4. fetch unit properties")):
+        required, deps = UNITS_EXPECTED[unit]
+        p = os.path.join(tree, "etc/systemd/system", unit)
+        if not os.path.isfile(p):
+            rep.add(False, row, f"/etc/systemd/system/{unit} missing")
+            continue
+        problems = _unit_problems(_parse_unit(open(p, encoding="utf-8").read()), required, deps)
+        if unit == "ir-search.service" and not os.path.islink(os.path.join(tree, "etc/systemd/system/multi-user.target.wants/ir-search.service")):
+            problems.append("not wanted by multi-user.target")
+        rep.add(not problems, row,
+                f"{unit}: User={required['User']}, no capability, no new privilege, read-only system, no device, W^X, "
+                f"@system-service, stdout and stderr to null, no core dumps, root steps {required['ExecStartPre']!r}"
+                + (f" and {required['ExecStartPost']!r}" if "ExecStartPost" in required else "")
+                + f", ordered after {', '.join(deps)}" if not problems else "; ".join(problems))
+    problems = []
+    for unit in ("ir-quote.service", "ir-quote.socket"):
+        required, deps = UNITS_EXPECTED[unit]
+        p = os.path.join(tree, "etc/systemd/system", unit)
+        if not os.path.isfile(p):
+            problems.append(f"{unit} missing")
+            continue
+        problems += [f"{unit}: {x}" for x in _unit_problems(_parse_unit(open(p, encoding="utf-8").read()), required, deps)]
+    if not os.path.islink(os.path.join(tree, "etc/systemd/system/sockets.target.wants/ir-quote.socket")):
+        problems.append("ir-quote.socket not wanted by sockets.target")
+    rep.add(not problems, "D4. quote helper properties",
+            "ir-quote.service: root with no capability, no network namespace, AF_UNIX only, read-only system but "
+            "/sys/kernel/config, stdlib interpreter in isolated mode; ir-quote.socket: /run/ir-quote.sock, root:ir-quote 0660"
             if not problems else "; ".join(problems))
 
 
@@ -610,6 +701,17 @@ def check_units(rep: ImageReport, tree: str) -> None:
     root_line = next((l for l in open(shadow, errors="replace") if l.startswith("root:")), None) if os.path.isfile(shadow) else None
     if not root_line or root_line.split(":")[1] not in ("*", "!", "!*", "!!", ""):
         hyg.append("root password not locked in /etc/shadow" if root_line else "/etc/shadow missing")
+    passwd = os.path.join(tree, "etc/passwd")
+    accounts = {l.split(":")[0]: l.rstrip("\n").split(":") for l in open(passwd, errors="replace")} if os.path.isfile(passwd) else {}
+    shadow_lines = {l.split(":")[0]: l.split(":") for l in open(shadow, errors="replace")} if os.path.isfile(shadow) else {}
+    for name in ACCOUNTS_REQUIRED:
+        if name not in accounts:
+            hyg.append(f"account {name} missing from /etc/passwd")
+            continue
+        if not accounts[name][-1].endswith(("nologin", "false")):
+            hyg.append(f"account {name} has a login shell")
+        if name in shadow_lines and shadow_lines[name][1] not in ("*", "!", "!*", "!!", ""):
+            hyg.append(f"account {name} has a password")
     fstab = os.path.join(tree, "etc/fstab")
     if os.path.isfile(fstab) and any(l.strip() and not l.startswith("#") for l in open(fstab)):
         hyg.append("/etc/fstab has entries")
@@ -624,7 +726,8 @@ def check_units(rep: ImageReport, tree: str) -> None:
         if os.path.exists(os.path.join(tree, rel)):
             hyg.append(f"/{rel} present")
     rep.add(not hyg, "D5. accounts, mounts, repart, binaries",
-            "root locked; no fstab entries, no cmdline file, no repart definitions, no ssh/agent binaries" if not hyg else "; ".join(hyg))
+            f"root locked; {', '.join(ACCOUNTS_REQUIRED)} present without shell or password; no fstab entries, no cmdline file, "
+            "no repart definitions, no ssh/agent binaries" if not hyg else "; ".join(hyg))
 
 
 def _assigned_string(tree_file: str, name: str) -> Optional[str]:
@@ -651,36 +754,72 @@ def _chain_lines(rules: str, chain: str) -> List[str]:
     return out
 
 
+def _shell_case_body(text: str, label: str) -> List[str]:
+    """The lines of one `label)` case of a POSIX shell case statement, stripped, comments dropped."""
+    out, inside = [], False
+    for line in text.splitlines():
+        st = line.strip()
+        if st == f"{label})":
+            inside = True
+            continue
+        if inside:
+            if st == ";;":
+                break
+            if st and not st.startswith("#"):
+                out.append(st)
+    return out
+
+
 def check_egress(rep: ImageReport, tree: str, port: int = 8000) -> None:
-    """D6: the firewall the entry point installs before the first request, read from the image's own tdx_entry.py."""
-    f = os.path.join(tree, APP_DIR, "tdx_entry.py")
-    if not os.path.isfile(f):
-        rep.add(False, "D6. firewall rules", "/opt/ir/app/tdx_entry.py missing")
+    """D6: the firewall loaded before the network comes up (/etc/nftables.conf), chain by chain, and the step that
+    empties its fetch allowance before the search starts (ir_box.sh close-fetch, run by ir-fetch.service)."""
+    conf = os.path.join(tree, "etc/nftables.conf")
+    if not os.path.isfile(conf):
+        rep.add(False, "D6. firewall rules", "/etc/nftables.conf missing")
         return
-    rules = _assigned_string(f, "EGRESS_RULES")
-    if rules is None:
-        rep.add(False, "D6. firewall rules", "EGRESS_RULES is not a string constant in tdx_entry.py")
-        return
-    n = rules.count("%d")
-    try:
-        text = rules % ((port,) * n)
-    except TypeError:
-        rep.add(False, "D6. firewall rules", "EGRESS_RULES does not format with the port")
-        return
+    text = open(conf, encoding="utf-8").read()
     problems = []
-    if not text.lstrip().startswith("flush ruleset"):
-        problems.append("does not start with `flush ruleset`")
-    out = _chain_lines(text, "output")
-    want_out = [l.format(port=port) for l in EGRESS_OUTPUT_EXPECTED]
-    if out != want_out:
-        problems.append(f"output chain is {out}, expected {want_out}")
-    inp = _chain_lines(text, "input")
-    want_in = [l.format(port=port) for l in EGRESS_INPUT_EXPECTED]
-    if inp != want_in:
-        problems.append(f"input chain is {inp}, expected {want_in}")
+    body = [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
+    if not body or body[0] != "flush ruleset":
+        problems.append("the first statement is not `flush ruleset`")
+    if "table inet ir_closed_box {" not in text:
+        problems.append("no `table inet ir_closed_box`")
+    for chain, expected in (("output", EGRESS_OUTPUT_EXPECTED), ("fetch", EGRESS_FETCH_EXPECTED), ("input", EGRESS_INPUT_EXPECTED)):
+        got = _chain_lines(text, chain)
+        want = [l.format(port=port) for l in expected]
+        if got != want:
+            problems.append(f"{chain} chain is {got}, expected {want}")
+    if not os.path.islink(os.path.join(tree, "etc/systemd/system/sysinit.target.wants/nftables.service")):
+        problems.append("nftables.service not wanted by sysinit.target")
+    dropin = os.path.join(tree, "etc/systemd/system/systemd-networkd.service.d/ir-closed-box.conf")
+    d = _parse_unit(open(dropin, encoding="utf-8").read()) if os.path.isfile(dropin) else {}
+    if d.get("Requires") != ["nftables.service"] or d.get("After") != ["nftables.service"]:
+        problems.append("systemd-networkd does not require and follow nftables.service")
+    # The close: the fetch unit's ExecStartPost runs ir_box.sh close-fetch, which flushes the chain, reads it back,
+    # re-checks the policies and makes /ram read-only.
+    unit = os.path.join(tree, "etc/systemd/system/ir-fetch.service")
+    u = _parse_unit(open(unit, encoding="utf-8").read()) if os.path.isfile(unit) else {}
+    if u.get("ExecStartPost") != [FETCH_CLOSE_STEP]:
+        problems.append(f"ir-fetch.service ExecStartPost is {u.get('ExecStartPost')}, expected [{FETCH_CLOSE_STEP!r}]")
+    box = os.path.join(tree, APP_DIR, "ir_box.sh")
+    if not os.path.isfile(box):
+        problems.append("/opt/ir/app/ir_box.sh missing")
+    else:
+        bt = open(box, encoding="utf-8").read()
+        close = _shell_case_body(bt, "close-fetch")
+        if NFT_TABLE_LINE not in bt:
+            problems.append(f"ir_box.sh does not set {NFT_TABLE_LINE}")
+        for want in FETCH_CLOSE_LINES:
+            if want not in close:
+                problems.append(f"ir_box.sh close-fetch lacks {want!r}")
+        pre = _shell_case_body(bt, "pre-search")
+        if '[ "$(fetch_rules)" -eq 0 ]' not in pre or "ruleset_live" not in pre:
+            problems.append("ir_box.sh pre-search does not re-check that the fetch chain is empty and the policy is drop")
     rep.add(not problems, "D6. firewall rules",
-            f"output: policy drop, only loopback, replies from tcp port {port} and DHCP; input: policy drop, loopback, "
-            f"established, DHCP, tcp port {port}" if not problems else "; ".join(problems))
+            f"output: policy drop; loopback, DHCP from systemd-network only, replies from tcp port {port} by ir-search only, "
+            "a fetch chain (ir-fetch, resolver DNS) that close-fetch empties and reads back before the search starts; "
+            f"input: policy drop, loopback, established, DHCP, tcp port {port}; loaded before networkd"
+            if not problems else "; ".join(problems))
 
 
 def _call_name(node: ast.AST) -> Optional[str]:
@@ -705,9 +844,32 @@ def _function(mod: ast.Module, name: str) -> Optional[ast.FunctionDef]:
     return None
 
 
+def _imports_closed(stmt: ast.AST) -> bool:
+    for node in ast.walk(stmt):
+        if isinstance(node, ast.Import):
+            if any(a.name == m or a.name.startswith(m + ".") for a in node.names for m in CLOSED_MODULES):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            mod = node.module or ""
+            if any(mod == m or mod.startswith(m + ".") for m in CLOSED_MODULES):
+                return True
+            if mod == "enclave" and any(a.name == "azure" for a in node.names):
+                return True
+    return False
+
+
+def _syscall_passes_tsync(seal: ast.FunctionDef) -> bool:
+    for node in ast.walk(seal):
+        if _call_name(node) == "syscall" and isinstance(node, ast.Call):
+            if any(isinstance(a, ast.Name) and a.id == "SECCOMP_FILTER_FLAG_TSYNC" for a in node.args):
+                return True
+    return False
+
+
 def check_seal_order(rep: ImageReport, tree: str) -> None:
-    """D7: in the image's own entry points, the listener is bound, THEN the firewall closes and the process is sealed,
-    THEN requests are served — and the seal is the real one (no-new-privs + seccomp, read back from the kernel)."""
+    """D7: in the image's own entry points the listener is bound, THEN the process is sealed (no-new-privs + seccomp
+    over EVERY thread: TSYNC, read back per task), THEN — in the TDX entry — the closed ranking modules are imported
+    and the engine built, THEN requests are served. The quote channel is opened before the seal."""
     problems = []
     m2 = os.path.join(tree, APP_DIR, "m2_entry.py")
     te = os.path.join(tree, APP_DIR, "tdx_entry.py")
@@ -715,7 +877,8 @@ def check_seal_order(rep: ImageReport, tree: str) -> None:
         if not os.path.isfile(p):
             rep.add(False, "D7. seal before serve", f"/{os.path.relpath(p, tree)} missing")
             return
-    mod = ast.parse(open(m2, encoding="utf-8").read())
+    m2_text = open(m2, encoding="utf-8").read()
+    mod = ast.parse(m2_text)
     main = _function(mod, "main")
     seal = _function(mod, "seal_network")
     if main is None or seal is None:
@@ -731,32 +894,38 @@ def check_seal_order(rep: ImageReport, tree: str) -> None:
         calls = {_call_name(n) for n in ast.walk(seal) if isinstance(n, ast.Call)}
         if not {"prctl", "syscall"} <= calls:
             problems.append("seal_network does not call prctl and syscall")
-        src_seal = ast.get_source_segment(open(m2, encoding="utf-8").read(), seal) or ""
-        if "/proc/self/status" not in src_seal or "Seccomp:" not in src_seal:
-            problems.append("seal_network does not read the seccomp mode back from /proc/self/status")
-    tmod = ast.parse(open(te, encoding="utf-8").read())
+        flag = next((n.value.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+                     and any(isinstance(t, ast.Name) and t.id == "SECCOMP_FILTER_FLAG_TSYNC" for t in n.targets)), None)
+        if flag != 1 or not _syscall_passes_tsync(seal):
+            problems.append("seal_network does not install the filter with SECCOMP_FILTER_FLAG_TSYNC (= 1): threads alive at the seal stay unsealed")
+        src_seal = ast.get_source_segment(m2_text, seal) or ""
+        if "/proc/self/task" not in src_seal or "Seccomp:" not in src_seal:
+            problems.append("seal_network does not read the seccomp mode back for every thread (/proc/self/task/*/status)")
+    te_text = open(te, encoding="utf-8").read()
+    tmod = ast.parse(te_text)
     tmain = _function(tmod, "main")
-    cts = _function(tmod, "close_then_seal")
-    if tmain is None or cts is None:
-        problems.append("tdx_entry.main or close_then_seal not found")
+    if tmain is None:
+        problems.append("tdx_entry.main not found")
     else:
-        i_close = _stmt_index_calling(cts.body, "close_egress")
-        i_seal2 = _stmt_index_calling(cts.body, "seal")
-        if None in (i_close, i_seal2) or not (i_close < i_seal2):
-            problems.append("close_then_seal does not close egress before sealing")
-        i_assign = next((i for i, s in enumerate(tmain.body) if isinstance(s, ast.Assign)
-                         and any(isinstance(t, ast.Attribute) and t.attr == "seal_network" for t in s.targets)
-                         and isinstance(s.value, ast.Name) and s.value.id == "close_then_seal"), None)
-        i_run = _stmt_index_calling(tmain.body, "main")
-        if None in (i_assign, i_run) or not (i_assign < i_run):
-            problems.append("tdx_entry.main does not install close_then_seal as m2_entry.seal_network before m2_entry.main()")
-        ce = _function(tmod, "close_egress")
-        src_ce = ast.get_source_segment(open(te, encoding="utf-8").read(), ce) or "" if ce else ""
-        if "policy drop" not in src_ce or "SystemExit" not in src_ce:
-            problems.append("close_egress does not read the rules back and refuse to serve without `policy drop`")
+        if any(_imports_closed(stmt) for stmt in tmod.body if not isinstance(stmt, ast.FunctionDef)):
+            problems.append("tdx_entry imports a closed module at module level (before the seal)")
+        i_chan = _stmt_index_calling(tmain.body, "open_quote_channel")
+        i_bind = _stmt_index_calling(tmain.body, "bind_server")
+        i_seal = _stmt_index_calling(tmain.body, "seal_network")
+        i_engine = next((i for i, st in enumerate(tmain.body) if _imports_closed(st)
+                         or any(_call_name(n) == "build_service" for n in ast.walk(st))), None)
+        i_serve = _stmt_index_calling(tmain.body, "serve_forever")
+        if None in (i_chan, i_bind, i_seal, i_engine, i_serve) or not (i_chan < i_seal and i_bind < i_seal < i_engine < i_serve):
+            problems.append(f"tdx_entry.main order open_quote_channel={i_chan} bind_server={i_bind} seal_network={i_seal} "
+                            f"engine={i_engine} serve_forever={i_serve}; want channel and bind, then seal, then engine, then serve")
+        if not any(isinstance(s, ast.Expr) and _call_name(s.value) == "seal_network" for s in tmain.body):
+            problems.append("seal_network() is not an unconditional top-level statement of tdx_entry.main")
+        if _stmt_index_calling(tmain.body, "make_server") is not None:
+            problems.append("tdx_entry.main calls make_server (binding and the engine in one step)")
     rep.add(not problems, "D7. seal before serve",
-            "m2_entry.main: make_server, then seal_network (no-new-privs + seccomp, mode read back), then serve_forever; "
-            "tdx_entry installs close_egress (rules read back) ahead of the seal before running main"
+            "m2_entry.main: make_server, then seal_network (no-new-privs + seccomp with TSYNC, mode read back for every thread), "
+            "then serve_forever; tdx_entry.main: quote channel and bind_server, then seal_network, then the closed engine "
+            "(build_service), then serve_forever; no closed module imported before the seal"
             if not problems else "; ".join(problems))
 
 

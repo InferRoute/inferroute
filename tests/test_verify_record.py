@@ -49,7 +49,7 @@ def test_standalone_has_no_inferroute_imports():
     src = SCRIPT.read_text()
     assert "sealedresearch" not in src and "inferroute_cli" not in src and "inferroute_local" not in src
     allowed = {"base64", "hashlib", "json", "os", "re", "struct", "sys", "typing", "cryptography", "datetime",
-               "argparse", "warnings", "__future__"}
+               "argparse", "warnings", "__future__", "importlib"}  # importlib: loads tdx_image.py from beside this file
     # `urllib` is allowed ONLY inside a function body. This program's value is that it runs offline and
     # deterministically over a folder; a module-level network import would make that a matter of intent
     # rather than of structure. --check-revocation is the one path that reaches the network, it is off by

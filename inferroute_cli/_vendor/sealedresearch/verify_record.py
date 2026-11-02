@@ -1036,20 +1036,24 @@ PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confid
 # image is authenticated. It grades how the program was BUILT, as published; never what happened while it ran.
 STATEMENT_TDX_IMAGE_CHECKED = (
     "For these searches, the Intel TDX boot image the quote names was also checked against the files InferRoute "
-    "publishes: its command line names no console, silences kernel messages and imports no host-supplied "
-    "credentials; its root filesystem matches the integrity hash on that command line; its search service's "
-    "standard output and error are discarded; the firewall its entry point installs admits, outbound, only replies "
-    "from the search port and UDP from port 68 to port 67, and the published code installs it, then a seal refusing "
-    "new sockets and connections, after binding and before serving; the files under /opt/ir/app equal the published "
-    "commit, except that the ranking modules' source is not published; the installed Python packages match their own "
-    "install records and a hash-pinned requirements file; the operating system files were compared to nothing but "
-    "the published image. This establishes the image's contents and its published code's configuration, not its "
-    "behaviour while it ran.")
+    "publishes (image v13 or later): its command line names no console, silences kernel messages and imports no "
+    "host-supplied credentials; its root filesystem matches the integrity hash on that command line; a firewall "
+    "loaded at boot drops all outbound traffic except replies from the search port by the search account, DHCP by "
+    "the network daemon's account, and the index fetch by a separate fetch account whose rule is removed and read "
+    "back as removed before the search service starts; the search service runs as an unprivileged account with no "
+    "capabilities, no devices, a read-only system and index, and no memory that is both writable and executable, "
+    "with its output discarded; the published entry point binds its socket, applies a seal refusing new sockets to "
+    "every thread, and only then loads the search engine; hardware quotes come from a separate helper with no "
+    "network; the files under /opt/ir/app equal the published commit, except that the ranking modules' source is "
+    "not published; the installed Python packages match their own install records and a hash-pinned requirements "
+    "file; the operating system files were compared to nothing but the published image. This establishes the "
+    "image's contents and its published code's configuration, not its behaviour while it ran.")
 TDX_RANKER_CLOSED = ("the ranking modules inside the image are pinned by hash, but their source is not published, so "
                      "what they do with a query cannot be reviewed")
 TDX_RUNS_PRIVILEGED = "the search service runs with full privileges inside the machine"
-TDX_TRUSTED_BASE = ("Intel's CPU and TDX module, and Google's firmware and host-supplied boot configuration, are taken on "
-                    "their makers' word")
+TDX_TRUSTED_BASE = ("Intel's CPU and TDX module, Google's firmware and host-supplied boot configuration, and the "
+                    "operating system's own network daemon (which keeps raw network access) are taken on their makers' "
+                    "word")
 TDX_METADATA = ("when, how often and from where requests arrive, and their size class and number of reply slots, "
                 "remain visible outside the machine")
 TDX_OWN_KEY = ("which image counts as InferRoute's rests on InferRoute's own signing key, and no outside party has "
@@ -1069,7 +1073,8 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_RUNS_PRIVILEGED,
      "the search program runs with full control inside the machine"),
     (TDX_TRUSTED_BASE,
-     "the Intel and Google hardware and firmware the machine runs on are taken on their makers' word"),
+     "the Intel and Google hardware and firmware the machine runs on, and the operating system's own network "
+     "program, are taken on their makers' word"),
     (TDX_METADATA,
      "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how "
      "often and from where you searched, and roughly how large your searches were"),
@@ -1194,11 +1199,10 @@ PLAIN_ANSWER_TDX: Dict[int, str] = {
        "adds: the program the machine started is exactly the one InferRoute published. Inside it, the search "
        "program's own code matches the code InferRoute publishes; its ranking part is secret (its exact version is "
        "pinned, but you cannot read it); and the operating system was compared only with InferRoute's own published "
-       "copy, not with anything independent. As published, the program shuts off its network connections, except "
-       "replies to searches and one used to keep its network address, before it takes its first search. It does that "
-       "only after it has downloaded its search index and run its secret ranking part with the network open and full "
-       "control of the machine. All of this is InferRoute checking its own work against its own published list: "
-       "nobody outside InferRoute has confirmed it.",
+       "copy, not with anything independent. As published, the machine shuts its network to the search program "
+       "before the search engine, secret part included, is even loaded, and the search program runs with no special "
+       "powers: from then on it can send nothing except replies to searches. All of this is InferRoute checking its "
+       "own work against its own published list: nobody outside InferRoute has confirmed it.",
 }
 PLAIN_TDX_HEADLINE_1 = ("The saved search statements have valid signatures linked to hardware evidence from an Intel "
                         "TDX machine, and the image that machine started from was checked against the files "
@@ -1268,10 +1272,10 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
     # Level 1 (image checked). Naive reader, 2 Nov: level 1 had lost the one thing a reader can act on.
-    (TDX_PRESEAL,
-     "ask for a record made with a program that shuts its network before its secret ranking part runs, and whose "
-     "program someone outside InferRoute has rebuilt and confirmed (this verifier would show the first; your "
-     "provider would have to show the second, and the other gaps stay open)"),
+    (TDX_OWN_KEY,
+     "ask for a record whose program someone outside InferRoute has rebuilt and confirmed, and ask whether your "
+     "own expert can inspect the secret ranking part (this verifier cannot show either; your provider would have to, "
+     "and the other gaps stay open)"),
     ("the Intel TDX image's own permissions were not assessed",
      "ask for a record made with a program image that sends nothing from your search anywhere except the "
      "results back to you, and writes nothing where whoever runs the machine can read it, such as the "
@@ -1547,8 +1551,10 @@ def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
     if record_ok is not True:
         return -1, ["this record did not verify — no sentence is licensed"]
     if image_checked is True and authenticated is True:
-        return 1, [TDX_RANKER_CLOSED, TDX_PRESEAL, TDX_RUNS_PRIVILEGED, TDX_PARTIES, TDX_KEYS_RETENTION,
-                   TDX_TRUSTED_BASE, TDX_METADATA, TDX_OWN_KEY, TDX_LEVEL1_NOT_ESTABLISHED]
+        # v13+: the engine loads after the seal and runs unprivileged (the image check pins v13), so neither the
+        # pre-seal window nor full privileges is a gap any more.
+        return 1, [TDX_RANKER_CLOSED, TDX_PARTIES, TDX_KEYS_RETENTION, TDX_TRUSTED_BASE, TDX_METADATA, TDX_OWN_KEY,
+                   TDX_LEVEL1_NOT_ESTABLISHED]
     blockers = [TDX_IMAGE_UNASSESSED]
     if not authenticated:
         blockers.append("the reference signature was not verified under a supplied key; independently "
@@ -2661,11 +2667,11 @@ def check_tdx_identity(c: "Checks", rd: Dict[str, Any], info: Optional[Dict[str,
 
 
 def load_tdx_image_module() -> Any:
-    """sealedresearch/tdx_image.py, loaded from beside this file: a vendored copy of this verifier needs no package,
+    """tdx_image.py, loaded from beside this file: a vendored copy of this verifier needs no package,
     only that file next to it. Raises ImportError when it is absent."""
     import importlib.util
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tdx_image.py")
-    spec = importlib.util.spec_from_file_location("sealedresearch_tdx_image", path) if os.path.isfile(path) else None
+    spec = importlib.util.spec_from_file_location("ir_tdx_image", path) if os.path.isfile(path) else None
     if spec is None or spec.loader is None:
         raise ImportError(f"{path} is not beside this verifier")
     mod = importlib.util.module_from_spec(spec)
@@ -2674,7 +2680,7 @@ def load_tdx_image_module() -> Any:
 
 
 def check_tdx_image(c: "Checks", info: Optional[Dict[str, Any]], image_report: Any) -> bool:
-    """The PUBLISHED image behind this search (--tdx-image): the rows of sealedresearch.tdx_image, re-anchored to the
+    """The PUBLISHED image behind this search (--tdx-image): the rows of tdx_image.py, re-anchored to the
     image this search's quote measured. Prefixed "image:" so a reader can tell them from the record's own rows.
     Returns the posture verdict: True only if every required image row PASSED and none FAILED."""
     rows, verified = image_report.rows_for_measured((info or {}).get("image_sha384"), (info or {}).get("boot_apps"))
@@ -2950,18 +2956,44 @@ def _load_ai_receipt_verifier():
 PLAIN_AI_LANE = (
     "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of your "
     "messages so that only the machines named here could read them, and sent them only to those machines. That is "
-    "the app vouching for itself: the machines confirm nothing per message. For each machine, this record does show "
-    "that it was a real Intel confidential machine with one inspection door (Intel's debug interface) switched off, "
-    "which closes one way of reading its memory and says nothing about the others; that the software it started from "
-    "matches files published by Chutes, the company that runs these machines for InferRoute (InferRoute recomputed "
-    "most of these values itself; one firmware value it only compared with its own earlier record); and that NVIDIA "
-    "confirmed the graphics chips were genuine with the expected firmware. NVIDIA did not confirm the chips were in "
-    "their protected mode, so whether your text was protected while those chips held it is unknown. The AI program "
-    "that actually read your messages, and that held the key to decrypt them, is chosen by Chutes and loaded after "
-    "the machine's report was made, so the report does not even say which program it was: this record cannot tell "
-    "you what it did with your text or whether it kept it. The machines themselves belong to other companies that "
-    "host them for Chutes. InferRoute's relay, which passed the encrypted traffic along, could see when and how much "
-    "you sent.")
+    "the app vouching for itself. Each machine did sign which encryption key it would decrypt with, and it is the key "
+    "the app says it used; but no machine signs anything per message, so nothing from the machines shows that they received "
+    "yours. For each machine, this record does show "
+    "that it was a genuine Intel TDX machine with Intel's debug interface disabled; that most of the software the "
+    "machine started from was recomputed by InferRoute itself from files published by the AI operator, the company "
+    "that operates these machines and sells InferRoute access to them (its name "
+    "appears in the rows above, as the issuer of each machine's certificate), while one firmware measurement was only compared with an earlier record kept by "
+    "InferRoute, not freshly recomputed from published files; and that NVIDIA's certificates identify the graphics "
+    "chips as genuine, while NVIDIA's automated attestation service reported, about these chips only, that they had "
+    "the expected firmware and were running with secure boot on and debug off. That service's report says nothing "
+    "about whether the chips were in their confidential-computing mode, so whether your text was isolated while those chips "
+    "processed it is unknown. The AI program that actually read your messages, and that held the key to decrypt them, "
+    "is chosen by the AI operator and loaded after the machine's report was made, so the report does not even say which "
+    "program it was: this record cannot tell you what it did with your text or whether it kept it. The machines "
+    "themselves belong to other companies that host the physical hardware for the AI operator; Intel's checks close one way "
+    "those hosts could read the machine's memory, but do not rule out others, and this record does not say which "
+    "country the machines were in. InferRoute (the company behind the Anteriora app) operates a relay that passed the "
+    "encrypted traffic along; it could see when and how much you sent, and this record does not verify whether "
+    "InferRoute logs that, or for how long. Because this record checks only the machines that received your text, "
+    "not what happened afterwards, ask the AI operator and InferRoute directly how long they keep any copy of your messages or "
+    "of their timing, whether messages are used to train AI models, whether backups are kept and where, and in which "
+    "country the machines were.")
+# The receipt's last check row, in plain words. Which patent searches belong to which AI conversation comes from
+# an index the app writes (unsigned); the rows check only that those searches' times fall while a checked machine
+# was in use. Either way the reader must be told what the link rests on.
+PLAIN_AI_SEARCHES_NONE = (
+    "This record does not link any of its patent searches to this conversation, so it does not show which searches, "
+    "if any, the AI assistant ran during it.")
+PLAIN_AI_SEARCHES_LINKED = (
+    "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
+    "that they were made while a checked machine was in use, not that they came from the conversation.")
+
+
+def plain_ai_lane(linked_searches: int) -> str:
+    tail = PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches) if linked_searches else PLAIN_AI_SEARCHES_NONE
+    return PLAIN_AI_LANE + " " + tail
+
+
 _AI_LANE_VERIFIED = False
 
 
@@ -3010,7 +3042,9 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
     if _AI_LANE_VERIFIED:
         print("\n  In plain words, for the AI conversation")
-        print("    " + PLAIN_AI_LANE)
+        sids = {n[len("session-"):-len(".receipt.json")] for n, _c, _ok in results}
+        linked = sum(1 for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") in sids)
+        print("    " + plain_ai_lane(linked))
     return {"receipts": len(results), "ok": ok_n, "failed": failed_n}
 
 
@@ -3161,7 +3195,7 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
                   tdx_pins: Optional[Dict[str, str]] = None, tdx_image: Any = None) -> Checks:
     """All checks for one sealed search. `row` is the searches.json entry; `evidence` the bundle it names;
     `reference` the values obtained from InferRoute out of band (None = identity cannot be established);
-    `tdx_image` an already-computed sealedresearch.tdx_image.ImageReport (--tdx-image), or None."""
+    `tdx_image` an already-computed tdx_image.ImageReport (--tdx-image), or None."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     c = Checks()
     st = dict(row.get("statement") or {}) if isinstance(row.get("statement"), dict) else {}
@@ -3553,7 +3587,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="TEST ROOTS ONLY; requires --i-am-testing")
     ap.add_argument("--uvm-min-svn", type=int, default=UVM_MIN_SVN)
     ap.add_argument("--tdx-image", default=None, metavar="DIR",
-                    help="the PUBLISHED Intel TDX image (uki.efi, root.img, verity.img): adds the image rows of sealedresearch.tdx_image to every TDX search")
+                    help="the PUBLISHED Intel TDX image (uki.efi, root.img, verity.img): adds the image rows of tdx_image.py to every TDX search")
     ap.add_argument("--tdx-source", default=None, metavar="PATH", help="with --tdx-image: the published source (git checkout or unpacked tarball) to compare the image's files with")
     ap.add_argument("--tdx-root-tree", default=None, metavar="DIR", help="with --tdx-image: an already-extracted root (when fsck.erofs is not available)")
     ap.add_argument("--i-am-testing", action="store_true", help="acknowledge that pin overrides make this a TEST run, never a verification of Azure (exit 3 at best)")

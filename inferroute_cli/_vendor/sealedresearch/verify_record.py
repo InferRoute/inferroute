@@ -2956,15 +2956,16 @@ def _load_ai_receipt_verifier():
 PLAIN_AI_LANE = (
     "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of your "
     "messages so that only the machines named here could read them, and sent them only to those machines. That is "
-    "only the app's own account. What this record can check is each machine: each machine's signed report names the "
-    "encryption key it would decrypt with, and this record verifies that. Whether the app really encrypted your "
-    "messages to that key is again only the app's word, and no machine signs anything per message, so nothing from "
+    "only the app's own claim. What this record can check is each machine: each machine's signed report contains a "
+    "fingerprint of the encryption key it would decrypt with, and this record checks that fingerprint against the key "
+    "the app says it used. Whether the app really encrypted your "
+    "messages to that key is again only the app's claim, and no machine signs anything per message, so nothing from "
     "the machines shows that they received yours. The check itself was written and published by InferRoute, the "
     "company behind the Anteriora app; anyone can run it again on this record, but it is not an independent audit. "
     "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
     "Intel's hardware keeps encrypted) with Intel's debug interface disabled; that most of the software the machine "
-    "started from was recomputed by InferRoute itself from files published by the AI operator, the company that "
-    "operates these machines and sells InferRoute access to them (its name appears in the rows above, as the issuer "
+    "started from was rebuilt and checked by InferRoute itself from files published by the AI operator, the company that "
+    "operates these machines and from which InferRoute buys access to them (its name appears in the rows above, as the issuer "
     "of each machine's certificate); and that one firmware fingerprint was only matched to a value InferRoute "
     "recorded earlier, so for that part you rely on InferRoute having recorded it correctly. NVIDIA's certificates "
     "identify the graphics chips as genuine, and NVIDIA's automated attestation service reported, about these chips "
@@ -2975,22 +2976,25 @@ PLAIN_AI_LANE = (
     "The AI program that actually read your messages, and that held the key to decrypt them, is chosen by the AI "
     "operator and loaded after the machine's report was made, so the report does not even say which program it was: "
     "this record cannot tell you what it did with your text or whether it kept it. The machines themselves belong "
-    "to other companies or individuals (the AI operator calls them miners) who host the physical hardware for the "
+    "to other companies or individuals (the AI operator's network calls them miners) who host the physical hardware for the "
     "AI operator; Intel's checks close one way those hosts could read the machine's memory, but do not rule out "
-    "others, and this record does not say which country the machines were in. InferRoute operates a relay that "
-    "passed the encrypted traffic along; it could see when and how much you sent, and this record does not verify "
-    "whether InferRoute logs that, or for how long. None of this shows that your text was exposed: it shows what "
-    "this record can and cannot check. Because it checks only the machines that received your text, not what "
+    "others, and this record does not say which country the machines were in. InferRoute operates a relay and the AI "
+    "operator a gateway that both passed the encrypted traffic along; either could see when and how much you sent, "
+    "and this record does not verify whether either logs that, or for how long. In short, what this record establishes "
+    "is about the machines, not about your text: they were genuine Intel TDX machines with debug off, most of their "
+    "starting software matched files InferRoute rebuilt, and each committed to the key the app says it used. Nothing "
+    "in it shows that your text was exposed, and nothing in it shows that it was not. Because it checks only the machines the app says received your text, not what "
     "happened afterwards, ask the AI operator and InferRoute directly how long they keep any copy of your messages "
-    "or of their timing, whether messages are used to train AI models, whether backups are kept and where, and in "
-    "which country the machines were.")
+    "or of their timing, whether messages are used to train AI models, whether backups are kept and where, in "
+    "which country the machines were, and which of them is legally responsible for your messages under data-protection "
+    "law and what rights you have to copies or erasure.")
 
 
 # The receipt's last check row, in plain words. Which patent searches belong to which AI conversation comes from
 # an index the app writes (unsigned); the rows check only that those searches' times fall while a checked machine
 # was in use. Either way the reader must be told what the link rests on.
 PLAIN_AI_SEARCHES_NONE = (
-    "This record does not link any of its patent searches to this conversation, so it does not show which searches, "
+    "This record does not link any of the patent searches it contains to this conversation, so it does not show which searches, "
     "if any, the AI assistant ran during it.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "

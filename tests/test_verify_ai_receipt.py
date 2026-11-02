@@ -342,7 +342,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     spec = importlib.util.spec_from_file_location("vr_ai_plain", p); V = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(V)
     t = V.PLAIN_AI_LANE
-    assert "only the app's own account" in t and "not an independent audit" in t and "None of this shows that your text was exposed" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
+    assert "only the app's own claim" in t and "not an independent audit" in t and "Nothing in it shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
     assert "does not even say which program it was" in t and "held the key" in t and "the AI operator" in t
     assert "only matched to a value InferRoute" in t and "you rely on InferRoute having recorded it correctly" in t and "genuine Intel TDX machine" in t
     low = t.lower()
@@ -353,7 +353,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     # Audit 1102-ai-r2: no corporate "confirmed", the key binding is stated, Chutes is a seller not InferRoute's operator,
     # and the search link is always stated with what it rests on.
     assert "nvidia confirmed" not in low and "confirm nothing" not in low and "runs these machines for inferroute" not in low
-    assert "names the encryption key it would decrypt with, and this record verifies that" in t and "nothing from the machines shows that they received yours" in t
+    assert "fingerprint of the encryption key it would decrypt with" in t and "gateway" in t and "legally responsible" in t and "nothing from the machines shows that they received yours" in t
     assert "and it is the key the app says it used" not in t  # audit r3: no welding of measurement to the app's word
     assert V.plain_ai_lane(0).endswith(V.PLAIN_AI_SEARCHES_NONE)
     two = V.plain_ai_lane(2)

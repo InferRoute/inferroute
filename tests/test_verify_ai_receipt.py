@@ -343,8 +343,8 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     spec.loader.exec_module(V)
     t = V.PLAIN_AI_LANE
     assert "only the app's own claim" in t and "not an independent audit" in t and "Nothing in it shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
-    assert "is not among the software the machine's report measures" in t and "held the key" in t and "the AI operator" in t
-    assert "InferRoute only recorded from an earlier machine" in t and "the record carries that statement, not the recalculation" in t and "was not compared at all" in t and "you rely on InferRoute having recorded it correctly" in t and "genuine Intel TDX machine" in t
+    assert "is not among the software the machine's report measures" in t and "holds the key" in t and "the AI operator" in t
+    assert "InferRoute recorded without stating in this record how it obtained it" in t and "the record carries that statement, not the recalculation" in t and "was not compared at all" in t  and "genuine Intel TDX machine" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
     for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "was protected.",
@@ -365,14 +365,15 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     # Second code-reading review: no "actually read" for an empty session; refusal surfaced; build sentence from the row;
     # a missing counter is said, not printed as "?"; a run-time signed row claims no recalculation.
     empty = V.plain_ai_lane(0, dict(f, requests=0))
-    assert "recorded no request sent in it" in empty and "actually read" not in empty and "would read" in empty
-    assert V.PLAIN_AI_REFUSED in V.plain_ai_lane(0, dict(f, refused=True)) and V.PLAIN_AI_REFUSED not in up
+    assert "recorded no request sent in it" in empty and "your text" not in empty and "would have been addressed" in empty and "would have carried" in empty
+    ref = V.plain_ai_lane(0, dict(f, refused=True, refused_at="2026-11-02T09:03:00Z"))
+    assert "found none it could trust, at 2026-11-02T09:03:00Z (UTC)" in ref and "stopped trusting" not in up
     nocount = V.plain_ai_lane(0, dict(f, requests=None))
     assert "carries no count of requests" in nocount and "? request" not in nocount
     rt = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
     assert V.PLAIN_AI_BUILD_RUNTIME in rt and "recalculated them itself" not in rt
     two = V.plain_ai_lane(0, dict(f, builds=[("bundled", ("RTMR1",))]))
-    assert "For one of them InferRoute states" in two and "The firmware one, the third and the fourth InferRoute only recorded" in two
+    assert "For one of them InferRoute states" in two and "The firmware one, the third and the fourth InferRoute recorded without stating" in two
     facts = V.ai_session_facts({"counters": {"requests": 2}, "served_by": [{"attestation_sha256": "a"}, {"attestation_sha256": "b"},
                                 {"attestation_sha256": "a"}], "verdict": "confidential", "started_at": "s", "last_activity_at": "e"},
                                [("PASS", "machine 1 (x) recorded build", "build b (current), recorded by InferRoute since d; RTMR1+RTMR2+RTMR3 recomputed by InferRoute from the operator's published artifacts; MRTD 1…"),

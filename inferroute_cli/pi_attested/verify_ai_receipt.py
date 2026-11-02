@@ -951,9 +951,13 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
         reqs = counters.get("requests")
         credited = sum(int(s.get("requests") or 0) for s in served if isinstance(s, dict))
         if isinstance(reqs, int):
-            c.add(credited >= reqs, "requests credited per machine",
+            # Zero counted with requests credited is a contradiction, not a retry (code-reading review, 2 Nov): the plain
+            # words for an empty session say no request was sent, which must not print over rows crediting some.
+            ok = credited >= reqs and (reqs > 0 or credited == 0)
+            c.add(ok, "requests credited per machine",
                   f"{credited} credited across machines ≥ {reqs} counted (a retried request is credited to each machine that carried it)"
-                  if credited >= reqs else f"only {credited} credited across machines for {reqs} counted")
+                  if ok else (f"{credited} credited across machines although {reqs} counted" if reqs == 0
+                              else f"only {credited} credited across machines for {reqs} counted"))
     else:
         c.add(None, "every pinned machine has an evidence row", "the receipt has no served_by rows (older client); only the last machine's evidence is kept")
     # Timeline.
@@ -979,7 +983,7 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             if t is None or t < first_pin or (last is not None and t > last + dt.timedelta(minutes=5)) or (refused_at is not None and t > refused_at):
                 outside.append(str(s.get("at")))
         c.add(not outside, "searches inside the session's verified window",
-              f"{len(searches)} search(es) between the first pin ({first_pin.strftime('%H:%M:%SZ')}) and the session's end" if not outside
+              f"{len(searches)} search(es) between the first pin ({first_pin.strftime('%H:%M:%SZ')}) and five minutes after the session's last activity" if not outside
               else f"outside the window (before the first verified machine, after the session, or after a refusal): {', '.join(outside)[:200]}")
 
 

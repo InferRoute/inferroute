@@ -100,24 +100,26 @@ LIMITATIONS = (
     # with an unfiled invention actually has, so it goes first, in their words.
     ("build-review", "Whether the AI machine keeps your text after answering it is the operator's claim, "
                      "not something this computer can check. The copy that lasts is the record on this "
-                     "computer. What the hardware DOES prove is that your words reach a genuine, "
-                     "non-debuggable enclave and are readable nowhere else in transit.\n\n"
+                     "computer. What the hardware DOES show is that the machine your words were encrypted to is "
+                     "a genuine Intel TDX machine with debug mode off, and that its report commits to the key "
+                     "this computer encrypted to; that each message was encrypted to that key is this computer's "
+                     "own claim, and what the program holding the key does with the words is not shown.\n\n"
                      "Why this computer cannot check it: InferRoute records the enclave builds it has "
                      "seen and refuses unrecorded ones, and recomputes what it can — stated per session "
                      "above. The measurements cover the machine's firmware, its start-up and, in the builds "
                      "InferRoute accepts, the operating system's programs, libraries and configuration. They "
                      "do NOT cover what the machine loads after it starts: the software containers the model "
                      "runs in, which the operator checks against its own signatures rather than measures, and "
-                     "the code the model is served with, which nothing measures — the operator has confirmed "
-                     "that gap and plans to add a proof of it. That software could change without changing "
-                     "any measurement."),
+                     "the code the model is served with, which nothing measures (an open issue in the "
+                     "operator's public tracker asks for a proof of it). That software could change without "
+                     "changing any measurement."),
     ("gpu-binding", "The GPU reports are signed by the same quote-bound key as the rest of the evidence, so "
                     "the enclave itself vouches that these are its GPUs — but NVIDIA provides no way to prove "
                     "from the outside that an attested GPU is attached to an attested CPU enclave. That step "
-                    "rests on the enclave's measured software, like everything else inside it. NVIDIA also "
+                    "rests on the enclave's own software, which is not all measured, like everything else inside it. NVIDIA also "
                     "does not report a GPU's confidential-computing mode, so it cannot be checked here."),
     ("metadata-visible", "Your account, session, the model, message sizes and timing are visible to relays; "
-                         "the words are not.")
+                         "the words travel encrypted to the machine's key, by this computer's own account.")
 )
 
 

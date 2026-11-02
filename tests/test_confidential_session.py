@@ -1279,3 +1279,13 @@ def test_the_request_count_is_on_disk_before_the_text_leaves(world):
     carrier.invoke = peeking
     asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
     assert seen["on_disk"] == 1
+
+
+def test_the_lane_limitations_claim_nothing_the_record_cannot_show():
+    """Code-reading audit 18: the 'build-review' limitation (quoted in the record and sent to the model) said the
+    words were 'readable nowhere else in transit' and that the operator 'plans to add a proof'."""
+    from inferroute_local.confidential import attest
+    text = " ".join(t for _, t in attest.LIMITATIONS).lower()
+    for bad in ("readable nowhere else", "plans to add", "the words are not."):
+        assert bad not in text, bad
+    assert "this computer's own claim" in text

@@ -345,7 +345,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     t = V.PLAIN_AI_LANE
     assert "only the app's own claim" in t and "not an independent audit" in t and "nothing in this record shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
     assert "is not among the software the machine's report measures" in t and "holds the key" in t and "the AI operator" in t
-    assert "InferRoute recorded without stating in this record how it obtained it" in t and "the record carries that statement, not the recalculation" in t and "was not compared by this record" in t  and "genuine Intel TDX machine" in t
+    assert "The matched entry does not say how InferRoute obtained the firmware measurement" in t and "the record carries that statement, not the recalculation" in t and "was not compared by this record" in t  and "genuine Intel TDX machine" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
     for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "was protected.",
@@ -408,7 +408,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     rt = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
     assert V.PLAIN_AI_BUILD_RUNTIME in rt and "recalculated them itself" not in rt
     two = V.plain_ai_lane(0, dict(f, builds=[("bundled", ("RTMR1",))]))
-    assert "For one of the four measurements InferRoute states that it recalculated it itself" in two and "The firmware measurement, measurement three and measurement four InferRoute recorded without stating" in two
+    assert "For one of the four measurements InferRoute states that it recalculated it itself" in two and "The matched entry does not say how InferRoute obtained the firmware measurement, measurement three and measurement four" in two
     facts = V.ai_session_facts({"counters": {"requests": 2}, "served_by": [{"attestation_sha256": "a"}, {"attestation_sha256": "b"},
                                 {"attestation_sha256": "a"}], "verdict": "confidential", "started_at": "s", "last_activity_at": "e"},
                                [("PASS", "machine 1 (x) recorded build", "build b (current), recorded by InferRoute since d; RTMR1+RTMR2+RTMR3 recomputed by InferRoute from the operator's published artifacts; MRTD 1…"),

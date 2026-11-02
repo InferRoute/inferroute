@@ -2976,9 +2976,10 @@ PLAIN_AI_SESSION = (
     "designed to contain no message text, but it does show when the conversation ran, which machine(s) the app "
     "selected for it, the identities of their graphics chips, any machines the receipt records as examined and "
     "rejected, how much was sent (byte and token counts), a cost estimate, error counts and a self-reported, "
-    "timestamped log of the app's own checks, switches and retries (not signed by anyone), though not the words; "
-    "these times and identifiers could be matched against the relay's or the operator's own logs. The app writes the "
-    "end time when it last touched the record, which can be after the last message.")
+    "timestamped log of the app's own checks, switches and retries (not signed by anyone, though this check confirmed"
+    " it is consistent with the evidence files and counts above), though not the words; these times and identifiers "
+    "could be matched against the relay's or the operator's own logs. The app writes the end time when it last "
+    "touched the record, which can be after the last message.")
 PLAIN_AI_SESSION_EMPTY = (
     "By the app's own count it sent no request in this conversation, which ran {window}; the app selected {machines} "
     "distinct machine(s) for it. This receipt is designed to contain no message text, but it does show when the "
@@ -3030,8 +3031,7 @@ PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation{rtmr3_note}.")
 PLAIN_AI_BUILD_RECORDED = (
-    "{rest} InferRoute recorded without stating in this record how it obtained {it}; for {that} you rely on "
-    "InferRoute's record.")
+    "The matched entry does not say how InferRoute obtained {rest_lower}; for {that} you rely on InferRoute's record.")
 PLAIN_AI_BUILD_RUNTIME = (
     "These measurements come from a record signed by InferRoute's publication key, which says nothing about how "
     "InferRoute obtained them.")
@@ -3061,9 +3061,10 @@ PLAIN_AI_PROGRAM = (
     "the operator can change it at any time without anything in this kind of record showing the change. That program "
     "necessarily reads every message in plain text in order to answer it; by InferRoute's account of how the app "
     "works, which no row here checks, with every request sent while the app still rated this conversation "
-    "confidential, the app {sends} it a note of its own, naming the machine, the AI model and {record_file}, and "
-    "because the AI operator chooses it, the operator could make it keep or send on that text; this record cannot "
-    "tell you what it {did} or whether it kept it.")
+    "confidential, the app {sends} it a note of its own, naming the machine, the AI model and {record_file}, together"
+    " with the list of checks that passed, the receipt's stated limitations, and instructions on how to answer "
+    "questions about privacy, and because the AI operator chooses it, the operator could make it keep or send on that"
+    " text; this record cannot tell you what it {did} or whether it kept it.")
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
@@ -3217,7 +3218,7 @@ def _plain_build(builds) -> str:
         if rest:
             names = [_FINGERPRINT_NAMES[k] for k in rest]
             label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1])
-            r = PLAIN_AI_BUILD_RECORDED.format(rest=label[0].upper() + label[1:], that="that part" if len(rest) == 1
+            r = PLAIN_AI_BUILD_RECORDED.format(rest=label[0].upper() + label[1:], rest_lower=label, that="that part" if len(rest) == 1
                                                else "those", it="it" if len(rest) == 1 else "them")
             s = (s + " " + r).strip()
         out.append(s)
@@ -3311,7 +3312,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                  qe_word=("up to date" if f["qe"] and all(q == "UpToDate" for q in f["qe"]) else
                           "software hardening needed" if "SWHardeningNeeded" in f["qe"] else "not stated in these rows"), 
                  provenance=(PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_MIXED if mixed
-                             else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF.replace("and from which InferRoute buys access to them", "in this conversation, you bought access from it directly") if direct else PLAIN_AI_BOOTCONF,
+                             else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF.replace(" and from which InferRoute buys access to them", "; in this conversation you bought access from it directly") if direct else PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty or f["requests"] is None else "your text"),
              PLAIN_AI_PROGRAM.format(record_file=_record_file_words(f["preamble_path"]),

@@ -58,7 +58,7 @@ ALPINE_KEYS = ("alpine-keys-2.6-r0.apk", "dd211936d544f4050924ce8aec078d24e7b1b0
 # 2026-10-15: 6.18.55-r0 -> 6.18.56-r0 (the mirror no longer serves 6.18.55; apk verify against alpine-keys 2.6 aarch64 OK before pinning).
 # 2026-10-08: 6.18.54-r0 -> 6.18.55-r0 (aports 52fae6d7, 2026-10-05, a stable point release); the mirror no longer
 # serves 6.18.54. The new package's Alpine signature was verified (apk verify) before its sha256 was pinned here.
-KERNEL = {"aarch64": ("linux-virt-6.18.58-r0.apk", "b46c51ddf572d85b2ba7b9adfaa64f4c38fc490c93d97a20ffd2418d51284085")}
+KERNEL = {"aarch64": ("linux-virt-6.18.60-r0.apk", "b931f14a93634469cc8930afe5d6837361325456b620b94e970bb981d841c99c")}
 MODULES = ("net/vmw_vsock/vsock", "net/vmw_vsock/vmw_vsock_virtio_transport_common",
            "net/vmw_vsock/vmw_vsock_virtio_transport", "drivers/char/hw_random/rng-core",
            "drivers/char/hw_random/virtio-rng")
@@ -67,20 +67,23 @@ REQUESTED = ("busybox", "musl", "python3", "nodejs", "bubblewrap")
 # The complete resolved set. Anything else — a new dependency, a bumped revision — is a failed build
 # until someone looks at it and updates this table on purpose.
 LOCK = {
-    "ada-libs": "3.3.0-r0", "brotli-libs": "1.2.1-r0", "bubblewrap": "0.12.0-r0", "busybox": "1.37.0-r31",
+    "ada-libs": "4.0.0-r0", "brotli-libs": "1.2.1-r0", "bubblewrap": "0.12.0-r0", "busybox": "1.37.0-r31",
     "busybox-binsh": "1.37.0-r31", "c-ares": "1.34.9-r0", "ca-certificates": "20261020-r0", "gdbm": "1.26-r0",
     "icu-data-en": "78.1-r0", "icu-libs": "78.1-r0", "libbz2": "1.0.8-r6", "libcap2": "2.78-r0",
     "libcrypto3": "3.5.9-r0", "libexpat": "2.9.0-r0", "libffi": "3.5.2-r1", "libgcc": "15.2.0-r5",
     "libncursesw": "6.6_p20260516-r0", "libpanelw": "6.6_p20260516-r0", "libssl3": "3.5.9-r0",
     "libstdc++": "15.2.0-r5", "mpdecimal": "4.0.1-r0", "musl": "1.2.6-r3",
-    "ncurses-terminfo-base": "6.6_p20260516-r0", "nghttp2-libs": "1.70.0-r0", "nodejs": "24.18.1-r0",
-    "pyc": "3.14.8-r0", "python3": "3.14.8-r0", "python3-pyc": "3.14.8-r0",
-    "python3-pycache-pyc0": "3.14.8-r0", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
+    "ncurses-terminfo-base": "6.6_p20260516-r0", "nghttp2-libs": "1.70.0-r0", "nodejs": "24.22.1-r1",
+    "pyc": "3.14.10-r1", "python3": "3.14.10-r1", "python3-pyc": "3.14.10-r1",
+    "python3-pycache-pyc0": "3.14.10-r1", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
     "simdutf": "9.0.0-r0", "sqlite-libs": "3.53.4-r0", "ssl_client": "1.37.0-r31", "xz-libs": "5.8.4-r0",
     "zlib": "1.3.2-r1", "zstd-libs": "1.5.7-r2",
 }
 # 2026-10-08: zlib 1.3.2-r0 -> r1 is Alpine aports 0afa2da0 (2026-10-06), "backport fix for CVE-2026-85091";
 # the stable mirror no longer serves r0. Reviewed and taken on purpose: a security fix, nothing else in the package.
+# 2026-11-02: the mirror stopped serving python3 3.14.8-r0, nodejs 24.18.1-r0 and linux-virt 6.18.58-r0. Taken: python3
+# 3.14.10-r1, nodejs 24.22.1-r1 (which pulls ada-libs 4.0.0-r0, its URL parser) and linux-virt 6.18.60-r0, all within
+# Alpine v3.24; the kernel apk's signature verified OK under Alpine's aarch64 key before its sha256 was pinned.
 # 2026-10-18: libexpat 2.8.5-r0 -> 2.9.0-r0 (a dependency of python3, resolved to whatever the mirror serves; the mirror
 # no longer serves 2.8.5). Taken on purpose to unblock 0.9.118; nothing else in the resolved set moved.
 # 2026-10-21: c-ares 1.34.8 -> 1.34.9 (a dependency of nodejs) and ca-certificates 20260909 -> 20261020 (the CA bundle),

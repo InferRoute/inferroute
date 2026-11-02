@@ -1261,3 +1261,21 @@ def test_a_key_rotated_on_the_same_machine_is_re_pinned_and_recorded(world):
     assert any(e["kind"] == "key-changed" for e in s.receipt.events)
     assert s.receipt.counters["instance_switches"] == len(s.receipt.served_by) - 1
     assert s.receipt.preamble_path == "home-relative"
+
+
+def test_the_request_count_is_on_disk_before_the_text_leaves(world):
+    """Code-reading audit 12: the count reached disk only after a complete reply, so a session cut off mid-reply
+    said 'no request sent'. Read the receipt from disk while the request is in flight."""
+    import json as _json
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    seen = {}
+    orig = carrier.invoke
+
+    async def peeking(*a, **k):
+        seen["on_disk"] = _json.loads(open(s.receipt.path).read())["counters"]["requests"]
+        return await orig(*a, **k)
+    carrier.invoke = peeking
+    asyncio.run(_msg(s, {"stream": False, "messages": [{"role": "user", "content": "1"}]}))
+    assert seen["on_disk"] == 1

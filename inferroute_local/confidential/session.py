@@ -518,6 +518,10 @@ class ConfidentialSession:
             c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
             c["ciphertext_bytes_sent"] += len(sealed.blob)
             self._restate_claim()          # the strong claim is earned here, by a request actually sealed
+            # Persist the count BEFORE the text leaves: it used to reach disk only after a complete reply, so a
+            # session cut off mid-reply kept 'requests: 0' and the record's plain words said nothing was sent
+            # (code-reading audit 12, 2 Nov).
+            self.receipt.save()
             try:
                 status, headers, raw = await self.transport.invoke(
                     fleet_id=self.fleet_id, instance_id=pinned.instance_id, nonce=nonce, stream=streaming, blob=sealed.blob)

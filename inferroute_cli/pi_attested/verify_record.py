@@ -2965,13 +2965,14 @@ PLAIN_AI_OPEN_EMPTY = (
     "About this AI conversation: the Anteriora app recorded no request sent in it. Had you sent messages, the app "
     "could have read them in plain text before encrypting them, and if the app itself were faulty or malicious, none "
     "of these checks would show it, because they look only at the remote machines. What follows describes the "
-    "machine(s) it had checked and was prepared to use; no text of yours reached it in this conversation, by the "
-    "app's own record, which is only the app's own claim.")
+    "machine(s) it had checked and was prepared to use; no text of yours reached any of them in this conversation, by"
+    " the app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
     "carries the conversation so far) {window}; the app selected {machines} distinct machine(s) for it{credit}. This "
     "receipt is designed to contain no message text, but it does show when the conversation ran, which machine(s) the"
-    " app selected for it, and how much was sent (byte and token counts), though not the words.")
+    " app selected for it, how much was sent (byte and token counts), a cost estimate and error counts, though not "
+    "the words. The app writes the end time when it last touched the record, which can be after the last message.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) selected for it.")
@@ -2979,12 +2980,12 @@ PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} by"
     " its own record; this record checks only that the event lies inside the conversation's time window. This record "
     "does not check whether the app sent further requests after that moment; any later request went only to a machine"
-    " the app says it re-checked.")
+    " the app says it had verified within the previous half-hour.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
     " with the app's challenge for this conversation, and this record checks that fingerprint against the key the app"
-    " recorded when it selected that machine {rotation}; the report contains a fingerprint that fixes that public "
+    " recorded when it selected that machine ({rotation}); the report contains a fingerprint that fixes that public "
     "key, but does not show where the matching private key was made or kept. Each report also answered a challenge "
     "the app says it drew for this conversation, so it is not a report made before that challenge existed. Whether "
     "the app really encrypted your messages to that key is again only the app's claim, and no machine signs anything "
@@ -3026,11 +3027,11 @@ PLAIN_AI_TCB_HARDENING = (
 PLAIN_AI_GPU = (
     "NVIDIA's certificates identify the graphics chips as genuine (nothing checked shows that they are attached to "
     "that machine: the machine's own software put their reports into its signed evidence), and NVIDIA's automated "
-    "attestation service reported, about these chips only, that their firmware matched NVIDIA's published reference "
-    "for its version and were running with secure boot on and debug off. That service's report says nothing about "
-    "whether the chips were in their confidential-computing mode, the setting meant to stop those who run the "
-    "physical machine from reading what the chips work on; if it was off, they might have been able to read {text} "
-    "while the chips processed it, and this record cannot tell you whether it was on.")
+    "attestation service reported, about these chips only, that their driver and firmware matched NVIDIA's published "
+    "reference for their versions and were running with secure boot on and debug off. That service's report says "
+    "nothing about whether the chips were in their confidential-computing mode, the setting meant to stop those who "
+    "run the physical machine from reading what the chips work on; if it was off, they might have been able to read "
+    "{text} while the chips processed it, and this record cannot tell you whether it was on.")
 PLAIN_AI_PROGRAM = (
     "The AI program your messages {were} addressed to, and that holds the key to decrypt them, is chosen by the AI "
     "operator and is not among the software the machine's report measures, so the report does not say which program "
@@ -3067,7 +3068,7 @@ PLAIN_AI_STOPPED = (
     "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record "
     "checks only that the stop and the failures recorded before it lie inside the conversation's time window. This "
     "record does not check whether the app sent further requests after that moment; any later request went only to a "
-    "machine the app says it re-checked.")
+    "machine the app says it had verified within the previous half-hour.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires, by the app's own timestamps, both answers to have been fetched within a quarter-hour of the moment the"
@@ -3181,8 +3182,8 @@ def _record_file_words(preamble_path: str) -> str:
     version number cannot tell, the fix landed before the number moved)."""
     if preamble_path == "home-relative":
         return "the name of the file where this conversation's record is kept (with your home folder written as '~')"
-    return ("the full path of the file where this conversation's record is kept on your computer, which includes your "
-            "computer's account name")
+    return ("the full path of the file where this conversation's record is kept on your computer, which normally "
+            "includes your computer's account name")
 
 
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -3209,6 +3210,10 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
               "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
+    new_client = f["preamble_path"] == "home-relative"
+    rotation = ("a machine that later offered a new key got a new entry, with its own check" if new_client else
+                "this record was written by a version of the app that did not record a machine's later change of key, "
+                "so messages sent after such a change would have been encrypted to a key this record does not show")
     opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
         claim=("it encrypted each of your messages so that only the machines named here could read them, and addressed "
                "them only to those machines (on the way they pass through a relay or gateway, described below)") if f["requests"] is not None else
@@ -3217,6 +3222,10 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]),
         credit="" if not f["requests"] else f" and credits those requests to {f['credited']} of them", **f)
+    if not new_client and f["requests"] is not None:
+        session += (" The version of the app that wrote this record saved the request count only after a reply "
+                    "finished, so a conversation cut off mid-reply can show fewer requests than were sent"
+                    + (", including none" if empty else "") + ".")
     direct = "direct" in str(f.get("transport") or "").lower()
     runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
     mixed = any(k == "runtime" for k, _ in f["builds"]) and not runtime_only
@@ -3231,9 +3240,6 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         else PLAIN_AI_REFUSED.format(refused_at=_plain_time(f["refused_at"])) if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
     if f["credited"] is None:
         f["credited"] = f["machines"]
-    new_client = f["preamble_path"] == "home-relative"
-    rotation = ("a machine that later offered a new key got a new entry, with its own check" if new_client else
-                "this record was written by a version of the app that did not record a machine's later change of key")
     parts = [opening + " " + session + refusal,
              PLAIN_AI_KEY.format(rotation=rotation) + " " + PLAIN_AI_WHO_CHECKS.format(
                  relay=(" (by the app's record this conversation did not pass through InferRoute's relay)" if direct

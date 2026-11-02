@@ -434,3 +434,14 @@ def test_a_stop_after_failed_rechecks_bounds_linked_searches():
         V.check_receipt_consistency(c, receipt, [], [{"at": at, "session_id": "s"}])
         row = [r for r in c.rows if r[1] == "searches inside the session's verified window"]
         assert row and (row[0][0] == "PASS") is ok, (at, row)
+
+
+def test_an_exported_receipt_writes_home_as_tilde():
+    """Code-reading audit 12: the record goes to third parties; the receipt's 'path' carried the account name."""
+    import json as _json, os
+    from inferroute_cli.probant_export import _home_relative_receipt_path
+    home = os.path.expanduser("~")
+    raw = _json.dumps({"path": os.path.join(home, ".inferroute/confidential/receipts/x.json"), "verdict": "confidential"}).encode()
+    out = _json.loads(_home_relative_receipt_path(raw))
+    assert out["path"] == "~/.inferroute/confidential/receipts/x.json" and out["verdict"] == "confidential"
+    assert _home_relative_receipt_path(b'{"path": "/srv/x.json"}') == b'{"path": "/srv/x.json"}'

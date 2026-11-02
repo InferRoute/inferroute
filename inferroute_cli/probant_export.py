@@ -1074,6 +1074,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         # an auditor received a record citing evidence that is not in the bundle — worse than one that
         # admits the evidence is gone, because it reads as an omission.
         raw, carried, missing = _carry_served_evidence(raw, Path(rp).parent, files)
+        raw = _home_relative_receipt_path(raw)
         note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"}
         # WHAT BINDS THIS RECEIPT TO THESE SEARCHES, said in the only terms that are worth anything. Two
         # independent auditors reached the same finding on 1 Oct: "the receipt carries none of the search
@@ -2185,6 +2186,22 @@ def _is_session_receipt(name: str) -> bool:
     `session-*.receipt.json`, write_bundle writes that name, and the pack must carry that same set — three
     readings of one fact, so it is spelled once."""
     return name.startswith("session-") and name.endswith(".receipt.json")
+
+
+def _home_relative_receipt_path(raw: bytes) -> bytes:
+    """The receipt's own 'path' field holds its absolute location, home folder (account name) included. A record
+    is handed to third parties, so the exported copy writes home as '~' (code-reading audit 12, 2 Nov). Nothing
+    verifies that field; every checked value is left as written."""
+    import os
+    try:
+        r = json.loads(raw)
+    except Exception:                                   # noqa: BLE001 — not JSON: leave it, the verifier will say so
+        return raw
+    p, home = str(r.get("path") or ""), os.path.expanduser("~").rstrip("/")
+    if not (isinstance(r, dict) and home and (p == home or p.startswith(home + "/"))):
+        return raw
+    r["path"] = "~" + p[len(home):]
+    return (json.dumps(r, indent=1, ensure_ascii=False) + "\n").encode()
 
 
 def _carry_served_evidence(raw: bytes, rdir: Path, files: dict):

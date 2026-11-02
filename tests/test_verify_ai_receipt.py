@@ -375,7 +375,9 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     # Review 9 (MATERIAL x2): a recorded stop is not the end of sending; the operator's program gets the app's note,
     # with the full home path from clients before 0.9.126.
     assert "does not check whether the app sent further requests after that moment" in V.plain_ai_lane(0, dict(f, refused=True, refused_at="2026-11-02T09:03:00Z"))
-    assert "account name" in V.plain_ai_lane(0, dict(f, writer="ir 0.9.125")) and "account name" not in V.plain_ai_lane(0, dict(f, writer="ir 0.9.126"))
+    # Review 11: the receipt's own 'preamble_path' field decides, not the version number.
+    assert "account name" in V.plain_ai_lane(0, dict(f, writer="ir 0.9.126")) and "account name" not in V.plain_ai_lane(0, dict(f, preamble_path="home-relative"))
+    assert "would also have sent it a note" in V.plain_ai_lane(0, dict(f, requests=0))
     # Review 8 (MATERIAL x2): no relay billing sentence on the direct carrier; the stop time is the stop event's.
     d8 = V.plain_ai_lane(0, dict(f, transport="direct to the enclave operator (your own key — InferRoute is not in the path)"))
     assert "billing report" not in d8 and "billing report" in up

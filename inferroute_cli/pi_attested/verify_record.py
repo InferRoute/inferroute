@@ -2984,12 +2984,11 @@ PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
     " with the app's challenge for this conversation, and this record checks that fingerprint against the key the app"
-    " recorded when it selected that machine (a machine that later offers a new key gets a new entry, with its own "
-    "check, from clients after 0.9.125); the report contains a fingerprint that fixes that public key, but does not "
-    "show where the matching private key was made or kept. Each report also answered a challenge the app says it drew"
-    " for this conversation, so it is not a report made before that challenge existed. Whether the app really "
-    "encrypted your messages to that key is again only the app's claim, and no machine signs anything per message, so"
-    " nothing from the machines shows that they received yours.")
+    " recorded when it selected that machine {rotation}; the report contains a fingerprint that fixes that public "
+    "key, but does not show where the matching private key was made or kept. Each report also answered a challenge "
+    "the app says it drew for this conversation, so it is not a report made before that challenge existed. Whether "
+    "the app really encrypted your messages to that key is again only the app's claim, and no machine signs anything "
+    "per message, so nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3002,10 +3001,9 @@ PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
     "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
     "with its debug mode off (a mode that company could otherwise use to read the machine's memory); that setting is "
-    "fixed for as long as that virtual machine, and the key its report commits to, exist. It shows that the software "
-    "the machine started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's "
-    "own published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
-    "certificates were checked.")
+    "fixed for the life of that virtual machine. It shows that the software the machine started from matched four "
+    "measurements (fingerprints of its start-up software) {provenance} Intel's own published status for this hardware"
+    " was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation.")
@@ -3038,9 +3036,9 @@ PLAIN_AI_PROGRAM = (
     "operator and is not among the software the machine's report measures, so the report does not say which program "
     "it was, and the operator can change it at any time without anything in this kind of record showing the change. "
     "That program necessarily reads every message in plain text in order to answer it; by InferRoute's account of how"
-    " the app works, which no row here checks, with every request the app also sends it a note of its own, naming the"
-    " machine, the AI model and {record_file}, and because the AI operator chooses it, the operator could make it "
-    "keep or send on that text; this record cannot tell you what it {did} or whether it kept it.")
+    " the app works, which no row here checks, with every request the app {sends} it a note of its own, naming the "
+    "machine, the AI model and {record_file}, and because the AI operator chooses it, the operator could make it keep"
+    " or send on that text; this record cannot tell you what it {did} or whether it kept it.")
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
@@ -3072,10 +3070,10 @@ PLAIN_AI_STOPPED = (
     "machine the app says it re-checked.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
-    "requires both answers to have been fetched within a quarter-hour of the moment the machine was selected), so "
-    "each saw your computer's address and the time, and NVIDIA also received the identities of the chips in each "
-    "machine the app had found genuine and might use, which could let it tell which machines you might use; neither "
-    "received any message text.")
+    "requires, by the app's own timestamps, both answers to have been fetched within a quarter-hour of the moment the"
+    " machine was selected), so each saw your computer's address and the time, and NVIDIA also received the "
+    "identities of the chips in each machine the app had found genuine and might use, which could let it tell which "
+    "machines you might use; neither received any message text.")
 PLAIN_AI_OPENED_EMPTY = (
     "By InferRoute's account, even with no request sent the relay saw this conversation being opened from your "
     "InferRoute account.")
@@ -3149,6 +3147,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
             "why": why[:240], "stopped_at": stopped_at, "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
             "writer": str(receipt.get("written_by") or ""),
+            "preamble_path": str(receipt.get("preamble_path") or ""),
             "start": str(receipt.get("started_at") or "?"),
             "end": str(receipt.get("last_activity_at") or receipt.get("ended_at") or "?"),
             "builds": sorted(set(builds)), "tcb": sorted(statuses)}
@@ -3176,11 +3175,11 @@ def _plain_build(builds) -> str:
     return " ".join(out)
 
 
-def _record_file_words(writer: str) -> str:
-    """Clients before 0.9.126 put the record's full path, home folder included, in the note every request carries
-    (code-reading audit 9); from 0.9.126 home is written as '~'. Unknown writer: say the worse case."""
-    m = re.search(r"(\d+)\.(\d+)\.(\d+)", writer or "")
-    if m and tuple(int(x) for x in m.groups()) >= (0, 9, 126):
+def _record_file_words(preamble_path: str) -> str:
+    """The receipt says how its app named the record file in the note every request carries (field 'preamble_path',
+    written since the code-reading audit 9 fix). Absent: an earlier client, which sent the full path (audit 11: the
+    version number cannot tell, the fix landed before the number moved)."""
+    if preamble_path == "home-relative":
         return "the name of the file where this conversation's record is kept (with your home folder written as '~')"
     return ("the full path of the file where this conversation's record is kept on your computer, which includes your "
             "computer's account name")
@@ -3206,7 +3205,7 @@ def _plain_window(start: str, end: str) -> str:
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
     """The paragraph for one conversation, in parts separated by blank lines."""
-    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "build_status": [], "writer": "",
+    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "build_status": [], "writer": "", "preamble_path": "",
               "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
@@ -3232,10 +3231,14 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         else PLAIN_AI_REFUSED.format(refused_at=_plain_time(f["refused_at"])) if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
     if f["credited"] is None:
         f["credited"] = f["machines"]
+    new_client = f["preamble_path"] == "home-relative"
+    rotation = ("a machine that later offered a new key got a new entry, with its own check" if new_client else
+                "this record was written by a version of the app that did not record a machine's later change of key")
     parts = [opening + " " + session + refusal,
-             PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS.format(
+             PLAIN_AI_KEY.format(rotation=rotation) + " " + PLAIN_AI_WHO_CHECKS.format(
                  relay=(" (by the app's record this conversation did not pass through InferRoute's relay)" if direct
-                        else ", and operates the relay the app says your traffic passed through"
+                        else (", and operates the relay the app says your traffic would have passed through" if empty
+                              else ", and operates the relay the app says your traffic passed through")
                         if "relay" in str(f.get("transport") or "").lower()
                         else ", and operates the relay InferRoute states carries this traffic")),
              " ".join(x for x in (PLAIN_AI_MACHINE.format(
@@ -3243,7 +3246,8 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                              else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty or f["requests"] is None else "your text"),
-             PLAIN_AI_PROGRAM.format(record_file=_record_file_words(f["writer"]), were="would have been" if empty else "were",
+             PLAIN_AI_PROGRAM.format(record_file=_record_file_words(f["preamble_path"]),
+                                     sends="would also have sent" if empty else "also sends", were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct
                                      else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")

@@ -51,6 +51,10 @@ class Receipt:
     # time and were throwing them away, which made a checkable claim uncheckable for no reason.
     # No conversation content is in here: measurements, our own challenge, and public keys.
     attestation: dict = field(default_factory=dict)
+    # How the note this app sends the operator's program with every request names the receipt file. "home-relative"
+    # (home written as "~") since the code-reading audit 9 fix; receipts without this field came from a client that
+    # sent the absolute path, account name included. The offline verifier reads this field, not the version number.
+    preamble_path: str = "home-relative"
     checks: dict = field(default_factory=dict)          # name → {ok, why, label, explain}
     fleet: dict = field(default_factory=dict)           # {instances, verified, e2ee_capable, eligible}
     limitations: list = field(default_factory=lambda: [{"id": k, "text": t} for k, t in attest.LIMITATIONS])

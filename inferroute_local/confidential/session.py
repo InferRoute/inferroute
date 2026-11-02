@@ -380,6 +380,9 @@ class ConfidentialSession:
                 # served_by row and evidence for the key that later requests are sealed to; otherwise the record names
                 # only the old key (code-reading audit 10, 2 Nov).
                 self.receipt.note("key-changed", f"{current} offered a new key; re-verified and re-pinned")
+                # A re-pin adds a served_by row, and the offline verifier reads switches == pins - 1; without this
+                # count it SKIPs that row and the plain words never print (code-reading audit 11).
+                self.receipt.counters["instance_switches"] = self.receipt.counters.get("instance_switches", 0) + 1
                 self._pin(current, "key rotated; re-verified")
             else:
                 self.pinned = self._pool[current]

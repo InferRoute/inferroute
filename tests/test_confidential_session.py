@@ -1259,3 +1259,5 @@ def test_a_key_rotated_on_the_same_machine_is_re_pinned_and_recorded(world):
     assert s.pinned.instance_id == iid and s.pinned.pubkey_b64 == s._pool[iid].pubkey_b64
     assert len(s.receipt.served_by) == before + 1, "the new key must get its own served_by row"
     assert any(e["kind"] == "key-changed" for e in s.receipt.events)
+    assert s.receipt.counters["instance_switches"] == len(s.receipt.served_by) - 1
+    assert s.receipt.preamble_path == "home-relative"

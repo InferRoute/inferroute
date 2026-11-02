@@ -2969,10 +2969,10 @@ PLAIN_AI_OPEN_EMPTY = (
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
     "carries the conversation so far) to {machines} distinct machine(s), {window}. This record is designed to contain"
-    " no message text, but it does show when the conversation ran and which machines were used.")
+    " no message text, but it does show when the conversation ran and which machines were checked for it.")
 PLAIN_AI_SESSION_NOCOUNT = (
-    "The app's record of this conversation carries no count of requests; it ran {window}, using {machines} distinct "
-    "machine(s).")
+    "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
+    "machine(s) checked for it.")
 PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} "
     "by its own record; this record checks only that the event lies inside the conversation's time window.")
@@ -3043,17 +3043,21 @@ PLAIN_AI_HOSTS = (
     "how much, and this "
     "record checks none of that, nor whether either logs it, or for how long, nor where the relay and gateway are.")
 PLAIN_AI_SUMMARY = (
-    "In short, what this record establishes is about the machines, not about {text}: they were genuine Intel TDX "
-    "machines with debug mode off, their starting software matched measurements InferRoute supplied, and each machine's "
-    "report, made in answer to the app's challenge, carried the fingerprint of a public key that matched the key the "
-    "app says it used; NVIDIA's report on the graphics chips answered that challenge too. The debug modes being off rules out reading the machines' memory through those modes, not by other means. Nothing in it shows that {text} was exposed, and nothing in it shows that it was not.")
+    "In short: nothing in this record shows that {text} was exposed, and nothing in it shows that it was not. What it"
+    " establishes is about the machines, not about {text}: they were genuine Intel TDX machines with debug mode off, "
+    "their starting software matched measurements InferRoute supplied, and each machine's report, made in answer to "
+    "the app's challenge, carried the fingerprint of a public key that matched the key the app says it used; NVIDIA's"
+    " report on the graphics chips answered that challenge too. The debug modes being off rules out reading the "
+    "machines' memory through those modes, not by other means.")
 PLAIN_AI_ASK = (
-    "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI "
-    "operator and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages "
-    "are used to train AI models, whether backups are kept and where, in which country the machines, the relay and the "
-    "gateway were, and which of them is legally responsible for your messages under data-protection law and what rights "
-    "you have to copies or erasure. The app also keeps the conversation on your own computer; ask InferRoute where, and "
-    "how to delete it.")
+    "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI operator "
+    "and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages are "
+    "used to train AI models, whether backups are kept and where, in which country the machines, the relay and the "
+    "gateway were, and which of them is legally responsible for your messages under data-protection law and what "
+    "rights you have to copies or erasure, whether your agreement is with InferRoute alone, and whether you will be "
+    "told if any of them finds that your messages or their timing were accessed without authority. If the answer to "
+    "any of these is that they do not know or will not say, this record offers nothing against that answer. The app "
+    "also keeps the conversation on your own computer; ask InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")

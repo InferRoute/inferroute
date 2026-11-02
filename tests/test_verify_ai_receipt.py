@@ -392,7 +392,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     # Review 6 (MATERIAL x4): credited machines; the app's own stop reason and time; Intel/NVIDIA lookups from the
     # user's computer; the signing key is committed, not shown to be inside.
     cr = V.plain_ai_lane(0, dict(f, machines=3, credited=2))
-    assert "selected 3 distinct machine(s) for it and records 2 of them as having carried those requests" in cr
+    assert "selected 3 distinct machine(s) for it and records 2 of them as the machine(s) it addressed those requests to" in cr
     st = V.plain_ai_lane(0, dict(f, refused=True, why="the enclave could not be re-verified 3 times in a row.", stopped_at="2026-11-02T09:04:00Z"))
     assert "at 2 Nov 2026, 09:04:00 UTC because, by its own record, the enclave could not be re-verified 3 times in a row;" in st
     assert V.PLAIN_AI_LOOKUPS in up and "signed from inside the machine" not in up and "where its private half was kept is, again, not shown" in up

@@ -3001,10 +3001,11 @@ PLAIN_AI_WHO_CHECKS = (
 PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
     "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
-    "with its debug mode off (a mode that company could otherwise use to read the machine's memory); that setting is "
-    "fixed for the life of that virtual machine. It shows that the software the machine started from matched four "
-    "measurements (fingerprints of its start-up software) {provenance} Intel's own published status for this hardware"
-    " was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
+    "with its debug mode off (a mode that company could otherwise use to read the machine's memory); by Intel's "
+    "design that setting cannot change for the life of that virtual machine. It shows that the software the machine "
+    "started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's own "
+    "published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
+    "certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation.")
@@ -3102,8 +3103,9 @@ PLAIN_AI_ASK = (
     "is legally responsible for your messages under data-protection law and what rights you have to copies or "
     "erasure, {agreement}, and whether you will be told if any of them finds that your messages or their timing were "
     "accessed without authority. If the answer to any of these is that they do not know or will not say, this record "
-    "offers nothing against that answer. By InferRoute's account, the app also keeps the conversation on your own "
-    "computer; ask InferRoute where, and how to delete it.")
+    "offers nothing against that answer. Intel and NVIDIA may keep a log of the lookups the app made; ask them if "
+    "that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer; ask "
+    "InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")
@@ -3214,11 +3216,13 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     rotation = ("a machine that later offered a new key got a new entry, with its own check" if new_client else
                 "this record was written by a version of the app that did not record a machine's later change of key, "
                 "so messages sent after such a change would have been encrypted to a key this record does not show")
+    path_words = ("the AI operator's gateway" if "direct" in str(f.get("transport") or "").lower()
+                  else "InferRoute's relay and the AI operator's gateway")
     opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
         claim=("it encrypted each of your messages so that only the machines named here could read them, and addressed "
-               "them only to those machines (on the way they pass through a relay or gateway, described below)") if f["requests"] is not None else
+               f"them only to those machines (on the way they pass through {path_words}, described below)") if f["requests"] is not None else
               ("any message it sent in this conversation was encrypted so that only the machines named here could read "
-               "it, and was addressed only to those machines (on the way it passes through a relay or gateway, described below)"))
+               f"it, and was addressed only to those machines (on the way it passes through {path_words}, described below)"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]),
         credit="" if not f["requests"] else f" and credits those requests to {f['credited']} of them", **f)

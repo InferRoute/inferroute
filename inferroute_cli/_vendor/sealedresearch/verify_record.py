@@ -2968,8 +2968,9 @@ PLAIN_AI_OPEN_EMPTY = (
     "app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
-    "carries the conversation so far) to {machines} distinct machine(s), {window}. This record is designed to contain"
-    " no message text, but it does show when the conversation ran and which machine(s) the app checked for it.")
+    "carries the conversation so far) {window}; the app checked {machines} distinct machine(s) for it and credits "
+    "those requests to {credited} of them. This receipt is designed to contain no message text, but it does show when"
+    " the conversation ran and which machine(s) the app checked for it.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) checked for it.")
@@ -3012,18 +3013,20 @@ PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
     "configuration) was not compared at all. The AI operator is, by InferRoute's account, the company that operates "
     "these machines and from which InferRoute buys access to them; the rows above show a name in the certificate that"
-    " signed each machine's evidence, a name this check reads but does not verify. The key behind that certificate is"
-    " itself committed in the machine's report, so the evidence was signed from inside the machine; only the name is "
-    "unverified.")
+    " signed each machine's evidence, a name this check reads but does not verify. The machine's report commits to "
+    "the key behind that certificate, as it does to the encryption key; where its private half was kept is, again, "
+    "not shown.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
 PLAIN_AI_GPU = (
-    "NVIDIA's certificates identify the graphics chips as genuine, and NVIDIA's automated attestation service reported, "
-    "about these chips only, that they had the expected firmware and were running with secure boot on and debug off. "
-    "That service's report says nothing about whether the chips were in their confidential-computing mode, the setting "
-    "meant to stop those who run the physical machine from reading what the chips work on; if it was off, they might "
-    "have been able to read {text} while the chips processed it, and this record cannot tell you whether it was on.")
+    "NVIDIA's certificates identify the graphics chips as genuine (nothing checked shows that they are attached to "
+    "that machine: the machine's own software put their reports into its signed evidence), and NVIDIA's automated "
+    "attestation service reported, about these chips only, that their firmware matched NVIDIA's published reference "
+    "for its version and were running with secure boot on and debug off. That service's report says nothing about "
+    "whether the chips were in their confidential-computing mode, the setting meant to stop those who run the "
+    "physical machine from reading what the chips work on; if it was off, they might have been able to read {text} "
+    "while the chips processed it, and this record cannot tell you whether it was on.")
 PLAIN_AI_PROGRAM = (
     "The AI program your messages {were} addressed to, and that holds the key to decrypt them, is chosen by the AI operator "
     "and is not among the software the machine's report measures, so the report does not say which program it was, "
@@ -3035,19 +3038,31 @@ PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
 PLAIN_AI_PATH_RELAY = (
-    "InferRoute operates a relay and, by InferRoute's account, the AI operator a gateway that the app says {carried} your "
-    "encrypted messages; either could see which account sent them, when, and how much, and this record checks none of "
-    "that, nor whether either logs it, or for how long, nor where the relay and gateway are.")
+    "InferRoute operates a relay and, by InferRoute's account, the AI operator a gateway that the app says {carried} "
+    "your encrypted messages; the relay could see which InferRoute account sent them, and both could see when and how"
+    " much, and this record checks none of that, nor whether either logs it, or for how long, nor where the relay and"
+    " gateway are.")
 PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway with a key of your own, "
     "not through InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record "
     "checks none of that, nor whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
-    "InferRoute supplied, as InferRoute's list stood when this record was exported; a flaw InferRoute finds in that "
-    "software later will not show here.")
+    "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
+    "finds in that software later will not show here.")
 PLAIN_AI_PROVENANCE_RUNTIME = (
     "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute shipped "
     "inside this check, so you cannot read it there.")
+PLAIN_AI_STOPPED = (
+    "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record checks "
+    "only that those events lie inside the conversation's time window.")
+PLAIN_AI_LOOKUPS = (
+    "To check the machines, the app itself asked Intel's and NVIDIA's online services from your computer, so each saw"
+    " your computer's address and the time; neither received any message text.")
+PLAIN_AI_OPENED_EMPTY = (
+    "Even with no request sent, the relay saw this conversation being opened from your InferRoute account.")
+PLAIN_AI_PROVENANCE_MIXED = (
+    "InferRoute supplied, from the list it shipped inside this check or, for some machines, from a row it signed and the "
+    "app kept at the time; a flaw InferRoute finds in that software later will not show here.")
 PLAIN_AI_HOSTS = (
     "The machines themselves belong to other companies or individuals (by InferRoute's account; the AI operator's "
     "network calls them miners) who host the physical hardware for the AI operator. Intel's hardware protection, "
@@ -3090,11 +3105,17 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
                 for i, s in enumerate(served) if isinstance(s, dict)}           # the key the evidence row counts by
     events = receipt.get("events") if isinstance(receipt.get("events"), list) else []
     stop = [e for e in events if isinstance(e, dict) and e.get("kind") in ("refused", "no-eligible-instance")]
+    rever = [e for e in events if isinstance(e, dict) and e.get("kind") == "reverify-failed"]
+    why = str(receipt.get("refusal") or "").strip()
+    credited = sum(1 for s in served if isinstance(s, dict) and int(s.get("requests") or 0) > 0)
     refused = str(receipt.get("verdict") or "") not in ("", "confidential") or bool(stop)
     refused_at = str(stop[0].get("ts") or "") if stop else ""
-    builds, statuses = [], set()
+    builds, statuses, build_status = [], set(), set()
     for st, name, detail in rows:
         if name.endswith("recorded build") and st == "PASS":
+            ms = re.match(r"build \S+ \((\w+)\)", detail)
+            if ms:
+                build_status.add(ms.group(1))
             m = re.search(r"; ([A-Z0-9+]+) recomputed by InferRoute", detail)
             builds.append(("runtime", ()) if "run-time row signed" in detail
                           else ("bundled", tuple(m.group(1).split("+")) if m else ()))
@@ -3104,7 +3125,9 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
                 statuses.add(m.group(1))
         # Only the platform status feeds the plain words (review 5): the QE status is a different property, and pooling
         # the two scoped "for at least one machine" wrongly. A QE outside UpToDate/SWHardeningNeeded FAILS anyway.
-    return {"requests": reqs, "machines": len(distinct) or 1, "refused": refused, "refused_at": refused_at,
+    stopped_at = str((rever[-1] if rever else (stop[0] if stop else {})).get("ts") or "")
+    return {"requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
+            "why": why[:240], "stopped_at": stopped_at, "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
             "start": str(receipt.get("started_at") or "?"),
             "end": str(receipt.get("last_activity_at") or receipt.get("ended_at") or "?"),
@@ -3153,7 +3176,8 @@ def _plain_window(start: str, end: str) -> str:
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
     """The paragraph for one conversation, in parts separated by blank lines."""
-    f = dict({"requests": None, "machines": 1, "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
+    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "build_status": [],
+              "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
     opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
@@ -3165,11 +3189,16 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         window=_plain_window(f["start"], f["end"]), **f)
     direct = "direct" in str(f.get("transport") or "").lower()
     runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
+    mixed = any(k == "runtime" for k, _ in f["builds"]) and not runtime_only
+    status = ", ".join(f"marked '{x}' on that list" for x in f["build_status"]) or "as listed"
     tcb = f["tcb"] or []
     tcb_word = ("up to date" if tcb and all(t == "UpToDate" for t in tcb)
                 else "software hardening needed" if "SWHardeningNeeded" in tcb else "not stated in these rows")
-    refusal = ("" if not f["refused"] else " " + (PLAIN_AI_REFUSED.format(refused_at=_plain_time(f["refused_at"]))
-                                                  if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
+    refusal = ("" if not f["refused"] else " " + (
+        PLAIN_AI_STOPPED.format(ts=_plain_time(f["stopped_at"]), why=f["why"].rstrip(".")) if f["why"] and f["stopped_at"]
+        else PLAIN_AI_REFUSED.format(refused_at=_plain_time(f["refused_at"])) if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
+    if f["credited"] is None:
+        f["credited"] = f["machines"]
     parts = [opening + " " + session + refusal,
              PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS.format(
                  relay=(" (by the app's record this conversation did not pass through InferRoute's relay)" if direct
@@ -3177,13 +3206,15 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                         if "relay" in str(f.get("transport") or "").lower()
                         else ", and operates the relay InferRoute states carries this traffic")),
              " ".join(x for x in (PLAIN_AI_MACHINE.format(
-                 provenance=PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_LIST, tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
+                 provenance=(PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_MIXED if mixed
+                             else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty else "your text"),
              PLAIN_AI_PROGRAM.format(were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct
-                                     else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")),
+                                     else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")
+                                     + (" " + PLAIN_AI_OPENED_EMPTY if empty else "")) + " " + PLAIN_AI_LOOKUPS,
              PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
              PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches)
                                      + (" The app counted no request in this conversation, although it links these searches to it."

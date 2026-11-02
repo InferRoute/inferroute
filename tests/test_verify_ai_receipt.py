@@ -358,10 +358,10 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert V.plain_ai_lane(0).endswith(V.PLAIN_AI_SEARCHES_NONE)
     # Independent review (fable, 2 Nov): the paragraph carries this session's own numbers, says where the private key
     # is NOT shown to be, and names Intel's status whenever it is not plainly up to date.
-    assert "does not show where the matching private key was made or kept" in t and "which account sent them" in t
+    assert "does not show where the matching private key was made or kept" in t and "which InferRoute account sent them" in t
     f = {"requests": 3, "machines": 2, "start": "2026-11-02T09:00:00Z", "end": "2026-11-02T09:05:00Z", "tcb": ["UpToDate"]}
     up = V.plain_ai_lane(0, f)
-    assert "this conversation sent 3 request(s)" in up and "to 2 distinct machine(s)" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    assert "this conversation sent 3 request(s)" in up and "the app checked 2 distinct machine(s) for it" in up and V.PLAIN_AI_TCB_HARDENING not in up
     # Second code-reading review: no "actually read" for an empty session; refusal surfaced; build sentence from the row;
     # a missing counter is said, not printed as "?"; a run-time signed row claims no recalculation.
     empty = V.plain_ai_lane(0, dict(f, requests=0))
@@ -372,6 +372,13 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     bare = V.plain_ai_lane(0, dict(f, refused=True, refused_at=""))
     assert V.PLAIN_AI_VERDICT_ONLY in bare and "lies inside the conversation's time window" not in bare
     assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
+    # Review 6 (MATERIAL x4): credited machines; the app's own stop reason and time; Intel/NVIDIA lookups from the
+    # user's computer; the signing key is committed, not shown to be inside.
+    cr = V.plain_ai_lane(0, dict(f, machines=3, credited=2))
+    assert "checked 3 distinct machine(s) for it and credits those requests to 2 of them" in cr
+    st = V.plain_ai_lane(0, dict(f, refused=True, why="the enclave could not be re-verified 3 times in a row.", stopped_at="2026-11-02T09:04:00Z"))
+    assert "at 2 Nov 2026, 09:04:00 UTC because, by its own record, the enclave could not be re-verified 3 times in a row;" in st
+    assert V.PLAIN_AI_LOOKUPS in up and "signed from inside the machine" not in up and "where its private half was kept is, again, not shown" in up
     # Review 5 (MATERIAL x2): a direct carrier names no InferRoute relay; a run-time build claims no shipped list.
     direct = V.plain_ai_lane(0, dict(f, transport="direct to the enclave operator (your own key — InferRoute is not in the path)"))
     assert "InferRoute operates a relay" not in direct and "straight to the AI operator's gateway" in direct

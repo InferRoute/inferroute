@@ -2957,57 +2957,57 @@ def _load_ai_receipt_verifier():
 _FINGERPRINT_NAMES = {"MRTD": "the firmware one", "RTMR1": "the second", "RTMR2": "the third", "RTMR3": "the fourth"}
 
 PLAIN_AI_OPEN = (
-    "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of your "
-    "messages so that only the machines named here could read them, and sent them only to those machines. That is only "
-    "the app's own claim. Before any message leaves your computer, the app can read it in plain text; if the app itself "
+    "About your conversation with the AI assistant: the Anteriora app on your computer says {claim}. That is only the"
+    " app's own claim. Before any message leaves your computer, the app can read it in plain text; if the app itself "
     "were faulty or malicious, none of these checks would show it, because they look only at the remote machines.")
 PLAIN_AI_OPEN_EMPTY = (
-    "About this AI conversation: the Anteriora app recorded no request sent in it. Had you sent messages, the app could "
-    "have read them in plain text before encrypting them, and if the app itself were faulty or malicious, none of these "
-    "checks would show it, because they look only at the remote machines. What follows describes the machine "
-    "it had checked and was prepared to use; no text of yours reached it in this conversation, by the app's own record, "
-    "which is only the app's own claim.")
+    "About this AI conversation: the Anteriora app recorded no request sent in it. Had you sent messages, the app "
+    "could have read them in plain text before encrypting them, and if the app itself were faulty or malicious, none "
+    "of these checks would show it, because they look only at the remote machines. What follows describes the "
+    "machine(s) it had checked and was prepared to use; no text of yours reached it in this conversation, by the "
+    "app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
-    "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request carries the conversation so far) "
-    "to {machines} distinct machine(s), between {start} and {end} (UTC). This record contains no message text, but it "
-    "does show when the conversation ran and which machines were used.")
+    "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
+    "carries the conversation so far) to {machines} distinct machine(s), {window}. This record is designed to contain"
+    " no message text, but it does show when the conversation ran and which machines were used.")
 PLAIN_AI_SESSION_NOCOUNT = (
-    "The app's record of this conversation carries no count of requests; it ran between {start} and {end} (UTC), "
-    "using {machines} distinct machine(s).")
+    "The app's record of this conversation carries no count of requests; it ran {window}, using {machines} distinct "
+    "machine(s).")
 PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} "
-    "(UTC), by its own record; this record checks only that the event lies inside the conversation's time window.")
+    "by its own record; this record checks only that the event lies inside the conversation's time window.")
 PLAIN_AI_KEY = (
-    "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each "
-    "machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this "
-    "record checks that fingerprint against the key the app says it used; the report commits to that public key, but "
-    "does not show where the matching private key was made or kept. Each report also answered a challenge the app "
-    "records having made during this conversation, so it is not a report reused from before that challenge. Whether the app really encrypted your messages to "
-    "that key is again only the app's claim, and no machine signs anything per message, so nothing from the machines "
-    "shows that they received yours.")
+    "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
+    " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this"
+    " record checks that fingerprint against the key the app says it used; the report commits to that public key, but"
+    " does not show where the matching private key was made or kept. Each report also answered a challenge the app "
+    "recorded for this conversation, so it is not a report made before that challenge existed. Whether the app really"
+    " encrypted your messages to that key is again only the app's claim, and no machine signs anything per message, "
+    "so nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
-    "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run it "
-    "again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above are "
-    "checked against copies of Intel's and NVIDIA's root certificates (and, for NVIDIA's attestation service, its "
-    "signing certificates) that InferRoute built into this check (anyone can compare them with the ones Intel and NVIDIA "
-    "publish), and the expected software measurements the machines are "
-    "compared with were supplied by InferRoute, which also operates the relay the app says your traffic passed through "
-    "and makes the app; so for most of what follows you rely on InferRoute's own records and code.")
+    "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
+    "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
+    "are checked against copies of Intel's and NVIDIA's root certificates that InferRoute built into this check (for "
+    "NVIDIA's attestation service, a copy of NVIDIA's intermediate certificate, to which the certificates the app "
+    "kept are tied) (anyone can compare them with the ones Intel and NVIDIA publish), and the expected software "
+    "measurements the machines are compared with were supplied by InferRoute, which also operates {relay} and makes "
+    "the app; so for most of what follows you rely on InferRoute's own records and code.")
 PLAIN_AI_MACHINE = (
-    "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory Intel's "
-    "hardware encrypts against the company running the physical machine, with the limits described below), with its "
-    "debug mode off (a mode that company could otherwise use to read the machine's memory) at the moment its report was "
-    "made. It shows that the software the machine started from matched four measurements InferRoute supplied. Intel's "
-    "own published status for this hardware was '{tcb_word}' at the time, and Intel's lists of revoked certificates "
-    "were checked.")
+    "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
+    "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
+    "with its debug mode off (a mode that company could otherwise use to read the machine's memory) at the moment its"
+    " report was made. It shows that the software the machine started from matched four measurements (fingerprints of"
+    " its start-up software) InferRoute supplied, as InferRoute's list stood when this record was exported; a flaw "
+    "InferRoute finds in that software later will not show here. Intel's own published status for this hardware was "
+    "'{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
-    "For {n_repro} of them InferRoute states that it recalculated them itself from files published by the AI operator; "
-    "the record carries that statement, not the recalculation.")
+    "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
+    "by the AI operator; the record carries that statement, not the recalculation.")
 PLAIN_AI_BUILD_RECORDED = (
     "{rest} InferRoute recorded without stating in this record how it obtained {it}; for {that} you rely on "
     "InferRoute's record.")
 PLAIN_AI_BUILD_RUNTIME = (
-    "These fingerprints come from a record signed by InferRoute's publication key, which says nothing about how "
+    "These measurements come from a record signed by InferRoute's publication key, which says nothing about how "
     "InferRoute obtained them.")
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
@@ -3030,6 +3030,9 @@ PLAIN_AI_PROGRAM = (
     "program necessarily reads every message in plain text in order to answer it, and because the AI operator chooses "
     "it, the operator could make it keep or send on that text; this record cannot tell you what it {did} "
     "or whether it kept it.")
+PLAIN_AI_VERDICT_ONLY = (
+    "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
+    "this record checks nothing about that verdict.")
 PLAIN_AI_HOSTS = (
     "The machines themselves belong to other companies or individuals (by InferRoute's account; the AI operator's network calls them miners) "
     "who host the physical hardware for the AI operator. Intel's hardware protection, which this record shows the "
@@ -3070,7 +3073,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
     events = receipt.get("events") if isinstance(receipt.get("events"), list) else []
     stop = [e for e in events if isinstance(e, dict) and e.get("kind") in ("refused", "no-eligible-instance")]
     refused = str(receipt.get("verdict") or "") not in ("", "confidential") or bool(stop)
-    refused_at = str(stop[0].get("ts") or "an unrecorded time") if stop else "an unrecorded time"
+    refused_at = str(stop[0].get("ts") or "") if stop else ""
     builds, statuses = [], set()
     for st, name, detail in rows:
         if name.endswith("recorded build") and st == "PASS":
@@ -3086,6 +3089,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
             if m:
                 statuses.add(m.group(1))
     return {"requests": reqs, "machines": len(distinct) or 1, "refused": refused, "refused_at": refused_at,
+            "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
             "start": str(receipt.get("started_at") or "?"),
             "end": str(receipt.get("last_activity_at") or receipt.get("ended_at") or "?"),
             "builds": sorted(set(builds)), "tcb": sorted(statuses)}
@@ -3099,7 +3103,8 @@ def _plain_build(builds) -> str:
             continue
         repro = [r for r in repro if r in _FINGERPRINT_NAMES]
         rest = [k for k in _FINGERPRINT_NAMES if k not in repro]
-        s = PLAIN_AI_BUILD_REPRODUCED.format(n_repro=["none", "one", "two", "three", "all four"][len(repro)]) if repro else ""
+        s = PLAIN_AI_BUILD_REPRODUCED.format(n_repro=["none", "one", "two", "three", "all four"][len(repro)],
+                                            it="it" if len(repro) == 1 else "them") if repro else ""
         if rest:
             names = [_FINGERPRINT_NAMES[k] for k in rest]
             label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1])
@@ -3108,29 +3113,58 @@ def _plain_build(builds) -> str:
             s = (s + " " + r).strip()
         out.append(s)
     if len(out) > 1:
-        out = [f"For one of the builds used: {x}" for x in out]
+        out = [f"In one of the software versions used: {x}" for x in out]
     return " ".join(out)
+
+
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _plain_time(ts: str) -> str:
+    """'2026-11-02T09:31:42Z' → '2 Nov 2026, 09:31:42 UTC'; anything else is returned as written."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})", ts or "")
+    if not m or not 1 <= int(m.group(2)) <= 12:
+        return ts or "an unrecorded time"
+    return f"{int(m.group(3))} {_MONTHS[int(m.group(2)) - 1]} {m.group(1)}, {m.group(4)} UTC"
+
+
+def _plain_window(start: str, end: str) -> str:
+    a, b = _plain_time(start), _plain_time(end)
+    if a[:11] == b[:11] and a.endswith(" UTC") and b.endswith(" UTC"):
+        return f"on {a.split(',')[0]}, from {a.split(', ')[1][:-4]} to {b.split(', ')[1]}"
+    return f"from {a} to {b}"
 
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
     """The paragraph for one conversation, in parts separated by blank lines."""
-    f = dict({"requests": None, "machines": 1, "refused": False, "refused_at": "an unrecorded time", "start": "?", "end": "?",
+    f = dict({"requests": None, "machines": 1, "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
-    opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN
-    session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(**f)
+    opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
+        claim=("it encrypted each of your messages so that only the machines named here could read them, and sent them "
+               "only to those machines") if f["requests"] is not None else
+              ("any message it sent in this conversation was encrypted so that only the machines named here could read "
+               "it, and went only to those machines"))
+    session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
+        window=_plain_window(f["start"], f["end"]), **f)
     tcb = f["tcb"] or []
     tcb_word = ("up to date" if tcb and all(t == "UpToDate" for t in tcb)
                 else "software hardening needed" if "SWHardeningNeeded" in tcb else "not stated in these rows")
-    parts = [opening + " " + session + (" " + PLAIN_AI_REFUSED.format(**f) if f["refused"] else ""),
-             PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS,
-             " ".join(x for x in (PLAIN_AI_MACHINE.format(tcb_word=tcb_word), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
+    refusal = ("" if not f["refused"] else " " + (PLAIN_AI_REFUSED.format(refused_at=_plain_time(f["refused_at"]))
+                                                  if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
+    parts = [opening + " " + session + refusal,
+             PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS.format(
+                 relay="the relay the app says your traffic passed through" if "relay" in f["transport"].lower()
+                 else "the relay InferRoute states carries this traffic"),
+             " ".join(x for x in (PLAIN_AI_MACHINE.format(tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty else "your text"),
              PLAIN_AI_PROGRAM.format(were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS.format(carried="would have carried" if empty else "carried"), PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
-             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches) if linked_searches
+             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches)
+                                     + (" The app counted no request in this conversation, although it links these searches to it."
+                                        if empty else "") if linked_searches
                                    else PLAIN_AI_SEARCHES_NONE)]
     return "\n\n".join(parts)
 

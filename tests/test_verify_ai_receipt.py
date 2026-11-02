@@ -367,13 +367,18 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     empty = V.plain_ai_lane(0, dict(f, requests=0))
     assert "recorded no request sent in it" in empty and "your text" not in empty and "would have been addressed" in empty and "would have carried" in empty
     ref = V.plain_ai_lane(0, dict(f, refused=True, refused_at="2026-11-02T09:03:00Z"))
-    assert "found none it could trust, at 2026-11-02T09:03:00Z (UTC)" in ref and "stopped trusting" not in up
+    assert "found none it could trust, at 2 Nov 2026, 09:03:00 UTC" in ref and "stopped trusting" not in up
+    # Code-reading review 4 (MATERIAL): a non-confidential verdict with no event must not claim a window check.
+    bare = V.plain_ai_lane(0, dict(f, refused=True, refused_at=""))
+    assert V.PLAIN_AI_VERDICT_ONLY in bare and "lies inside the conversation's time window" not in bare
+    assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
+    assert "for every machine" in up and "for at least one machine" in V.plain_ai_lane(0, dict(f, tcb=["UpToDate", "SWHardeningNeeded"], tcb_uniform=False))
     nocount = V.plain_ai_lane(0, dict(f, requests=None))
     assert "carries no count of requests" in nocount and "? request" not in nocount
     rt = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
     assert V.PLAIN_AI_BUILD_RUNTIME in rt and "recalculated them itself" not in rt
     two = V.plain_ai_lane(0, dict(f, builds=[("bundled", ("RTMR1",))]))
-    assert "For one of them InferRoute states" in two and "The firmware one, the third and the fourth InferRoute recorded without stating" in two
+    assert "For one of the four measurements InferRoute states that it recalculated it itself" in two and "The firmware one, the third and the fourth InferRoute recorded without stating" in two
     facts = V.ai_session_facts({"counters": {"requests": 2}, "served_by": [{"attestation_sha256": "a"}, {"attestation_sha256": "b"},
                                 {"attestation_sha256": "a"}], "verdict": "confidential", "started_at": "s", "last_activity_at": "e"},
                                [("PASS", "machine 1 (x) recorded build", "build b (current), recorded by InferRoute since d; RTMR1+RTMR2+RTMR3 recomputed by InferRoute from the operator's published artifacts; MRTD 1…"),

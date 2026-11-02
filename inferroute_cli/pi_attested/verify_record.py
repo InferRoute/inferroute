@@ -2968,11 +2968,14 @@ PLAIN_AI_OPEN_EMPTY = (
     "machine(s) it had checked and was prepared to use; no text of yours reached any of them in this conversation, by"
     " the app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
-    "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
-    "carries the conversation so far) {window}; the app selected {machines} distinct machine(s) for it{credit}. This "
-    "receipt is designed to contain no message text, but it does show when the conversation ran, which machine(s) the"
-    " app selected for it, how much was sent (byte and token counts), a cost estimate and error counts, though not "
-    "the words. The app writes the end time when it last touched the record, which can be after the last message.")
+    "By the app's own count, this conversation began sending {requests} request(s) (a request the relay or gateway "
+    "then refused still counts) (InferRoute states that each request carries the conversation so far) {window}; the "
+    "app selected {machines} distinct machine(s) for it{credit}. This receipt is designed to contain no message text,"
+    " but it does show when the conversation ran, which machine(s) the app selected for it, how much was sent (byte "
+    "and token counts), a cost estimate, error counts and a timestamped log of the app's own checks, switches and "
+    "retries, though not the words; these times and identifiers could be matched against the relay's or the "
+    "operator's own logs. The app writes the end time when it last touched the record, which can be after the last "
+    "message.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) selected for it.")
@@ -2980,7 +2983,8 @@ PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} by"
     " its own record; this record checks only that the event lies inside the conversation's time window. This record "
     "does not check whether the app sent further requests after that moment; any later request went only to a machine"
-    " the app says it had verified within the previous half-hour.")
+    " whose evidence the app had checked at most half an hour earlier, or a little longer if a re-check had just "
+    "failed (each failed re-check is an event in the receipt).")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
@@ -3052,6 +3056,9 @@ PLAIN_AI_PATH_RELAY = (
     "the app a billing report (the conversation's id, the model, the machine, counts of the word-pieces sent and "
     "received, and the reply time), and this record checks none of that, nor whether either logs it, or for how long,"
     " nor where the relay and gateway are.")
+PLAIN_AI_PATH_OTHER = (
+    "The app's record names the carrier of the encrypted messages as '{carrier}'; this record checks nothing about who "
+    "carried them or what they could see.")
 PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
@@ -3063,13 +3070,15 @@ PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
 PLAIN_AI_PROVENANCE_RUNTIME = (
-    "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute shipped "
-    "inside this check, so you cannot read it there.")
+    "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute "
+    "shipped inside this check, so you cannot read it there; a flaw InferRoute finds in that software later will not "
+    "show here.")
 PLAIN_AI_STOPPED = (
     "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record "
     "checks only that the stop and the failures recorded before it lie inside the conversation's time window. This "
     "record does not check whether the app sent further requests after that moment; any later request went only to a "
-    "machine the app says it had verified within the previous half-hour.")
+    "machine whose evidence the app had checked at most half an hour earlier, or a little longer if a re-check had "
+    "just failed (each failed re-check is an event in the receipt).")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires, by the app's own timestamps, both answers to have been fetched within a quarter-hour of the moment the"
@@ -3260,15 +3269,19 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                      sends="would also have sent" if empty else "also sends", were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct
-                                     else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")
-                                     + (" " + PLAIN_AI_OPENED_EMPTY if empty else "")) + " " + PLAIN_AI_LOOKUPS,
+                                     else (PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")
+                                           + (" " + PLAIN_AI_OPENED_EMPTY if empty else ""))
+                                     if "relay" in str(f.get("transport") or "").lower()
+                                     else PLAIN_AI_PATH_OTHER.format(carrier=str(f.get("transport") or "not named")[:80])
+                                     ) + " " + PLAIN_AI_LOOKUPS,
              PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text",
                                      supplied=("from a run-time record InferRoute signed, not from the list shipped inside this check"
                                                if runtime_only else "InferRoute supplied")),
              PLAIN_AI_ASK.format(happened="would happen" if empty else "happened",
                                  places="the machines and the gateway" if direct else "the machines, the relay and the gateway",
                                  agreement=("which agreement covers this conversation, since you used your own account with the AI operator"
-                                            if direct else "whether your agreement is with InferRoute alone")) + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=", and before the app stopped trusting a machine" if f["refused"] else "")
+                                            if direct else "whether your agreement is with InferRoute alone")) + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=(", and before the app stopped trusting a machine unless it selected one again before the search"
+                                                    if f["refused"] else ""))
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches
                                    else PLAIN_AI_SEARCHES_NONE)]

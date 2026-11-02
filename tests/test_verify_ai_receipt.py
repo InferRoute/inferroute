@@ -361,7 +361,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "does not show where the matching private key was made or kept" in t and "which InferRoute account sent them" in t
     f = {"requests": 3, "machines": 2, "start": "2026-11-02T09:00:00Z", "end": "2026-11-02T09:05:00Z", "tcb": ["UpToDate"]}
     up = V.plain_ai_lane(0, f)
-    assert "this conversation sent 3 request(s)" in up and "the app selected 2 distinct machine(s) for it" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    assert "this conversation began sending 3 request(s)" in up and "the app selected 2 distinct machine(s) for it" in up and V.PLAIN_AI_TCB_HARDENING not in up
     # Second code-reading review: no "actually read" for an empty session; refusal surfaced; build sentence from the row;
     # a missing counter is said, not printed as "?"; a run-time signed row claims no recalculation.
     empty = V.plain_ai_lane(0, dict(f, requests=0))
@@ -445,3 +445,17 @@ def test_an_exported_receipt_writes_home_as_tilde():
     out = _json.loads(_home_relative_receipt_path(raw))
     assert out["path"] == "~/.inferroute/confidential/receipts/x.json" and out["verdict"] == "confidential"
     assert _home_relative_receipt_path(b'{"path": "/srv/x.json"}') == b'{"path": "/srv/x.json"}'
+
+
+def test_a_search_after_a_resumed_session_is_inside_the_window():
+    """Code-reading audit 13: a session can resume after 'no-eligible-instance' by pinning again; a search after
+    that new pin is inside the window, one between the stop and the new pin is not."""
+    receipt = {"verdict": "degraded", "started_at": "2026-11-02T10:00:00Z", "last_activity_at": "2026-11-02T10:30:00Z",
+               "events": [{"kind": "pinned", "ts": "2026-11-02T10:00:05Z", "detail": "i-a"},
+                          {"kind": "no-eligible-instance", "ts": "2026-11-02T10:10:00Z", "detail": "x"},
+                          {"kind": "pinned", "ts": "2026-11-02T10:20:00Z", "detail": "i-b"}]}
+    for at, ok in (("2026-11-02T10:15:00Z", False), ("2026-11-02T10:25:00Z", True)):
+        c = V.Checks()
+        V.check_receipt_consistency(c, receipt, [], [{"at": at, "session_id": "s"}])
+        row = [r for r in c.rows if r[1] == "searches inside the session's verified window"]
+        assert row and (row[0][0] == "PASS") is ok, (at, row)

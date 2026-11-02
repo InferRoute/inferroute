@@ -305,7 +305,10 @@ _CACHE: dict[str, Collateral] = {}
 
 
 async def fetch_collateral(http, fmspc: str, ca: str = "platform", timeout: float = 60.0) -> Collateral:
-    if fmspc in _CACHE and time.time() - _CACHE[fmspc].fetched_at < 6 * 3600:
+    # Reuse for at most 10 minutes: the offline verifier FAILs a receipt whose collateral was fetched more than
+    # 15 minutes from the pin (COLLATERAL_SLACK_S), so a 6-hour cache made a true receipt fail for a second session
+    # in a long-lived process (code-reading audit 13, 2 Nov).
+    if fmspc in _CACHE and time.time() - _CACHE[fmspc].fetched_at < 10 * 60:
         return _CACHE[fmspc]
     from cryptography import x509
     h = {"User-Agent": UA}

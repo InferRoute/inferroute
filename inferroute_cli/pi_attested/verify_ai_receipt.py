@@ -985,7 +985,13 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
         outside = []
         for s in searches:
             t = _parse_time(s.get("at"))
-            if t is None or t < first_pin or (last is not None and t > last + dt.timedelta(minutes=5)) or (refused_at is not None and t > refused_at):
+            # After a stop, a search counts as inside only if the app selected a machine again between the stop and it
+            # (a session can resume after 'no-eligible-instance'; treating the stop as terminal FAILed true receipts —
+            # code-reading audit 13). The re-selection is a 'pinned' event, itself checked against the timeline.
+            repinned = refused_at is not None and t is not None and any(
+                (pt := _parse_time(p.get("ts"))) is not None and refused_at < pt <= t for p in pins)
+            if t is None or t < first_pin or (last is not None and t > last + dt.timedelta(minutes=5)) or (
+                    refused_at is not None and t > refused_at and not repinned):
                 outside.append(str(s.get("at")))
         c.add(not outside, "searches inside the session's verified window",
               f"{len(searches)} search(es) between the first pin ({first_pin.strftime('%H:%M:%SZ')}) and five minutes after the session's last activity" if not outside

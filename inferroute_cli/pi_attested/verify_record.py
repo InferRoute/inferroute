@@ -2958,33 +2958,43 @@ _FINGERPRINT_NAMES = {"MRTD": "the firmware measurement", "RTMR1": "measurement 
                       "RTMR3": "measurement four"}
 
 PLAIN_AI_OPEN = (
-    "About your conversation with the AI assistant: the Anteriora app on your computer says {claim}. That is only the"
-    " app's own claim. Before any message leaves your computer, the app can read it in plain text; if the app itself "
-    "were faulty or malicious, none of these checks would show it, because they look only at the remote machines.")
+    "About your conversation with the AI assistant (that this receipt is the one for this conversation is the app's "
+    "own index, which nothing signs): the Anteriora app on your computer says {claim}. That is only the app's own "
+    "claim. Before any message leaves your computer, the app can read it in plain text; if the app itself were faulty"
+    " or malicious, none of these checks would show it, because they look only at the remote machines.")
 PLAIN_AI_OPEN_EMPTY = (
-    "About this AI conversation: the Anteriora app recorded no request sent in it. Had you sent messages, the app "
-    "could have read them in plain text before encrypting them, and if the app itself were faulty or malicious, none "
-    "of these checks would show it, because they look only at the remote machines. What follows describes the "
-    "machine(s) it had checked and was prepared to use; no text of yours reached any of them in this conversation, by"
-    " the app's own record, which is only the app's own claim.")
+    "About this AI conversation (that this receipt is the one for this conversation is the app's own index, which "
+    "nothing signs): the Anteriora app recorded no request sent in it. Had you sent messages, the app could have read"
+    " them in plain text before encrypting them, and if the app itself were faulty or malicious, none of these checks"
+    " would show it, because they look only at the remote machines. What follows describes the machine(s) it had "
+    "checked and was prepared to use; no text of yours reached any of them in this conversation, by the app's own "
+    "record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation began sending {requests} request(s) (a request the relay or gateway "
     "then refused still counts) (InferRoute states that each request carries the conversation so far) {window}; the "
     "app selected {machines} distinct machine(s) for it{credit}. This receipt is designed to contain no message text,"
-    " but it does show when the conversation ran, which machine(s) the app selected for it, how much was sent (byte "
-    "and token counts), a cost estimate, error counts and a timestamped log of the app's own checks, switches and "
-    "retries, though not the words; these times and identifiers could be matched against the relay's or the "
-    "operator's own logs. The app writes the end time when it last touched the record, which can be after the last "
-    "message.")
+    " but it does show when the conversation ran, which machine(s) the app selected for it, the identities of their "
+    "graphics chips, the other machines the app examined and rejected, how much was sent (byte and token counts), a "
+    "cost estimate, error counts and a timestamped log of the app's own checks, switches and retries, though not the "
+    "words; these times and identifiers could be matched against the relay's or the operator's own logs. The app "
+    "writes the end time when it last touched the record, which can be after the last message.")
+PLAIN_AI_SESSION_EMPTY = (
+    "By the app's own count it sent no request in this conversation, which ran {window}; the app selected {machines} "
+    "distinct machine(s) for it. This receipt is designed to contain no message text, but it does show when the "
+    "conversation ran, which machine(s) the app selected, the identities of their graphics chips, the other machines "
+    "the app examined and rejected, and a timestamped log of the app's own checks; these times and identifiers could "
+    "be matched against the relay's or the operator's own logs.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) selected for it.")
 PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} by"
     " its own record; this record checks only that the event lies inside the conversation's time window. This record "
-    "does not check whether the app sent further requests after that moment; any later request went only to a machine"
-    " whose evidence the app had checked at most half an hour earlier, or a little longer if a re-check had just "
-    "failed (each failed re-check is an event in the receipt).")
+    "does not check whether the app sent further requests after that moment; by the app's own record it re-checks a "
+    "machine's evidence before the first request that comes more than half an hour after the last check; if that "
+    "re-check fails, by InferRoute's account the app still sends that request and the next on the older evidence, and"
+    " stops only at the third failure in a row. The record carries the first check's evidence and the events, not the"
+    " later re-checks.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint (a short code computed from the key, not a biometric) of the "
@@ -2994,7 +3004,9 @@ PLAIN_AI_KEY = (
     "that fixes that public key, but does not show where the matching private key was made or kept. Each report also "
     "answered a challenge the app says it drew for this conversation, so it is not a report made before that "
     "challenge existed. Whether the app really encrypted your messages to that key is again only the app's claim, and"
-    " no machine signs anything per message, so nothing from the machines shows that they received yours.")
+    " no machine signs anything per message, so nothing from the machines that this record can re-check shows that "
+    "they received yours; the app's own counts of replies it could decrypt are its word that the holder of that key "
+    "answered.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3013,7 +3025,8 @@ PLAIN_AI_MACHINE = (
     "'{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
-    "by the AI operator; the record carries that statement, not the recalculation.")
+    "by the AI operator; the record carries that statement, not the recalculation; for the operating-system "
+    "measurement, the recalculation was of a list of files the operator itself produced, not of the files behind it.")
 PLAIN_AI_BUILD_RECORDED = (
     "{rest} InferRoute recorded without stating in this record how it obtained {it}; for {that} you rely on "
     "InferRoute's record.")
@@ -3022,12 +3035,12 @@ PLAIN_AI_BUILD_RUNTIME = (
     "InferRoute obtained them.")
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
-    "configuration) was not compared by this record (see the 'not recomputed' rows above); the app compared it only "
-    "against the AI operator's own published list. The AI operator is, by InferRoute's account, the company that "
-    "operates these machines and from which InferRoute buys access to them; the rows above show a name in the "
-    "certificate that signed each machine's evidence, a name this check reads but does not verify. The machine's "
-    "report commits to the key behind that certificate, as it does to the encryption key; where its private half was "
-    "kept is, again, not shown.")
+    "configuration) was not compared by this record (see the 'not recomputed' rows above); by the app's record, it "
+    "compared it only against the AI operator's own published list. The AI operator is, by InferRoute's account, the "
+    "company that operates these machines and from which InferRoute buys access to them; the rows above show a name "
+    "in the certificate that signed each machine's evidence, a name this check reads but does not verify. The "
+    "machine's report commits to the key behind that certificate, as it does to the encryption key; where its private"
+    " half was kept is, again, not shown.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
@@ -3078,15 +3091,18 @@ PLAIN_AI_PROVENANCE_RUNTIME = (
 PLAIN_AI_STOPPED = (
     "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record "
     "checks only that the stop and the failures recorded before it lie inside the conversation's time window. This "
-    "record does not check whether the app sent further requests after that moment; any later request went only to a "
-    "machine whose evidence the app had checked at most half an hour earlier, or a little longer if a re-check had "
-    "just failed (each failed re-check is an event in the receipt).")
+    "record does not check whether the app sent further requests after that moment; by the app's own record it "
+    "re-checks a machine's evidence before the first request that comes more than half an hour after the last check; "
+    "if that re-check fails, by InferRoute's account the app still sends that request and the next on the older "
+    "evidence, and stops only at the third failure in a row. The record carries the first check's evidence and the "
+    "events, not the later re-checks.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires, by the app's own timestamps, both answers to have been fetched within a quarter-hour of the moment the"
-    " machine was selected), so each saw your computer's address and the time, and NVIDIA also received the "
-    "identities of the chips in each machine the app had found genuine and might use, which could let it tell which "
-    "machines you might use; neither received any message text.")
+    " machine was selected), so each saw your computer's address and the time, Intel also received the identity of "
+    "each machine's hardware family, and NVIDIA also received the identities of the chips in each machine the app had"
+    " found genuine and might use, which could let it tell which machines you might use; neither received any message"
+    " text.")
 PLAIN_AI_OPENED_EMPTY = (
     "By InferRoute's account, even with no request sent the relay saw this conversation being opened from your "
     "InferRoute account.")
@@ -3239,10 +3255,12 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]),
         credit="" if not f["requests"] else f" and records {f['credited']} of them as having carried those requests", **f)
+    if empty:
+        session = PLAIN_AI_SESSION_EMPTY.format(window=_plain_window(f["start"], f["end"]), **f)
     if not new_client and f["requests"] is not None:
         session += (" As the 'not recomputed' rows above state, the older version of the app that wrote this record "
-                    "saved the request count only after a reply finished, so a conversation cut off mid-reply can show "
-                    "fewer requests than were sent" + (", including none" if empty else "") + ".")
+                    "saved the request count only with a later save, so a conversation cut off mid-reply, or ending on a "
+                    "refused request, can show fewer requests than were sent" + (", including none" if empty else "") + ".")
     direct = "direct" in str(f.get("transport") or "").lower()
     runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
     mixed = any(k == "runtime" for k, _ in f["builds"]) and not runtime_only

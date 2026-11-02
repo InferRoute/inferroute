@@ -3017,12 +3017,13 @@ PLAIN_AI_WHO_CHECKS = (
     "follows you rely on InferRoute's own records and code.")
 PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off; by Intel's "
-    "design that setting cannot change for the life of that virtual machine. That kind of machine has its memory "
-    "encrypted by Intel's hardware against the company running the physical machine, and debug mode is a way that "
-    "company could otherwise read it; but this record does not show that {text} was protected by that encryption, and"
-    " the limits are described below. It shows that the software the machine started from matched four measurements "
-    "(fingerprints of its start-up software) {provenance} Intel's own published status for this hardware was "
-    "'{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked certificates were checked.")
+    "design, which this record relies on rather than checks, that setting cannot change for the life of that virtual "
+    "machine. That kind of machine has its memory encrypted by Intel's hardware against the company running the "
+    "physical machine, and debug mode is a way that company could otherwise read it; but this record does not show "
+    "that {text} was protected by that encryption, and the limits are described below. It shows that the software the"
+    " machine started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's own"
+    " published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
+    "certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation; for the operating-system "
@@ -3035,12 +3036,12 @@ PLAIN_AI_BUILD_RUNTIME = (
     "InferRoute obtained them.")
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
-    "configuration) was not compared by this record (see the 'not recomputed' rows above); by the app's record, it "
-    "compared it only against the AI operator's own published list. The AI operator is, by InferRoute's account, the "
-    "company that operates these machines and from which InferRoute buys access to them; the rows above show a name "
-    "in the certificate that signed each machine's evidence, a name this check reads but does not verify. The "
-    "machine's report commits to the key behind that certificate, as it does to the encryption key; where its private"
-    " half was kept is, again, not shown.")
+    "configuration) was not compared by this record (see the 'not recomputed' rows above, which list what this check "
+    "did not or could not verify); by the app's record, it compared it only against the AI operator's own published "
+    "list. The AI operator is, by InferRoute's account, the company that operates these machines and from which "
+    "InferRoute buys access to them; the rows above show a name in the certificate that signed each machine's "
+    "evidence, a name this check reads but does not verify. The machine's report commits to the key behind that "
+    "certificate, as it does to the encryption key; where its private half was kept is, again, not shown.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
@@ -3121,8 +3122,9 @@ PLAIN_AI_SUMMARY = (
     "their starting software matched measurements {supplied}, and each machine's report, made in answer to the app's "
     "challenge, carried the fingerprint of a public key that matched the key the app says it used; NVIDIA's report on"
     " the graphics chips answered that challenge too. NVIDIA's report said nothing about the chips' "
-    "confidential-computing mode. Intel's debug mode being off for the life of each machine, and the chips' debug "
-    "mode being off when NVIDIA reported, rule out reading memory through those modes, not by other means.")
+    "confidential-computing mode. Intel's debug mode being off for each machine (for its whole life, by Intel's "
+    "design), and the chips' debug mode being off when NVIDIA reported, rule out reading memory through those modes, "
+    "not by other means.")
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, ask the AI operator "
     "and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages are "
@@ -3131,8 +3133,8 @@ PLAIN_AI_ASK = (
     "erasure, {agreement}, and whether you will be told if any of them finds that your messages or their timing were "
     "accessed without authority. If the answer to any of these is that they do not know or will not say, this record "
     "offers nothing against that answer. Intel and NVIDIA may keep a log of the lookups the app made; ask them if "
-    "that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer; ask "
-    "InferRoute where, and how to delete it.")
+    "that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer, in plain"
+    " text; ask InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")

@@ -344,7 +344,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     t = V.PLAIN_AI_LANE
     assert "only the app's own claim" in t and "not an independent audit" in t and "Nothing in it shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
     assert "does not even say which program it was" in t and "held the key" in t and "the AI operator" in t
-    assert "only matched to a value InferRoute" in t and "you rely on InferRoute having recorded it correctly" in t and "genuine Intel TDX machine" in t
+    assert "InferRoute only recorded from an earlier machine" in t and "the record carries that statement, not the recalculation" in t and "was not compared at all" in t and "you rely on InferRoute having recorded it correctly" in t and "genuine Intel TDX machine" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
     for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "was protected.",
@@ -356,6 +356,14 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "fingerprint of the public key" in t and "necessarily reads every message in plain text" in t and "gateway" in t and "legally responsible" in t and "nothing from the machines shows that they received yours" in t
     assert "and it is the key the app says it used" not in t  # audit r3: no welding of measurement to the app's word
     assert V.plain_ai_lane(0).endswith(V.PLAIN_AI_SEARCHES_NONE)
+    # Independent review (fable, 2 Nov): the paragraph carries this session's own numbers, says where the private key
+    # is NOT shown to be, and names Intel's status whenever it is not plainly up to date.
+    assert "does not show where the matching private key was made or kept" in t and "which account sent them" in t
+    f = {"requests": 3, "machines": 2, "start": "2026-11-02T09:00:00Z", "end": "2026-11-02T09:05:00Z", "tcb": ["UpToDate"]}
+    up = V.plain_ai_lane(0, f)
+    assert "this record covers 3 message(s) to 2 machine(s)" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    assert V.PLAIN_AI_TCB_HARDENING in V.plain_ai_lane(0, dict(f, tcb=["UpToDate", "SWHardeningNeeded"]))
+    assert "\n\n" in up and up.endswith(V.PLAIN_AI_SEARCHES_NONE)
     two = V.plain_ai_lane(2)
     assert "links 2 of the patent searches" in two and "not that they came from the conversation" in two
     for tail in (V.PLAIN_AI_SEARCHES_NONE, V.PLAIN_AI_SEARCHES_LINKED):

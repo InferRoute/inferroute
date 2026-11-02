@@ -1123,6 +1123,11 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     ai_src = verifier_src.with_name("verify_ai_receipt.py")
     if ai_src.exists():
         files["verify_ai_receipt.py"] = ai_src.read_bytes()
+    # The image-posture checker too (verify_record.py --tdx-image DIR loads it from its own directory): a reader can
+    # check the published search image against the quote without anything from InferRoute but the image files.
+    ti_src = verifier_src.with_name("tdx_image.py")
+    if ti_src.exists():
+        files["tdx_image.py"] = ti_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
                 # Which matter this was made from, beyond its name (export_belongs_to).
                 "matter_created_at": rec.get("created_at"),
@@ -2794,6 +2799,9 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     _ai = Path(__file__).resolve().parent / "pi_attested" / "verify_ai_receipt.py"
     if _ai.is_file():
         files["verify_ai_receipt.py"] = _ai.read_bytes()
+    _ti = Path(__file__).resolve().parent / "pi_attested" / "tdx_image.py"
+    if _ti.is_file():
+        files["tdx_image.py"] = _ti.read_bytes()
     for name in sorted(p.name for p in src.iterdir()):
         # *.attestation.json: the per-machine evidence rows the receipts' served_by point at — measurements, the
         # device's challenge, public keys and the vendors' signed answers; no text. Without them the pack names

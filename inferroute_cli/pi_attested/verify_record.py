@@ -2974,16 +2974,17 @@ PLAIN_AI_SESSION = (
     "then refused still counts) (InferRoute states that each request carries the conversation so far) {window}; the "
     "app selected {machines} distinct machine(s) for it{credit}. This receipt is designed to contain no message text,"
     " but it does show when the conversation ran, which machine(s) the app selected for it, the identities of their "
-    "graphics chips, the other machines the app examined and rejected, how much was sent (byte and token counts), a "
-    "cost estimate, error counts and a timestamped log of the app's own checks, switches and retries, though not the "
-    "words; these times and identifiers could be matched against the relay's or the operator's own logs. The app "
-    "writes the end time when it last touched the record, which can be after the last message.")
+    "graphics chips, any machines the receipt records as examined and rejected, how much was sent (byte and token "
+    "counts), a cost estimate, error counts and a self-reported, timestamped log of the app's own checks, switches "
+    "and retries (not signed by anyone), though not the words; these times and identifiers could be matched against "
+    "the relay's or the operator's own logs. The app writes the end time when it last touched the record, which can "
+    "be after the last message.")
 PLAIN_AI_SESSION_EMPTY = (
     "By the app's own count it sent no request in this conversation, which ran {window}; the app selected {machines} "
     "distinct machine(s) for it. This receipt is designed to contain no message text, but it does show when the "
-    "conversation ran, which machine(s) the app selected, the identities of their graphics chips, the other machines "
-    "the app examined and rejected, and a timestamped log of the app's own checks; these times and identifiers could "
-    "be matched against the relay's or the operator's own logs.")
+    "conversation ran, which machine(s) the app selected, the identities of their graphics chips, any machines the "
+    "receipt records as examined and rejected, and a self-reported, timestamped log of the app's own checks (not "
+    "signed by anyone); these times and identifiers could be matched against the relay's or the operator's own logs.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) selected for it.")
@@ -2993,8 +2994,9 @@ PLAIN_AI_REFUSED = (
     "does not check whether the app sent further requests after that moment; by the app's own record it re-checks a "
     "machine's evidence before the first request that comes more than half an hour after the last check; if that "
     "re-check fails, by InferRoute's account the app still sends that request and the next on the older evidence, and"
-    " stops only at the third failure in a row. The record carries the first check's evidence and the events, not the"
-    " later re-checks.")
+    " stops only at the third failure in a row. For a machine the app kept after a re-check, the record carries only "
+    "the first check's evidence; a machine selected after a re-check has its own row and its own check above. "
+    "Requests sent after that moment carry none of the app's notes to the program.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint (a short code computed from the key, not a biometric) of the "
@@ -3010,24 +3012,23 @@ PLAIN_AI_KEY = (
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
-    "are checked against fingerprints of Intel's and NVIDIA's root public keys that InferRoute built into this check "
-    "(for NVIDIA's attestation service, of an intermediate key, to which the certificates the app kept are tied) "
-    "(anyone can compare them with the ones Intel and NVIDIA publish), and the expected software measurements the "
-    "machines are compared with were supplied by InferRoute, which also makes the app{relay}; so for most of what "
-    "follows you rely on InferRoute's own records and code.")
+    "are checked against fingerprints of keys that InferRoute built into this check: Intel's root key, NVIDIA's "
+    "device-identity root key for the graphics chips, and, for NVIDIA's attestation service, an intermediate key to "
+    "which the certificates the app kept are tied (anyone can compare them with the ones Intel and NVIDIA publish), "
+    "and the expected software measurements the machines are compared with were supplied by InferRoute, which also "
+    "makes the app{relay}; so for most of what follows you rely on InferRoute's own records and code.")
 PLAIN_AI_MACHINE = (
-    "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off; by Intel's "
-    "design, which this record relies on rather than checks, that setting cannot change for the life of that virtual "
-    "machine. That kind of machine has its memory encrypted by Intel's hardware against the company running the "
-    "physical machine, and debug mode is a way that company could otherwise read it; but this record does not show "
-    "that {text} was protected by that encryption, and the limits are described below. It shows that the software the"
-    " machine started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's own"
-    " published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
-    "certificates were checked.")
+    "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off, and does "
+    "not show that {text} was protected by the memory encryption such machines provide; by Intel's design, which this"
+    " record relies on rather than checks, that setting cannot change for the life of that virtual machine. That kind"
+    " of machine has its memory encrypted by Intel's hardware against the company running the physical machine, and "
+    "debug mode is a way that company could otherwise read it; the limits are described below. It shows that the "
+    "software the machine started from matched four measurements (fingerprints of its start-up software) {provenance}"
+    " Intel's own published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and for the quoting "
+    "software on it '{qe_word}', and Intel's lists of revoked certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
-    "by the AI operator; the record carries that statement, not the recalculation; for the operating-system "
-    "measurement, the recalculation was of a list of files the operator itself produced, not of the files behind it.")
+    "by the AI operator; the record carries that statement, not the recalculation{rtmr3_note}.")
 PLAIN_AI_BUILD_RECORDED = (
     "{rest} InferRoute recorded without stating in this record how it obtained {it}; for {that} you rely on "
     "InferRoute's record.")
@@ -3058,9 +3059,10 @@ PLAIN_AI_PROGRAM = (
     "operator and is not among the software the machine's report measures, so the report does not say which program "
     "it was, and the operator can change it at any time without anything in this kind of record showing the change. "
     "That program necessarily reads every message in plain text in order to answer it; by InferRoute's account of how"
-    " the app works, which no row here checks, with every request the app {sends} it a note of its own, naming the "
-    "machine, the AI model and {record_file}, and because the AI operator chooses it, the operator could make it keep"
-    " or send on that text; this record cannot tell you what it {did} or whether it kept it.")
+    " the app works, which no row here checks, with every request sent while the app still rated this conversation "
+    "confidential, the app {sends} it a note of its own, naming the machine, the AI model and {record_file}, and "
+    "because the AI operator chooses it, the operator could make it keep or send on that text; this record cannot "
+    "tell you what it {did} or whether it kept it.")
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
@@ -3079,9 +3081,9 @@ PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
     "InferRoute's relay. By InferRoute's account of how the app works, which no row here checks, the gateway could "
-    "see which account sent them, from which network address (it saw the app's machine check from your computer even "
-    "if nothing was sent), when, how much, which AI model and which machine, and this record checks none of that, nor"
-    " whether it logs it, or for how long, nor where it is.")
+    "see which account sent them, from which network address (the app's machine check also came from your computer, "
+    "so the gateway would have seen the address even if no request had been sent), when, how much, which AI model and"
+    " which machine, and this record checks none of that, nor whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
@@ -3095,8 +3097,9 @@ PLAIN_AI_STOPPED = (
     "record does not check whether the app sent further requests after that moment; by the app's own record it "
     "re-checks a machine's evidence before the first request that comes more than half an hour after the last check; "
     "if that re-check fails, by InferRoute's account the app still sends that request and the next on the older "
-    "evidence, and stops only at the third failure in a row. The record carries the first check's evidence and the "
-    "events, not the later re-checks.")
+    "evidence, and stops only at the third failure in a row. For a machine the app kept after a re-check, the record "
+    "carries only the first check's evidence; a machine selected after a re-check has its own row and its own check "
+    "above. Requests sent after that moment carry none of the app's notes to the program.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires, by the app's own timestamps, both answers to have been fetched within a quarter-hour of the moment the"
@@ -3160,7 +3163,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
                     for i, s in enumerate(served) if isinstance(s, dict) and int(s.get("requests") or 0) > 0})
     refused = str(receipt.get("verdict") or "") not in ("", "confidential") or bool(stop)
     refused_at = str(stop[0].get("ts") or "") if stop else ""
-    builds, statuses, build_status = [], set(), set()
+    builds, statuses, build_status, qe_statuses = [], set(), set(), set()
     for st, name, detail in rows:
         if name.endswith("recorded build") and st == "PASS":
             ms = re.match(r"build \S+ \((\w+)\)", detail)
@@ -3173,13 +3176,16 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
             m = re.search(r"status (\w+)", detail)
             if m:
                 statuses.add(m.group(1))
-        # Only the platform status feeds the plain words (review 5): the QE status is a different property, and pooling
-        # the two scoped "for at least one machine" wrongly. A QE outside UpToDate/SWHardeningNeeded FAILS anyway.
+        # Only the platform status feeds 'statuses' (review 5); the QE status is a different property, kept apart.
+        if name.endswith("Intel Quoting Enclave identity and status"):
+            mq = re.match(r"(\w+):", detail)
+            if mq:
+                qe_statuses.add(mq.group(1))
     stopped_at = str((stop[0] if stop else (rever[-1] if rever else {})).get("ts") or "")   # as the verifier's window
     return {"requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
             "why": why[:240], "stopped_at": stopped_at, "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
-            "writer": str(receipt.get("written_by") or ""),
+            "writer": str(receipt.get("written_by") or ""), "qe": sorted(qe_statuses),
             "preamble_path": str(receipt.get("preamble_path") or ""),
             "start": str(receipt.get("started_at") or "?"),
             "end": str(receipt.get("last_activity_at") or receipt.get("ended_at") or "?"),
@@ -3195,7 +3201,10 @@ def _plain_build(builds) -> str:
         repro = [r for r in repro if r in _FINGERPRINT_NAMES]
         rest = [k for k in _FINGERPRINT_NAMES if k not in repro]
         s = PLAIN_AI_BUILD_REPRODUCED.format(n_repro=["none", "one", "two", "three", "all four"][len(repro)],
-                                            it="it" if len(repro) == 1 else "them") if repro else ""
+                                            it="it" if len(repro) == 1 else "them",
+                                            rtmr3_note=("; by InferRoute's account, for the operating-system measurement "
+                                                        "the recalculation was of a list of files the operator itself "
+                                                        "produced, not of the files behind it" if "RTMR3" in repro else "")) if repro else ""
         if rest:
             names = [_FINGERPRINT_NAMES[k] for k in rest]
             label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1])
@@ -3238,7 +3247,7 @@ def _plain_window(start: str, end: str) -> str:
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
     """The paragraph for one conversation, in parts separated by blank lines."""
-    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "build_status": [], "writer": "", "preamble_path": "",
+    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "build_status": [], "writer": "", "preamble_path": "", "qe": [],
               "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
@@ -3284,7 +3293,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                               else ", and operates the relay the app says your traffic passed through")
                         if "relay" in str(f.get("transport") or "").lower()
                         else ", and operates the relay InferRoute states carries this traffic")),
-             " ".join(x for x in (PLAIN_AI_MACHINE.format(text="any text" if empty else "your text", 
+             " ".join(x for x in (PLAIN_AI_MACHINE.format(text="any text" if empty else "your text",
+                 qe_word=("up to date" if f["qe"] and all(q == "UpToDate" for q in f["qe"]) else
+                          "software hardening needed" if "SWHardeningNeeded" in f["qe"] else "not stated in these rows"), 
                  provenance=(PLAIN_AI_PROVENANCE_RUNTIME if runtime_only else PLAIN_AI_PROVENANCE_MIXED if mixed
                              else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),

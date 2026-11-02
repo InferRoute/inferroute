@@ -3043,9 +3043,10 @@ PLAIN_AI_PATH_RELAY = (
     " much, and this record checks none of that, nor whether either logs it, or for how long, nor where the relay and"
     " gateway are.")
 PLAIN_AI_PATH_DIRECT = (
-    "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway with a key of your own, "
-    "not through InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record "
-    "checks none of that, nor whether it logs it, or for how long, nor where it is.")
+    "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
+    "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
+    "InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record checks "
+    "none of that, nor whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
@@ -3092,8 +3093,7 @@ PLAIN_AI_SEARCHES_NONE = (
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
     "that their times, as the app recorded them, fall within the period in which the app says a checked machine was "
-    "in use (or within five minutes after it ended, and before any refusal), not that they came from the "
-    "conversation.")
+    "in use (or within five minutes after it ended{refusal_bound}), not that they came from the conversation.")
 
 
 def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
@@ -3181,10 +3181,10 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
     opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN.format(
-        claim=("it encrypted each of your messages so that only the machines named here could read them, and sent them "
-               "only to those machines") if f["requests"] is not None else
+        claim=("it encrypted each of your messages so that only the machines named here could read them, and addressed "
+               "them only to those machines (on the way they pass through a relay or gateway, described below)") if f["requests"] is not None else
               ("any message it sent in this conversation was encrypted so that only the machines named here could read "
-               "it, and went only to those machines"))
+               "it, and was addressed only to those machines (on the way it passes through a relay or gateway, described below)"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]), **f)
     direct = "direct" in str(f.get("transport") or "").lower()
@@ -3216,7 +3216,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                      else PLAIN_AI_PATH_RELAY.format(carried="would have carried" if empty else "carried")
                                      + (" " + PLAIN_AI_OPENED_EMPTY if empty else "")) + " " + PLAIN_AI_LOOKUPS,
              PLAIN_AI_SUMMARY.format(text="any text" if empty else "your text"),
-             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches)
+             PLAIN_AI_ASK.format(happened="would happen" if empty else "happened") + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=", and before the app stopped trusting a machine" if f["refused"] else "")
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches
                                    else PLAIN_AI_SEARCHES_NONE)]

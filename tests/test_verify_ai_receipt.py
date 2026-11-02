@@ -372,6 +372,12 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     bare = V.plain_ai_lane(0, dict(f, refused=True, refused_at=""))
     assert V.PLAIN_AI_VERDICT_ONLY in bare and "lies inside the conversation's time window" not in bare
     assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
+    # Review 8 (MATERIAL x2): no relay billing sentence on the direct carrier; the stop time is the stop event's.
+    d8 = V.plain_ai_lane(0, dict(f, transport="direct to the enclave operator (your own key — InferRoute is not in the path)"))
+    assert "billing report" not in d8 and "billing report" in up
+    both = V.ai_session_facts({"verdict": "degraded", "refusal": "no verified alternative", "events": [
+        {"kind": "reverify-failed", "ts": "2026-11-02T10:05:00Z"}, {"kind": "no-eligible-instance", "ts": "2026-11-02T10:09:00Z"}]}, [])
+    assert both["stopped_at"] == "2026-11-02T10:09:00Z"
     # Review 7 (MATERIAL x2): credited machines are distinct instances, never more than selected.
     re_pin = V.ai_session_facts({"counters": {"requests": 4}, "served_by": [{"instance": {"id": "i-a"}, "attestation_sha256": "x", "requests": 2},
                                 {"instance": {"id": "i-a"}, "attestation_sha256": "y", "requests": 2}], "verdict": "confidential"}, [])

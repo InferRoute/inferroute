@@ -2969,10 +2969,9 @@ PLAIN_AI_OPEN_EMPTY = (
     "app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation sent {requests} request(s) (InferRoute states that each request "
-    "carries the conversation so far) {window}; the app selected {machines} distinct machine(s) for it and credits "
-    "those requests to {credited} of them. This receipt is designed to contain no message text, but it does show when"
-    " the conversation ran, which machine(s) the app selected for it, and how much was sent (byte and token counts), "
-    "though not the words.")
+    "carries the conversation so far) {window}; the app selected {machines} distinct machine(s) for it{credit}. This "
+    "receipt is designed to contain no message text, but it does show when the conversation ran, which machine(s) the"
+    " app selected for it, and how much was sent (byte and token counts), though not the words.")
 PLAIN_AI_SESSION_NOCOUNT = (
     "The app's record of this conversation carries no count of requests; it ran {window}, with {machines} distinct "
     "machine(s) selected for it.")
@@ -2982,11 +2981,11 @@ PLAIN_AI_REFUSED = (
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this"
-    " record checks that fingerprint against the key the app says it used; the report commits to that public key, but"
-    " does not show where the matching private key was made or kept. Each report also answered a challenge the app "
-    "says it drew for this conversation, so it is not a report made before that challenge existed. Whether the app "
-    "really encrypted your messages to that key is again only the app's claim, and no machine signs anything per "
-    "message, so nothing from the machines shows that they received yours.")
+    " record checks that fingerprint against the key the app says it used; the report contains a fingerprint that "
+    "fixes that public key, but does not show where the matching private key was made or kept. Each report also "
+    "answered a challenge the app says it drew for this conversation, so it is not a report made before that "
+    "challenge existed. Whether the app really encrypted your messages to that key is again only the app's claim, and"
+    " no machine signs anything per message, so nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3041,18 +3040,19 @@ PLAIN_AI_VERDICT_ONLY = (
     "this record checks nothing about that verdict.")
 PLAIN_AI_PATH_RELAY = (
     "InferRoute operates a relay and, by InferRoute's account, the AI operator a gateway that the app says {carried} "
-    "your encrypted messages; the relay could see which InferRoute account sent them, and both could see when and how"
-    " much, and this record checks none of that, nor whether either logs it, or for how long, nor where the relay and"
-    " gateway are.")
+    "your encrypted messages; the relay could see which InferRoute account sent them and this conversation's id, and "
+    "both could see when, how much, which AI model and which machine; after each reply the relay also receives from "
+    "the app a billing report (the conversation's id, the model, the machine, counts of the word-pieces sent and "
+    "received, and the reply time), and this record checks none of that, nor whether either logs it, or for how long,"
+    " nor where the relay and gateway are.")
 PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
-    "InferRoute's relay; the gateway could see which account sent them, when, and how much, and this record checks "
-    "none of that, nor whether it logs it, or for how long, nor where it is.")
+    "InferRoute's relay; the gateway could see which account sent them, when, how much, which AI model and which "
+    "machine, and this record checks none of that, nor whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
-    "InferRoute supplied ({status}; 'observed' means InferRoute has seen this software run and recorded its "
-    "measurements, not that it has examined the software), as InferRoute's list stood when this record was exported; "
-    "a flaw InferRoute finds in that software later will not show here.")
+    "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
+    "finds in that software later will not show here.")
 PLAIN_AI_PROVENANCE_RUNTIME = (
     "carried in a row InferRoute signed and the app kept at the time; that build is not on the list InferRoute shipped "
     "inside this check, so you cannot read it there.")
@@ -3060,10 +3060,10 @@ PLAIN_AI_STOPPED = (
     "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record checks "
     "only that those events lie inside the conversation's time window.")
 PLAIN_AI_LOOKUPS = (
-    "To check the machines, the app itself asked Intel's and NVIDIA's online services from your computer, so each saw"
-    " your computer's address and the time, and NVIDIA also received the chips' identities, so it could tell which "
-    "machine you were about to use; neither received any message text. The relay also receives from the app, for "
-    "billing, counts of the words sent and received.")
+    "To check the machines, the app itself asked Intel's online service (in this conversation or in the quarter-hour "
+    "before it) and NVIDIA's from your computer, so each saw your computer's address and the time, and NVIDIA also "
+    "received the identities of the chips in each machine the app considered, so it could tell which machines you "
+    "might use; neither received any message text.")
 PLAIN_AI_OPENED_EMPTY = (
     "Even with no request sent, the relay saw this conversation being opened from your InferRoute account.")
 PLAIN_AI_PROVENANCE_MIXED = (
@@ -3131,7 +3131,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
                 statuses.add(m.group(1))
         # Only the platform status feeds the plain words (review 5): the QE status is a different property, and pooling
         # the two scoped "for at least one machine" wrongly. A QE outside UpToDate/SWHardeningNeeded FAILS anyway.
-    stopped_at = str((rever[-1] if rever else (stop[0] if stop else {})).get("ts") or "")
+    stopped_at = str((stop[0] if stop else (rever[-1] if rever else {})).get("ts") or "")   # as the verifier's window
     return {"requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
             "why": why[:240], "stopped_at": stopped_at, "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
@@ -3192,11 +3192,14 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
               ("any message it sent in this conversation was encrypted so that only the machines named here could read "
                "it, and was addressed only to those machines (on the way it passes through a relay or gateway, described below)"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
-        window=_plain_window(f["start"], f["end"]), **f)
+        window=_plain_window(f["start"], f["end"]),
+        credit="" if not f["requests"] else f" and credits those requests to {f['credited']} of them", **f)
     direct = "direct" in str(f.get("transport") or "").lower()
     runtime_only = bool(f["builds"]) and all(k == "runtime" for k, _ in f["builds"])
     mixed = any(k == "runtime" for k, _ in f["builds"]) and not runtime_only
-    status = ", ".join(f"marked '{x}' on that list" for x in f["build_status"]) or "as listed"
+    status = "; ".join(f"marked '{x}' on that list" + ("; 'observed' means InferRoute has seen this software run and "
+                                                         "recorded its measurements, not that it has examined the software"
+                                                         if x == "observed" else "") for x in f["build_status"]) or "as listed"
     tcb = f["tcb"] or []
     tcb_word = ("up to date" if tcb and all(t == "UpToDate" for t in tcb)
                 else "software hardening needed" if "SWHardeningNeeded" in tcb else "not stated in these rows")

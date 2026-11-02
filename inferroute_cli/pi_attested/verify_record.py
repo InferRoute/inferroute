@@ -2987,13 +2987,14 @@ PLAIN_AI_REFUSED = (
     "failed (each failed re-check is an event in the receipt).")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
-    " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
-    " with the app's challenge for this conversation, and this record checks that fingerprint against the key the app"
-    " recorded when it selected that machine ({rotation}); the report contains a fingerprint that fixes that public "
-    "key, but does not show where the matching private key was made or kept. Each report also answered a challenge "
-    "the app says it drew for this conversation, so it is not a report made before that challenge existed. Whether "
-    "the app really encrypted your messages to that key is again only the app's claim, and no machine signs anything "
-    "per message, so nothing from the machines shows that they received yours.")
+    " machine's signed report contains a fingerprint (a short code computed from the key, not a biometric) of the "
+    "public key that messages to it are encrypted to, combined with the app's challenge for this conversation (a "
+    "random number the app sent so the machine had to answer freshly), and this record checks that fingerprint "
+    "against the key the app recorded when it selected that machine ({rotation}); the report contains a fingerprint "
+    "that fixes that public key, but does not show where the matching private key was made or kept. Each report also "
+    "answered a challenge the app says it drew for this conversation, so it is not a report made before that "
+    "challenge existed. Whether the app really encrypted your messages to that key is again only the app's claim, and"
+    " no machine signs anything per message, so nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3122,7 +3123,8 @@ PLAIN_AI_SEARCHES_NONE = (
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
     "that their times, as the app recorded them, fall between the app's first checked machine and five minutes after "
-    "the conversation's last activity{refusal_bound}, not that they came from the conversation.")
+    "the conversation's last activity{refusal_bound}, not that they came from the conversation: the link rests on "
+    "timing and on the app's list, not on anything the machines signed.")
 
 
 def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
@@ -3236,7 +3238,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                f"it, and was addressed only to those machines (on the way it passes through {path_words}, described below)"))
     session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(
         window=_plain_window(f["start"], f["end"]),
-        credit="" if not f["requests"] else f" and credits those requests to {f['credited']} of them", **f)
+        credit="" if not f["requests"] else f" and records {f['credited']} of them as having carried those requests", **f)
     if not new_client and f["requests"] is not None:
         session += (" As the 'not recomputed' rows above state, the older version of the app that wrote this record "
                     "saved the request count only after a reply finished, so a conversation cut off mid-reply can show "

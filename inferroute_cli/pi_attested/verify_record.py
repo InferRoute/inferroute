@@ -2960,15 +2960,16 @@ _FINGERPRINT_NAMES = {"MRTD": "the firmware measurement", "RTMR1": "measurement 
 PLAIN_AI_OPEN = (
     "About your conversation with the AI assistant (that this receipt is the one for this conversation is the app's "
     "own index, which nothing signs): the Anteriora app on your computer says {claim}. That is only the app's own "
-    "claim. Before any message leaves your computer, the app can read it in plain text; if the app itself were faulty"
-    " or malicious, none of these checks would show it, because they look only at the remote machines.")
+    "claim. Before any message leaves your computer, the app can read it in plain text, and the app is software "
+    "InferRoute publishes and updates; if the app or an update of it were faulty or malicious, none of these checks "
+    "would show it, because they look only at the remote machines.")
 PLAIN_AI_OPEN_EMPTY = (
     "About this AI conversation (that this receipt is the one for this conversation is the app's own index, which "
     "nothing signs): the Anteriora app recorded no request sent in it. Had you sent messages, the app could have read"
-    " them in plain text before encrypting them, and if the app itself were faulty or malicious, none of these checks"
-    " would show it, because they look only at the remote machines. What follows describes the machine(s) it had "
-    "checked and was prepared to use; no text of yours reached any of them in this conversation, by the app's own "
-    "record, which is only the app's own claim.")
+    " them in plain text before encrypting them, and the app is software InferRoute publishes and updates; if the app"
+    " or an update of it were faulty or malicious, none of these checks would show it, because they look only at the "
+    "remote machines. What follows describes the machine(s) it had checked and was prepared to use; no text of yours "
+    "reached any of them in this conversation, by the app's own record, which is only the app's own claim.")
 PLAIN_AI_SESSION = (
     "By the app's own count, this conversation began sending {requests} request(s) (by InferRoute's account, a "
     "request the relay or gateway then refused still counts) (InferRoute states that each request carries the "
@@ -3012,12 +3013,13 @@ PLAIN_AI_KEY = (
     "answered.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
-    "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
-    "are checked against fingerprints of keys that InferRoute built into this check: Intel's root key, NVIDIA's "
-    "device-identity root key for the graphics chips, and, for NVIDIA's attestation service, an intermediate key to "
-    "which the certificates the app kept are tied (anyone can compare them with the ones Intel and NVIDIA publish), "
-    "and the expected software measurements the machines are compared with were supplied by InferRoute, which also "
-    "makes the app{relay}; so for most of what follows you rely on InferRoute's own records and code.")
+    "it again on this record, but it is not an independent audit. Intel's and NVIDIA's certificate chains and "
+    "signatures in the rows above are checked against fingerprints of keys that InferRoute built into this check: "
+    "Intel's root key, NVIDIA's device-identity root key for the graphics chips, and, for NVIDIA's attestation "
+    "service, an intermediate key to which the certificates the app kept are tied (anyone can compare them with the "
+    "ones Intel and NVIDIA publish), and the expected software measurements the machines are compared with were "
+    "supplied by InferRoute, which also makes the app{relay}; so for most of what follows you rely on InferRoute's "
+    "own records and code.")
 PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off, and does "
     "not show that {text} was protected by the memory encryption such machines provide; by Intel's design, which this"
@@ -3056,15 +3058,15 @@ PLAIN_AI_GPU = (
     "{text} while the chips processed it, and this record cannot tell you whether it was on.")
 PLAIN_AI_PROGRAM = (
     "The AI program your messages {were} addressed to, and that holds the key to decrypt them, is chosen by the AI "
-    "operator and is not among the software the machine's report measures (by InferRoute's account the operator loads"
-    " it after the machine's start-up measurements were taken), so the report does not say which program it was, and "
-    "the operator can change it at any time without anything in this kind of record showing the change. That program "
-    "necessarily reads every message in plain text in order to answer it; by InferRoute's account of how the app "
-    "works, which no row here checks, with every request sent while the app still rated this conversation "
-    "confidential, the app {sends} it a note of its own, naming the machine, the AI model and {record_file}, together"
-    " with the list of checks that passed, the receipt's stated limitations, and instructions on how to answer "
-    "questions about privacy, and because the AI operator chooses it, the operator could make it keep or send on that"
-    " text; this record cannot tell you what it {did} or whether it kept it.")
+    "operator and is not among the software the machine's report measures (by InferRoute's account the operator "
+    "fetches it from its own servers and loads it only after the machine's start-up measurements were taken), so the "
+    "report does not say which program it was, and the operator can change it at any time without anything in this "
+    "kind of record showing the change. That program necessarily reads every message in plain text in order to answer"
+    " it; by InferRoute's account of how the app works, which no row here checks, with every request sent while the "
+    "app still rated this conversation confidential, the app {sends} it a note of its own, naming the machine, the AI"
+    " model and {record_file}, together with the list of checks that passed, the receipt's stated limitations, and "
+    "instructions on how to answer questions about privacy, and because the AI operator chooses it, the operator "
+    "could make it keep or send on that text; this record cannot tell you what it {did} or whether it kept it.")
 PLAIN_AI_VERDICT_ONLY = (
     "The app's record gives this conversation a verdict other than 'confidential' but records no event or time for it; "
     "this record checks nothing about that verdict.")
@@ -3120,20 +3122,20 @@ PLAIN_AI_PROVENANCE_MIXED = (
     "InferRoute supplied, from the list it shipped inside this check or, for some machines, from a row it signed and the "
     "app kept at the time; a flaw InferRoute finds in that software later will not show here.")
 PLAIN_AI_HOSTS = (
-    "The machines themselves belong to other companies or individuals (by InferRoute's account; the AI operator's "
-    "network calls them miners) who host the physical hardware for the AI operator. Intel's hardware protection, "
-    "which this record shows the machines had, closes one way those hosts could read a machine's memory, but does not"
-    " rule out others, such as measuring the chips' behaviour from outside or physically tampering with the hardware,"
-    " and this record does not say which country the machines were in.")
+    "The machines themselves belong to other companies or individuals (by InferRoute's account, hardware rented to "
+    "the AI operator's decentralised network, which calls them miners) who host the physical hardware for the AI "
+    "operator. Intel's hardware protection, which this record shows the machines had, closes one way those hosts "
+    "could read a machine's memory, but does not rule out others, such as measuring the chips' behaviour from outside"
+    " or physically tampering with the hardware, and this record does not say which country the machines were in.")
 PLAIN_AI_SUMMARY = (
-    "In short: nothing in this record shows that {text} was exposed, and nothing in it shows that it was not. What it"
-    " establishes is about the machines, not about {text}: they were genuine Intel TDX machines with debug mode off, "
-    "their starting software matched measurements {supplied}, and each machine's report, made in answer to the app's "
-    "challenge, carried the fingerprint of a public key that matched the key the app says it used; NVIDIA's report on"
-    " the graphics chips answered that challenge too. NVIDIA's report said nothing about the chips' "
-    "confidential-computing mode. Intel's debug mode being off for each machine (for its whole life, by Intel's "
-    "design), and the chips' debug mode being off when NVIDIA reported, rule out reading memory through those modes, "
-    "not by other means.")
+    "In short: this record does not establish whether {text} was exposed or protected; nothing in it shows that "
+    "{text} was exposed, and nothing in it shows that it was not. What it establishes is about the machines, not "
+    "about {text}: they were genuine Intel TDX machines with debug mode off, their starting software matched "
+    "measurements {supplied}, and each machine's report, made in answer to the app's challenge, carried the "
+    "fingerprint of a public key that matched the key the app says it used; NVIDIA's report on the graphics chips "
+    "answered that challenge too. NVIDIA's report said nothing about the chips' confidential-computing mode. Intel's "
+    "debug mode being off for each machine (for its whole life, by Intel's design), and the chips' debug mode being "
+    "off when NVIDIA reported, rule out reading memory through those modes, not by other means.")
 PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, this record does not "
     "say, and InferRoute has not stated in it, the following, so ask the AI operator and InferRoute directly: how "

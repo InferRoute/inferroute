@@ -343,7 +343,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     spec = importlib.util.spec_from_file_location("vr_ai_plain", p); V = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(V)
     t = V.PLAIN_AI_LANE
-    assert "only the app's own claim" in t and "not an independent audit" in t and "nothing in this record shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
+    assert "only the app's own claim" in t and "not an independent audit" in t and "nothing in it shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
     assert "is not among the software the machine's report measures" in t and "holds the key" in t and "the AI operator" in t
     assert "The matched entry does not say how InferRoute obtained the firmware measurement" in t and "the record carries that statement, not the recalculation" in t and "was not compared by this record" in t  and "genuine Intel TDX machine" in t
     low = t.lower()

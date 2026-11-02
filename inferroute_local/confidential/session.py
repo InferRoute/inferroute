@@ -375,7 +375,14 @@ class ConfidentialSession:
         current = self.pinned.instance_id if self.pinned else None
         self._absorb_pool(e2, fetched_at=fetched_at)
         if current in self._pool and self._pool[current].nonces:
-            self.pinned = self._pool[current]
+            if self.pinned is None or self._pool[current].pubkey_b64 != self.pinned.pubkey_b64:
+                # The same machine now offers a different key (re-verified evidence). Re-pin so the receipt gets a new
+                # served_by row and evidence for the key that later requests are sealed to; otherwise the record names
+                # only the old key (code-reading audit 10, 2 Nov).
+                self.receipt.note("key-changed", f"{current} offered a new key; re-verified and re-pinned")
+                self._pin(current, "key rotated; re-verified")
+            else:
+                self.pinned = self._pool[current]
             return
         if current:
             record_failure(current)

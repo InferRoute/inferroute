@@ -2977,18 +2977,19 @@ PLAIN_AI_SESSION_NOCOUNT = (
     "machine(s) selected for it.")
 PLAIN_AI_REFUSED = (
     "In this conversation the app itself stopped trusting a machine, or found none it could trust, at {refused_at} by"
-    " its own record; this record checks only that the event lies inside the conversation's time window. The app's "
-    "record does not say whether it sent further requests after that moment; any later request went only to a machine"
+    " its own record; this record checks only that the event lies inside the conversation's time window. This record "
+    "does not check whether the app sent further requests after that moment; any later request went only to a machine"
     " the app says it re-checked.")
 PLAIN_AI_KEY = (
     "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each"
     " machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, combined"
     " with the app's challenge for this conversation, and this record checks that fingerprint against the key the app"
-    " says it used; the report contains a fingerprint that fixes that public key, but does not show where the "
-    "matching private key was made or kept. Each report also answered a challenge the app says it drew for this "
-    "conversation, so it is not a report made before that challenge existed. Whether the app really encrypted your "
-    "messages to that key is again only the app's claim, and no machine signs anything per message, so nothing from "
-    "the machines shows that they received yours.")
+    " recorded when it selected that machine (a machine that later offers a new key gets a new entry, with its own "
+    "check, from clients after 0.9.125); the report contains a fingerprint that fixes that public key, but does not "
+    "show where the matching private key was made or kept. Each report also answered a challenge the app says it drew"
+    " for this conversation, so it is not a report made before that challenge existed. Whether the app really "
+    "encrypted your messages to that key is again only the app's claim, and no machine signs anything per message, so"
+    " nothing from the machines shows that they received yours.")
 PLAIN_AI_WHO_CHECKS = (
     "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
     "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above "
@@ -3001,9 +3002,9 @@ PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
     "Intel's hardware encrypts against the company running the physical machine, with the limits described below), "
     "with its debug mode off (a mode that company could otherwise use to read the machine's memory); that setting is "
-    "fixed for as long as that virtual machine, and the key it holds, exist. It shows that the software the machine "
-    "started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's own "
-    "published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
+    "fixed for as long as that virtual machine, and the key its report commits to, exist. It shows that the software "
+    "the machine started from matched four measurements (fingerprints of its start-up software) {provenance} Intel's "
+    "own published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and Intel's lists of revoked "
     "certificates were checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
@@ -3016,11 +3017,11 @@ PLAIN_AI_BUILD_RUNTIME = (
     "InferRoute obtained them.")
 PLAIN_AI_BOOTCONF = (
     "The part of the start-up record that the company running the physical machine supplies itself (its boot "
-    "configuration) was not compared at all. The AI operator is, by InferRoute's account, the company that operates "
-    "these machines and from which InferRoute buys access to them; the rows above show a name in the certificate that"
-    " signed each machine's evidence, a name this check reads but does not verify. The machine's report commits to "
-    "the key behind that certificate, as it does to the encryption key; where its private half was kept is, again, "
-    "not shown.")
+    "configuration) was not compared by this record; the app compared it only against the AI operator's own published"
+    " list. The AI operator is, by InferRoute's account, the company that operates these machines and from which "
+    "InferRoute buys access to them; the rows above show a name in the certificate that signed each machine's "
+    "evidence, a name this check reads but does not verify. The machine's report commits to the key behind that "
+    "certificate, as it does to the encryption key; where its private half was kept is, again, not shown.")
 PLAIN_AI_TCB_HARDENING = (
     "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
     "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
@@ -3055,8 +3056,9 @@ PLAIN_AI_PATH_DIRECT = (
     "By the app's record it {sent} your encrypted messages straight to the AI operator's gateway using your own "
     "account key with that operator (a key for access, not the one your messages were encrypted to), not through "
     "InferRoute's relay. By InferRoute's account of how the app works, which no row here checks, the gateway could "
-    "see which account sent them, when, how much, which AI model and which machine, and this record checks none of "
-    "that, nor whether it logs it, or for how long, nor where it is.")
+    "see which account sent them, from which network address (it saw the app's machine check from your computer even "
+    "if nothing was sent), when, how much, which AI model and which machine, and this record checks none of that, nor"
+    " whether it logs it, or for how long, nor where it is.")
 PLAIN_AI_PROVENANCE_LIST = (
     "InferRoute supplied ({status}), as InferRoute's list stood when this record was exported; a flaw InferRoute "
     "finds in that software later will not show here.")
@@ -3065,9 +3067,9 @@ PLAIN_AI_PROVENANCE_RUNTIME = (
     "inside this check, so you cannot read it there.")
 PLAIN_AI_STOPPED = (
     "The app stopped trusting a machine in this conversation at {ts} because, by its own record, {why}; this record "
-    "checks only that the stop and the failures recorded before it lie inside the conversation's time window. The "
-    "app's record does not say whether it sent further requests after that moment, and this record cannot tell; any "
-    "later request went only to a machine the app says it re-checked.")
+    "checks only that the stop and the failures recorded before it lie inside the conversation's time window. This "
+    "record does not check whether the app sent further requests after that moment; any later request went only to a "
+    "machine the app says it re-checked.")
 PLAIN_AI_LOOKUPS = (
     "To check the machines, the app itself asked Intel's online service and NVIDIA's from your computer (this check "
     "requires both answers to have been fetched within a quarter-hour of the moment the machine was selected), so "

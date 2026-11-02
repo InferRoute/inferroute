@@ -344,7 +344,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     t = V.PLAIN_AI_LANE
     assert "only the app's own claim" in t and "not an independent audit" in t and "nothing in this record shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
     assert "is not among the software the machine's report measures" in t and "holds the key" in t and "the AI operator" in t
-    assert "InferRoute recorded without stating in this record how it obtained it" in t and "the record carries that statement, not the recalculation" in t and "was not compared at all" in t  and "genuine Intel TDX machine" in t
+    assert "InferRoute recorded without stating in this record how it obtained it" in t and "the record carries that statement, not the recalculation" in t and "was not compared by this record" in t  and "genuine Intel TDX machine" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
     for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "was protected.",
@@ -374,7 +374,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "on 2 Nov 2026, from 09:00:00 to 09:05:00 UTC" in up
     # Review 9 (MATERIAL x2): a recorded stop is not the end of sending; the operator's program gets the app's note,
     # with the full home path from clients before 0.9.126.
-    assert "does not say whether it sent further requests after that moment" in V.plain_ai_lane(0, dict(f, refused=True, refused_at="2026-11-02T09:03:00Z"))
+    assert "does not check whether the app sent further requests after that moment" in V.plain_ai_lane(0, dict(f, refused=True, refused_at="2026-11-02T09:03:00Z"))
     assert "account name" in V.plain_ai_lane(0, dict(f, writer="ir 0.9.125")) and "account name" not in V.plain_ai_lane(0, dict(f, writer="ir 0.9.126"))
     # Review 8 (MATERIAL x2): no relay billing sentence on the direct carrier; the stop time is the stop event's.
     d8 = V.plain_ai_lane(0, dict(f, transport="direct to the enclave operator (your own key — InferRoute is not in the path)"))

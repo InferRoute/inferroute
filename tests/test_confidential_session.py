@@ -1237,3 +1237,25 @@ def test_the_preamble_path_hides_the_users_account_name():
     assert _home_relative(os.path.join(home, ".inferroute/confidential/receipts/x.json")) == "~/.inferroute/confidential/receipts/x.json"
     assert _home_relative("/var/tmp/elsewhere/x.json") == "x.json"
     assert _home_relative(None) == ""
+
+
+def test_a_key_rotated_on_the_same_machine_is_re_pinned_and_recorded(world):
+    """Code-reading audit 10: when the pinned machine re-verifies with a NEW key, the session used to switch to it
+    silently (no served_by row, no evidence), so the record named only the old key. It must re-pin."""
+    import dataclasses
+    carrier = FakeCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    iid, before = s.pinned.instance_id, len(s.receipt.served_by or [])
+    orig = s._absorb_pool
+
+    def rotated(e2, *, fetched_at):
+        orig(e2, fetched_at=fetched_at)
+        p = s._pool[iid]
+        s._pool[iid] = dataclasses.replace(p, pubkey_b64=FakeEnclave().pubkey_b64, nonces=p.nonces or ["n"])
+    s._absorb_pool = rotated
+    s.pinned.nonces.clear()
+    asyncio.run(s._refresh_pool())
+    assert s.pinned.instance_id == iid and s.pinned.pubkey_b64 == s._pool[iid].pubkey_b64
+    assert len(s.receipt.served_by) == before + 1, "the new key must get its own served_by row"
+    assert any(e["kind"] == "key-changed" for e in s.receipt.events)

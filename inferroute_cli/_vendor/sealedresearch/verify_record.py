@@ -3163,9 +3163,9 @@ PLAIN_AI_SEARCHES_NONE = (
     "AI assistant ran during it.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
-    "that their times, as the app recorded them, fall between the app's first checked machine and five minutes after "
-    "the conversation's last activity{refusal_bound}, not that they came from the conversation: the link rests on "
-    "timing and on the app's list, not on anything the machines signed.")
+    "that their times, as the app recorded them, fall between the time the app selected its first checked machine and"
+    " five minutes after the conversation's last activity{refusal_bound}, not that they came from the conversation: "
+    "the link rests on timing and on the app's list, not on anything the machines signed.")
 
 
 def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
@@ -3295,7 +3295,8 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     if empty:
         session = PLAIN_AI_SESSION_EMPTY.format(window=_plain_window(f["start"], f["end"]), **f)
     if f["first_pin"] and f["requests"]:
-        session += f" Its first machine was selected at {_plain_time(f['first_pin'])}, so no request left before then."
+        session += (f" By the app's own record, its first machine was selected at {_plain_time(f['first_pin'])}, and the "
+                    "app sends no request before it has selected one.")
     if f["failed_recheck_at"] and not f["refused"]:
         session += " " + PLAIN_AI_FAILED_RECHECK.format(ts=_plain_time(f["failed_recheck_at"]))
     if f["rever_n"] and not f["refused"]:

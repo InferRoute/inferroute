@@ -186,6 +186,17 @@ CLAIM_CONFIDENTIAL = (
 )
 
 
+def _home_relative(path: str | None) -> str:
+    """The receipt path as the model is told it: home written as `~`, so the operator's program (which reads this note in
+    plain text) does not learn the user's account name (code-reading audit 9, 2 Nov)."""
+    if not path:
+        return ""
+    import os
+    home = os.path.expanduser("~").rstrip("/")
+    p = str(path)
+    return "~" + p[len(home):] if home and (p == home or p.startswith(home + "/")) else os.path.basename(p)
+
+
 def lane_preamble(r: "Receipt") -> str:
     """What the model is told about its own situation, derived from the receipt so it can never
     say more than was verified. Kept short: it rides on every request."""
@@ -212,7 +223,7 @@ def lane_preamble(r: "Receipt") -> str:
         "policies; never say otherwise.\n"
         "If asked whether or how this session is private, answer only from the facts above, point to the panel printed "
         "when the session opened, the receipt at "
-        f"{r.path or '~/.inferroute/confidential/receipts/'}, and `ir confidential show`; and state the "
+        f"{_home_relative(r.path) or '~/.inferroute/confidential/receipts/'}, and `ir confidential show`; and state the "
         f"limitations plainly: {lims}. Never say the conversation, the words or the text are private, protected or "
         "confidential; say what was checked and what was not.\n"
         "Otherwise behave exactly as you normally would; this note changes nothing about the task."

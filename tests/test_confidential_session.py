@@ -428,7 +428,9 @@ def test_the_enclave_is_told_the_truth_about_the_lane_on_every_request(world):
     pre = lane_preamble(s.receipt)
     assert sysmsg["content"].startswith(pre) and sysmsg["content"].endswith("You are Claude Code.")
     assert "fake/Model" not in pre, "the operator's model string rides inside the ciphertext only, never in the preamble"
-    for needle in ("fake", "i-a", "Encryption key bound to enclave", s.receipt.path, "NOT running on Anthropic",
+    import os
+    assert os.path.expanduser("~") not in pre, "the operator's program must not learn the user's home path"
+    for needle in ("fake", "i-a", "Encryption key bound to enclave", os.path.basename(s.receipt.path), "NOT running on Anthropic",
                    "InferRoute records the enclave builds"):
         assert needle in pre, needle
     assert "attributed" not in pre
@@ -1225,3 +1227,13 @@ def test_the_agent_never_sees_the_operators_model_string_in_a_reply(world):
     carrier.reply = lambda body: {"id": "c", "model": "fake/Model-TEE", "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
     st, _, out = asyncio.run(_oai(s, {"model": "x", "stream": False, "messages": [{"role": "user", "content": "q"}]}))
     assert json.loads(out)["model"] == "fake" and b"Model-TEE" not in out
+
+
+def test_the_preamble_path_hides_the_users_account_name():
+    """Code-reading audit 9: the note rides inside every request to the operator's program in plain text."""
+    import os
+    from inferroute_local.confidential.receipt import _home_relative
+    home = os.path.expanduser("~")
+    assert _home_relative(os.path.join(home, ".inferroute/confidential/receipts/x.json")) == "~/.inferroute/confidential/receipts/x.json"
+    assert _home_relative("/var/tmp/elsewhere/x.json") == "x.json"
+    assert _home_relative(None) == ""

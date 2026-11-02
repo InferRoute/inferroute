@@ -572,8 +572,10 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
         A(f"<tr><th>Model enclave verified</th><td class={'ok' if model.get('verified') else 'bad'}>{head}"
           f"{('<table>' + rows + '</table>') if rows else ' <span class=note>(no per-check list recorded)</span>'}"
           f"{('<p class=note>Not proven, in the receipt&#39;s own words:</p><ul class=note>' + lim_rows + '</ul>') if lim_rows else ''}"
-          f"<p class=note>Verified by this device's local sealed endpoint at session time; the evidence for these checks is "
-          f"held in that endpoint's receipt on this device, not reproduced in this bundle.</p></td></tr>")
+          f"<p class=note>Verified by this device's local sealed endpoint at session time. The session's receipt and the "
+          f"evidence it references travel in this bundle when this device could read them (the manifest says which), "
+          f"and verify_record.py re-checks them offline; the texts above are the receipt's own words, not that "
+          f"re-check.</p></td></tr>")
         surf = r.get("which_surface_saw_what") or {}
         if surf:
             srows = "".join(f"<tr><td>{_e(k.replace('_', ' '))}</td><td>{_e(v)}</td></tr>" for k, v in surf.items())

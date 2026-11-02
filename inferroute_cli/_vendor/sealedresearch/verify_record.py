@@ -2980,7 +2980,8 @@ PLAIN_AI_SESSION = (
     "timestamped log of the app's own checks, switches and retries (not signed by anyone, though this check confirmed"
     " it is consistent with the evidence files and counts above), though not the words; these times and identifiers "
     "could be matched against the relay's or the operator's own logs. The app writes the end time when it last "
-    "touched the record, which can be after the last message.")
+    "touched the record, which can be after the last message or, if the app was closed while a reply was arriving, "
+    "before that reply.")
 PLAIN_AI_SESSION_EMPTY = (
     "By the app's own count it sent no request in this conversation, which ran {window}; the app selected {machines} "
     "distinct machine(s) for it. This receipt is designed to contain no message text, but it does show when the "
@@ -3022,13 +3023,14 @@ PLAIN_AI_WHO_CHECKS = (
     "own records and code.")
 PLAIN_AI_MACHINE = (
     "For each machine, this record shows that it was a genuine Intel TDX machine with its debug mode off, and does "
-    "not show that {text} was protected by the memory encryption such machines provide; by Intel's design, which this"
-    " record relies on rather than checks, that setting cannot change for the life of that virtual machine. That kind"
-    " of machine has its memory encrypted by Intel's hardware against the company running the physical machine, and "
-    "debug mode is a way that company could otherwise read it; the limits are described below. It shows that the "
-    "software the machine started from matched four measurements (fingerprints of its start-up software) {provenance}"
-    " Intel's own published status for this hardware was '{tcb_word}' {tcb_scope} at the time, and for the Intel "
-    "component that signs such reports '{qe_word}', and Intel's lists of revoked certificates were checked.")
+    "not show that {text} was protected by the memory encryption such machines provide; debug mode, by Intel's "
+    "design, which this record relies on rather than checks, cannot be switched on later for the life of that virtual"
+    " machine. That kind of machine has its memory encrypted by Intel's hardware against the company running the "
+    "physical machine, and debug mode is a way that company could otherwise read it; the limits are described below. "
+    "It shows that the software the machine started from matched four measurements (fingerprints of its start-up "
+    "software) {provenance} Intel's own published status for this hardware was '{tcb_word}' {tcb_scope} at the time, "
+    "and for the Intel component that signs such reports '{qe_word}', and Intel's lists of revoked certificates were "
+    "checked.")
 PLAIN_AI_BUILD_REPRODUCED = (
     "For {n_repro} of the four measurements InferRoute states that it recalculated {it} itself from files published "
     "by the AI operator; the record carries that statement, not the recalculation{rtmr3_note}.")
@@ -3121,6 +3123,14 @@ PLAIN_AI_OPENED_EMPTY = (
 PLAIN_AI_PROVENANCE_MIXED = (
     "InferRoute supplied, from the list it shipped inside this check or, for some machines, from a row it signed and the "
     "app kept at the time; a flaw InferRoute finds in that software later will not show here.")
+PLAIN_AI_OLD_LIMITATIONS = (
+    "This receipt's own limitation texts, written by the version of the app that ran this conversation and sent to the "
+    "program with every request, say the hardware proves your words were readable nowhere else in transit and that "
+    "relays cannot see the words; that is the app's claim about its own encryption, which this check does not "
+    "establish, and later versions of the app no longer say it.")
+PLAIN_AI_FAILED_RECHECK = (
+    "By the app's own record, a machine it had used failed a later re-check at {ts} and the app switched; the record "
+    "carries only that machine's first evidence.")
 PLAIN_AI_HOSTS = (
     "The machines themselves belong to other companies or individuals (by InferRoute's account, hardware rented to "
     "the AI operator's decentralised network, which calls them miners) who host the physical hardware for the AI "
@@ -3140,14 +3150,14 @@ PLAIN_AI_ASK = (
     "Because it checks only the machines, not what {happened} to text sent to them afterwards, this record does not "
     "say, and InferRoute has not stated in it, the following, so ask the AI operator and InferRoute directly: how "
     "long they keep any copy of your messages or of their timing, whether messages are used to train AI models, "
-    "whether backups are kept and where, in which country {places} were, and which of them is legally responsible for"
-    " your messages under data-protection law and what rights you have to copies or erasure, {agreement}, and whether"
-    " you will be told if any of them finds that your messages or their timing were accessed without authority. If "
-    "the answer to any of these is that they do not know or will not say, this record offers nothing against that "
-    "answer. Intel and NVIDIA may keep a log of the lookups the app made; ask them if that matters to you. By "
-    "InferRoute's account, the app also keeps the conversation on your own computer, in plain text, where other "
-    "programs on that computer and any backup or sync service you use could read it; ask InferRoute where, and how to"
-    " delete it.")
+    "whether backups are kept and where, in which country {places} were, who hosted the physical machines, and which "
+    "of them is legally responsible for your messages under data-protection law and what rights you have to copies or"
+    " erasure, {agreement}, and whether you will be told if any of them finds that your messages or their timing were"
+    " accessed without authority. If the answer to any of these is that they do not know or will not say, this record"
+    " offers nothing against that answer. Intel and NVIDIA may keep a log of the lookups the app made; ask them if "
+    "that matters to you. By InferRoute's account, the app also keeps the conversation on your own computer, in plain"
+    " text, where other programs on that computer and any backup or sync service you use could read it; ask "
+    "InferRoute where, and how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")
@@ -3193,9 +3203,13 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
                 qe_statuses.add(mq.group(1))
     stopped_at = str((stop[0] if stop else (rever[-1] if rever else {})).get("ts") or "")
     pins = [e for e in events if isinstance(e, dict) and e.get("kind") == "pinned"]
+    pfr = [e for e in events if isinstance(e, dict) and e.get("kind") == "pinned-failed-reverify"]
+    lims = " ".join(str(x.get("text") or "") for x in (receipt.get("limitations") or []) if isinstance(x, dict))
+    old_lims = "readable nowhere else" in lims or "the words are not." in lims
     first_pin = str(pins[0].get("ts") or "") if pins else ""   # as the verifier's window
     return {"requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
-            "why": why[:240], "stopped_at": stopped_at, "first_pin": first_pin, "rever_n": len(rever), "build_status": sorted(build_status),
+            "why": why[:240], "stopped_at": stopped_at, "first_pin": first_pin, "rever_n": len(rever), "old_lims": old_lims,
+            "failed_recheck_at": str(pfr[0].get("ts") or "") if pfr else "", "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
             "writer": str(receipt.get("written_by") or ""), "qe": sorted(qe_statuses),
             "preamble_path": str(receipt.get("preamble_path") or ""),
@@ -3259,7 +3273,7 @@ def _plain_window(start: str, end: str) -> str:
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
     """The paragraph for one conversation, in parts separated by blank lines."""
-    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "first_pin": "", "rever_n": 0, "build_status": [], "writer": "", "preamble_path": "", "qe": [],
+    f = dict({"requests": None, "machines": 1, "credited": None, "why": "", "stopped_at": "", "first_pin": "", "rever_n": 0, "old_lims": False, "failed_recheck_at": "", "build_status": [], "writer": "", "preamble_path": "", "qe": [],
               "refused": False, "refused_at": "", "transport": "relay", "tcb_uniform": True, "start": "?", "end": "?",
               "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
     empty = f["requests"] == 0
@@ -3282,6 +3296,8 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         session = PLAIN_AI_SESSION_EMPTY.format(window=_plain_window(f["start"], f["end"]), **f)
     if f["first_pin"] and f["requests"]:
         session += f" Its first machine was selected at {_plain_time(f['first_pin'])}, so no request left before then."
+    if f["failed_recheck_at"] and not f["refused"]:
+        session += " " + PLAIN_AI_FAILED_RECHECK.format(ts=_plain_time(f["failed_recheck_at"]))
     if f["rever_n"] and not f["refused"]:
         session += (f" By the app's own record, a later re-check of a machine failed {f['rever_n']} time(s) during this "
                     "conversation without stopping it, so some requests may have gone on evidence checked earlier.")
@@ -3317,7 +3333,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                              else PLAIN_AI_PROVENANCE_LIST.format(status=status)), tcb_word=tcb_word, tcb_scope="for every machine" if f["tcb_uniform"] else "for at least one machine"), _plain_build(f["builds"]), PLAIN_AI_BOOTCONF.replace(" and from which InferRoute buys access to them", "; in this conversation you bought access from it directly") if direct else PLAIN_AI_BOOTCONF,
                                   PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
              PLAIN_AI_GPU.format(text="any text sent to them" if empty or f["requests"] is None else "your text"),
-             PLAIN_AI_PROGRAM.format(record_file=_record_file_words(f["preamble_path"]),
+             (PLAIN_AI_OLD_LIMITATIONS + " " if f["old_lims"] else "") + PLAIN_AI_PROGRAM.format(record_file=_record_file_words(f["preamble_path"]),
                                      sends="would also have sent" if empty else "also sends", were="would have been" if empty else "were",
                                      did="would do with text sent to it" if empty else "did with your text"),
              PLAIN_AI_HOSTS + " " + (PLAIN_AI_PATH_DIRECT.format(sent="would have sent" if empty else "sent") if direct

@@ -332,3 +332,19 @@ def test_export_ships_the_receipt_verifier_beside_verify_record():
     src = (Path(E.__file__).resolve().parent / "pi_attested" / "verify_ai_receipt.py")
     assert src.exists()
     assert 'files["verify_ai_receipt.py"]' in Path(E.__file__).read_text()
+
+
+def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish():
+    """Reviewed wording (2 Nov): the device's own account is marked as such; NVIDIA's token is not called a check of
+    confidential mode; the unmeasured program and its key custody are named; no outcome words."""
+    import importlib.util, pathlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "verify_record.py"
+    spec = importlib.util.spec_from_file_location("vr_ai_plain", p); V = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(V)
+    t = V.PLAIN_AI_LANE
+    assert "this computer's own account" in t and "does not say whether the processors ran in their confidential mode" in t
+    assert "not measured" in t and "holds the key" in t and "Chutes" in t and "not recomputed" in t
+    low = t.lower()
+    assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
+    for bad in ("nvidia's own service checked", "carried only sealed data", "stayed private", "protected"):
+        assert bad not in low, bad

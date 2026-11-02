@@ -110,6 +110,8 @@ OID_TCB = {"blSPL": _AMD + "3.1", "teeSPL": _AMD + "3.2", "snpSPL": _AMD + "3.3"
 class Checks:
     def __init__(self) -> None:
         self.rows: List[Tuple[str, str, str]] = []      # (status, name, detail)  status ∈ PASS FAIL SKIP
+        # Set only by check_tdx_image (--tdx-image): True iff every required image row passed. None = not assessed.
+        self.tdx_posture_verified: Optional[bool] = None
 
     def add(self, ok: Optional[bool], name: str, detail: str) -> bool:
         self.rows.append(("SKIP" if ok is None else "PASS" if ok else "FAIL", name, detail))
@@ -1029,7 +1031,63 @@ PLAIN_FORBIDDEN = ("never exposed", "could not have been read", "remained confid
 # it if it is said in words. Rendering the reasons rather than fixing prose has a second property that
 # matters more: when a deployment closes stdio or resolves its fragments, the plain caveat shrinks by
 # itself. Nobody has to rewrite a sentence, which is the step where an overclaim gets reintroduced.
+# ── Intel TDX level 1: the image was checked against its published files (verify_record --tdx-image) ──
+# Earned only when every TDX search's image passed every required image row AND the reference that names the
+# image is authenticated. It grades how the program was BUILT, as published; never what happened while it ran.
+STATEMENT_TDX_IMAGE_CHECKED = (
+    "For these searches, the Intel TDX boot image the quote names was also checked against the files InferRoute "
+    "publishes: its command line names no console, silences kernel messages and imports no host-supplied "
+    "credentials; its root filesystem matches the integrity hash on that command line; its search service's "
+    "standard output and error are discarded; the firewall its entry point installs admits, outbound, only replies "
+    "from the search port and UDP from port 68 to port 67, and the published code installs it, then a seal refusing "
+    "new sockets and connections, after binding and before serving; the files under /opt/ir/app equal the published "
+    "commit, except that the ranking modules' source is not published; the installed Python packages match their own "
+    "install records and a hash-pinned requirements file; the operating system files were compared to nothing but "
+    "the published image. This establishes the image's contents and its published code's configuration, not its "
+    "behaviour while it ran.")
+TDX_RANKER_CLOSED = ("the ranking modules inside the image are pinned by hash, but their source is not published, so "
+                     "what they do with a query cannot be reviewed")
+TDX_RUNS_PRIVILEGED = "the search service runs with full privileges inside the machine"
+TDX_TRUSTED_BASE = ("Intel's CPU and TDX module, and Google's firmware and host-supplied boot configuration, are taken on "
+                    "their makers' word")
+TDX_METADATA = ("when, how often and from where requests arrive, and their size class and number of reply slots, "
+                "remain visible outside the machine")
+TDX_OWN_KEY = ("which image counts as InferRoute's rests on InferRoute's own signing key, and no outside party has "
+               "rebuilt the image")
+TDX_LEVEL1_NOT_ESTABLISHED = ("sealing on the user's computer and the AI conversation are not covered by this record")
+TDX_KEYS_RETENTION = ("who holds the keys that could unseal the query or sign these statements, and whether the program "
+                      "kept a copy of the query, are not established")
+TDX_PARTIES = ("the physical machine is Google's and the virtual machine on it is InferRoute's; what either could see "
+               "is not established, and the reference is InferRoute's own")
+TDX_PRESEAL = ("before the firewall and seal are installed the program fetches its index over the network, and its "
+               "ranking modules have already run with full control of the machine")
+
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
+    (TDX_RANKER_CLOSED,
+     "the private ranking part of the program is identified by its fingerprint but cannot be read by you, so "
+     "what it does with your search cannot be checked"),
+    (TDX_RUNS_PRIVILEGED,
+     "the search program runs with full control inside the machine"),
+    (TDX_TRUSTED_BASE,
+     "the Intel and Google hardware and firmware the machine runs on are taken on their makers' word"),
+    (TDX_METADATA,
+     "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how "
+     "often and from where you searched, and roughly how large your searches were"),
+    (TDX_KEYS_RETENTION,
+     "this record does not say who holds the keys that could unseal your text or sign these statements, or "
+     "whether the program kept a copy of your text"),
+    (TDX_PARTIES,
+     "the physical machine is Google's and the virtual machine on it is InferRoute's; this record does not show "
+     "what either could see, and the reference it was checked against is InferRoute's own"),
+    (TDX_PRESEAL,
+     "before it closes its network the program fetches its index, and its private ranking part has already run "
+     "with full control of the machine"),
+    (TDX_OWN_KEY,
+     "which program counts as InferRoute's rests on InferRoute's own signature, and nobody outside InferRoute "
+     "has rebuilt it"),
+    (TDX_LEVEL1_NOT_ESTABLISHED,
+     "this record does not cover how your computer sealed your text, or your conversation with the AI "
+     "assistant"),
     (TDX_NOT_ESTABLISHED,
      "this verifier did not establish encryption before sending, who held the keys, or whether the "
      "program disclosed or retained your text"),
@@ -1131,7 +1189,21 @@ PLAIN_ANSWER_TDX: Dict[int, str] = {
     -1: PLAIN_ANSWER[-1],
     0: "This record cannot tell you whether your text stayed private: it records which machine and which "
        "program image ran your search, not whether anyone read your text, so on that question it says nothing.",
+    1: "This record cannot prove that nobody read your text. What it adds is a check of the image the search "
+       "machine started from. The image is the one InferRoute published, byte for byte. Inside it, the search "
+       "program's own source files match the source InferRoute publishes; its ranking modules are fixed by "
+       "fingerprint but their source is not published, so what they do with your search cannot be read; and the "
+       "operating system and library files underneath were matched to nothing but that published image. As "
+       "published, before it accepts its first search the program installs a firewall and a seal that admit "
+       "nothing outbound except replies to requests and one port used for its network address, and its screen "
+       "output is discarded. Before that point it fetches its index over the network, and its ranking modules "
+       "have already run with full control of the machine. All of this is read from the published files; none of "
+       "it is an observation of what the program did.",
 }
+PLAIN_TDX_HEADLINE_1 = ("The saved search statements have valid signatures linked to hardware evidence from an Intel "
+                        "TDX machine, and the image that machine started from was checked against the files "
+                        "InferRoute publishes \u2014 which establishes what that image contained when it started, not "
+                        "how it was made and not what happened while it ran.")
 
 PLAIN_CANNOT_SEE = ("Any such list can only hold things this check looks at. There is no complete "
                     "list of what it cannot see; the following are examples, not all of it. It never "
@@ -1253,7 +1325,10 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     print(f"    {answer}")
     if reach >= 0:
         print()
-        print(f"    {PLAIN_NARROWER}")
+        # Level-1 TDX already says what it adds; a second "What it does show" read as a retraction (review, 2 Nov).
+        print("    " + ("Even that is narrower than it may sound: it is a fact about the image and about the record, "
+                        "which has not been altered since. It is not a fact about whether your text stayed private."
+                        if (tdx and reach == 1) else PLAIN_NARROWER))
         # A TDX record has no container policy: no "document", no closed controls, no platform containers.
         # Left ungated, closed={} reads as "not self-contained, unidentified" and the paragraph below
         # describes dependencies of a document this record does not hold.
@@ -1349,6 +1424,12 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     # session's failing tests to fit my change, which is how a gate gets weakened.
     if tdx:   # "a protected computer" primes "protected" before the negation; a TDX reader gets the machine named
         headline = headline.replace("for a protected computer", "from an Intel TDX machine")
+        if reach == 1:   # the AMD level-1 headline names a container policy's controls, which a TDX record has none of
+            headline = PLAIN_TDX_HEADLINE_1
+            # The AMD caveat says "the program's publication ... were not verified": here publication IS what passed.
+            caveat = ("This does not show who could read your text, who holds the keys, whether the program kept your "
+                      "text, or anything about your own computer or the AI conversation. The program's behaviour while "
+                      "it ran was not observed.")
     print(f"    {headline}")
     print(f"    {caveat}")
     # "These are gaps" cited a list that reach -1 never prints: report_plain(-1) is called from four
@@ -1449,8 +1530,10 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
     return (1 if controls_checked else 0), blockers
 
 
-def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool) -> Tuple[int, List[str]]:
-    """The TDX ladder: -1 when the record did not verify, otherwise 0. Never 1.
+def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
+                              image_checked: bool = False) -> Tuple[int, List[str]]:
+    """The TDX ladder: -1 when the record did not verify; 1 only when every search's image passed every required
+    image row (verify_record --tdx-image) AND the reference naming it is authenticated; otherwise 0.
 
     Level 1 grades a container policy's controls, and a TDX image has none to read; reaching it would need an
     assessment of the image's own permissions that this program does not make. record_ok already carries
@@ -1458,6 +1541,9 @@ def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool) -> Tuple[
     against the reference at the search's time), so it is the whole of level 0's gate."""
     if record_ok is not True:
         return -1, ["this record did not verify — no sentence is licensed"]
+    if image_checked is True and authenticated is True:
+        return 1, [TDX_RANKER_CLOSED, TDX_PRESEAL, TDX_RUNS_PRIVILEGED, TDX_PARTIES, TDX_KEYS_RETENTION,
+                   TDX_TRUSTED_BASE, TDX_METADATA, TDX_OWN_KEY, TDX_LEVEL1_NOT_ESTABLISHED]
     blockers = [TDX_IMAGE_UNASSESSED]
     if not authenticated:
         blockers.append("the reference signature was not verified under a supplied key; independently "
@@ -1472,11 +1558,12 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
                            floor_pinned: bool, revocation_checked: bool, authenticated: bool,
                            record_ok: bool, committed: Optional[set] = None,
                            production_roots: bool = False, tdx_searches: int = 0,
-                           searches_total: Optional[int] = None) -> None:
+                           searches_total: Optional[int] = None, tdx_image_checked: bool = False) -> None:
     """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
-    print("  SCOPE — archived SEARCH operations only. AI session receipts are NOT VERIFIED here; "
+    print("  SCOPE — archived SEARCH operations only. " + ("AI session receipts: see their own section above; "
+          if _AI_LANE_VERIFIED else "AI session receipts are NOT VERIFIED here; ") + 
           "no statement below covers the conversation, omitted operations, or future requests.")
     print("  Reference signatures are relative to the supplied key; its independent provenance is not established here.")
     print("  (these rows do NOT affect the exit code above, which is about the record's integrity)")
@@ -1507,7 +1594,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         report_plain(-1)
         return
     if tdx_searches:
-        reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated)
+        reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated,
+                                                    image_checked=tdx_image_checked)
         print(f"  Intel TDX — {tdx_searches} search(es) ran on a boot image the supplied reference names as "
               "InferRoute's. There is no container "
               "policy to read, so this record has none of the policy rows an AMD record shows and cannot earn the "
@@ -1516,6 +1604,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         print()
         print("  You may write:")
         print(f"    1. {STATEMENT_SEALED_TDX}")
+        if reach >= 1:
+            print(f"    2. {STATEMENT_TDX_IMAGE_CHECKED}")
         print("  You may NOT write that the text was never exposed, could not have been read, or remained "
               "confidential. What is missing:")
         for blocker in dict.fromkeys(blockers):
@@ -2565,6 +2655,30 @@ def check_tdx_identity(c: "Checks", rd: Dict[str, Any], info: Optional[Dict[str,
           f"against reference {reference.get('source') or '(unnamed)'} published {reference.get('published_at') or '?'}")
 
 
+def load_tdx_image_module() -> Any:
+    """sealedresearch/tdx_image.py, loaded from beside this file: a vendored copy of this verifier needs no package,
+    only that file next to it. Raises ImportError when it is absent."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tdx_image.py")
+    spec = importlib.util.spec_from_file_location("sealedresearch_tdx_image", path) if os.path.isfile(path) else None
+    if spec is None or spec.loader is None:
+        raise ImportError(f"{path} is not beside this verifier")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def check_tdx_image(c: "Checks", info: Optional[Dict[str, Any]], image_report: Any) -> bool:
+    """The PUBLISHED image behind this search (--tdx-image): the rows of sealedresearch.tdx_image, re-anchored to the
+    image this search's quote measured. Prefixed "image:" so a reader can tell them from the record's own rows.
+    Returns the posture verdict: True only if every required image row PASSED and none FAILED."""
+    rows, verified = image_report.rows_for_measured((info or {}).get("image_sha384"), (info or {}).get("boot_apps"))
+    for status, name, detail in rows:
+        c.add(None if status == "SKIP" else status == "PASS", f"image: {name}", detail)
+    c.tdx_posture_verified = verified
+    return verified
+
+
 def check_hardware(c: "Checks", offer: Dict[str, Any], rd: Dict[str, Any], rd_bytes: bytes, *, pins: Dict[str, str],
                    uvm_root: str, uvm_min_svn: int, policy_b64: Optional[str] = None,
                    min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
@@ -2825,6 +2939,26 @@ def _load_ai_receipt_verifier():
         return None
 
 
+# Reviewed 2 Nov (fable, adversarial): every clause below is either a row the AI-receipt verifier PASSED, or is
+# marked as this computer's own account, or names what nothing here establishes. Printed only when every receipt
+# in the record was fully re-checked offline.
+PLAIN_AI_LANE = (
+    "This computer reports that it sent your conversation with the AI assistant only to the machines this record "
+    "names, and that it sealed each message, on this computer, to a key named in each machine's hardware report. The "
+    "machines sign nothing per message, so that part rests on this computer's own account. For each machine named, "
+    "the record does show: it was a genuine Intel TDX machine with its debug interface off; the measurements of what "
+    "it loaded after its firmware were recomputed by InferRoute from files the operator, Chutes, publishes, while the "
+    "firmware measurement itself was matched to a value InferRoute had recorded, not recomputed; and NVIDIA's "
+    "attestation service issued a token, under NVIDIA keys this program pins and for this session's nonce, that the "
+    "graphics processors' identity and firmware matched NVIDIA's reference. That token does not say whether the "
+    "processors ran in their confidential mode, so protection of your text while it was on them is not established. "
+    "The machines belong to third-party hosts, and the program on them is chosen by Chutes. That program, fetched "
+    "after the hardware report was made, is what reads your messages and holds the key they were sealed to, and it "
+    "is not measured: this record cannot tell you what it did with your text or that key, or whether it kept them. "
+    "InferRoute's relay, which carried the traffic, could see when and how much you sent.")
+_AI_LANE_VERIFIED = False
+
+
 def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Print verify_ai_receipt.py's rows for every session-*.receipt.json in the bundle, as an OPTIONAL section.
 
@@ -2866,6 +3000,11 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     print(f"  AI receipts: {ok_n} of {len(results)} fully re-checked offline, {failed_n} failed, "
           f"{len(results) - ok_n - failed_n} incomplete. Per-request sealing, what the machine's software did with the text, "
           "and retention remain the device's word; see each receipt's SKIP rows.")
+    global _AI_LANE_VERIFIED
+    _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
+    if _AI_LANE_VERIFIED:
+        print("\n  In plain words, for the AI conversation")
+        print("    " + PLAIN_AI_LANE)
     return {"receipts": len(results), "ok": ok_n, "failed": failed_n}
 
 
@@ -3013,9 +3152,10 @@ def _verify_offer_reference_auth(c: Checks, reference: Optional[Dict[str, Any]],
 def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[str, str], uvm_root: str,
                   uvm_min_svn: int, matter_cutoff: Optional[int], reference: Optional[Dict[str, Any]],
                   min_tcb: Optional[Dict[str, Dict[str, int]]] = None,
-                  tdx_pins: Optional[Dict[str, str]] = None) -> Checks:
+                  tdx_pins: Optional[Dict[str, str]] = None, tdx_image: Any = None) -> Checks:
     """All checks for one sealed search. `row` is the searches.json entry; `evidence` the bundle it names;
-    `reference` the values obtained from InferRoute out of band (None = identity cannot be established)."""
+    `reference` the values obtained from InferRoute out of band (None = identity cannot be established);
+    `tdx_image` an already-computed sealedresearch.tdx_image.ImageReport (--tdx-image), or None."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     c = Checks()
     st = dict(row.get("statement") or {}) if isinstance(row.get("statement"), dict) else {}
@@ -3077,6 +3217,8 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
         # and Google's certificate, must have been current WHEN THE SEARCH RAN, not now.
         info = check_tdx(c, offer, rd_bytes, at_iso=at, pins=tdx_pins)
         check_tdx_identity(c, rd, info, reference, at)
+        if tdx_image is not None:
+            check_tdx_image(c, info, tdx_image)
     else:
         p = check_hardware(c, offer, rd, rd_bytes, pins=pins, uvm_root=uvm_root, uvm_min_svn=uvm_min_svn,
                            policy_b64=(evidence or {}).get("policy_b64"), min_tcb=operation_floor,
@@ -3404,6 +3546,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--tdx-pin", action="append", default=[], metavar="intel_root|gce_root=SPKI_SHA256_HEX",
                     help="TEST ROOTS ONLY; requires --i-am-testing")
     ap.add_argument("--uvm-min-svn", type=int, default=UVM_MIN_SVN)
+    ap.add_argument("--tdx-image", default=None, metavar="DIR",
+                    help="the PUBLISHED Intel TDX image (uki.efi, root.img, verity.img): adds the image rows of sealedresearch.tdx_image to every TDX search")
+    ap.add_argument("--tdx-source", default=None, metavar="PATH", help="with --tdx-image: the published source (git checkout or unpacked tarball) to compare the image's files with")
+    ap.add_argument("--tdx-root-tree", default=None, metavar="DIR", help="with --tdx-image: an already-extracted root (when fsck.erofs is not available)")
     ap.add_argument("--i-am-testing", action="store_true", help="acknowledge that pin overrides make this a TEST run, never a verification of Azure (exit 3 at best)")
     a = ap.parse_args(argv)
 
@@ -3512,7 +3658,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     seen_chains: Dict[Tuple[str, bytes], Tuple[str, Any, Any]] = {}
     seen_host_data: set = set()
     tdx_searches = 0
+    tdx_image_report = None
+    if a.tdx_image:
+        try:
+            _ti = load_tdx_image_module()
+        except Exception as exc:                            # noqa: BLE001 — a vendored verifier without the file beside it
+            print(f"REFUSED: --tdx-image needs tdx_image.py beside this verifier ({type(exc).__name__}: {exc})")
+            return 2
+        try:
+            tdx_image_report = _ti.verify_image(a.tdx_image, source=a.tdx_source, root_tree=a.tdx_root_tree)
+        except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal, not a traceback
+            print(f"REFUSED: --tdx-image {a.tdx_image} could not be assessed ({type(exc).__name__}: {exc})")
+            return 2
     firmware_floor_results: List[bool] = []
+    posture_results: List[bool] = []
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
             print(f"\nSearch {i}: FAIL malformed row")
@@ -3567,13 +3726,19 @@ def main(argv: Optional[List[str]] = None) -> int:
         tdx_searches += int(is_tdx_offer(ev.get("offer")))
         try:
             c = verify_search(row, ev, pins=pins, uvm_root=uvm_root, uvm_min_svn=a.uvm_min_svn, matter_cutoff=cutoff,
-                              reference=reference, min_tcb=min_tcb, tdx_pins=tdx_pins)
+                              reference=reference, min_tcb=min_tcb, tdx_pins=tdx_pins, tdx_image=tdx_image_report)
         except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal, not a traceback
             print(f"  FAIL verifier error on this search: {type(exc).__name__}: {exc}")
             fails += 1
             continue
         c.dump()
-        fails += len(c.failed)
+        # The image rows answer how the program was built, not whether this record is intact: they decide the
+        # TDX grade below and never the exit code.
+        fails += len([f for f in c.failed if not str(f).startswith("image:")])
+        posture_results.append(c.tdx_posture_verified is True)
+        if c.tdx_posture_verified is not None:
+            print("  image posture: " + ("VERIFIED — every required image row passed for this search" if c.tdx_posture_verified
+                                         else "NOT VERIFIED — see the image rows above"))
         firmware_floor_results.append(any(status == "PASS" and name == "configured firmware TCB floor"
                                           for status, name, _ in c.rows))
     if searches:
@@ -3640,7 +3805,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             record_ok=(fails == 0),
             committed=seen_host_data,
             production_roots=not test_roots,
-            tdx_searches=tdx_searches, searches_total=len(searches))
+            tdx_searches=tdx_searches, searches_total=len(searches),
+            tdx_image_checked=bool(searches) and len(posture_results) == len(searches) and all(posture_results))
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

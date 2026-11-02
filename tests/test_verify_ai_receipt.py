@@ -343,7 +343,7 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     spec.loader.exec_module(V)
     t = V.PLAIN_AI_LANE
     assert "only the app's own claim" in t and "not an independent audit" in t and "Nothing in it shows that your text was exposed, and nothing in it shows that it was not" in t and "says nothing about whether the chips were in their confidential-computing mode" in t
-    assert "does not even say which program it was" in t and "held the key" in t and "the AI operator" in t
+    assert "is not among the software the machine's report measures" in t and "held the key" in t and "the AI operator" in t
     assert "InferRoute only recorded from an earlier machine" in t and "the record carries that statement, not the recalculation" in t and "was not compared at all" in t and "you rely on InferRoute having recorded it correctly" in t and "genuine Intel TDX machine" in t
     low = t.lower()
     assert not [w for w in V.PLAIN_FORBIDDEN if w.lower() in low]
@@ -361,7 +361,24 @@ def test_the_plain_ai_paragraph_never_overclaims_what_the_rows_do_not_establish(
     assert "does not show where the matching private key was made or kept" in t and "which account sent them" in t
     f = {"requests": 3, "machines": 2, "start": "2026-11-02T09:00:00Z", "end": "2026-11-02T09:05:00Z", "tcb": ["UpToDate"]}
     up = V.plain_ai_lane(0, f)
-    assert "this record covers 3 message(s) to 2 machine(s)" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    assert "this conversation sent 3 request(s)" in up and "to 2 distinct machine(s)" in up and V.PLAIN_AI_TCB_HARDENING not in up
+    # Second code-reading review: no "actually read" for an empty session; refusal surfaced; build sentence from the row;
+    # a missing counter is said, not printed as "?"; a run-time signed row claims no recalculation.
+    empty = V.plain_ai_lane(0, dict(f, requests=0))
+    assert "recorded no request sent in it" in empty and "actually read" not in empty and "would read" in empty
+    assert V.PLAIN_AI_REFUSED in V.plain_ai_lane(0, dict(f, refused=True)) and V.PLAIN_AI_REFUSED not in up
+    nocount = V.plain_ai_lane(0, dict(f, requests=None))
+    assert "carries no count of requests" in nocount and "? request" not in nocount
+    rt = V.plain_ai_lane(0, dict(f, builds=[("runtime", ())]))
+    assert V.PLAIN_AI_BUILD_RUNTIME in rt and "recalculated them itself" not in rt
+    two = V.plain_ai_lane(0, dict(f, builds=[("bundled", ("RTMR1",))]))
+    assert "For one of them InferRoute states" in two and "The firmware one, the third and the fourth InferRoute only recorded" in two
+    facts = V.ai_session_facts({"counters": {"requests": 2}, "served_by": [{"attestation_sha256": "a"}, {"attestation_sha256": "b"},
+                                {"attestation_sha256": "a"}], "verdict": "confidential", "started_at": "s", "last_activity_at": "e"},
+                               [("PASS", "machine 1 (x) recorded build", "build b (current), recorded by InferRoute since d; RTMR1+RTMR2+RTMR3 recomputed by InferRoute from the operator's published artifacts; MRTD 1…"),
+                                ("PASS", "Intel TCB status (platform)", "FMSPC f, status SWHardeningNeeded (level d)")])
+    assert facts["machines"] == 2 and facts["requests"] == 2 and not facts["refused"] and facts["tcb"] == ["SWHardeningNeeded"]
+    assert facts["builds"] == [("bundled", ("RTMR1", "RTMR2", "RTMR3"))]
     assert V.PLAIN_AI_TCB_HARDENING in V.plain_ai_lane(0, dict(f, tcb=["UpToDate", "SWHardeningNeeded"]))
     assert "\n\n" in up and up.endswith(V.PLAIN_AI_SEARCHES_NONE)
     two = V.plain_ai_lane(2)

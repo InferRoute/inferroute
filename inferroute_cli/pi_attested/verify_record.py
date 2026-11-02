@@ -2950,134 +2950,176 @@ def _load_ai_receipt_verifier():
         return None
 
 
-# Reviewed 2 Nov (fable, adversarial): every clause below is either a row the AI-receipt verifier PASSED, or is
-# marked as this computer's own account, or names what nothing here establishes. Printed only when every receipt
-# in the record was fully re-checked offline.
-PLAIN_AI_LANE_PARTS = (
-    (
-        "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of "
-        "your messages so that only the machines named here could read them, and sent them only to those machines. "
-        "That is only the app's own claim. Before any message leaves your computer, the app can read it in plain "
-        "text; if the app itself were faulty or malicious, none of these checks would show it, because they look only"
-        " at the remote machines."),
-    (
-        "What this record can check is each machine. Each machine's signed report contains a fingerprint of the "
-        "public key that messages to it are encrypted to, and this record checks that fingerprint against the key the"
-        " app says it used; the report vouches for that public key, but does not show where the matching private key "
-        "was made or kept. Whether the app really encrypted your messages to that key is again only the app's claim, "
-        "and no machine signs anything per message, so nothing from the machines shows that they received yours. The "
-        "check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run "
-        "it again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows "
-        "above are checked against Intel's and NVIDIA's own certificates, but the expected software fingerprints the "
-        "machines are compared with were supplied by InferRoute, which also operates the relay the app says your "
-        "traffic passed through and makes the app; so for most of what follows you rely on InferRoute's own records "
-        "and code."),
-    (
-        "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory "
-        "Intel's hardware encrypts against the company running the physical machine, with the limits described "
-        "below), with its debug mode off (a mode that company could otherwise use to read the machine's memory) at "
-        "the moment its report was made. It shows that the software the machine started from matched fingerprints "
-        "InferRoute supplied with this check: for three of them InferRoute states that it recalculated them itself "
-        "from files published by the AI operator, the company that operates these machines and from which InferRoute "
-        "buys access to them (its name appears in the rows above, as the issuer of the certificate that signed each "
-        "machine's evidence), but the record carries that statement, not the recalculation; the fourth, for the "
-        "machine's firmware, InferRoute only recorded from an earlier machine, so for that part you rely on "
-        "InferRoute having recorded it correctly. The part of the start-up record that the company running the "
-        "physical machine supplies itself (its boot configuration) was not compared at all."),
-    (
-        "NVIDIA's certificates identify the graphics chips as genuine, and NVIDIA's automated attestation service "
-        "reported, about these chips only, that they had the expected firmware and were running with secure boot on "
-        "and debug off. That service's report says nothing about whether the chips were in their "
-        "confidential-computing mode, the setting meant to stop those who run the physical machine from reading what "
-        "the chips work on; if it was off, they might have been able to read your text while the chips processed it, "
-        "and this record cannot tell you whether it was on."),
-    (
-        "The AI program that actually read your messages, and that held the key to decrypt them, is chosen by the AI "
-        "operator and loaded after the machine's report was made, so the report does not even say which program it "
-        "was, and the operator can change it at any time without anything in this kind of record showing the change. "
-        "That program necessarily reads every message in plain text in order to answer it, and because the AI "
-        "operator chooses it, the operator could make it keep or send on that text; this record cannot tell you what "
-        "it did with your text or whether it kept it."),
-    (
-        "The machines themselves belong to other companies or individuals (the AI operator's network calls them "
-        "miners) who host the physical hardware for the AI operator. Intel's hardware protection, which this record "
-        "shows the machines had, closes one way those hosts could read a machine's memory, but does not rule out "
-        "others, such as measuring the chips' behaviour from outside or physically tampering with the hardware, and "
-        "this record does not say which country the machines were in. InferRoute operates a relay and the AI operator"
-        " a gateway that the app says carried your encrypted messages; either could see which account sent them, "
-        "when, and how much, and this record checks none of that, nor whether either logs it, or for how long."),
-    (
-        "In short, what this record establishes is about the machines, not about your text: they were genuine Intel "
-        "TDX machines with debug mode off, their starting software matched fingerprints InferRoute supplied, and each"
-        " machine's report carried the fingerprint of a public key that matched the key the app says it used. Nothing"
-        " in it shows that your text was exposed, and nothing in it shows that it was not."),
-    (
-        "Because it checks only the machines the app says received your text, not what happened afterwards, ask the "
-        "AI operator and InferRoute directly how long they keep any copy of your messages or of their timing, whether"
-        " messages are used to train AI models, whether backups are kept and where, in which country the machines "
-        "were, and which of them is legally responsible for your messages under data-protection law and what rights "
-        "you have to copies or erasure."),
-)
-PLAIN_AI_LANE = " ".join(PLAIN_AI_LANE_PARTS)
+# The plain paragraph for ONE AI conversation (one receipt). Fixed sentences are the lane's permanent limits; every
+# sentence about THIS session (its numbers, its build rows, a refusal, Intel's status) is generated from that receipt
+# and its rows, so a sentence that is false for this receipt is not printed. Reviewed 2 Nov: Kimi K2.6 rounds 1-8 on
+# mac-papa and two independent code-reading reviews (fable).
+_FINGERPRINT_NAMES = {"MRTD": "the firmware one", "RTMR1": "the second", "RTMR2": "the third", "RTMR3": "the fourth"}
 
-
-# The receipt's last check row, in plain words. Which patent searches belong to which AI conversation comes from
-# an index the app writes (unsigned); the rows check only that those searches' times fall while a checked machine
-# was in use. Either way the reader must be told what the link rests on.
+PLAIN_AI_OPEN = (
+    "About your conversation with the AI assistant: the Anteriora app on your computer says it encrypted each of your "
+    "messages so that only the machines named here could read them, and sent them only to those machines. That is only "
+    "the app's own claim. Before any message leaves your computer, the app can read it in plain text; if the app itself "
+    "were faulty or malicious, none of these checks would show it, because they look only at the remote machines.")
+PLAIN_AI_OPEN_EMPTY = (
+    "About this AI conversation: the Anteriora app recorded no request sent in it. What follows describes the machine "
+    "it had checked and was prepared to use; no text of yours reached it in this conversation, by the app's own record, "
+    "which is only the app's own claim.")
+PLAIN_AI_SESSION = (
+    "By the app's own count, this conversation sent {requests} request(s) (each request carries the conversation so far) "
+    "to {machines} distinct machine(s), between {start} and {end} (UTC).")
+PLAIN_AI_SESSION_NOCOUNT = (
+    "The app's record of this conversation carries no count of requests; it ran between {start} and {end} (UTC), "
+    "using {machines} distinct machine(s).")
+PLAIN_AI_REFUSED = (
+    "In this conversation the app itself stopped trusting a machine, or found none it could trust; the rows above say "
+    "when.")
+PLAIN_AI_KEY = (
+    "What this record can check is each machine, meaning a protected virtual machine rather than a whole server. Each "
+    "machine's signed report contains a fingerprint of the public key that messages to it are encrypted to, and this "
+    "record checks that fingerprint against the key the app says it used; the report vouches for that public key, but "
+    "does not show where the matching private key was made or kept. Each report also answered a challenge the app made "
+    "during this conversation, so it is not an old report reused. Whether the app really encrypted your messages to "
+    "that key is again only the app's claim, and no machine signs anything per message, so nothing from the machines "
+    "shows that they received yours.")
+PLAIN_AI_WHO_CHECKS = (
+    "The check itself was written and published by InferRoute, the company behind the Anteriora app; anyone can run it "
+    "again on this record, but it is not an independent audit. Intel's and NVIDIA's signatures in the rows above are "
+    "checked against copies of Intel's and NVIDIA's root certificates that InferRoute built into this check (anyone can "
+    "compare them with the ones Intel and NVIDIA publish), and the expected software fingerprints the machines are "
+    "compared with were supplied by InferRoute, which also operates the relay the app says your traffic passed through "
+    "and makes the app; so for most of what follows you rely on InferRoute's own records and code.")
+PLAIN_AI_MACHINE = (
+    "For each machine, this record shows that it was a genuine Intel TDX machine (a kind of machine whose memory Intel's "
+    "hardware encrypts against the company running the physical machine, with the limits described below), with its "
+    "debug mode off (a mode that company could otherwise use to read the machine's memory) at the moment its report was "
+    "made. It shows that the software the machine started from matched four fingerprints InferRoute supplied.")
+PLAIN_AI_BUILD_REPRODUCED = (
+    "For {n_repro} of them InferRoute states that it recalculated them itself from files published by the AI operator; "
+    "the record carries that statement, not the recalculation.")
+PLAIN_AI_BUILD_RECORDED = (
+    "{rest} InferRoute only recorded from an earlier machine, so for {that} you rely on InferRoute having recorded "
+    "{it} correctly.")
+PLAIN_AI_BUILD_RUNTIME = (
+    "These fingerprints come from a record signed by InferRoute's publication key, which says nothing about how "
+    "InferRoute obtained them.")
+PLAIN_AI_BOOTCONF = (
+    "The part of the start-up record that the company running the physical machine supplies itself (its boot "
+    "configuration) was not compared at all. The AI operator is the company that operates these machines and from which "
+    "InferRoute buys access to them; the rows above show a name in the certificate that signed each machine's evidence, "
+    "a name this check reads but does not verify.")
+PLAIN_AI_TCB_HARDENING = (
+    "For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel accepts the "
+    "hardware as genuine but relies on software protections against known weaknesses, which this record does not check.")
+PLAIN_AI_GPU = (
+    "NVIDIA's certificates identify the graphics chips as genuine, and NVIDIA's automated attestation service reported, "
+    "about these chips only, that they had the expected firmware and were running with secure boot on and debug off. "
+    "That service's report says nothing about whether the chips were in their confidential-computing mode, the setting "
+    "meant to stop those who run the physical machine from reading what the chips work on; if it was off, they might "
+    "have been able to read your text while the chips processed it, and this record cannot tell you whether it was on.")
+PLAIN_AI_PROGRAM = (
+    "The AI program that {reads} your messages, and that {holds} the key to decrypt them, is chosen by the AI operator "
+    "and is not among the software the machine's report measures, so the report does not say which program it was, "
+    "and the operator can change it at any time without anything in this kind of record showing the change. That "
+    "program necessarily reads every message in plain text in order to answer it, and because the AI operator chooses "
+    "it, the operator could make it keep or send on that text; this record cannot tell you what it did with your text "
+    "or whether it kept it.")
+PLAIN_AI_HOSTS = (
+    "The machines themselves belong to other companies or individuals (the AI operator's network calls them miners) "
+    "who host the physical hardware for the AI operator. Intel's hardware protection, which this record shows the "
+    "machines had, closes one way those hosts could read a machine's memory, but does not rule out others, such as "
+    "measuring the chips' behaviour from outside or physically tampering with the hardware, and this record does not "
+    "say which country the machines were in. InferRoute operates a relay and the AI operator a gateway that the app "
+    "says carried your encrypted messages; either could see which account sent them, when, and how much, and this "
+    "record checks none of that, nor whether either logs it, or for how long, nor where the relay and gateway are.")
+PLAIN_AI_SUMMARY = (
+    "In short, what this record establishes is about the machines, not about your text: they were genuine Intel TDX "
+    "machines with debug mode off, their starting software matched fingerprints InferRoute supplied, and each machine's "
+    "report, made during this conversation, carried the fingerprint of a public key that matched the key the app says "
+    "it used. Nothing in it shows that your text was exposed, and nothing in it shows that it was not.")
+PLAIN_AI_ASK = (
+    "Because it checks only the machines the app says received your text, not what happened afterwards, ask the AI "
+    "operator and InferRoute directly how long they keep any copy of your messages or of their timing, whether messages "
+    "are used to train AI models, whether backups are kept and where, in which country the machines, the relay and the "
+    "gateway were, and which of them is legally responsible for your messages under data-protection law and what rights "
+    "you have to copies or erasure. The app also keeps the conversation on your own computer; ask InferRoute where, and "
+    "how to delete it.")
 PLAIN_AI_SEARCHES_NONE = (
-    "This record does not link any of the patent searches it contains to this conversation, so it does not show which searches, "
-    "if any, the AI assistant ran during it.")
+    "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
+    "AI assistant ran during it.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
-    "that their times, as the app recorded them, fall within the period in which the app says a checked machine was "
-    "in use, not that they came from the conversation.")
+    "that their times, as the app recorded them, fall within the period in which the app says a checked machine was in "
+    "use (or within five minutes after it ended), not that they came from the conversation.")
 
 
-PLAIN_AI_SESSION = ("By the app's own count, this record covers {requests} message(s) to {machines} machine(s), between {start} "
-                    "and {end} (UTC).")
-PLAIN_AI_TCB_HARDENING = ("For at least one machine, Intel's status for its hardware was 'software hardening needed': Intel "
-                          "accepts the hardware as genuine but relies on software protections against known weaknesses, "
-                          "which this record does not check.")
+def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
+    """What the plain paragraph says about ONE conversation, read from its receipt and its rows. None = not recorded."""
+    counters = receipt.get("counters") if isinstance(receipt.get("counters"), dict) else {}
+    reqs = counters.get("requests") if isinstance(counters.get("requests"), int) else None
+    served = receipt.get("served_by") if isinstance(receipt.get("served_by"), list) else []
+    distinct = {str(s.get("attestation_sha256") or s.get("instance_id") or i) for i, s in enumerate(served) if isinstance(s, dict)}
+    events = receipt.get("events") if isinstance(receipt.get("events"), list) else []
+    refused = (str(receipt.get("verdict") or "") not in ("", "confidential")
+               or any(isinstance(e, dict) and e.get("kind") in ("refused", "no-eligible-instance") for e in events))
+    builds, statuses = [], set()
+    for st, name, detail in rows:
+        if name.endswith("recorded build") and st == "PASS":
+            m = re.search(r"; ([A-Z0-9+]+) recomputed by InferRoute", detail)
+            builds.append(("runtime", ()) if "run-time row signed" in detail
+                          else ("bundled", tuple(m.group(1).split("+")) if m else ()))
+        if name.endswith("Intel TCB status (platform)"):
+            m = re.search(r"status (\w+)", detail)
+            if m:
+                statuses.add(m.group(1))
+    return {"requests": reqs, "machines": len(distinct) or 1, "refused": refused,
+            "start": str(receipt.get("started_at") or "?"),
+            "end": str(receipt.get("last_activity_at") or receipt.get("ended_at") or "?"),
+            "builds": sorted(set(builds)), "tcb": sorted(statuses)}
 
 
-def ai_session_facts(bundle_dir: str, results) -> Dict[str, Any]:
-    """The numbers the plain paragraph must not leave out, read from the receipts and the rows. Unknown stays '?'."""
-    reqs, machines, starts, ends, statuses = 0, 0, [], [], set()
-    for name, c, _ok in results:
-        try:
-            r = json.load(open(os.path.join(bundle_dir, name)))
-        except Exception:                               # noqa: BLE001 — the rows already say so
-            r = {}
-        n = (r.get("counters") or {}).get("requests") if isinstance(r.get("counters"), dict) else None
-        reqs = reqs + n if isinstance(n, int) and isinstance(reqs, int) else "?"
-        served = r.get("served_by") if isinstance(r.get("served_by"), list) else []
-        machines += len(served) or 1
-        if r.get("started_at"):
-            starts.append(str(r["started_at"]))
-        if r.get("last_activity_at") or r.get("ended_at"):
-            ends.append(str(r.get("last_activity_at") or r.get("ended_at")))
-        for st, nm, detail in getattr(c, "rows", []):
-            if "Intel TCB status (platform)" in nm:
-                m = re.search(r"status (\w+)", detail)
-                if m:
-                    statuses.add(m.group(1))
-    return {"requests": reqs, "machines": machines, "start": min(starts) if starts else "?",
-            "end": max(ends) if ends else "?", "tcb": sorted(statuses)}
+def _plain_build(builds) -> str:
+    out = []
+    for kind, repro in builds:
+        if kind == "runtime":
+            out.append(PLAIN_AI_BUILD_RUNTIME)
+            continue
+        repro = [r for r in repro if r in _FINGERPRINT_NAMES]
+        rest = [k for k in _FINGERPRINT_NAMES if k not in repro]
+        s = PLAIN_AI_BUILD_REPRODUCED.format(n_repro=["none", "one", "two", "three", "all four"][len(repro)]) if repro else ""
+        if rest:
+            names = [_FINGERPRINT_NAMES[k] for k in rest]
+            label = (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1])
+            r = PLAIN_AI_BUILD_RECORDED.format(rest=label[0].upper() + label[1:], that="that part" if len(rest) == 1
+                                               else "those", it="it" if len(rest) == 1 else "them")
+            s = (s + " " + r).strip()
+        out.append(s)
+    if len(out) > 1:
+        out = [f"For one of the builds used: {x}" for x in out]
+    return " ".join(out)
 
 
 def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) -> str:
-    """The paragraph as printed: parts separated by blank lines, the session's own numbers first, Intel's status
-    when it is not plainly up to date, and the search-link sentence last."""
-    tail = PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches) if linked_searches else PLAIN_AI_SEARCHES_NONE
-    parts = list(PLAIN_AI_LANE_PARTS)
-    if facts:
-        parts[0] = parts[0] + " " + PLAIN_AI_SESSION.format(**facts)
-        if any(t != "UpToDate" for t in facts.get("tcb") or []):
-            parts[2] = parts[2] + " " + PLAIN_AI_TCB_HARDENING
-    parts[-1] = parts[-1] + " " + tail
+    """The paragraph for one conversation, in parts separated by blank lines."""
+    f = dict({"requests": None, "machines": 1, "refused": False, "start": "?", "end": "?",
+              "builds": [("bundled", ("RTMR1", "RTMR2", "RTMR3"))], "tcb": []}, **(facts or {}))
+    empty = f["requests"] == 0
+    opening = PLAIN_AI_OPEN_EMPTY if empty else PLAIN_AI_OPEN
+    session = (PLAIN_AI_SESSION if f["requests"] is not None else PLAIN_AI_SESSION_NOCOUNT).format(**f)
+    parts = [opening + " " + session + (" " + PLAIN_AI_REFUSED if f["refused"] else ""),
+             PLAIN_AI_KEY + " " + PLAIN_AI_WHO_CHECKS,
+             " ".join(x for x in (PLAIN_AI_MACHINE, _plain_build(f["builds"]), PLAIN_AI_BOOTCONF,
+                                  PLAIN_AI_TCB_HARDENING if any(t != "UpToDate" for t in f["tcb"]) else "") if x),
+             PLAIN_AI_GPU,
+             PLAIN_AI_PROGRAM.format(reads="would read" if empty else "actually read",
+                                     holds="would hold" if empty else "held"),
+             PLAIN_AI_HOSTS, PLAIN_AI_SUMMARY,
+             PLAIN_AI_ASK + " " + (PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches) if linked_searches
+                                   else PLAIN_AI_SEARCHES_NONE)]
     return "\n\n".join(parts)
 
 
+PLAIN_AI_LANE = plain_ai_lane(0).replace("\n\n", " ")      # the default rendering, for readers of this constant
 _AI_LANE_VERIFIED = False
 
 
@@ -3126,10 +3168,17 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
     if _AI_LANE_VERIFIED:
         print("\n  In plain words, for the AI conversation")
-        sids = {n[len("session-"):-len(".receipt.json")] for n, _c, _ok in results}
-        linked = sum(1 for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") in sids)
-        text = plain_ai_lane(linked, ai_session_facts(bundle_dir, results))
-        print("\n\n".join("    " + p for p in text.split("\n\n")))
+        for name, c, _ok in results:
+            sid = name[len("session-"):-len(".receipt.json")]
+            try:
+                receipt = json.load(open(os.path.join(bundle_dir, name)))
+            except Exception:                               # noqa: BLE001 — unreadable receipts already FAILED
+                receipt = {}
+            linked = sum(1 for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") == sid)
+            if len(results) > 1:
+                print(f"\n    — {name} —")
+            text = plain_ai_lane(linked, ai_session_facts(receipt if isinstance(receipt, dict) else {}, c.rows))
+            print("\n\n".join("    " + p for p in text.split("\n\n")))
     return {"receipts": len(results), "ok": ok_n, "failed": failed_n}
 
 

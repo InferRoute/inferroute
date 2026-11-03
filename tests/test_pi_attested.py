@@ -1573,7 +1573,11 @@ def test_the_vendored_verifier_has_not_drifted_from_the_canonical_copy():
     """
     import hashlib
     here = Path(PA.__file__).resolve().parent / "_vendor" / "sealedresearch"
-    canon = Path("/home/henry/workspaces/inferroute/sealed-research/client-dist/build/sealed_client/sealedresearch")
+    # IR_SEALED_RESEARCH_ROOT names another sealed-research checkout (a release worktree whose client-dist/build is
+    # the bundle this release vendors), the same way sealed-research's own pin test takes IR_ATTESTED_WORKTREE.
+    # Without it, the shared checkout's bundle is the reference, as before.
+    sr_root = Path(os.environ.get("IR_SEALED_RESEARCH_ROOT", "/home/henry/workspaces/inferroute/sealed-research"))
+    canon = sr_root / "client-dist" / "build" / "sealed_client" / "sealedresearch"
     if not canon.is_dir():
         pytest.skip("the canonical client bundle is not on this machine")
 

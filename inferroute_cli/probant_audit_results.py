@@ -45,10 +45,17 @@ def restore(records_dir: Path | None, matter: str) -> dict:
         origin = json.loads((bundle / "MANIFEST.json").read_text())
         if origin.get("client") != client or origin.get("matter") != name or identity(pack) != data["identity"]:
             raise ValueError("saved audit association or pack has changed")
-        rows = json.loads((pack / "searches.json").read_text())
-        source_rows = json.loads((bundle / "searches.json").read_text())
-        if [r.get("statement") for r in rows] != [r.get("statement") for r in source_rows]:
-            raise ValueError("saved audit statements do not match this matter's exported record")
+        made = json.loads((pack / "MANIFEST.json").read_text())
+        if made.get("kind") == "name-check":
+            # A name-check pack has no statements to compare; it names the record it was made from by the
+            # hash of that record's MANIFEST.json.
+            if made.get("derived_from_manifest_sha256") != _sha((bundle / "MANIFEST.json").read_bytes()):
+                raise ValueError("saved audit pack was not made from this matter's exported record")
+        else:
+            rows = json.loads((pack / "searches.json").read_text())
+            source_rows = json.loads((bundle / "searches.json").read_text())
+            if [r.get("statement") for r in rows] != [r.get("statement") for r in source_rows]:
+                raise ValueError("saved audit statements do not match this matter's exported record")
         # Display the saved audit, but preparing another audit must export the current record.
         return {"pack": str(pack), "pack_identity": data["identity"]}
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
@@ -66,14 +73,12 @@ def identity(pack: Path) -> dict:
 
 def template(pack: Path) -> dict:
     manifest = json.loads((pack / "MANIFEST.json").read_text())
-    counts = manifest["contents"]
-    totals = {6: counts["searches"], 7: counts["session_receipts"], 8: counts["document_reads"]}
     return {"schema": SCHEMA, "pack": identity(pack),
             "auditor": {"name": "", "model": ""}, "completed_at": "",
             "verified_statement": "", "limitations": [],
             "claims": [{**claim, "verdict": None, "verified_statement": "", "evidence": "",
                         "limitations": [], "coverage": {"tool": None, "independent": None,
-                                                         "total": totals.get(claim["id"], counts["statements"]),
+                                                         "total": _claim_total(manifest, claim["id"]),
                                                          "unchecked": ""}}
                        for claim in manifest["audit_claims"]]}
 
@@ -90,14 +95,25 @@ def _limits(value, name: str, *, required: bool = False) -> list:
     return [_text(v, name, limit=2000) for v in value]
 
 
-def _ceiling(manifest: dict, n: int):
-    """(verdict, why) claim n cannot exceed from this pack, from the one table the pack's checker also uses."""
+def _checker():
+    """The pack's own checker, loaded from this installation: ONE source for ceilings and per-claim counts, so
+    the client and the auditor's checker cannot disagree about either."""
     import importlib.util
     path = Path(__file__).resolve().parent / "pi_attested" / "check_report.py"
     spec = importlib.util.spec_from_file_location("_probant_check_report", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.ceiling_of(manifest, n)
+    return mod
+
+
+def _ceiling(manifest: dict, n: int):
+    """(verdict, why) claim n cannot exceed from this pack, from the one table the pack's checker also uses."""
+    return _checker().ceiling_of(manifest, n)
+
+
+def _claim_total(manifest: dict, n: int) -> int:
+    """How many operations claim n covers in this pack: the prior-art counts, or the pack's own `claim_totals`."""
+    return _checker().claim_total(manifest, n)
 
 
 def validate(data, pack: Path, expected: dict) -> dict:
@@ -118,8 +134,6 @@ def validate(data, pack: Path, expected: dict) -> dict:
     if not isinstance(claims, list) or len(claims) != len(manifest["audit_claims"]):
         raise ValueError("the result must answer every claim exactly once")
     normalized = []
-    counts = manifest["contents"]
-    totals = {6: counts["searches"], 7: counts["session_receipts"], 8: counts["document_reads"]}
     for wanted, claim in zip(manifest["audit_claims"], claims):
         if not isinstance(claim, dict) or type(claim.get("id")) is not int or any(claim.get(k) != v for k, v in wanted.items()):
             raise ValueError("a claim was omitted, reordered or retitled")
@@ -135,7 +149,7 @@ def validate(data, pack: Path, expected: dict) -> dict:
         coverage = claim.get("coverage")
         if not isinstance(coverage, dict):
             raise ValueError("coverage is missing")
-        total = totals.get(wanted["id"], counts["statements"])
+        total = _claim_total(manifest, wanted["id"])
         if type(coverage.get("total")) is not int or coverage["total"] != total:
             raise ValueError(f"claim {wanted['id']}: coverage total is {coverage.get('total')!r}; this pack holds "
                              f"{total} operation(s) for this claim")

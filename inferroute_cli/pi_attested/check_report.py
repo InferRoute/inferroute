@@ -68,6 +68,10 @@ def totals(manifest):
 
 
 def claim_total(manifest, cid):
+    # A pack whose claims are not the prior-art eight (a name check's) states each claim's count itself.
+    stated = manifest.get("claim_totals")
+    if isinstance(stated, dict) and str(cid) in stated:
+        return int(stated[str(cid)])
     special, default = totals(manifest)
     return special.get(cid, default)
 

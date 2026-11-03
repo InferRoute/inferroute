@@ -481,12 +481,16 @@ def test_a_failed_receipt_outranks_an_incomplete_one_in_the_exit_code(tmp_path, 
     assert V.exit_code(ok_only) == 0
 
 
-# ───────────────────────── a conversation that moved machines (review of 5c26ff3) ─────────────────────────
+# ───────────────────────── a conversation that moved machines (reviews of 5c26ff3 and 00a6650) ─────────────────────────
+#
+# Each receipt is judged on its OWN leg. The rows a switch carries into the next leg's receipt are information about
+# the earlier leg, never evidence that widens a window; every leg's receipt travels in the record and a search is
+# judged on the leg that was serving at its time.
 
-def _switched_receipt(*, drop_carried_row: bool = False) -> tuple:
-    """A last leg built by the REAL continuity._record_switch from two real Receipts: leg 1 opened, pinned and
-    warmed a standby; leg 2 (the standby) pinned its own machine; then the lane switched. Times are relative to
-    now, because _record_switch stamps its own note with the current time."""
+def _chain(n_legs: int = 2, *, leg1_stops_at=None, last_leg_requests: int = 2) -> tuple:
+    """Legs of one conversation built by the REAL continuity._record_switch, oldest first, as receipt dicts. Leg k
+    opens at -1000+300k s (relative to now, because _record_switch stamps its own note with the current time), pins
+    5 s later, and is switched into 200 s after it opened; the last leg's activity runs to +5 s."""
     import dataclasses
     import datetime as _dt
     from types import SimpleNamespace
@@ -494,57 +498,131 @@ def _switched_receipt(*, drop_carried_row: bool = False) -> tuple:
     from inferroute_local.confidential.receipt import Receipt
     now = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0)
     t = lambda s: (now + _dt.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ")     # noqa: E731
-    old = Receipt(session_id="leg1:glm-5.2", model_short="glm-5.2", upstream_model="glm-5.2", fleet_id="f1",
-                  transport="relay", started_at=t(-600), verified_at=t(-590))
-    old.events = [{"ts": t(-600), "kind": "continuity-order", "detail": "glm-5.2 > kimi-k2.6"},
-                  {"ts": t(-599), "kind": "continuity-open", "detail": "serving from glm-5.2"},
-                  {"ts": t(-590), "kind": "pinned", "detail": "in_first — session opened"},
-                  {"ts": t(-560), "kind": "standby-ready", "detail": "kimi-k2.6 verified and held in reserve"}]
-    old.served_by = [{"at": t(-590), "instance": {"id": "in_first"}, "attestation_sha256": "11" * 32, "requests": 3}]
-    old.counters["requests"] = 3
-    new = Receipt(session_id="leg2:kimi-k2.6", model_short="kimi-k2.6", upstream_model="kimi-k2.6", fleet_id="f2",
-                  transport="relay", started_at=t(-570), verified_at=t(-565))
-    new.events = [{"ts": t(-565), "kind": "pinned", "detail": "in_second — session opened"}]
-    new.served_by = [{"at": t(-565), "instance": {"id": "in_second"}, "attestation_sha256": "22" * 32, "requests": 2}]
-    new.counters["requests"] = 2
-    new.events.append({"ts": t(-1), "kind": "switched", "detail": "glm-5.2 -> kimi-k2.6 (timeout)"})
-    Cont.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=1),
-                                   SimpleNamespace(receipt=old, model_short="glm-5.2"))
-    new.last_activity_at = t(5)
-    d = dataclasses.asdict(new)
-    if drop_carried_row:
-        d["served_by"] = [r for r in d["served_by"] if not r.get("from_previous_session")]
-    return d, t
+    legs = []
+    for k in range(n_legs):
+        base = -1000 + 300 * k
+        r = Receipt(session_id=f"leg{k + 1}:m{k + 1}", model_short=f"m{k + 1}", upstream_model=f"m{k + 1}",
+                    fleet_id=f"f{k + 1}", transport="relay", started_at=t(base), verified_at=t(base + 5))
+        r.events = [{"ts": t(base), "kind": "continuity-open", "detail": f"serving from m{k + 1}"},
+                    {"ts": t(base + 5), "kind": "pinned", "detail": f"in_{k + 1} — session opened"}]
+        reqs = last_leg_requests if k == n_legs - 1 else 3
+        r.served_by = [{"at": t(base + 5), "instance": {"id": f"in_{k + 1}"}, "attestation_sha256": f"{k + 1:02d}" * 32,
+                        "requests": reqs}]
+        r.counters["requests"] = reqs
+        r.verdict = "confidential"
+        if k == 0 and leg1_stops_at is not None:
+            r.events.append({"ts": t(leg1_stops_at), "kind": "no-eligible-instance", "detail": "no verified alternative"})
+        if k:
+            prev = legs[-1]
+            r.events.append({"ts": t(base + 200), "kind": "switched", "detail": f"m{k} -> m{k + 1} (timeout)"})
+            Cont.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=r), switches=k),
+                                           SimpleNamespace(receipt=prev, model_short=f"m{k}"))
+            prev.last_activity_at = t(base + 199)
+        legs.append(r)
+    legs[-1].last_activity_at = t(5)
+    return [dataclasses.asdict(r) for r in legs], t
 
 
-def test_a_last_leg_built_by_the_real_switch_passes_its_timeline_and_its_first_leg_searches():
-    d, t = _switched_receipt()
+def _bundle_of(tmp_path: Path, legs: list) -> Path:
+    d = tmp_path / "rec"
+    d.mkdir()
+    for k, r in enumerate(legs[:-1], 1):
+        (d / f"session-S.leg-{k}.receipt.json").write_text(json.dumps(r))
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[-1]))
+    return d
+
+
+def _search_row(results, name):
+    return next(s for s, n, _ in next(c for f, c, _ in results if f == name).rows
+                if n == "searches inside the session's verified window")
+
+
+def test_a_last_leg_built_by_the_real_switch_passes_its_own_timeline_and_keeps_carried_rows_as_information():
+    legs, t = _chain(2)
+    d = legs[-1]
     carried = [e for e in d["events"] if e.get("from_previous_session")]
-    assert {e["kind"] for e in carried} >= {"continuity-order", "continuity-open", "pinned", "standby-ready"}
-    # Carried events predate this leg's start: judged as the earlier leg's record, not against this leg's window.
-    assert min(e["ts"] for e in carried) < d["started_at"]
+    assert carried and min(e["ts"] for e in carried) < d["started_at"]
+    assert not any(e["kind"] == "pinned" for e in carried), "a pin is not carried: it would widen nothing now"
     c = V.Checks()
-    # A search made on leg 1, after leg 1's pin and BEFORE leg 2 pinned anything.
-    V.check_receipt_consistency(c, d, [], [{"at": t(-580)}])
+    V.check_receipt_consistency(c, d, [], [])
     rows = _rows(c)
-    assert rows["receipt timeline"] == "PASS", c.rows
-    assert rows["earlier legs carried in"] == "PASS", c.rows
-    assert rows["searches inside the session's verified window"] == "PASS", c.rows
-    assert rows["every pinned machine has an evidence row"] == "PASS", c.rows
+    assert rows["receipt timeline"] == "PASS" and rows["earlier legs carried in"] == "PASS", c.rows
+    assert "Information only" in _detail(c, "earlier legs carried in")
+    assert rows["continuity switches vs switched events"] == "PASS"
     assert not c.failed
 
 
-def test_carried_pins_open_the_window_only_when_the_carried_rows_back_them():
-    d, t = _switched_receipt(drop_carried_row=True)
+def test_the_last_leg_alone_never_vouches_for_a_search_made_on_an_earlier_leg():
+    legs, t = _chain(2)
     c = V.Checks()
-    V.check_receipt_consistency(c, d, [], [{"at": t(-580)}])
-    rows = _rows(c)
-    assert rows["earlier legs carried in"] == "FAIL"
-    assert rows["searches inside the session's verified window"] == "FAIL"     # window stays at this leg's own pin
+    V.check_receipt_consistency(c, legs[-1], [], [{"at": t(-900)}])          # leg 1 served; leg 2 not yet open
+    assert _rows(c)["searches inside the session's verified window"] == "FAIL"
+
+
+def test_a_search_on_leg_one_is_judged_on_leg_one_s_receipt_and_passes(tmp_path):
+    legs, t = _chain(2)
+    d = _bundle_of(tmp_path, legs)
+    given = V.searches_by_receipt(str(d), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-400)}])
+    assert [s["at"] for s in given["session-S.leg-1.receipt.json"]] == [t(-900)]
+    assert [s["at"] for s in given["session-S.receipt.json"]] == [t(-400)]
+    results = V.verify_bundle(str(d), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-400)}])
+    assert _search_row(results, "session-S.leg-1.receipt.json") == "PASS"
+    assert _search_row(results, "session-S.receipt.json") == "PASS"
+
+
+def test_a_search_in_the_dead_gap_after_leg_one_stopped_fails(tmp_path):
+    """Round 3 (00a6650): leg 1 pinned, then stopped (no eligible instance); the next leg began serving later. A search
+    between the two ran while no verified machine served. It falls to leg 1, where it is after the stop: FAIL."""
+    legs, t = _chain(2, leg1_stops_at=-950)
+    d = _bundle_of(tmp_path, legs)
+    results = V.verify_bundle(str(d), [{"session_id": "S", "at": t(-850)}])
+    assert _search_row(results, "session-S.leg-1.receipt.json") == "FAIL"
+    assert V.exit_code(results) == 1
+
+
+def test_three_legs_keep_three_distinct_leg_ids():
+    legs, _t = _chain(3)
+    last = legs[-1]
+    rows = {r.get("from_previous_session") for r in last["served_by"]}
+    evs = {e.get("from_previous_session") for e in last["events"] if e.get("from_previous_session")}
+    assert rows == {"leg1:m1", "leg2:m2", None} and evs == {"leg1:m1", "leg2:m2"}
+    c = V.Checks()
+    V.check_receipt_consistency(c, last, [], [])
+    assert "from 2 earlier leg(s)" in _detail(c, "earlier legs carried in")
+    assert _rows(c)["continuity switches vs switched events"] == "PASS"
+    assert last["counters"]["continuity_switches"] == 2
+
+
+def test_a_last_leg_with_no_requests_of_its_own_passes_the_credited_row():
+    legs, _t = _chain(2, last_leg_requests=0)
+    c = V.Checks()
+    V.check_receipt_consistency(c, legs[-1], [], [])
+    assert _rows(c)["requests credited per machine"] == "PASS", c.rows
+    # and a last leg crediting too few of ITS OWN requests is not hidden by the carried rows' credit
+    legs, _t = _chain(2)
+    legs[-1]["counters"]["requests"] = 9
+    c = V.Checks()
+    V.check_receipt_consistency(c, legs[-1], [], [])
+    assert _rows(c)["requests credited per machine"] == "FAIL"
+
+
+def test_the_switch_counter_is_not_judged_on_a_receipt_from_before_events_were_carried():
+    legs, _t = _chain(2)
+    d = legs[-1]
+    d["events"] = [e for e in d["events"] if not e.get("from_previous_session")]
+    d["counters"]["continuity_switches"] = 2
+    c = V.Checks()
+    V.check_receipt_consistency(c, d, [], [])
+    assert _rows(c)["continuity switches vs switched events"] == "SKIP"
+    d["events"].append({"ts": d["events"][-1]["ts"], "kind": "carried", "detail": "x", "from_previous_session": "leg1:m1"})
+    c = V.Checks()
+    V.check_receipt_consistency(c, d, [], [])
+    assert _rows(c)["continuity switches vs switched events"] == "FAIL"
 
 
 def test_carried_events_out_of_order_are_still_caught():
-    d, t = _switched_receipt()
+    legs, _t = _chain(3)
+    d = legs[-1]
     idx = [i for i, e in enumerate(d["events"]) if e.get("from_previous_session")]
     d["events"][idx[0]]["ts"], d["events"][idx[-1]]["ts"] = d["events"][idx[-1]]["ts"], d["events"][idx[0]]["ts"]
     c = V.Checks()

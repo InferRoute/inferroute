@@ -1072,32 +1072,77 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
     return cur, followed
 
 
-def settle_model_lane(rec: dict) -> dict:
-    """A session record whose `model_lane` describes the receipt its conversation ENDED on.
+def _receipt_file_of(folder: Path, sid: str) -> Optional[Path]:
+    """The receipt of a leg, found by its session id the way receipt.save() names it: <stamp>-<sid[:8]>-<sha6>.json."""
+    import glob as _glob
+    tail = hashlib.sha256(sid.encode()).hexdigest()[:6]
+    hits = sorted(folder.glob(f"*-{_glob.escape(sid[:8])}-{tail}.json"))
+    return hits[-1] if hits else None
 
-    The record's model lane is written from the receipt active when the record was written. If the conversation
-    then moved machines, the export ships the last leg's receipt (last_leg), and a page built from the record
-    would describe a different receipt from the one beside it. This rebuilds the lane from the last leg, keeps
-    the paths it replaced under `earlier_receipts`, and says how many switches it followed. A record that names
-    no readable receipt, or whose receipt is already the last leg, is returned unchanged."""
+
+def conversation_legs(rp: Path, seeds=()) -> List[Path]:
+    """Every leg's receipt of the conversation `rp` belongs to, in the order the legs started; the last is the leg it
+    ended on. Forward through last_leg; backward through the `from_previous_session` ids a receipt carries (each
+    earlier leg's own receipt names ITS predecessor too, so older receipts that kept only the nearest id still chain);
+    and from `seeds`, receipt paths a session record named before. A leg whose receipt is gone is simply absent."""
+    found: Dict[Path, dict] = {}
+
+    def load(p: Path) -> Optional[dict]:
+        try:
+            doc = json.loads(Path(p).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    todo = [Path(rp), *[Path(x) for x in seeds]]
+    try:
+        todo.append(last_leg(Path(rp))[0])
+    except OSError:
+        pass
+    while todo and len(found) < 64:
+        p = todo.pop()
+        key = p.resolve() if p.exists() else p
+        if key in found:
+            continue
+        doc = load(p)
+        if doc is None:
+            continue
+        found[key] = doc
+        tags = {str(x.get("from_previous_session")) for x in (doc.get("served_by") or []) + (doc.get("events") or [])
+                if isinstance(x, dict) and x.get("from_previous_session")}
+        for sid in tags:
+            q = _receipt_file_of(p.parent, sid)
+            if q is not None:
+                todo.append(q)
+    return [p for p, d in sorted(found.items(), key=lambda kv: (str(kv[1].get("started_at") or ""), str(kv[0])))]
+
+
+def settle_model_lane(rec: dict) -> dict:
+    """A session record whose `model_lane` describes the receipt its conversation ENDED on, and names the receipt of
+    every earlier leg under `leg_receipts`.
+
+    The record's model lane is written from the receipt active when the record was written. A conversation that then
+    moved machines has one receipt per leg, each judged on its own leg; the export ships them all, and a page built
+    from the record must describe the same last leg the bundle's main receipt is. A record that names no readable
+    receipt, or a conversation that never moved, is returned unchanged."""
     lane = rec.get("model_lane") if isinstance(rec, dict) else None
     if not isinstance(lane, dict) or not lane.get("receipt"):
         return rec
-    first = Path(str(lane["receipt"]))
+    named = Path(str(lane["receipt"]))
+    seeds = [e for e in (lane.get("earlier_receipts") or []) if isinstance(e, str)]
+    if not named.is_file():
+        return rec
+    legs = conversation_legs(named, seeds)
+    if len(legs) < 2:
+        return rec
     try:
-        if not first.is_file():
-            return rec
-        final, n = last_leg(first)
-        if not n:
-            return rec
-        r = json.loads(final.read_text(encoding="utf-8"))
+        r = json.loads(legs[-1].read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return rec
     checks = r.get("checks") if isinstance(r.get("checks"), dict) else {}
     cl = [{"label": c.get("label", k), "ok": bool(c.get("ok")), "why": c.get("why", "")}
           for k, c in checks.items() if isinstance(c, dict)]
     e2ee = r.get("e2ee") if isinstance(r.get("e2ee"), dict) else {}
-    earlier = [e for e in (lane.get("earlier_receipts") or []) if isinstance(e, str)]
     lane = {**lane,
             "verified": r.get("verdict") == "confidential",
             "checks": f"{sum(1 for c in cl if c['ok'])}/{len(cl)}" if cl else "",
@@ -1106,19 +1151,39 @@ def settle_model_lane(rec: dict) -> dict:
             "model": str(r.get("model_short") or ""),
             "sealing": " + ".join(str(x) for x in (e2ee.get("kem"), e2ee.get("aead")) if x),
             "instance": str((r.get("instance") or {}).get("id") or "")[:8] if isinstance(r.get("instance"), dict) else "",
-            "receipt": str(final),
-            "earlier_receipts": earlier + [str(first)],
-            "switches_followed": int(lane.get("switches_followed") or 0) + n}
+            "receipt": str(legs[-1]),
+            "leg_receipts": [str(p) for p in legs[:-1]]}
     return {**rec, "model_lane": lane}
 
 
 def _switch_note(model: dict, *, name: bool) -> str:
-    n = int(model.get("switches_followed") or 0)
+    n = len(model.get("leg_receipts") or [])
     if not n:
         return ""
-    return (f"<p class=note>This conversation moved to another machine {n} time{'s' if n != 1 else ''}. What is shown "
-            f"here is the receipt it ended on, which lists the earlier machines among its served_by rows; "
-            f"{'the receipt in this folder' if name else 'the receipt in this bundle'} is that one.</p>")
+    where = "this folder" if name else "this bundle"
+    return (f"<p class=note>This conversation moved to another machine {n} time{'s' if n != 1 else ''}, so it has "
+            f"{n + 1} receipts, one per machine it moved through. What is shown here is the receipt of the last. "
+            f"{where[0].upper() + where[1:]} carries each receipt this computer still had, and each is checked on its "
+            "own: the earlier receipts are not evidence for the last, nor the last for them.</p>")
+
+
+def _leg_files(sess: dict, sid: str, files: Dict[str, bytes], *, home_relative: bool) -> List[str]:
+    """Add each earlier leg's receipt of a session to `files`, as session-<sid>.leg-<k>.receipt.json in leg order,
+    with the evidence its served_by names. Returns the names written."""
+    names = []
+    legs = ((sess.get("record") or {}).get("model_lane") or {}).get("leg_receipts") or []
+    for k, lp in enumerate(legs, 1):
+        try:
+            raw = Path(lp).read_bytes()
+        except OSError:
+            continue
+        raw, _carried, _missing = _carry_served_evidence(raw, Path(lp).parent, files)
+        if home_relative:
+            raw = _home_relative_receipt_path(raw)
+        name = f"session-{sid}.leg-{k}.receipt.json"
+        files[name] = raw
+        names.append(name)
+    return names
 
 
 def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bool = False) -> Path:
@@ -1174,11 +1239,8 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                                   "why": "this session's record names no receipt: the AI lane was never "
                                          "opened in it, or its record could not be read whole"})
             continue
-        followed = int(((sess.get("record") or {}).get("model_lane") or {}).get("switches_followed") or 0)
+        # _load_sessions has settled the lane on the leg the conversation ended on (settle_model_lane).
         try:
-            raw = Path(rp).read_bytes()
-            rp, more = last_leg(Path(rp))
-            followed += more
             raw = Path(rp).read_bytes()
         except OSError as e:
             receipt_notes.append({"session": sid, "searches": n, "receipt": "named but unreadable",
@@ -1193,10 +1255,9 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         raw, carried, missing = _carry_served_evidence(raw, Path(rp).parent, files)
         raw = _home_relative_receipt_path(raw)
         note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json",
-                "switches_followed": followed}
-        earlier = len(((sess.get("record") or {}).get("model_lane") or {}).get("earlier_receipts") or [])
-        if earlier:
-            note["earlier_receipts"] = earlier
+                # One receipt per leg when the conversation moved machines; each is checked on its own leg, and
+                # verify_ai_receipt gives each search to the leg that was serving at its time.
+                "earlier_leg_receipts": _leg_files(sess, sid, files, home_relative=True)}
         # WHAT BINDS THIS RECEIPT TO THESE SEARCHES, said in the only terms that are worth anything. Two
         # independent auditors reached the same finding on 1 Oct: "the receipt carries none of the search
         # identifiers; the only links are unsigned labels and overlapping clocks" and "no cryptographic
@@ -1304,14 +1365,9 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
     for sess in b.get("sessions") or []:
         sid = sess["session_id"]
         rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
-        # _load_sessions has already moved the lane to the receipt the conversation ended on (settle_model_lane).
-        followed = int(((sess.get("record") or {}).get("model_lane") or {}).get("switches_followed") or 0)
+        # _load_sessions has settled the lane on the leg the conversation ended on (settle_model_lane).
         try:
             raw = Path(rp).read_bytes() if rp else None
-            if raw is not None:
-                rp, more = last_leg(Path(rp))
-                followed += more
-                raw = Path(rp).read_bytes()
         except OSError:
             raw = None
         if raw is None:
@@ -1319,9 +1375,8 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
             continue
         raw, _carried, _missing = _carry_served_evidence(raw, Path(rp).parent, files)
         files[f"session-{sid}.receipt.json"] = raw
-        earlier = len(((sess.get("record") or {}).get("model_lane") or {}).get("earlier_receipts") or [])
-        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json", "switches_followed": followed,
-                      **({"earlier_receipts": earlier} if earlier else {})})
+        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json",
+                      "earlier_leg_receipts": _leg_files(sess, sid, files, home_relative=False)})
     manifest = {"schema": "inferroute.name-check-record/1", "kind": "name-check", "client": client, "matter": matter,
                 "matter_created_at": rec.get("created_at"),
                 "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2923,10 +2978,13 @@ page. Do not try to recover any of them, and do not guess at the product or the 
 
 What is here:
 
-  - `session-*.receipt.json`: for each AI session the record holds a receipt for, the record kept by the
-    computer that ran the name check of checking the AI machine before anything was sent to it. Where a
-    receipt had a `path` field (where the file sat on that computer), it was removed and the receipt's
-    `withheld` field says so; the rest of each receipt is as the record holds it.
+  - `session-*.receipt.json`: one receipt per leg of each AI session the record holds receipts for, each the
+    record kept by the computer that ran the name check of checking the AI machine of that leg before anything
+    was sent to it. A session whose conversation moved to another machine has a leg per machine it moved
+    through: the last leg's receipt is `session-<id>.receipt.json` and each earlier leg's is
+    `session-<id>.leg-<k>.receipt.json`, k counting from 1 in the order the legs ran. Where a receipt had a
+    `path` field (where the file sat on that computer), it was removed and the receipt's `withheld` field
+    says so; the rest of each receipt is as the record holds it.
   - `*.attestation.json`, where the record had them: a machine's evidence row, which a receipt's
     `served_by` entry names by its SHA-256.
   - `verify_ai_receipt.py`: the offline re-checker for these receipts, from the client that wrote this
@@ -2939,6 +2997,11 @@ What is here:
 
 **The trademark searches are not in this folder, and the full record could not prove them either:** they
 ran on the computer that made the record, and nothing outside it signed them. Leave them out of your verdicts.
+
+**Each receipt is judged on its own leg.** A later leg's receipt also lists the earlier legs' machines and
+events, tagged `from_previous_session`: that is information about those legs, not evidence for the later
+one, and each earlier leg is judged on its own receipt here. The claims below are about each receipt's own
+leg: its `served_by` rows and events that carry no `from_previous_session`.
 
 There is no `verify_record.py` here. That program checks enclave-signed search statements, which a name check
 does not have.
@@ -2981,7 +3044,7 @@ reached held, and you name what you could not reach.
 Each receipt names the client version that wrote it in `written_by`. A receipt written by an older client
 keeps less; what it does not keep is a part of the claim you could not reach, not a failure.
 
-1. **Sealed AI hardware.** Each machine a receipt here names was an Intel TDX confidential machine with
+1. **Sealed AI hardware.** Each machine a receipt's own leg pinned was an Intel TDX confidential machine with
    debugging disabled; its hardware report (the TDX quote) is signed under a certificate chain that ends in
    Intel's SGX root; and Intel's signed collateral from the time of the session showed that machine's
    platform TCB status and its Quoting Enclave's status each `UpToDate` or `SWHardeningNeeded` (the two the
@@ -2989,9 +3052,8 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
 
    Where a receipt has `served_by`, it has one row per pin, naming the pinned machine's evidence by
    `attestation_sha256` and `attestation_file`: a machine pinned again gets another row naming the same
-   evidence, and rows carried over from an earlier leg of the conversation are tagged
-   `from_previous_session`. The receipt's own `attestation` should be the evidence of the last machine
-   pinned; without `served_by`, the receipt's own `attestation` is the only evidence. A row with
+   evidence, and rows carried over from an earlier leg are tagged `from_previous_session` and belong to that
+   leg's own receipt. The receipt's own `attestation` should be the evidence of the last machine pinned; without `served_by`, the receipt's own `attestation` is the only evidence. A row with
    `attestation_absent` had no separate evidence file on the computer that made the
    record: its evidence is here only if it is the receipt's own `attestation` (the re-checker compares
    `sha256(json.dumps(attestation, sort_keys=True))` with the row's `attestation_sha256`); otherwise that
@@ -3001,8 +3063,8 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    under `collateral.intel`; a row without it (a client before 0.9.126 did not keep it, and none is kept
    when Intel could not be reached) cannot show TCB status or revocation for that machine.
 
-2. **Sealed to that machine.** For each machine that served, the encryption key the receipt says the session
-   was sealed to is the one that machine's TDX quote commits to, under a challenge chosen by the computer
+2. **Sealed to that machine.** For each machine a receipt's own leg pinned, the encryption key the receipt
+   says the session was sealed to is the one that machine's TDX quote commits to, under a challenge chosen by the computer
    that made the record.
 
    In each machine's evidence row, `checked_with` holds that computer's side: `challenge`, which it chose,
@@ -3016,7 +3078,8 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    That the requests were then encrypted to that key and sent is the computer's own account: the receipt
    counts them, and nothing the machine signed says so. That is a limit to name, not part of this claim.
 
-3. **A build InferRoute has recorded.** Each machine's measurements (MRTD and RTMR1-RTMR3) are a build
+3. **A build InferRoute has recorded.** The measurements (MRTD and RTMR1-RTMR3) of each machine a receipt's
+   own leg pinned are a build
    InferRoute has recorded and not marked refused: one in the list its released client carries, or a build
    row signed by InferRoute's offline publication key.
 
@@ -3036,13 +3099,11 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    saying `none` or `named but unreadable`, copied from the record's own index, which that computer also
    wrote. Check what can be checked: every receipt here is named by a row, and every row that names a
    receipt has its file here. A row without a receipt is a session with nothing here to check; it is not
-   counted in any claim. When a conversation moved to another machine, the receipt that took over is the
-   one the record carries, and the row's `switches_followed` says how many moves the exporter followed to
-   reach it; a row without that field was written by an older exporter. `switches_followed: 0` does not mean
-   the conversation never moved: current clients point a name check's session record at the new receipt on
-   every move, so the exporter may have nothing left to follow. Whether it moved is in the receipt itself
-   (`counters.continuity_switches` and its `switched` events), and a row's `earlier_receipts`, when present,
-   counts the receipts the session's record named before the one carried here.
+   counted in any claim. A row names its session's last leg's receipt under `receipt` and each earlier
+   leg's under `earlier_leg_receipts`, in leg order; a row without `earlier_leg_receipts` was written by an
+   older exporter, which carried one receipt per session. Whether a conversation moved is in its last leg's
+   receipt: `counters.continuity_switches`, and its `switched` events (the one that moved it into that leg
+   is the leg's own, earlier ones are carried). The re-checker compares the two.
 
 `ended_at` empty does not mean a session is still open: it is written when a session closes, and a session
 that was killed never closes. `last_activity_at` is the last moment the session is known to have been alive.
@@ -3064,10 +3125,10 @@ VERIFIED; the most the claim can be is VERIFIED IN PART, naming what stays open.
     the text after decrypting it.
   - That the record holds every session of the name check: the index is the account of the computer that
     made it.
-  - That a receipt is its conversation's last. A conversation can move to another machine, and the receipt
-    of the leg that took over names the earlier machines. The exporter follows those moves through the
-    receipts its computer still had; a later leg's receipt that was no longer there cannot be followed, and
-    a record from an older exporter (its rows lack `switches_followed`) may hold an earlier leg's receipt.
+  - That every leg of a conversation is here. The exporter collects a conversation's legs through the
+    receipts its computer still had, and a leg whose receipt was gone is missing. A last leg's
+    `counters.continuity_switches` counts the moves, so a conversation with fewer receipts here than its
+    moves plus one is missing a leg.
 """
 
 # The most a claim can be from a pack like this. Claim 1's applies only to a pack in which some machine's evidence
@@ -3089,8 +3150,8 @@ NAME_CLAIM_CEILING_WHEN_COLLATERAL_MISSING = (1,)
 PACK_NAME_RECORD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit pack</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; line-height: 1.5">
 <h1>Evidence-only audit pack</h1>
-<p>This folder is an evidence-only copy of a name-check record: the receipts for its AI session and the evidence
-they name. The names, the product notes, the trademark searches and any report were left out. The readable
+<p>This folder is an evidence-only copy of a name-check record: the receipts of its AI sessions, one for each
+machine a conversation moved through, and the evidence they name. Each receipt is checked on its own. The names, the product notes, the trademark searches and any report were left out. The readable
 record stays with the person who made it.</p>
 <p>To audit it, read <code>AUDIT.md</code>.</p>
 </body></html>

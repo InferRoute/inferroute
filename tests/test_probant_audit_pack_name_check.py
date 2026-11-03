@@ -238,8 +238,8 @@ def test_the_name_check_brief_borrows_nothing_false_from_the_prior_art_brief():
     spec.loader.exec_module(v)
     assert v.ACCEPTED_TCB == ("UpToDate", "SWHardeningNeeded")
     assert "each `UpToDate` or `SWHardeningNeeded`" in md
-    assert "`switches_followed: 0` does not mean\n   the conversation never moved" in md
-    assert "`counters.continuity_switches`" in md and "`earlier_receipts`" in md
+    assert "`counters.continuity_switches`" in md and "`earlier_leg_receipts`" in md
+    assert "switches_followed" not in md
     assert sorted(E.NAME_CLAIM_CEILINGS) == [n for n, _ in E.name_audit_claims()]
 
 
@@ -401,7 +401,7 @@ def _leg(d: Path, stamp: str, sid: str, *, start: str, last: str, prev: str = ""
     rows = [{"at": start, "attestation_sha256": "11" * 32, "requests": 1}]
     if prev:
         rows = [{"at": start, "attestation_sha256": "22" * 32, "requests": 3, "from_previous_session": prev}] + rows
-    p = d / f"{stamp}-{sid[:8]}-abcdef.json"
+    p = d / f"{stamp}-{sid[:8]}-{hashlib.sha256(sid.encode()).hexdigest()[:6]}.json"
     p.write_text(json.dumps({"schema": "inferroute.confidential.receipt/1", "session_id": sid, "verdict": "confidential",
                              "model_short": sid.split(":")[-1], "checks": {"quote": {"ok": True, "label": f"quote of {sid[:4]}"}},
                              "started_at": start, "last_activity_at": last, "served_by": rows,
@@ -422,42 +422,55 @@ def test_the_exporter_follows_a_model_switch_to_the_receipt_the_conversation_end
     assert E.last_leg(first) == (last, 2)
     assert E.last_leg(last) == (last, 0)
 
-    # The name-check record names the FIRST leg (written at launch); the export carries the LAST.
+    # The name-check record names the FIRST leg (written at launch). The export carries EVERY leg, each as its own
+    # receipt: the last under the session's usual name, the earlier ones as .leg-<k>, in order.
     rdir = S.records_dir("Acme", "bottle")
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / f"{SID_A}.json").write_text(json.dumps({"schema": "inferroute.attested-session/1", "session_id": SID_A,
                                                     "written_by": "host", "mode": "names",
                                                     "model_lane": {"receipt": str(first)}}))
     rec = E.write_bundle("Acme", "bottle", str(tmp_path / "rec"))
-    carried = json.loads((rec / f"session-{SID_A}.receipt.json").read_text())
-    assert carried["session_id"] == "cccc3333-0000:deepseek"
+    sid_of = lambda n: json.loads((rec / n).read_text())["session_id"]          # noqa: E731
+    assert sid_of(f"session-{SID_A}.receipt.json") == "cccc3333-0000:deepseek"
+    assert sid_of(f"session-{SID_A}.leg-1.receipt.json") == "aaaa1111-0000:glm-5.2"
+    assert sid_of(f"session-{SID_A}.leg-2.receipt.json") == "bbbb2222-0000:kimi-k2.6"
+    assert not any("dddd" in sid_of(p.name) for p in rec.glob("session-*.receipt.json"))
     row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
-    assert row["switches_followed"] == 2 and row["earlier_receipts"] == 1
-    # The page describes the receipt it ships, and says the conversation moved.
+    assert row["receipt"] == f"session-{SID_A}.receipt.json"
+    assert row["earlier_leg_receipts"] == [f"session-{SID_A}.leg-1.receipt.json", f"session-{SID_A}.leg-2.receipt.json"]
+    # The page describes the last leg's receipt and says there is one per leg, each checked on its own.
     html = (rec / "record.html").read_text()
-    assert "model deepseek" in html and "glm-5.2" not in html and "moved to another machine 2 times" in html
+    assert "model deepseek" in html and "moved to another machine 2 times, so it has 3 receipts" in html
+    assert "each is checked on its own" in html
     pack = E.write_audit_pack(rec, tmp_path / "pack")
-    assert json.loads((pack / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 2
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert m["contents"]["session_receipts"] == 3 and set(m["claim_totals"].values()) == {3}
+    assert sorted(p.name for p in pack.glob("session-*.receipt.json")) == sorted(
+        [f"session-{SID_A}.receipt.json", *row["earlier_leg_receipts"]])
     md = (pack / "AUDIT.md").read_text()
-    assert "switches_followed" in md and "That a receipt is its conversation's last" in md
+    assert "Each receipt is judged on its own leg." in md and "earlier_leg_receipts" in md
+    assert "switches_followed" not in md and "window" not in md.split("## What no audit")[1]
 
 
-def test_a_prior_art_record_follows_a_model_switch_too(home, tmp_path):
+def test_a_prior_art_record_ships_every_leg_even_when_its_record_names_the_last(home, tmp_path):
+    """A record repointed at the last leg (the launcher does that on a switch) still ships the earlier legs: they are
+    found backwards through the from_previous_session ids the last leg carries."""
     assert S.cmd_new("Acme", "cooling", "2026-01-15") == 0
     d = home / "ir" / "confidential" / "receipts"
-    first = _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:glm-5.2", start="2026-11-03T08:33:19Z", last="2026-11-03T08:40:00Z")
+    _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:glm-5.2", start="2026-11-03T08:33:19Z", last="2026-11-03T08:40:00Z")
     last = _leg(d, "2026-11-03T08-34-00Z", "bbbb2222-0000:kimi-k2.6", start="2026-11-03T08:34:00Z",
                 last="2026-11-03T09:00:00Z", prev="aaaa1111-0000:glm-5.2")
     rdir = S.records_dir("Acme", "cooling")
     rdir.mkdir(parents=True, exist_ok=True)
     (rdir / "sess1.json").write_text(json.dumps({"session_id": "sess1", "surface": "browser",
-                                                 "model_lane": {"verified": True, "receipt": str(first)}}))
+                                                 "model_lane": {"verified": True, "receipt": str(last)}}))
     rec = E.write_bundle("Acme", "cooling", str(tmp_path / "out"))
     assert json.loads((rec / "session-sess1.receipt.json").read_text())["session_id"] == "bbbb2222-0000:kimi-k2.6"
-    assert json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 1
+    assert json.loads((rec / "session-sess1.leg-1.receipt.json").read_text())["session_id"] == "aaaa1111-0000:glm-5.2"
+    assert json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]["earlier_leg_receipts"] == [
+        "session-sess1.leg-1.receipt.json"]
     html = (rec / "record.html").read_text()
-    assert "quote of bbbb" in html and "quote of aaaa" not in html and "moved to another machine 1 time." in html
-    assert last.is_file()
+    assert "quote of bbbb" in html and "quote of aaaa" not in html and "so it has 2 receipts" in html
 
 
 def test_the_launcher_points_a_name_record_at_the_receipt_a_switch_moved_to(tmp_path):

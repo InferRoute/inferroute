@@ -939,12 +939,12 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
     events = [e for e in (receipt.get("events") or []) if isinstance(e, dict)]
     pins = [e for e in events if e.get("kind") == "pinned"]
     # A conversation that moved machines continues in the NEW leg's receipt, which carries the earlier legs' served_by
-    # rows and continuity events (and, from this change, their pins) tagged `from_previous_session`. Those happened
-    # before this leg started, so they are judged as the earlier legs' record, not against this leg's own window.
+    # rows and continuity events tagged `from_previous_session`. Those are INFORMATION about the earlier legs, never
+    # evidence for this one: every check below judges this receipt on its own leg, and each earlier leg is judged on
+    # its own receipt, which the record carries beside this one.
     own_events = [e for e in events if not e.get("from_previous_session")]
     carried_events = [e for e in events if e.get("from_previous_session")]
     own_pins = [e for e in pins if not e.get("from_previous_session")]
-    carried_pins = [e for e in pins if e.get("from_previous_session")]
     served = receipt.get("served_by") if isinstance(receipt.get("served_by"), list) else []
     counters = receipt.get("counters") if isinstance(receipt.get("counters"), dict) else {}
     started, last = _parse_time(receipt.get("started_at")), _parse_time(receipt.get("last_activity_at") or receipt.get("ended_at"))
@@ -970,7 +970,8 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
         else:
             c.add(None, "instance switches vs pins", "the receipt carries no instance_switches counter (older client)")
         reqs = counters.get("requests")
-        credited = sum(int(s.get("requests") or 0) for s in served if isinstance(s, dict))
+        # This leg's count against this leg's rows: a carried row's requests were counted by its own leg's receipt.
+        credited = sum(int(s.get("requests") or 0) for s in own_rows)
         if isinstance(reqs, int):
             # Zero counted with requests credited is a contradiction, not a retry (code-reading review, 2 Nov): the plain
             # words for an empty session say no request was sent, which must not print over rows crediting some.
@@ -988,42 +989,43 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
              and (verified is None or started <= verified <= last))
     c.add(tl_ok, "receipt timeline", f"{receipt.get('started_at')} → {receipt.get('last_activity_at') or receipt.get('ended_at')}, "
           f"{len(own_events)} event(s) in order inside that window" if tl_ok else "events out of order, undated, or outside the session window")
-    # Earlier legs carried in: dated, in order among themselves, none after this leg's last activity, and every carried
-    # pin backed by a carried evidence row from the same leg. Only then do their pins open the search window below.
-    carried_ok = None
-    if carried_events or any(isinstance(x, dict) and x.get("from_previous_session") for x in served):
+    # Earlier legs carried in: information, checked only for being dated, the events in order among themselves, and
+    # nothing after this leg's last activity. They open no window and back nothing below.
+    carried_rows = [x for x in served if isinstance(x, dict) and x.get("from_previous_session")]
+    if carried_events or carried_rows:
         cts = [_parse_time(e.get("ts")) for e in carried_events]
-        rows_by_leg = {(str(x.get("from_previous_session")), str((x.get("instance") or {}).get("id") or ""))
-                       for x in served if isinstance(x, dict) and x.get("from_previous_session")}
-        unbacked = [str(e.get("detail", "")).split(" ")[0] for e in carried_pins
-                    if (str(e.get("from_previous_session")), str(e.get("detail", "")).split(" ")[0]) not in rows_by_leg]
-        row_ts = [_parse_time(x.get("at")) for x in served if isinstance(x, dict) and x.get("from_previous_session")]
+        row_ts = [_parse_time(x.get("at")) for x in carried_rows]
         carried_ok = (last is not None and all(t is not None for t in cts + row_ts) and cts == sorted(t for t in cts if t)
-                      and all(t <= last for t in cts + row_ts if t) and not unbacked)
-        legs = {str(e.get("from_previous_session")) for e in carried_events} | {k for k, _ in rows_by_leg}
+                      and all(t <= last for t in cts + row_ts if t))
+        legs = {str(e.get("from_previous_session")) for e in carried_events} | {str(x.get("from_previous_session")) for x in carried_rows}
         c.add(carried_ok, "earlier legs carried in",
-              f"{len(carried_events)} event(s) and {len(row_ts)} evidence row(s) from {len(legs)} earlier leg(s) of this "
-              f"conversation: dated, in order, none after this leg's last activity, every carried pin backed by a carried row"
-              if carried_ok else
-              ("a carried pin has no carried evidence row: " + ", ".join(u[:12] for u in unbacked)[:160] if unbacked
-               else "carried events undated, out of order, or after this leg's last activity"))
+              f"{len(carried_events)} event(s) and {len(row_ts)} evidence row(s) carried from {len(legs)} earlier leg(s): each "
+              "dated, the events in order among themselves, none after this leg's last activity. Information only: "
+              "nothing here is checked as this leg's, and each earlier leg is checked on its own receipt"
+              if carried_ok else "carried events or rows undated, out of order, or after this leg's last activity")
+    # The conversation's switch counter against the `switched` events this receipt holds: the one that moved the
+    # conversation here is this leg's own, and each earlier one is carried. A client before events were carried
+    # (30 Sep) kept the counter with no carried events; then a mismatch says nothing, so it is not judged.
+    cs = counters.get("continuity_switches")
+    if isinstance(cs, int):
+        sw = sum(1 for e in events if e.get("kind") == "switched")
+        if sw == cs:
+            c.add(True, "continuity switches vs switched events", f"{cs} switch(es) counted, {sw} switched event(s) recorded")
+        elif not carried_events and cs > sw:
+            c.add(None, "continuity switches vs switched events",
+                  f"{cs} counted, {sw} recorded, and no earlier leg's events carried: written by a client that did not carry them")
+        else:
+            c.add(False, "continuity switches vs switched events", f"{cs} switch(es) counted but {sw} switched event(s) recorded")
     # Searches attributed to this session fall inside the window in which a verified machine was pinned.
     verdict = str(receipt.get("verdict") or "")
-    refused_at = next((_parse_time(e.get("ts")) for e in events if e.get("kind") in ("refused", "no-eligible-instance")), None)
+    refused_at = next((_parse_time(e.get("ts")) for e in own_events if e.get("kind") in ("refused", "no-eligible-instance")), None)
     if refused_at is None and verdict not in ("", "confidential"):
         # A stop after failed re-checks (session.py _reverify) writes no 'refused' event, only 'reverify-failed' ones and
         # a verdict; the plain words say the app stopped at the last of those, so searches must end there too.
-        rever = [_parse_time(e.get("ts")) for e in events if e.get("kind") == "reverify-failed"]
+        rever = [_parse_time(e.get("ts")) for e in own_events if e.get("kind") == "reverify-failed"]
         refused_at = next((t for t in reversed(rever) if t is not None), None)
-    # The window opens at the conversation's first pin: this leg's, or an earlier leg's when the carried record held up
-    # above. A pin is carried as an event (from this change) or, for receipts written before it, as the `at` of a
-    # carried evidence row, which is the moment that machine was pinned.
-    starts = [_parse_time(e.get("ts")) for e in own_pins]
-    if carried_ok:
-        starts += [_parse_time(e.get("ts")) for e in carried_pins]
-        starts += [_parse_time(x.get("at")) for x in served if isinstance(x, dict) and x.get("from_previous_session")]
-    starts = [t for t in starts if t is not None]
-    first_pin = min(starts) if starts else verified
+    # The window opens at THIS leg's first pin, never an earlier leg's (review of 00a6650).
+    first_pin = _parse_time(own_pins[0].get("ts")) if own_pins else verified
     if not searches:
         c.add(None, "searches inside the session's verified window", "no search in this record is attributed to this session")
     elif verdict == "refused" or first_pin is None:
@@ -1037,7 +1039,7 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             # (a session can resume after 'no-eligible-instance'; treating the stop as terminal FAILed true receipts —
             # code-reading audit 13). The re-selection is a 'pinned' event, itself checked against the timeline.
             repinned = refused_at is not None and t is not None and any(
-                (pt := _parse_time(p.get("ts"))) is not None and refused_at < pt <= t for p in pins)
+                (pt := _parse_time(p.get("ts"))) is not None and refused_at < pt <= t for p in own_pins)
             if t is None or t < first_pin or (last is not None and t > last + dt.timedelta(minutes=5)) or (
                     refused_at is not None and t > refused_at and not repinned):
                 outside.append(str(s.get("at")))
@@ -1093,13 +1095,72 @@ def receipt_files(bundle_dir: str) -> List[str]:
         return []
 
 
+LEG_MARK = ".leg-"
+
+
+def session_of(receipt_file: str) -> str:
+    """The session a receipt file belongs to. A conversation that moved machines has one receipt per leg: the last as
+    `session-<sid>.receipt.json`, each earlier one as `session-<sid>.leg-<k>.receipt.json` (k from 1, in order)."""
+    sid = receipt_file[len("session-"):-len(".receipt.json")]
+    i = sid.rfind(LEG_MARK)
+    return sid[:i] if i > 0 and sid[i + len(LEG_MARK):].isdigit() else sid
+
+
+def _serving_from(receipt: dict) -> Optional[dt.datetime]:
+    """When a leg began serving the conversation: the switch that moved it here (its own `switched` event), or for the
+    first leg, its first pin. Its own events only: carried ones describe other legs."""
+    own = [e for e in (receipt.get("events") or []) if isinstance(e, dict) and not e.get("from_previous_session")]
+    sw = [_parse_time(e.get("ts")) for e in own if e.get("kind") == "switched"]
+    pins = [_parse_time(e.get("ts")) for e in own if e.get("kind") == "pinned"]
+    for t in sw + pins:
+        if t is not None:
+            return t
+    return _parse_time(receipt.get("verified_at")) or _parse_time(receipt.get("started_at"))
+
+
+def searches_by_receipt(bundle_dir: str, searches: Optional[List[dict]] = None) -> Dict[str, List[dict]]:
+    """Which searches each receipt file is judged on. A session with one receipt takes every search the record links to
+    it (an unsigned index, by session id). A session with several legs gives each search to the leg that was serving at
+    its time: the last leg whose serving began at or before it, or the first leg when it precedes them all. That leg is
+    then judged on its OWN window, so a search made while no verified machine served — after one leg stopped and
+    before the next began — fails on the leg it fell to, instead of passing on a window another leg opened."""
+    names = receipt_files(bundle_dir)
+    groups: Dict[str, List[str]] = {}
+    for n in names:
+        groups.setdefault(session_of(n), []).append(n)
+    out: Dict[str, List[dict]] = {n: [] for n in names}
+    for sid, files in groups.items():
+        mine = [s for s in (searches or []) if isinstance(s, dict) and str(s.get("session_id") or "") == sid]
+        if len(files) == 1:
+            out[files[0]] = mine
+            continue
+        starts = []
+        for n in files:
+            try:
+                r = json.load(open(os.path.join(bundle_dir, n)))
+            except Exception:                               # noqa: BLE001 — unreadable: it takes no search
+                r = None
+            starts.append((_serving_from(r) if isinstance(r, dict) else None, n))
+        known = sorted((t, n) for t, n in starts if t is not None)
+        if not known:
+            continue
+        for s in mine:
+            t = _parse_time(s.get("at"))
+            pick = known[0][1]
+            for st, n in known:
+                if t is not None and st <= t:
+                    pick = n
+            out[pick].append(s)
+    return out
+
+
 def verify_bundle(bundle_dir: str, searches: Optional[List[dict]] = None) -> List[Tuple[str, Checks, bool]]:
-    """One (file, checks, ok) per receipt in the record. Searches are attributed by session id: the receipt
-    file `session-<sid>.receipt.json` covers the searches whose `session_id` is <sid> (an unsigned index
-    written by the exporter; the rows then check those searches' TIMES against the receipt)."""
+    """One (file, checks, ok) per receipt in the record, each judged on its own leg with the searches
+    searches_by_receipt gives it (an unsigned index written by the exporter; the rows then check those searches'
+    TIMES against that receipt)."""
     out = []
+    given = searches_by_receipt(bundle_dir, searches)
     for name in receipt_files(bundle_dir):
-        sid = name[len("session-"):-len(".receipt.json")]
         try:
             receipt = json.load(open(os.path.join(bundle_dir, name)))
         except Exception as exc:                            # noqa: BLE001
@@ -1107,8 +1168,7 @@ def verify_bundle(bundle_dir: str, searches: Optional[List[dict]] = None) -> Lis
             c.add(False, "receipt", f"unreadable ({type(exc).__name__})")
             out.append((name, c, False))
             continue
-        mine = [s for s in (searches or []) if isinstance(s, dict) and str(s.get("session_id") or "") == sid]
-        c, ok = verify_receipt(receipt, bundle_dir=bundle_dir, searches=mine)
+        c, ok = verify_receipt(receipt, bundle_dir=bundle_dir, searches=given.get(name, []))
         out.append((name, c, ok))
     return out
 

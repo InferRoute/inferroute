@@ -457,20 +457,24 @@ class Continuity:
             prior = list(getattr(old.receipt, "served_by", []) or [])
             for row in prior:
                 row = dict(row)
-                row["from_previous_session"] = old.receipt.session_id
+                # setdefault, not overwrite: a row carried in from an EARLIER leg keeps that leg's id, so a
+                # three-leg conversation reads as three legs and not as one (review of 00a6650).
+                row.setdefault("from_previous_session", old.receipt.session_id)
                 self.active.receipt.served_by.insert(0, row)
             # The continuity EVENTS too, not only the evidence. A live run showed the surviving receipt
             # carrying `switched` and `carried` while the decisions that led there — which fleets were
             # considered and why, and that a standby had been verified and held — stayed behind on the
             # receipt nobody reads afterwards. Evidence without the reasoning is half a record.
-            # `pinned` too: the moment each earlier machine was selected opens the window in which the
-            # conversation's searches are checked, and without it a search made on the first leg read as made
-            # before any machine was verified (review of 5c26ff3).
-            carried_kinds = ("continuity-order", "continuity-open", "standby-ready", "pinned",
+            # Information about the earlier legs, never evidence for this one: each leg's own receipt is judged on
+            # its own leg, and the exporter ships every leg's receipt (review of 00a6650).
+            carried_kinds = ("continuity-order", "continuity-open", "standby-ready",
                              "switched", "carried", "no-standby", "standby-stale")
-            prior_events = [dict(e, from_previous_session=old.receipt.session_id)
-                            for e in (getattr(old.receipt, "events", []) or [])
-                            if e.get("kind") in carried_kinds]
+            prior_events = []
+            for e in (getattr(old.receipt, "events", []) or []):
+                if e.get("kind") in carried_kinds:
+                    e = dict(e)
+                    e.setdefault("from_previous_session", old.receipt.session_id)
+                    prior_events.append(e)
             self.active.receipt.events[:0] = prior_events
             self.active.receipt.counters["continuity_switches"] = self.switches
             self.active.receipt.note(

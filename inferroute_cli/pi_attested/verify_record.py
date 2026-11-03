@@ -3420,7 +3420,10 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
                 receipt = json.load(open(os.path.join(bundle_dir, name)))
             except Exception:                               # noqa: BLE001 — unreadable receipts already FAILED
                 receipt = {}
-            linked = sum(1 for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") == sid)
+            # A conversation that moved machines has a receipt per leg; each is linked to the searches made while it
+            # served, as verify_ai_receipt judged them. An older verify_ai_receipt has no such split: by session id.
+            linked = (len(v.searches_by_receipt(bundle_dir, searches).get(name, [])) if hasattr(v, "searches_by_receipt")
+                      else sum(1 for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") == sid))
             if len(results) > 1:
                 print(f"\n    — {name} —")
             text = plain_ai_lane(linked, ai_session_facts(receipt if isinstance(receipt, dict) else {}, c.rows))

@@ -793,6 +793,15 @@ def test_an_old_single_receipt_record_is_not_failed_for_the_leg_it_never_carried
     out = capsys.readouterr().out
     assert "another leg of its conversation was not re-checked" in out and "In plain words" in out
     assert "FAILED" not in out and "contradict" not in out
+    # The pack-level line says incomplete too, in the same terms: never VERIFIED, never FAILED.
+    assert "AI receipts: incomplete (not re-checked: leg 1's receipt is not in this record)" in out
+    assert VR._AI_LANE_VERIFIED is False and VR._AI_LANE_MISSING_LEGS == ["leg 1's receipt is not in this record"]
+    VR.report_confidentiality([], reference=None, floor_pinned=False, revocation_checked=False, authenticated=False,
+                              record_ok=False)
+    agg = capsys.readouterr().out
+    assert "AI session receipts: incomplete (not re-checked: leg 1's receipt is not in this record)" in agg
+    assert "NOT VERIFIED" not in agg.split("SCOPE", 1)[1].split("\n", 1)[0]
+    assert "FAILED" not in agg.split("SCOPE", 1)[1].split("\n", 1)[0]
 
 
 def test_two_switches_in_the_same_second_stay_two_legs(tmp_path):

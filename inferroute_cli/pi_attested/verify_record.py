@@ -1573,8 +1573,12 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
     """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
-    print("  SCOPE — archived SEARCH operations only. " + ("AI session receipts: see their own section above; "
-          if _AI_LANE_VERIFIED else "AI session receipts are NOT VERIFIED here; ") + 
+    print("  SCOPE — archived SEARCH operations only. " + (
+          "AI session receipts: see their own section above; " if _AI_LANE_VERIFIED else
+          # A leg whose receipt is not in the record is a gap, never a pass and never a failure.
+          ("AI session receipts: incomplete (not re-checked: " + "; ".join(_AI_LANE_MISSING_LEGS)
+           + "); the receipts that are here: see their own section above; ") if _AI_LANE_MISSING_LEGS else
+          "AI session receipts are NOT VERIFIED here; ") + 
           "no statement below covers the conversation, omitted operations, or future requests.")
     print("  Reference signatures are relative to the supplied key; its independent provenance is not established here.")
     print("  (these rows do NOT affect the exit code above, which is about the record's integrity)")
@@ -3456,6 +3460,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
 
 PLAIN_AI_LANE = plain_ai_lane(0).replace("\n\n", " ")      # the default rendering, for readers of this constant
 _AI_LANE_VERIFIED = False
+_AI_LANE_MISSING_LEGS: List[str] = []      # "leg N's receipt is not in this record", when that is the only gap
 
 
 def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -3511,10 +3516,21 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     print(f"  AI receipts: {ok_n} of {len(results)} fully re-checked offline, {failed_n} failed, "
           f"{len(results) - ok_n - failed_n} incomplete. Per-request sealing, what the machine's software did with the text, "
           "and retention remain the device's word; see each receipt's SKIP rows.")
-    global _AI_LANE_VERIFIED
-    _AI_LANE_VERIFIED = bool(results) and all(plain_ok)     # a missing leg alone does not withdraw the others' words
+    global _AI_LANE_VERIFIED, _AI_LANE_MISSING_LEGS
+    _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
+    _AI_LANE_MISSING_LEGS = []
+    if bool(results) and all(plain_ok) and not _AI_LANE_VERIFIED:
+        for _name, c, _ok in results:
+            for st, n, d in c.rows:
+                m = re.search(r"leg\(s\) ([\d, ]+) of this conversation", d) if (st == "SKIP" and n == every_leg) else None
+                if m:
+                    _AI_LANE_MISSING_LEGS += [f"leg {j.strip()}'s receipt is not in this record"
+                                              for j in m.group(1).split(",") if j.strip()]
+        if _AI_LANE_MISSING_LEGS:
+            print("  AI receipts: incomplete (not re-checked: " + "; ".join(_AI_LANE_MISSING_LEGS) + "). The receipts "
+                  "that are here re-check; the plain words below describe only them.")
     legs = v.leg_facts(bundle_dir) if hasattr(v, "leg_facts") else {}
-    if _AI_LANE_VERIFIED:
+    if bool(results) and all(plain_ok):
         print("\n  In plain words, for the AI conversation")
         for name, c, _ok in results:
             sid = name[len("session-"):-len(".receipt.json")]

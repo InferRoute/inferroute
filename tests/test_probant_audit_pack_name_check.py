@@ -626,3 +626,45 @@ def test_a_session_id_that_recurs_in_a_later_launch_does_not_join_the_two_conver
     assert E.last_leg(a1) == (b1, 1) and E.last_leg(a2) == (b2, 1)
     # a seed that belongs to the other launch is dropped
     assert E.conversation_legs(b1, seeds=[str(a2)]) == [a1, b1]
+
+
+def test_the_exporter_numbers_two_switches_in_the_same_second_as_two_legs(name_matter, tmp_path):
+    """Review of 24f5c42: legs were placed by their switch's TIME, so two switches in one second put two legs in one
+    slot (the second was dropped) and the next leg was named missing. They are placed by time and detail, which names
+    the move. Here leg 2 is promoted at 08:40:00, fails at once, and leg 3 is promoted in the same second."""
+    d = name_matter / "ir" / "confidential" / "receipts"
+    T = "2026-11-03T08:40:00Z"
+    _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:m1", start="2026-11-03T08:33:19Z", last=T)
+    legs = {"b": ("bbbb2222-0000:m2", "aaaa1111-0000:m1", "m1 -> m2 (timeout)", T, "2026-11-03T08-34-00Z"),
+            "c": ("cccc3333-0000:m3", "bbbb2222-0000:m2", "m2 -> m3 (timeout)", T, "2026-11-03T08-35-00Z"),
+            "e": ("eeee5555-0000:m4", "cccc3333-0000:m3", "m3 -> m4 (fleet)", "2026-11-03T08:50:00Z", "2026-11-03T08-36-00Z")}
+    paths = {}
+    for k, (sid, prev, detail, at, stamp) in legs.items():
+        p = _leg(d, stamp, sid, start=at, last="2026-11-03T09:00:00Z", prev=prev)
+        doc = json.loads(p.read_text())
+        for e in doc["events"]:
+            if e["kind"] == "switched" and not e.get("from_previous_session"):
+                e["detail"] = detail
+        doc["started_at"] = "2026-11-03T08:39:00Z"
+        p.write_text(json.dumps(doc))
+        paths[k] = p
+    last = json.loads(paths["e"].read_text())          # the last leg carries every earlier switch, in order
+    last["events"][:0] = [{"ts": T, "kind": "switched", "detail": "m1 -> m2 (timeout)", "from_previous_session": legs["b"][0]},
+                          {"ts": T, "kind": "switched", "detail": "m2 -> m3 (timeout)", "from_previous_session": legs["c"][0]}]
+    last["served_by"][:0] = [{"at": "2026-11-03T08:33:19Z", "attestation_sha256": "33" * 32, "requests": 1,
+                              "from_previous_session": "aaaa1111-0000:m1"},
+                             {"at": T, "attestation_sha256": "44" * 32, "requests": 0,
+                              "from_previous_session": legs["b"][0]}]
+    paths["e"].write_text(json.dumps(last))
+    rdir = S.records_dir("Acme", "bottle")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / f"{SID_A}.json").write_text(json.dumps({"schema": "inferroute.attested-session/1", "session_id": SID_A,
+                                                    "written_by": "host", "mode": "names",
+                                                    "model_lane": {"receipt": str(paths["e"])}}))
+    rec = E.write_bundle("Acme", "bottle", str(tmp_path / "rec"))
+    row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
+    assert row["earlier_leg_receipts"] == [f"session-{SID_A}.leg-{k}.receipt.json" for k in (1, 2, 3)], row
+    assert row["missing_leg_receipts"] == []
+    sid_of = lambda n: json.loads((rec / n).read_text())["session_id"]          # noqa: E731
+    assert [sid_of(f"session-{SID_A}.leg-{k}.receipt.json") for k in (1, 2, 3)] == [
+        "aaaa1111-0000:m1", legs["b"][0], legs["c"][0]]

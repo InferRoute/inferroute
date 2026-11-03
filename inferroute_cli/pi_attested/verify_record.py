@@ -3236,15 +3236,16 @@ PLAIN_AI_SESSION_LEG_MOVED = _leg_of(PLAIN_AI_SESSION_LEG, (
 # A leg of the same conversation whose receipt is not in the record. Stated as a fact about the record, nothing more:
 # receipts are not signed, so whether it was never exported or was removed is not something the record can show.
 PLAIN_AI_LEG_MISSING = (
-    "This record does not carry the receipt of {which} of this conversation{searches}; receipts are not signed, so this "
-    "record cannot show whether that receipt was never exported or was removed.")
+    "This record does not carry the receipt of leg {leg} of this conversation{searches}{moved}; receipts are not signed, "
+    "so this record cannot show whether that receipt was never exported or was removed.")
 
 
 def _plain_missing(g: Dict[str, Any]) -> str:
-    which = (f"leg {g['leg']}, a later leg this receipt records the conversation moving to" if g.get("after_move")
-             else f"leg {g['leg']}")
     n = int(g.get("searches") or 0)
-    return PLAIN_AI_LEG_MISSING.format(which=which, searches=(
+    moved = ("" if not g.get("after_move") else
+             " (this receipt records that the conversation moved from it to that leg)" if g.get("own_move")
+             else " (a receipt here records that the conversation moved to that leg)")
+    return PLAIN_AI_LEG_MISSING.format(leg=g["leg"], moved=moved, searches=(
         f", so the {n} search(es) this check placed in that leg were not re-checked" if n else ""))
 
 
@@ -3522,7 +3523,7 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     # no search in it, is only "not re-checked": the receipts that ARE here are still described in plain words.
     every_leg = getattr(v, "EVERY_LEG", None)
     gap_rows = tuple(getattr(v, "MISSING_LEG_ROWS", (every_leg,)))
-    ok_n = failed_n = 0
+    ok_n = failed_n = gap_n = 0
     plain_ok = []
     for name, c, ok in results:
         print(f"  {name}")
@@ -3539,15 +3540,19 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
             print("    → re-checked offline: Intel's and NVIDIA's signed answers, the quote, the key bindings and the "
                   "recorded build all hold; SKIP rows name what no record can establish")
         elif not rest:
-            print("    → INCOMPLETE: this receipt re-checks; another leg of its conversation was not re-checked, because "
-                  "its receipt is not in this record" + (", and the searches made during that leg were not re-checked "
-                                                        "either" if any(n == gap_rows[-1] for _s, n, _d in c.rows) else ""))
+            gap_n += 1
+            print("    → NOT VERIFIED as a whole: this receipt re-checks, but another leg of its conversation was not "
+                  "re-checked, because its receipt is not in this record" + (
+                      ", and the searches made during that leg were not re-checked either"
+                      if any(n == gap_rows[-1] for _s, n, _d in c.rows) else ""))
         else:
             print(f"    → INCOMPLETE: {len(rest)} row(s) could not be re-checked from this receipt (an older "
                   "client did not keep the material); nothing in it contradicts")
         plain_ok.append(not c.failed and not rest)
     print(f"  AI receipts: {ok_n} of {len(results)} fully re-checked offline, {failed_n} failed, "
-          f"{len(results) - ok_n - failed_n} incomplete. Per-request sealing, what the machine's software did with the text, "
+          + (f"{gap_n} re-checked but NOT VERIFIED as a whole (a leg of their conversation has no receipt here), "
+             if gap_n else "")
+          + f"{len(results) - ok_n - failed_n - gap_n} incomplete. Per-request sealing, what the machine's software did with the text, "
           "and retention remain the device's word; see each receipt's SKIP rows.")
     global _AI_LANE_VERIFIED, _AI_LANE_MISSING_LEGS
     _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
@@ -3556,13 +3561,13 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     if bool(results) and all(plain_ok) and not _AI_LANE_VERIFIED:
         # A leg whose receipt is not here is a gap in the WHOLE: never a pass, never a failure, and never softened —
         # receipts are not signed, so a removed receipt and one never exported look the same (review of 5051307).
-        seen = set()
+        seen = {}
         for meta in legs.values():
             for g in meta.get("missing") or []:
-                key = (g["leg"], g.get("after_move"))
-                if key not in seen:
-                    seen.add(key)
-                    _AI_LANE_MISSING_LEGS.append(v._gone(g))
+                seen.setdefault((str(g.get("session") or ""), g["leg"]), g)
+        several = len({k[0] for k in seen}) > 1
+        for (sid, _leg), g in sorted(seen.items()):
+            _AI_LANE_MISSING_LEGS.append((f"in conversation {sid}, " if several else "") + v._gone(g))
         for _name, c, _ok in results:
             for st, n, d in c.rows:
                 if st == "SKIP" and n == every_leg and "the last leg's receipt is not in this record" in d:

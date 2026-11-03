@@ -410,7 +410,8 @@ class Continuity:
             return 503, {}, _one(b'{"error":{"message":"the enclave produced no answer"}}')
 
     async def _switch(self, failed=None, why: str = "") -> bool:
-        """Promote the standby. Only ever a pointer move — anything slow happened in the background.
+        """Promote the standby: a pointer move plus one write — the old leg's receipt is saved with its `moved-off`
+        event (see _record_switch). Anything slow (opening and verifying the standby) happened in the background.
 
         Serialised, and idempotent per outage: a caller whose session has ALREADY been replaced by
         someone else's switch has nothing to do and says so, rather than spending a second standby on a
@@ -482,12 +483,16 @@ class Continuity:
             # presented alone vouched for searches made after the switch). Saved now only if it has been saved
             # before: a receipt that was never written has no file to update.
             old.receipt.note("moved-off", f"to {self.active.receipt.session_id}")
-            if getattr(old.receipt, "path", "") and hasattr(old.receipt, "save"):
-                old.receipt.save()
             self.active.receipt.note(
                 "continuity", f"this conversation began on {old.model_short} "
                               f"({old.receipt.counters.get('requests', 0)} requests) and moved here")
         except Exception:                             # noqa: BLE001 — bookkeeping must never fail a turn
+            pass
+        # Its own try, after everything above: a disk that refuses this write must not cost the new leg its notes.
+        try:
+            if getattr(old.receipt, "path", "") and hasattr(old.receipt, "save"):
+                old.receipt.save()
+        except Exception:                             # noqa: BLE001
             pass
 
     def _save_beliefs_occasionally(self) -> None:

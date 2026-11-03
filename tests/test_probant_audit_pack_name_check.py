@@ -668,3 +668,33 @@ def test_the_exporter_numbers_two_switches_in_the_same_second_as_two_legs(name_m
     sid_of = lambda n: json.loads((rec / n).read_text())["session_id"]          # noqa: E731
     assert [sid_of(f"session-{SID_A}.leg-{k}.receipt.json") for k in (1, 2, 3)] == [
         "aaaa1111-0000:m1", legs["b"][0], legs["c"][0]]
+
+
+def test_the_exporter_follows_moved_off_to_the_next_leg_and_names_it_when_absent(name_matter, tmp_path):
+    """A leg whose own moved-off names its successor: the successor is shipped when present even if it carried nothing
+    of the old leg, and named in missing_leg_receipts when absent."""
+    d = name_matter / "ir" / "confidential" / "receipts"
+    a = _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:m1", start="2026-11-03T08:33:19Z", last="2026-11-03T08:40:00Z")
+    doc = json.loads(a.read_text())
+    doc["events"].append({"ts": "2026-11-03T08:40:00Z", "kind": "moved-off", "detail": "to bbbb2222-0000:m2"})
+    a.write_text(json.dumps(doc))
+    b = _leg(d, "2026-11-03T08-34-00Z", "bbbb2222-0000:m2", start="2026-11-03T08:34:00Z", last="2026-11-03T09:00:00Z")
+    bd = json.loads(b.read_text())                    # a successor that carried nothing of leg 1, but was switched into
+    bd["events"].append({"ts": "2026-11-03T08:40:00Z", "kind": "switched", "detail": "m1 -> m2 (fleet)"})
+    b.write_text(json.dumps(bd))
+    assert E.last_leg(a) == (b, 1)
+    rdir = S.records_dir("Acme", "bottle")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / f"{SID_A}.json").write_text(json.dumps({"schema": "inferroute.attested-session/1", "session_id": SID_A,
+                                                    "written_by": "host", "mode": "names",
+                                                    "model_lane": {"receipt": str(a)}}))
+    rec = E.write_bundle("Acme", "bottle", str(tmp_path / "rec"))
+    row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
+    assert json.loads((rec / f"session-{SID_A}.receipt.json").read_text())["session_id"] == "bbbb2222-0000:m2"
+    assert row["earlier_leg_receipts"] == [f"session-{SID_A}.leg-1.receipt.json"] and row["missing_leg_receipts"] == []
+    b.unlink()
+    rec2 = E.write_bundle("Acme", "bottle", str(tmp_path / "rec2"))
+    row2 = json.loads((rec2 / "MANIFEST.json").read_text())["sessions"][0]
+    assert json.loads((rec2 / f"session-{SID_A}.receipt.json").read_text())["session_id"] == "aaaa1111-0000:m1"
+    assert row2["missing_leg_receipts"] == [{"leg": 2, "why": "no receipt of this leg was found on this computer; leg 1's "
+                                                             "receipt records that the conversation moved to it"}]

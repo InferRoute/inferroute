@@ -950,7 +950,7 @@ def test_a_first_leg_presented_as_the_only_receipt_does_not_vouch_for_searches_a
     assert _rows(c)[V.SEARCHES_IN_MISSING_LEG] == "SKIP" and "fall in leg 2" in gap and t(-400) in gap
     every = _detail(c, "a receipt for every leg")
     assert every.startswith("not re-checked: leg 2's receipt is not in this record (a receipt here records that the "
-                            "conversation moved off it to a later leg), and 1 search(es)") and "one possible reason" not in every
+                            "conversation moved from its own leg to this later one), and 1 search(es)") and "one possible reason" not in every
     # and checked on its own (no bundle), the receipt's window still ends at its own moved-off event
     c2 = V.Checks()
     V.check_receipt_consistency(c2, legs[0], [], [{"at": t(-400)}])
@@ -978,7 +978,9 @@ def test_a_present_leg_that_no_switch_recognises_is_named_as_such(tmp_path):
     (d / "session-S.receipt.json").write_text(json.dumps(legs[1]))
     c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
     assert _rows(c)["a receipt for every leg"] == "FAIL"
-    assert "no receipt here is recognisable as leg 1's (by its own switch event)" in _detail(c, "a receipt for every leg")
+    # leg 1 has no switch of its own, so "(by its own switch event)" would be wrong for it (review of d35f393)
+    assert ("no receipt here is recognisable as leg 1's (a first leg's receipt is the one with no switch into it)"
+            in _detail(c, "a receipt for every leg"))
     assert "leg 1's receipt is not in this record" not in _detail(c, "a receipt for every leg")
 
 
@@ -996,3 +998,55 @@ def test_the_plain_words_count_the_searches_in_a_missing_leg(tmp_path):
             "was never exported or was removed.") in txt
     low = txt.lower()
     assert not [w for w in VR.PLAIN_FORBIDDEN if w.lower() in low]
+
+
+# ───────────────────────── review of d35f393 ─────────────────────────
+
+def test_a_later_leg_named_by_moved_off_is_described_from_each_receipt_s_own_place(tmp_path):
+    """gap3: legs 1 and 2 here, leg 3 absent; leg 2's own moved-off names leg 3. Only leg 2's receipt says "this receipt
+    records…"; leg 1's says "a receipt here records…"; the clause closes the sentence instead of splitting it."""
+    VR = _vr()
+    legs, t = _chain(3)
+    d = tmp_path / "rec"
+    d.mkdir()
+    (d / "session-S.leg-1.receipt.json").write_text(json.dumps(legs[0]))
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[1]))
+    S = [{"session_id": "S", "at": t(-100)}]
+    lf = V.leg_facts(str(d), S)
+    def words(name, doc):
+        return VR.plain_ai_lane(0, VR.ai_session_facts(doc, [], lf[name]))
+    one, two = words("session-S.leg-1.receipt.json", legs[0]), words("session-S.receipt.json", legs[1])
+    tail = ("; receipts are not signed, so this record cannot show whether that receipt was never exported or was "
+            "removed.")
+    assert ("This record does not carry the receipt of leg 3 of this conversation, so the 1 search(es) this check placed "
+            "in that leg were not re-checked (a receipt here records that the conversation moved to that leg)" + tail) in one
+    assert ("This record does not carry the receipt of leg 3 of this conversation, so the 1 search(es) this check placed "
+            "in that leg were not re-checked (this receipt records that the conversation moved from it to that leg)" + tail) in two
+    assert "moving to of this conversation" not in one + two
+    c = next(c for n, c, _ in V.verify_bundle(str(d), S) if n == "session-S.receipt.json")
+    assert "(a receipt here records that the conversation moved from its own leg to this later one)" in \
+        _detail(c, "a receipt for every leg")
+
+
+def test_two_conversations_missing_a_leg_each_are_named_with_their_own_search_counts(tmp_path, capsys):
+    """two.py: the same old single-receipt shape in conversations A and B, one search in B's missing leg. The summary
+    named "leg 1" once and dropped B's search count."""
+    b, sid, before = _old_single_last_leg(tmp_path)
+    r = (b / FRESH).read_text()
+    (b / FRESH).unlink()
+    (b / "session-A.receipt.json").write_text(r)
+    (b / "session-B.receipt.json").write_text(r)
+    S = [{"session_id": "B", "at": before}]
+    assert V.exit_code(V.verify_bundle(str(b), S)) == 4
+    VR = _vr()
+    VR.report_ai_receipts(str(b), S)
+    out = capsys.readouterr().out
+    assert out.count("→ NOT VERIFIED as a whole: this receipt re-checks") == 2 and "FAILED" not in out
+    assert ("2 re-checked but NOT VERIFIED as a whole (a leg of their conversation has no receipt here), 0 incomplete"
+            in out)
+    whole = ("in conversation A, leg 1's receipt is not in this record; in conversation B, leg 1's receipt is not in this "
+             "record, and 1 search(es) made during that leg were not re-checked; receipts are not signed")
+    assert "AI receipts: NOT VERIFIED as a whole: " + whole in out
+    VR.report_confidentiality([], reference=None, floor_pinned=False, revocation_checked=False, authenticated=False,
+                              record_ok=False)
+    assert "AI session receipts are NOT VERIFIED as a whole: " + whole in capsys.readouterr().out

@@ -1269,7 +1269,8 @@ UNSIGNED = ("receipts are not signed, so this record cannot tell a receipt that 
 def _gone(g: Dict[str, Any]) -> str:
     """One missing leg, in the words every summary uses."""
     s = f"leg {g['leg']}'s receipt is not in this record" + (
-        " (a receipt here records that the conversation moved off it to a later leg)" if g.get("after_move") else "")
+        " (a receipt here records that the conversation moved from its own leg to this later one)" if g.get("after_move")
+        else "")
     if g.get("searches"):
         s += f", and {g['searches']} search(es) made during that leg were not re-checked"
     return s
@@ -1363,10 +1364,12 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
             want = max((cs if isinstance(cs, int) else 0), len(sw)) + 1
             readable = [n for n in files if isinstance(docs.get(n), dict)]
             unplaced = [n for n in readable if n not in legs.values()]
-            gaps = [{"leg": j, "searches": len(lost.get(j, [])),
-                     "after_move": left is not None and j == k} for j in missing]
+            gaps = [{"leg": j, "searches": len(lost.get(j, [])), "session": sid,
+                     "after_move": left is not None and j == k,
+                     # which receipt's own `moved-off` names this leg: only that receipt may say "this receipt records…"
+                     "moved_from": main if (left is not None and j == k) else ""} for j in missing]
             for n in files:
-                facts[n]["missing"] = gaps
+                facts[n]["missing"] = [dict(g, own_move=(g["moved_from"] == n)) for g in gaps]
             gone = "; ".join(_gone(g) for g in gaps)
             if not missing and len(readable) == want:
                 extra[main].append((True, EVERY_LEG, f"{want} leg(s) by the conversation's switch count, a readable "
@@ -1380,8 +1383,9 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
                 extra[main].append((False, EVERY_LEG,
                                     f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here, "
                                     "and the receipts here do not match its legs one to one"
-                                    + "".join(f"; no receipt here is recognisable as leg {j}'s (by its own switch event)"
-                                              for j in missing)))
+                                    + "".join(f"; no receipt here is recognisable as leg {j}'s " + (
+                                        "(a first leg's receipt is the one with no switch into it)" if j == 1
+                                        else "(by its own switch event)") for j in missing)))
             for j, ats in sorted(lost.items()):
                 # Never a PASS: these searches are given to no receipt. Not a FAIL either: nothing here contradicts them.
                 extra[main].append((None, SEARCHES_IN_MISSING_LEG,

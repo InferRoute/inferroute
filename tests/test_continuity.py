@@ -838,3 +838,18 @@ def test_a_switch_writes_moved_off_into_the_leg_it_leaves(tmp_path, monkeypatch)
     C.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=2),
                                 SimpleNamespace(receipt=unsaved, model_short="c"))
     assert any(e["kind"] == "moved-off" for e in unsaved.events)
+
+
+def test_a_failed_save_of_the_old_leg_costs_the_new_leg_nothing(tmp_path):
+    from types import SimpleNamespace
+    old = FakeReceipt("s-a", "a")
+    old.path = str(tmp_path / "a.json")
+
+    def refuse():
+        raise OSError("disk full")
+    old.save = refuse
+    new = FakeReceipt("s-b", "b")
+    C.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=1),
+                                SimpleNamespace(receipt=old, model_short="a"))
+    assert any(e["kind"] == "moved-off" for e in old.events)
+    assert any(e["kind"] == "continuity" for e in new.events), "the new leg lost its note to the old leg's save"

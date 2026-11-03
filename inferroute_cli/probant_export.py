@@ -1073,10 +1073,28 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
             if back is not None and back.resolve() == cur.resolve():
                 found.append((str(doc.get("started_at") or ""), p))
         if not found:
-            break
+            # The leg's own `moved-off` event names its successor ("to <sid>", since review of 5051307): follow it when
+            # the successor did not carry this leg's rows (it always does when present; this catches the rest).
+            nxt = _moved_off_to(r)
+            q = _receipt_file_of(cur.parent, nxt[1], not_after=nxt[0]) if nxt else None
+            if q is None or q.resolve() in seen:
+                break
+            cur = q
+            followed += 1
+            continue
         cur = sorted(found)[0][1]          # the direct successor: later legs carry this leg's id too
         followed += 1
     return cur, followed
+
+
+def _moved_off_to(doc: dict) -> Optional[Tuple[dt.datetime, str]]:
+    """(when, the next leg's session id) from a receipt's own `moved-off` event ("to <sid>"), or None."""
+    for e in (doc.get("events") or []) if isinstance(doc, dict) else []:
+        if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "moved-off":
+            t, det = _receipt_time(e.get("ts")), str(e.get("detail") or "")
+            if t is not None and det.startswith("to ") and det[3:].strip():
+                return t, det[3:].strip()
+    return None
 
 
 def _own_switch_event(doc: dict) -> Optional[Tuple[dt.datetime, str]]:
@@ -1257,6 +1275,12 @@ def _leg_files(sess: dict, sid: str, files: Dict[str, bytes], *, home_relative: 
             out["missing_leg_receipts"].append(
                 {"leg": j, "why": (f"this leg's receipt could not be read on this computer ({unread[j]})" if j in unread
                                    else "no receipt of this leg was found on this computer")})
+    # The last receipt found says the conversation moved on from it: the leg it moved to had no receipt here to ship.
+    nxt = _moved_off_to(last)
+    if nxt is not None:
+        out["missing_leg_receipts"].append(
+            {"leg": len(sw) + 2, "why": f"no receipt of this leg was found on this computer; leg {len(sw) + 1}'s receipt "
+                                        "records that the conversation moved to it"})
     ev_missing: Dict[str, List[str]] = {}
     for j, lp in sorted(placed.items()):
         raw = lp.read_bytes()

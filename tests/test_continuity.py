@@ -821,3 +821,20 @@ def test_a_prompt_answered_promptly_is_never_called_a_stall(monkeypatch):
     assert status == 200 and body == b"ok"
     assert lane.switches == 0
     assert "stalled" not in [e["kind"] for e in lane.active.receipt.events]
+
+
+def test_a_switch_writes_moved_off_into_the_leg_it_leaves(tmp_path, monkeypatch):
+    """Review of 5051307: the old leg's receipt says when the conversation left it and for which leg, and is saved."""
+    from types import SimpleNamespace
+    saved = []
+    old = FakeReceipt("s-a", "a")
+    old.path, old.save = str(tmp_path / "a.json"), lambda: saved.append("a")
+    new = FakeReceipt("s-b", "b")
+    C.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=1),
+                                SimpleNamespace(receipt=old, model_short="a"))
+    assert [e for e in old.events if e["kind"] == "moved-off"] == [{"kind": "moved-off", "detail": "to s-b"}]
+    assert saved == ["a"]
+    unsaved = FakeReceipt("s-c", "c")                    # never written: no file to update, so no save
+    C.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=2),
+                                SimpleNamespace(receipt=unsaved, model_short="c"))
+    assert any(e["kind"] == "moved-off" for e in unsaved.events)

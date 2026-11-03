@@ -1091,6 +1091,9 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
     opens = max(first_pin, moved_in) if (first_pin is not None and moved_in is not None) else first_pin
     legmeta = leg or {}
     until = legmeta.get("ends")              # a leg the conversation moved off served until that switch
+    left = _moved_off(receipt)               # …and says so itself since review of 5051307
+    if left is not None and (until is None or left < until):
+        until = left
     if not searches:
         c.add(None, "searches inside the session's verified window",
               "no search in this record is attributed to this " + ("leg" if legmeta.get("leg") else "session"))
@@ -1259,6 +1262,27 @@ def _own_switch_event(receipt: dict) -> Optional[Tuple[dt.datetime, str]]:
 
 
 EVERY_LEG = "a receipt for every leg"
+UNSIGNED = ("receipts are not signed, so this record cannot tell a receipt that was never exported from one that was "
+            "removed")
+
+
+def _gone(g: Dict[str, Any]) -> str:
+    """One missing leg, in the words every summary uses."""
+    s = f"leg {g['leg']}'s receipt is not in this record" + (
+        " (a receipt here records that the conversation moved off it to a later leg)" if g.get("after_move") else "")
+    if g.get("searches"):
+        s += f", and {g['searches']} search(es) made during that leg were not re-checked"
+    return s
+
+
+def _moved_off(receipt: dict) -> Optional[dt.datetime]:
+    """When this receipt's own leg was left for another: its own `moved-off` event (written since review of 5051307)."""
+    for e in _as_list(receipt.get("events")):
+        if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "moved-off":
+            t = _parse_time(e.get("ts"))
+            if t is not None:
+                return t
+    return None
 SEARCHES_IN_MISSING_LEG = "searches in a leg whose receipt is not here"
 # Rows that only say a leg's receipt is absent from the record. Absence is a gap, never a contradiction: they are SKIP
 # (the receipt is not fully re-checked: exit 4), and a reader of the plain words is told the gap, not a failure.
@@ -1275,9 +1299,14 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
     that moved the conversation off it, whatever that leg's own last activity says. A leg's receipt is recognised by its
     own `switched` event (time and detail), or for leg 1 by having none, not by its file name.
 
-    A leg with no readable receipt here: a search that falls in it FAILs, naming the leg (the next leg's receipt cannot
-    vouch for it). With no search in it, the leg is only not re-checked — a SKIP, never a FAIL: a record made before
-    receipts travelled per leg carries one receipt per session, and that is not a fault (review of 24f5c42)."""
+    A leg with no readable receipt here is not re-checked — a SKIP, never a FAIL and never a PASS. A search that falls
+    in it is given to no receipt (the next leg's receipt cannot vouch for it) and is named as not re-checked. Receipts
+    are not signed, so a record cannot tell a receipt that was never exported (a record made before receipts travelled
+    per leg carries one per session) from one that was removed; the rows say so (reviews of 24f5c42 and 5051307).
+
+    A receipt whose own `moved-off` event says the conversation left it is not the conversation's last leg, even when
+    it is the only receipt of its session: the legs after it are reported missing instead of extending it.
+    """
     names = receipt_files(bundle_dir)
     docs: Dict[str, Optional[dict]] = {}
     for n in names:
@@ -1300,7 +1329,11 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
         main = f"session-{sid}.receipt.json"
         top = docs.get(main)
         sw = _switches(top) if isinstance(top, dict) else []
-        if isinstance(top, dict) and (sw or len(files) > 1):
+        left = _moved_off(top) if isinstance(top, dict) else None
+        if isinstance(top, dict) and (sw or len(files) > 1 or left is not None):
+            if left is not None:
+                # This "last" receipt says the conversation moved off it: there is at least one leg after it.
+                sw = sw + [(left, "moved-off")]
             legs: Dict[int, str] = {}
             for n in files:
                 d = docs.get(n)
@@ -1327,22 +1360,28 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
                 else:
                     lost.setdefault(j, []).append(str(x.get("at")))
             cs = _as_dict(top.get("counters")).get("continuity_switches")
-            want = (cs if isinstance(cs, int) else len(sw)) + 1
-            readable = len([n for n in files if isinstance(docs.get(n), dict)])
-            gone = "; ".join(f"leg {j}'s receipt is not in this record" for j in missing)
-            if not missing and readable == want:
+            want = max((cs if isinstance(cs, int) else 0), len(sw)) + 1
+            readable = [n for n in files if isinstance(docs.get(n), dict)]
+            unplaced = [n for n in readable if n not in legs.values()]
+            gaps = [{"leg": j, "searches": len(lost.get(j, [])),
+                     "after_move": left is not None and j == k} for j in missing]
+            for n in files:
+                facts[n]["missing"] = gaps
+            gone = "; ".join(_gone(g) for g in gaps)
+            if not missing and len(readable) == want:
                 extra[main].append((True, EVERY_LEG, f"{want} leg(s) by the conversation's switch count, a readable "
                                                      "receipt here for each"))
-            elif missing and readable == len(legs):
-                extra[main].append((None, EVERY_LEG, "not re-checked: " + gone + (
-                    " (a record exported before receipts were carried for each leg holds one receipt per session)"
-                    if len(files) == 1 else "")))
+            elif missing and not unplaced:
+                extra[main].append((None, EVERY_LEG, "not re-checked: " + gone + "; " + UNSIGNED + (
+                    " (one possible reason: a record exported before receipts were carried for each leg holds one "
+                    "receipt per session)" if len(files) == 1 and left is None else "")))
             else:
-                # Something present contradicts something present: receipts here that are no leg of this conversation.
+                # Something present contradicts something present: a receipt here that is no leg of this conversation.
                 extra[main].append((False, EVERY_LEG,
                                     f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here, "
                                     "and the receipts here do not match its legs one to one"
-                                    + (f"; {gone}" if missing else "")))
+                                    + "".join(f"; no receipt here is recognisable as leg {j}'s (by its own switch event)"
+                                              for j in missing)))
             for j, ats in sorted(lost.items()):
                 # Never a PASS: these searches are given to no receipt. Not a FAIL either: nothing here contradicts them.
                 extra[main].append((None, SEARCHES_IN_MISSING_LEG,
@@ -1382,15 +1421,16 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
     return given, extra, facts
 
 
-def leg_facts(bundle_dir: str) -> Dict[str, Dict[str, Any]]:
-    """Per receipt file: whether it is one leg of a conversation that moved between machines (`leg`), and for a leg
-    that is not the last, when the switch that moved the conversation off it happened (`ends`)."""
-    return _plan(bundle_dir, [])[2]
+def leg_facts(bundle_dir: str, searches: Optional[List[dict]] = None) -> Dict[str, Dict[str, Any]]:
+    """Per receipt file: whether it is one leg of a conversation that moved between machines (`leg`); for a leg that is
+    not the last, when the conversation moved off it (`ends`); and the legs of its conversation whose receipts are not
+    in this record, each with how many of `searches` fell in it (`missing`)."""
+    return _plan(bundle_dir, searches or [])[2]
 
 
 def searches_by_receipt(bundle_dir: str, searches: Optional[List[dict]] = None) -> Dict[str, List[dict]]:
     """Which searches each receipt file is judged on (see _plan). A search that falls in a leg with no receipt here is
-    given to no file; verify_bundle FAILs it on the session's last receipt."""
+    given to no file; verify_bundle reports it as not re-checked (SKIP) on the session's last receipt — never a PASS."""
     return _plan(bundle_dir, searches)[0]
 
 

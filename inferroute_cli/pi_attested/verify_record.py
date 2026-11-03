@@ -1576,8 +1576,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
     print("  SCOPE — archived SEARCH operations only. " + (
           "AI session receipts: see their own section above; " if _AI_LANE_VERIFIED else
           # A leg whose receipt is not in the record is a gap, never a pass and never a failure.
-          ("AI session receipts: incomplete (not re-checked: " + "; ".join(_AI_LANE_MISSING_LEGS)
-           + "); the receipts that are here: see their own section above; ") if _AI_LANE_MISSING_LEGS else
+          ("AI session receipts are NOT VERIFIED as a whole: " + "; ".join(_AI_LANE_MISSING_LEGS)
+           + "; the receipts that are here: see their own section above; ") if _AI_LANE_MISSING_LEGS else
           "AI session receipts are NOT VERIFIED here; ") + 
           "no statement below covers the conversation, omitted operations, or future requests.")
     print("  Reference signatures are relative to the supplied key; its independent provenance is not established here.")
@@ -3233,6 +3233,21 @@ PLAIN_AI_SESSION_LEG_MOVED = _leg_of(PLAIN_AI_SESSION_LEG, (
     "The app writes the end time when it last touched the record, which can be after the last message or, if the app was "
     "closed while a reply was arriving, before that reply.",
     "This leg's end is the moment the app recorded moving the conversation off it."))
+# A leg of the same conversation whose receipt is not in the record. Stated as a fact about the record, nothing more:
+# receipts are not signed, so whether it was never exported or was removed is not something the record can show.
+PLAIN_AI_LEG_MISSING = (
+    "This record does not carry the receipt of {which} of this conversation{searches}; receipts are not signed, so this "
+    "record cannot show whether that receipt was never exported or was removed.")
+
+
+def _plain_missing(g: Dict[str, Any]) -> str:
+    which = (f"leg {g['leg']}, a later leg this receipt records the conversation moving to" if g.get("after_move")
+             else f"leg {g['leg']}")
+    n = int(g.get("searches") or 0)
+    return PLAIN_AI_LEG_MISSING.format(which=which, searches=(
+        f", so the {n} search(es) this check placed in that leg were not re-checked" if n else ""))
+
+
 PLAIN_AI_SEARCHES_NONE_LEG = (
     "This check gave none of the patent searches this record links to this conversation to this leg, so it does not show "
     "which searches, if any, the AI assistant ran during it.")
@@ -3297,7 +3312,8 @@ def ai_session_facts(receipt: Dict[str, Any], rows, leg: Optional[Dict[str, Any]
     lims = " ".join(str(x.get("text") or "") for x in (receipt.get("limitations") or []) if isinstance(x, dict))
     old_lims = "readable nowhere else" in lims or "the words are not." in lims
     first_pin = str(pins[0].get("ts") or "") if pins else ""   # as the verifier's window
-    return {"leg": leg, "moved_off": legmeta.get("ends") is not None, "requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
+    return {"leg": leg, "moved_off": legmeta.get("ends") is not None, "missing": list(legmeta.get("missing") or []),
+            "requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
             "why": why[:240], "stopped_at": stopped_at, "first_pin": first_pin, "rever_n": len(rever), "old_lims": old_lims,
             "failed_recheck_at": str(pfr[0].get("ts") or "") if pfr else "", "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
@@ -3430,7 +3446,8 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
         if f["refused_at"] else PLAIN_AI_VERDICT_ONLY))
     if f["credited"] is None:
         f["credited"] = f["machines"]
-    parts = [opening + " " + session + refusal,
+    gaps = "".join(" " + _plain_missing(g) for g in (f.get("missing") or []))
+    parts = [opening + " " + session + refusal + gaps,
              PLAIN_AI_KEY.format(rotation=rotation) + " " + PLAIN_AI_WHO_CHECKS.format(
                  relay=(" (by the app's record this conversation did not pass through InferRoute's relay)" if direct
                         else (", and operates the relay the app says your traffic would have passed through" if empty
@@ -3535,17 +3552,25 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     global _AI_LANE_VERIFIED, _AI_LANE_MISSING_LEGS
     _AI_LANE_VERIFIED = bool(results) and ok_n == len(results)
     _AI_LANE_MISSING_LEGS = []
+    legs = v.leg_facts(bundle_dir, searches) if hasattr(v, "leg_facts") else {}
     if bool(results) and all(plain_ok) and not _AI_LANE_VERIFIED:
+        # A leg whose receipt is not here is a gap in the WHOLE: never a pass, never a failure, and never softened —
+        # receipts are not signed, so a removed receipt and one never exported look the same (review of 5051307).
+        seen = set()
+        for meta in legs.values():
+            for g in meta.get("missing") or []:
+                key = (g["leg"], g.get("after_move"))
+                if key not in seen:
+                    seen.add(key)
+                    _AI_LANE_MISSING_LEGS.append(v._gone(g))
         for _name, c, _ok in results:
             for st, n, d in c.rows:
-                if st == "SKIP" and n == every_leg:
-                    found = re.findall(r"leg (\d+)'s receipt is not in this record", d)
-                    _AI_LANE_MISSING_LEGS += [f"leg {j}'s receipt is not in this record" for j in found] or (
-                        ["the last leg's receipt is not in this record"] if "last leg's receipt" in d else [])
+                if st == "SKIP" and n == every_leg and "the last leg's receipt is not in this record" in d:
+                    _AI_LANE_MISSING_LEGS.append("the last leg's receipt is not in this record")
         if _AI_LANE_MISSING_LEGS:
-            print("  AI receipts: incomplete (not re-checked: " + "; ".join(_AI_LANE_MISSING_LEGS) + "). The receipts "
+            _AI_LANE_MISSING_LEGS.append(v.UNSIGNED)
+            print("  AI receipts: NOT VERIFIED as a whole: " + "; ".join(_AI_LANE_MISSING_LEGS) + ". The receipts "
                   "that are here re-check; the plain words below describe only them.")
-    legs = v.leg_facts(bundle_dir) if hasattr(v, "leg_facts") else {}
     if bool(results) and all(plain_ok):
         print("\n  In plain words, for the AI conversation")
         for name, c, _ok in results:

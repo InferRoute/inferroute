@@ -477,6 +477,13 @@ class Continuity:
                     prior_events.append(e)
             self.active.receipt.events[:0] = prior_events
             self.active.receipt.counters["continuity_switches"] = self.switches
+            # The OLD leg's receipt says when the conversation left it and for which leg, so a reader holding only
+            # that receipt cannot take it for the whole conversation (review of 5051307: a first leg's receipt
+            # presented alone vouched for searches made after the switch). Saved now only if it has been saved
+            # before: a receipt that was never written has no file to update.
+            old.receipt.note("moved-off", f"to {self.active.receipt.session_id}")
+            if getattr(old.receipt, "path", "") and hasattr(old.receipt, "save"):
+                old.receipt.save()
             self.active.receipt.note(
                 "continuity", f"this conversation began on {old.model_short} "
                               f"({old.receipt.counters.get('requests', 0)} requests) and moved here")

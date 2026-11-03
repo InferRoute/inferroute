@@ -517,7 +517,10 @@ def _chain(n_legs: int = 2, *, leg1_stops_at=None, last_leg_requests: int = 2) -
             r.events.append({"ts": t(base + 200), "kind": "switched", "detail": f"m{k} -> m{k + 1} (timeout)"})
             Cont.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=r), switches=k),
                                            SimpleNamespace(receipt=prev, model_short=f"m{k}"))
-            prev.last_activity_at = t(base + 199)
+            for e in prev.events:                        # _record_switch stamps `moved-off` with the real clock
+                if e["kind"] == "moved-off":
+                    e["ts"] = t(base + 200)
+            prev.last_activity_at = t(base + 200)
         legs.append(r)
     legs[-1].last_activity_at = t(5)
     return [dataclasses.asdict(r) for r in legs], t
@@ -646,8 +649,9 @@ def test_a_missing_leg_cannot_be_stood_in_for_by_the_next_one(tmp_path):
     gap = _detail(c, V.SEARCHES_IN_MISSING_LEG)
     assert _rows(c)[V.SEARCHES_IN_MISSING_LEG] == "SKIP" and gap.startswith("not re-checked: 2 search(es) fall in leg 1")
     assert "nothing here shows which machine served them" in gap and t(-600) in gap
-    assert _detail(c, "a receipt for every leg") == "not re-checked: leg 1's receipt is not in this record (a record " \
-        "exported before receipts were carried for each leg holds one receipt per session)"
+    assert _detail(c, "a receipt for every leg") == ("not re-checked: leg 1's receipt is not in this record, and 2 "
+        "search(es) made during that leg were not re-checked; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed (one possible reason: a record exported before "
+        "receipts were carried for each leg holds one receipt per session)")
     assert not [r for r in c.rows if r[1] == "searches inside the session's verified window" and r[0] == "PASS"]
     assert not [r for r in c.rows if r[1] in V.MISSING_LEG_ROWS and r[0] != "SKIP"]
     assert V.exit_code([r for r in results]) in (1, 4)            # 1 only for the fixture's absent evidence files
@@ -748,7 +752,8 @@ def test_leg_one_is_described_as_a_leg_and_its_window_ends_at_the_switch_off_it(
     # a single-leg conversation is not called a leg anywhere
     one_only = tmp_path / "single"
     one_only.mkdir()
-    (one_only / "session-T.receipt.json").write_text(json.dumps(legs[0] | {"events": [e for e in legs[0]["events"]]}))
+    never_moved = [e for e in legs[0]["events"] if e["kind"] != "moved-off"]
+    (one_only / "session-T.receipt.json").write_text(json.dumps(legs[0] | {"events": never_moved}))
     assert V.leg_facts(str(one_only))["session-T.receipt.json"]["leg"] is False
 
 
@@ -797,22 +802,25 @@ def test_an_old_single_receipt_record_is_not_failed_for_the_leg_it_never_carried
     results = V.verify_bundle(str(b), [])
     c = results[0][1]
     assert _rows(c)["a receipt for every leg"] == "SKIP" and not c.failed, c.failed
-    assert _detail(c, "a receipt for every leg").startswith("not re-checked: leg 1's receipt is not in this record (a record")
+    assert _detail(c, "a receipt for every leg").startswith("not re-checked: leg 1's receipt is not in this record; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed")
+    assert "(one possible reason: a record exported before receipts were carried" in _detail(c, "a receipt for every leg")
     assert V.exit_code(results) == 4
     VR = _vr()
     VR.report_ai_receipts(str(b), [])
     out = capsys.readouterr().out
     assert "another leg of its conversation was not re-checked" in out and "In plain words" in out
     assert "FAILED" not in out and "contradict" not in out
-    # The pack-level line says incomplete too, in the same terms: never VERIFIED, never FAILED.
-    assert "AI receipts: incomplete (not re-checked: leg 1's receipt is not in this record)" in out
-    assert VR._AI_LANE_VERIFIED is False and VR._AI_LANE_MISSING_LEGS == ["leg 1's receipt is not in this record"]
+    # The pack-level lines: NOT VERIFIED as a whole (review of 5051307), never FAILED, and receipts named as unsigned.
+    assert "AI receipts: NOT VERIFIED as a whole: leg 1's receipt is not in this record; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed." in out
+    assert VR._AI_LANE_VERIFIED is False and VR._AI_LANE_MISSING_LEGS == ["leg 1's receipt is not in this record", "receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed"]
+    # The plain words for the receipt that is here name the missing leg, neutrally.
+    assert "This record does not carry the receipt of leg 1 of this conversation; receipts are not signed, so this " \
+           "record cannot show whether that receipt was never exported or was removed." in out
     VR.report_confidentiality([], reference=None, floor_pinned=False, revocation_checked=False, authenticated=False,
                               record_ok=False)
-    agg = capsys.readouterr().out
-    assert "AI session receipts: incomplete (not re-checked: leg 1's receipt is not in this record)" in agg
-    assert "NOT VERIFIED" not in agg.split("SCOPE", 1)[1].split("\n", 1)[0]
-    assert "FAILED" not in agg.split("SCOPE", 1)[1].split("\n", 1)[0]
+    scope = capsys.readouterr().out.split("SCOPE", 1)[1].split("\n", 1)[0]
+    assert "AI session receipts are NOT VERIFIED as a whole: leg 1's receipt is not in this record; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed" in scope
+    assert "FAILED" not in scope
 
 
 def test_two_switches_in_the_same_second_stay_two_legs(tmp_path):
@@ -863,8 +871,10 @@ def test_an_old_single_receipt_record_with_a_search_in_the_missing_leg_is_incomp
     VR.report_confidentiality([], reference=None, floor_pinned=False, revocation_checked=False, authenticated=False,
                               record_ok=False)
     scope = capsys.readouterr().out.split("SCOPE", 1)[1].split("\n", 1)[0]
-    assert "incomplete (not re-checked: leg 1's receipt is not in this record)" in scope
-    assert "NOT VERIFIED" not in scope and "FAILED" not in scope
+    # Review of 5051307: a gap in the whole keeps "NOT VERIFIED", counts the searches in it, and says receipts are unsigned.
+    assert ("NOT VERIFIED as a whole: leg 1's receipt is not in this record, and 1 search(es) made during that leg were "
+            "not re-checked; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed") in scope
+    assert "FAILED" not in scope
 
 
 def test_a_leg_moved_off_ends_at_the_switch_in_the_verifier_and_the_plain_words(tmp_path):
@@ -892,7 +902,7 @@ def test_the_not_carried_per_leg_note_appears_only_for_a_single_receipt_session(
     (d / "session-S.leg-1.receipt.json").write_text(json.dumps(legs[0]))
     (d / "session-S.receipt.json").write_text(json.dumps(legs[2]))
     c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
-    assert _detail(c, "a receipt for every leg") == "not re-checked: leg 2's receipt is not in this record"
+    assert _detail(c, "a receipt for every leg") == "not re-checked: leg 2's receipt is not in this record; receipts are not signed, so this record cannot tell a receipt that was never exported from one that was removed"
 
 
 def test_a_passing_recheck_resumes_only_a_recheck_stop_and_many_stops_name_the_last():
@@ -919,3 +929,70 @@ def test_a_malformed_receipt_is_a_fail_row_not_a_traceback(tmp_path):
         res = V.verify_bundle(str(d), [{"session_id": "S", "at": "2026-11-03T09:00:00Z"}])
         assert res and V.exit_code(res) == 1
         assert V.main([str(d)]) == 1
+
+
+# ───────────────────────── review of 5051307 ─────────────────────────
+
+def test_a_first_leg_presented_as_the_only_receipt_does_not_vouch_for_searches_after_the_switch(tmp_path):
+    """The rename attack: leg 1's receipt renamed as the session's only receipt extended leg 1 over the whole
+    conversation. Leg 1's receipt now records `moved-off` (written by _record_switch), so its window ends there and the
+    searches after it fall in a later leg whose receipt is not here: not re-checked, never PASS."""
+    legs, t = _chain(2)
+    assert any(e["kind"] == "moved-off" and e["detail"] == "to leg2:m2" for e in legs[0]["events"])
+    d = tmp_path / "renamed"
+    d.mkdir()
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[0]))
+    res = V.verify_bundle(str(d), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-400)}])
+    c = res[0][1]
+    assert _rows(c)["searches inside the session's verified window"] == "PASS"          # the -900 search, on leg 1
+    assert "1 search(es)" in _detail(c, "searches inside the session's verified window")
+    gap = _detail(c, V.SEARCHES_IN_MISSING_LEG)
+    assert _rows(c)[V.SEARCHES_IN_MISSING_LEG] == "SKIP" and "fall in leg 2" in gap and t(-400) in gap
+    every = _detail(c, "a receipt for every leg")
+    assert every.startswith("not re-checked: leg 2's receipt is not in this record (a receipt here records that the "
+                            "conversation moved off it to a later leg), and 1 search(es)") and "one possible reason" not in every
+    # and checked on its own (no bundle), the receipt's window still ends at its own moved-off event
+    c2 = V.Checks()
+    V.check_receipt_consistency(c2, legs[0], [], [{"at": t(-400)}])
+    assert _rows(c2)["searches inside the session's verified window"] == "FAIL"
+
+
+def test_an_honest_two_leg_conversation_is_unchanged_by_moved_off(tmp_path):
+    legs, t = _chain(2)
+    res = V.verify_bundle(str(_bundle_of(tmp_path, legs)), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-400)}])
+    assert _search_row(res, "session-S.leg-1.receipt.json") == "PASS" and _search_row(res, "session-S.receipt.json") == "PASS"
+    last = next(c for n, c, _ in res if n == "session-S.receipt.json")
+    assert _rows(last)["a receipt for every leg"] == "PASS"
+    assert not any(c.failed and [r for r in c.rows if r[0] == "FAIL" and "timeline" in r[1]] for _n, c, _ok in res)
+
+
+def test_a_present_leg_that_no_switch_recognises_is_named_as_such(tmp_path):
+    legs, t = _chain(2)
+    odd = dict(legs[1], session_id="other:x", events=[dict(e) for e in legs[1]["events"]])
+    for e in odd["events"]:
+        if e["kind"] == "switched" and not e.get("from_previous_session"):
+            e["detail"] = "x -> y (not this conversation)"
+    d = tmp_path / "rec"
+    d.mkdir()
+    (d / "session-S.leg-1.receipt.json").write_text(json.dumps(odd))
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[1]))
+    c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
+    assert _rows(c)["a receipt for every leg"] == "FAIL"
+    assert "no receipt here is recognisable as leg 1's (by its own switch event)" in _detail(c, "a receipt for every leg")
+    assert "leg 1's receipt is not in this record" not in _detail(c, "a receipt for every leg")
+
+
+def test_the_plain_words_count_the_searches_in_a_missing_leg(tmp_path):
+    VR = _vr()
+    legs, t = _chain(2)
+    d = tmp_path / "last"
+    d.mkdir()
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[1]))
+    lf = V.leg_facts(str(d), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-800)}])
+    f = VR.ai_session_facts(legs[1], [], lf["session-S.receipt.json"])
+    txt = VR.plain_ai_lane(0, f)
+    assert ("This record does not carry the receipt of leg 1 of this conversation, so the 2 search(es) this check placed "
+            "in that leg were not re-checked; receipts are not signed, so this record cannot show whether that receipt "
+            "was never exported or was removed.") in txt
+    low = txt.lower()
+    assert not [w for w in VR.PLAIN_FORBIDDEN if w.lower() in low]

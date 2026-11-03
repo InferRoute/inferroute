@@ -3243,8 +3243,8 @@ PLAIN_AI_LEG_MISSING = (
 def _plain_missing(g: Dict[str, Any]) -> str:
     n = int(g.get("searches") or 0)
     moved = ("" if not g.get("after_move") else
-             " (this receipt records that the conversation moved from it to that leg)" if g.get("own_move")
-             else " (a receipt here records that the conversation moved to that leg)")
+             f" (this receipt records that the conversation moved from its own leg to leg {g['leg']})" if g.get("own_move")
+             else f" (a receipt here records that the conversation moved to leg {g['leg']})")
     return PLAIN_AI_LEG_MISSING.format(leg=g["leg"], moved=moved, searches=(
         f", so the {n} search(es) this check placed in that leg were not re-checked" if n else ""))
 

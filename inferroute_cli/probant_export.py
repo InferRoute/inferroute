@@ -1073,11 +1073,14 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
             if back is not None and back.resolve() == cur.resolve():
                 found.append((str(doc.get("started_at") or ""), p))
         if not found:
-            # The leg's own `moved-off` event names its successor ("to <sid>", since review of 5051307): follow it when
-            # the successor did not carry this leg's rows (it always does when present; this catches the rest).
+            # The leg's own `moved-off` event names its successor ("to <sid>", since review of 5051307). Follow it only
+            # to a file that PROVES it is that successor: its own `switched` event, or a row carried from this leg. The
+            # standby's receipt is saved when it is opened, before any switch, so if the app stopped after this leg was
+            # saved and before the successor saved again, the successor's file on disk is that earlier copy — it names
+            # nothing of this leg and must not be taken for the leg that served after the move (review of 63836b6).
             nxt = _moved_off_to(r)
             q = _receipt_file_of(cur.parent, nxt[1], not_after=nxt[0]) if nxt else None
-            if q is None or q.resolve() in seen:
+            if q is None or q.resolve() in seen or not _proves_successor(q, sid):
                 break
             cur = q
             followed += 1
@@ -1085,6 +1088,21 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
         cur = sorted(found)[0][1]          # the direct successor: later legs carry this leg's id too
         followed += 1
     return cur, followed
+
+
+def _proves_successor(path: Path, prev_sid: str) -> bool:
+    """Whether a receipt shows it took over from leg `prev_sid`: its own `switched` event, or a served_by/events row
+    carried from that leg."""
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(doc, dict):
+        return False
+    if _own_switch_event(doc) is not None:
+        return True
+    rows = [x for k in ("served_by", "events") for x in (doc.get(k) or []) if isinstance(x, dict)]
+    return any(x.get("from_previous_session") == prev_sid for x in rows)
 
 
 def _moved_off_to(doc: dict) -> Optional[Tuple[dt.datetime, str]]:
@@ -1278,9 +1296,11 @@ def _leg_files(sess: dict, sid: str, files: Dict[str, bytes], *, home_relative: 
     # The last receipt found says the conversation moved on from it: the leg it moved to had no receipt here to ship.
     nxt = _moved_off_to(last)
     if nxt is not None:
+        stale = _receipt_file_of(Path(str(lane.get("receipt"))).parent, nxt[1], not_after=nxt[0])
+        why = ("only a copy saved before the switch was found" if stale is not None
+               else "no receipt of this leg was found on this computer")
         out["missing_leg_receipts"].append(
-            {"leg": len(sw) + 2, "why": f"no receipt of this leg was found on this computer; leg {len(sw) + 1}'s receipt "
-                                        "records that the conversation moved to it"})
+            {"leg": len(sw) + 2, "why": f"{why}; leg {len(sw) + 1}'s receipt records that the conversation moved to it"})
     ev_missing: Dict[str, List[str]] = {}
     for j, lp in sorted(placed.items()):
         raw = lp.read_bytes()

@@ -698,3 +698,49 @@ def test_the_exporter_follows_moved_off_to_the_next_leg_and_names_it_when_absent
     assert json.loads((rec2 / f"session-{SID_A}.receipt.json").read_text())["session_id"] == "aaaa1111-0000:m1"
     assert row2["missing_leg_receipts"] == [{"leg": 2, "why": "no receipt of this leg was found on this computer; leg 1's "
                                                              "receipt records that the conversation moved to it"}]
+
+
+def test_a_stale_standby_copy_is_not_taken_for_the_leg_that_served_after_the_move(name_matter, tmp_path, capsys):
+    """Review of 63836b6. The standby's receipt is saved when it is opened, before any switch. If the app stops after
+    the old leg is saved with `moved-off` and before the successor saves again, the successor's file on disk names
+    nothing of the old leg. It must not be followed: the next leg is listed as missing ("only a copy saved before the
+    switch was found"), the record stays exit 4 NOT VERIFIED, and a search after the move is never given to leg 1."""
+    import shutil
+    from tests.test_verify_ai_receipt import FIX, FRESH, V, _vr
+    d = name_matter / "ir" / "confidential" / "receipts"
+    (d / "evidence").mkdir(parents=True, exist_ok=True)
+    leg1 = json.loads((FIX / "fresh" / FRESH).read_text())
+    for row in leg1["served_by"]:
+        shutil.copy(FIX / "fresh" / row["attestation_file"], d / "evidence" / f"{row['attestation_sha256']}.json")
+        row["attestation_file"] = ""
+    nxt = "fixture-next:m2"
+    leg1["last_activity_at"] = "2026-11-02T09:32:30Z"
+    leg1["events"].append({"ts": "2026-11-02T09:32:20Z", "kind": "moved-off", "detail": f"to {nxt}"})
+    p1 = d / f"2026-11-02T09-31-42Z-{leg1['session_id'][:8]}-{hashlib.sha256(leg1['session_id'].encode()).hexdigest()[:6]}.json"
+    leg1["path"] = str(p1)
+    p1.write_text(json.dumps(leg1))
+    stale = dict(leg1, session_id=nxt, started_at="2026-11-02T09:31:45Z", events=[], last_activity_at="2026-11-02T09:31:45Z")
+    p2 = d / f"2026-11-02T09-31-45Z-{nxt[:8]}-{hashlib.sha256(nxt.encode()).hexdigest()[:6]}.json"
+    stale["path"] = str(p2)
+    p2.write_text(json.dumps(stale))
+    assert E.last_leg(p1) == (p1, 0)
+    rdir = S.records_dir("Acme", "bottle")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / f"{SID_A}.json").write_text(json.dumps({"schema": "inferroute.attested-session/1", "session_id": SID_A,
+                                                    "written_by": "host", "mode": "names",
+                                                    "model_lane": {"receipt": str(p1)}}))
+    rec = E.write_bundle("Acme", "bottle", str(tmp_path / "rec"))
+    row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
+    assert json.loads((rec / f"session-{SID_A}.receipt.json").read_text())["session_id"] == leg1["session_id"]
+    assert row["missing_leg_receipts"] == [{"leg": 2, "why": "only a copy saved before the switch was found; leg 1's "
+                                                             "receipt records that the conversation moved to it"}]
+    searches = [{"session_id": SID_A, "at": "2026-11-02T09:32:00Z"}, {"session_id": SID_A, "at": "2026-11-02T09:32:40Z"}]
+    given = V.searches_by_receipt(str(rec), searches)
+    assert [x["at"] for x in given[f"session-{SID_A}.receipt.json"]] == ["2026-11-02T09:32:00Z"]   # never the post-move one
+    res = V.verify_bundle(str(rec), searches)
+    assert V.exit_code(res) == 4, [r for _n, c, _ok in res for r in c.rows if r[0] == "FAIL"]
+    VR = _vr()
+    VR.report_ai_receipts(str(rec), searches)
+    out = capsys.readouterr().out
+    assert "NOT VERIFIED as a whole: leg 2's receipt is not in this record" in out and "FAILED" not in out
+    assert "(this receipt records that the conversation moved from its own leg to leg 2)" in out

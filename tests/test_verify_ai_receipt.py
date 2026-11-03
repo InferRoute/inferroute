@@ -1019,9 +1019,9 @@ def test_a_later_leg_named_by_moved_off_is_described_from_each_receipt_s_own_pla
     tail = ("; receipts are not signed, so this record cannot show whether that receipt was never exported or was "
             "removed.")
     assert ("This record does not carry the receipt of leg 3 of this conversation, so the 1 search(es) this check placed "
-            "in that leg were not re-checked (a receipt here records that the conversation moved to that leg)" + tail) in one
+            "in that leg were not re-checked (a receipt here records that the conversation moved to leg 3)" + tail) in one
     assert ("This record does not carry the receipt of leg 3 of this conversation, so the 1 search(es) this check placed "
-            "in that leg were not re-checked (this receipt records that the conversation moved from it to that leg)" + tail) in two
+            "in that leg were not re-checked (this receipt records that the conversation moved from its own leg to leg 3)" + tail) in two
     assert "moving to of this conversation" not in one + two
     c = next(c for n, c, _ in V.verify_bundle(str(d), S) if n == "session-S.receipt.json")
     assert "(a receipt here records that the conversation moved from its own leg to this later one)" in \

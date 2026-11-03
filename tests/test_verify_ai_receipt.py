@@ -635,17 +635,24 @@ def test_carried_events_out_of_order_are_still_caught():
 def test_a_missing_leg_cannot_be_stood_in_for_by_the_next_one(tmp_path):
     """The standby pins when it is warmed (-695 here), long before the switch (-500). With leg 1's receipt absent its
     searches fell to leg 2 and passed on leg 2's early pin. Now the last leg's switches say leg 1 served until -500, and a
-    search there with no leg-1 receipt FAILs, naming the leg; a bundle-level row says a leg is missing."""
+    search there is given to no receipt: never a PASS. Since review of c5156d2 it is "not re-checked" (SKIP, exit 4), not
+    FAIL: the receipt is absent, and nothing present contradicts anything present."""
     legs, t = _chain(2)
     only_last = tmp_path / "last"
     only_last.mkdir()
     (only_last / "session-S.receipt.json").write_text(json.dumps(legs[-1]))
     results = V.verify_bundle(str(only_last), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-600)}])
     c = results[0][1]
-    fails = [d for s, n, d in c.rows if s == "FAIL" and n == "searches inside the session's verified window"]
-    assert fails and "fall in leg 1 of this conversation, whose receipt is not in this record" in fails[0] and t(-600) in fails[0]
-    assert _rows(c)["a receipt for every leg"] == "FAIL" and "leg(s) 1" in _detail(c, "a receipt for every leg")
-    assert V.exit_code(results) == 1
+    gap = _detail(c, V.SEARCHES_IN_MISSING_LEG)
+    assert _rows(c)[V.SEARCHES_IN_MISSING_LEG] == "SKIP" and gap.startswith("not re-checked: 2 search(es) fall in leg 1")
+    assert "nothing here shows which machine served them" in gap and t(-600) in gap
+    assert _detail(c, "a receipt for every leg") == "not re-checked: leg 1's receipt is not in this record (a record " \
+        "exported before receipts were carried for each leg holds one receipt per session)"
+    assert not [r for r in c.rows if r[1] == "searches inside the session's verified window" and r[0] == "PASS"]
+    assert not [r for r in c.rows if r[1] in V.MISSING_LEG_ROWS and r[0] != "SKIP"]
+    assert V.exit_code([r for r in results]) in (1, 4)            # 1 only for the fixture's absent evidence files
+    assert not [d for st, n, d in c.rows if st == "FAIL" and n in ("searches inside the session's verified window",)
+                + V.MISSING_LEG_ROWS]
     full = V.verify_bundle(str(_bundle_of(tmp_path, legs)), [{"session_id": "S", "at": t(-600)}])
     assert _search_row(full, "session-S.leg-1.receipt.json") == "PASS"
     assert next(c for n, c, _ in full if n == "session-S.receipt.json").rows[-1][:2] == ("PASS", "a receipt for every leg")
@@ -675,15 +682,19 @@ def test_every_stop_is_honoured_not_only_the_first():
         assert (_rows(c)["searches inside the session's verified window"] == "PASS") is ok, at
 
 
-def test_receipts_with_no_usable_time_fail_their_searches_and_leg_numbers_sort_as_numbers(tmp_path):
+def test_without_the_last_leg_no_search_can_pass_and_leg_numbers_sort_as_numbers(tmp_path):
+    """Earlier legs with no last leg: their serving times are unknown, so no search is placed on one. Not re-checked
+    (never PASS, never a FAIL for the absence)."""
     d = tmp_path / "rec"
     d.mkdir()
     for k in (1, 2):
         (d / f"session-S.leg-{k}.receipt.json").write_text(json.dumps({"schema": V.SCHEMA, "session_id": f"x{k}"}))
     results = V.verify_bundle(str(d), [{"session_id": "S", "at": "2026-11-03T09:00:00Z"}])
     rows = [r for _n, c, _ok in results for r in c.rows]
-    assert any(s == "FAIL" and "give no time to judge them by" in det for s, _n, det in rows)
-    assert any(s == "FAIL" and n == "a receipt for every leg" for s, n, _d in rows)       # the last leg is missing
+    assert ("SKIP", V.SEARCHES_IN_MISSING_LEG) in [(s_, n) for s_, n, _d in rows]
+    assert any(s_ == "SKIP" and n == "a receipt for every leg" and "the last leg's receipt is not in this record" in det
+               for s_, n, det in rows)
+    assert not any(s_ == "PASS" and n == "searches inside the session's verified window" for s_, n, _d in rows)
     assert V._leg_number("session-S.leg-10.receipt.json") == 10 and V._leg_number("session-S.receipt.json") == 0
 
 
@@ -786,7 +797,7 @@ def test_an_old_single_receipt_record_is_not_failed_for_the_leg_it_never_carried
     results = V.verify_bundle(str(b), [])
     c = results[0][1]
     assert _rows(c)["a receipt for every leg"] == "SKIP" and not c.failed, c.failed
-    assert "not re-checked: leg(s) 1" in _detail(c, "a receipt for every leg")
+    assert _detail(c, "a receipt for every leg").startswith("not re-checked: leg 1's receipt is not in this record (a record")
     assert V.exit_code(results) == 4
     VR = _vr()
     VR.report_ai_receipts(str(b), [])
@@ -817,3 +828,94 @@ def test_two_switches_in_the_same_second_stay_two_legs(tmp_path):
                                      "session-S.receipt.json")] == [1, 2, 3]
     c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
     assert _rows(c)["a receipt for every leg"] == "PASS"
+
+
+# ───────────────────────── review of c5156d2 ─────────────────────────
+
+def _old_single_last_leg(tmp_path):
+    """The fresh fixture made into a last leg whose first leg's receipt the record does not carry (a record exported
+    before receipts travelled per leg)."""
+    b = _bundle(tmp_path, "fresh")
+    p = b / FRESH
+    r = json.loads(p.read_text())
+    r["events"] = sorted(r["events"] + [{"ts": r["started_at"], "kind": "switched", "detail": "m1 -> m2 (fleet)"}],
+                         key=lambda e: e["ts"])
+    r.setdefault("counters", {})["continuity_switches"] = 1
+    p.write_text(json.dumps(r))
+    sid = FRESH[len("session-"):-len(".receipt.json")]
+    before = (V._parse_time(r["started_at"]) - __import__("datetime").timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return b, sid, before
+
+
+def test_an_old_single_receipt_record_with_a_search_in_the_missing_leg_is_incomplete_never_failed(tmp_path, capsys):
+    b, sid, before = _old_single_last_leg(tmp_path)
+    searches = [{"session_id": sid, "at": before}]
+    results = V.verify_bundle(str(b), searches)
+    c = results[0][1]
+    assert not c.failed, c.failed
+    assert _rows(c)[V.SEARCHES_IN_MISSING_LEG] == "SKIP" and _rows(c)["a receipt for every leg"] == "SKIP"
+    assert V.exit_code(results) == 4
+    VR = _vr()
+    VR.report_ai_receipts(str(b), searches)
+    out = capsys.readouterr().out
+    assert "FAILED" not in out and "contradict" not in out and "In plain words" in out
+    assert "the searches made during that leg were not re-checked either" in out
+    VR.report_confidentiality([], reference=None, floor_pinned=False, revocation_checked=False, authenticated=False,
+                              record_ok=False)
+    scope = capsys.readouterr().out.split("SCOPE", 1)[1].split("\n", 1)[0]
+    assert "incomplete (not re-checked: leg 1's receipt is not in this record)" in scope
+    assert "NOT VERIFIED" not in scope and "FAILED" not in scope
+
+
+def test_a_leg_moved_off_ends_at_the_switch_in_the_verifier_and_the_plain_words(tmp_path):
+    VR = _vr()
+    legs, t = _chain(2)
+    d = _bundle_of(tmp_path, legs)
+    res = V.verify_bundle(str(d), [{"session_id": "S", "at": t(-900)}])
+    c = next(c for n, c, _ in res if n == "session-S.leg-1.receipt.json")
+    assert "before the switch that moved the conversation off it (" in _detail(c, "searches inside the session's verified window")
+    last = next(c for n, c, _ in res if n == "session-S.receipt.json")
+    assert _detail(last, "searches inside the session's verified window").endswith("to this leg")
+    f = VR.ai_session_facts(legs[0], [], V.leg_facts(str(d))["session-S.leg-1.receipt.json"])
+    txt = VR.plain_ai_lane(1, f)
+    assert "This leg's end is the moment the app recorded moving the conversation off it." in txt
+    assert "writes the end time when it last touched the record" not in txt
+    assert "between the time this leg's machine began serving and before the switch that moved the conversation off it (" in txt
+    lastf = VR.ai_session_facts(legs[-1], [], V.leg_facts(str(d))["session-S.receipt.json"])
+    assert "writes the end time when it last touched the record" in VR.plain_ai_lane(0, lastf)
+
+
+def test_the_not_carried_per_leg_note_appears_only_for_a_single_receipt_session(tmp_path):
+    legs, t = _chain(3)
+    d = tmp_path / "rec"
+    d.mkdir()
+    (d / "session-S.leg-1.receipt.json").write_text(json.dumps(legs[0]))
+    (d / "session-S.receipt.json").write_text(json.dumps(legs[2]))
+    c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
+    assert _detail(c, "a receipt for every leg") == "not re-checked: leg 2's receipt is not in this record"
+
+
+def test_a_passing_recheck_resumes_only_a_recheck_stop_and_many_stops_name_the_last():
+    r = {"verdict": "degraded", "started_at": "2026-11-03T09:00:00Z", "last_activity_at": "2026-11-03T09:10:00Z",
+         "events": [{"kind": "pinned", "ts": "2026-11-03T09:00:00Z", "detail": "a"},
+                    {"kind": "no-eligible-instance", "ts": "2026-11-03T09:01:00Z", "detail": "gone"},
+                    {"kind": "reverified", "ts": "2026-11-03T09:02:00Z", "detail": "4/4 instances verified"}]}
+    c = V.Checks()
+    V.check_receipt_consistency(c, r, [], [{"at": "2026-11-03T09:03:00Z"}])
+    assert _rows(c)["searches inside the session's verified window"] == "FAIL"
+    VR = _vr()
+    assert "after the last of those stops" in VR.PLAIN_AI_STOPPED_MANY and "after that moment" not in VR.PLAIN_AI_STOPPED_MANY
+
+
+def test_a_malformed_receipt_is_a_fail_row_not_a_traceback(tmp_path):
+    for bad, says in (({"events": 5}, "'events' is a int"),
+                      ({"served_by": [{"instance": "in_x", "attestation_sha256": "ab" * 32}]}, "'served_by[0].instance' is a str")):
+        r = {"schema": V.SCHEMA, "session_id": "s", "started_at": "2026-11-03T09:00:00Z", **bad}
+        c, ok = V.verify_receipt(r)
+        assert not ok and _rows(c)["malformed receipt"] == "FAIL" and says in _detail(c, "malformed receipt")
+        d = tmp_path / f"b{len(says)}"
+        d.mkdir()
+        (d / "session-S.receipt.json").write_text(json.dumps(r))
+        res = V.verify_bundle(str(d), [{"session_id": "S", "at": "2026-11-03T09:00:00Z"}])
+        assert res and V.exit_code(res) == 1
+        assert V.main([str(d)]) == 1

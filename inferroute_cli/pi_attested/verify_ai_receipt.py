@@ -944,40 +944,54 @@ NO_ELIGIBLE_WHY = ("the verified instance is gone and no verified alternative is
                    "unverified")
 
 
+def _as_list(v: Any) -> list:
+    return v if isinstance(v, list) else []
+
+
+def _as_dict(v: Any) -> dict:
+    return v if isinstance(v, dict) else {}
+
+
 def leg_stops(receipt: dict) -> List[Tuple[dt.datetime, str]]:
+    """Every stop in this receipt's own leg as (time, reason); see _stops."""
+    return [(t, w) for t, w, _k in _stops(receipt)]
+
+
+def _stops(receipt: dict) -> List[Tuple[dt.datetime, str, str]]:
     """Every stop in this receipt's own leg, each with its own reason: a `refused` event (its detail is the reason), a
     `no-eligible-instance` event, and each run of `reverify-failed` events that reaches the limit — the event whose
     detail says "(3 in a row)". A receipt with a stopping verdict and no such event falls back to its last failed
     re-check. The receipt's single `refusal` text is the reason of its LAST stop only, so it is never paired with an
     earlier stop's time (review of 24f5c42)."""
     import re as _re
-    own = [e for e in (receipt.get("events") or []) if isinstance(e, dict) and not e.get("from_previous_session")]
-    out: List[Tuple[dt.datetime, str]] = []
+    own = [e for e in _as_list(receipt.get("events")) if isinstance(e, dict) and not e.get("from_previous_session")]
+    out: List[Tuple[dt.datetime, str, str]] = []
     for e in own:
         t = _parse_time(e.get("ts"))
         if t is None:
             continue
         k, det = e.get("kind"), str(e.get("detail") or "")
         if k == "refused":
-            out.append((t, det or str(receipt.get("refusal") or "")))
+            out.append((t, det or str(receipt.get("refusal") or ""), "refused"))
         elif k == "no-eligible-instance":
-            out.append((t, NO_ELIGIBLE_WHY))
+            out.append((t, NO_ELIGIBLE_WHY, "no-eligible-instance"))
         elif k == "reverify-failed":
             m = _re.search(r"\((\d+) in a row\)", det)
             if m and int(m.group(1)) >= REVERIFY_LIMIT:
                 out.append((t, f"the enclave could not be re-verified {m.group(1)} times in a row — refusing to "
-                               "continue on stale evidence"))
+                               "continue on stale evidence", "reverify-failed"))
     if not out and str(receipt.get("verdict") or "") not in ("", "confidential"):
         rever = [t for t in (_parse_time(e.get("ts")) for e in own if e.get("kind") == "reverify-failed") if t]
         if rever:
-            out.append((rever[-1], str(receipt.get("refusal") or "")))
+            out.append((rever[-1], str(receipt.get("refusal") or ""), "reverify-failed"))
     out.sort(key=lambda x: x[0])
     if out and receipt.get("refusal"):
-        out[-1] = (out[-1][0], str(receipt["refusal"]))     # the receipt's own reason belongs to its last stop
+        out[-1] = (out[-1][0], str(receipt["refusal"]), out[-1][2])     # the receipt's own reason: its last stop
     return out
 
 
-def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str, Any]], searches: List[dict]) -> None:
+def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str, Any]], searches: List[dict], *,
+                              leg: Optional[Dict[str, Any]] = None) -> None:
     events = [e for e in (receipt.get("events") or []) if isinstance(e, dict)]
     pins = [e for e in events if e.get("kind") == "pinned"]
     # A conversation that moved machines continues in the NEW leg's receipt, which carries the earlier legs' served_by
@@ -1061,7 +1075,9 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             c.add(False, "continuity switches vs switched events", f"{cs} switch(es) counted but {sw} switched event(s) recorded")
     # Searches attributed to this receipt fall inside the window in which a verified machine of THIS leg served.
     verdict = str(receipt.get("verdict") or "")
-    stops = [t for t, _why in leg_stops(receipt)]
+    stop_list = _stops(receipt)
+    stops = [t for t, _why, _k in stop_list]
+    stop_kind = {t: k for t, _why, k in stop_list}
     pin_times = [t for t in (_parse_time(p.get("ts")) for p in own_pins) if t is not None]
     # Resuming after a stop: a machine selected again, or a re-check that passed and was not followed by the pinned
     # machine failing it (session.py _reverify writes `reverified`, then `pinned-failed-reverify` if the pin lost).
@@ -1073,8 +1089,11 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
     first_pin = pin_times[0] if pin_times else verified
     moved_in = next((t for t in (_parse_time(e.get("ts")) for e in own_events if e.get("kind") == "switched") if t), None)
     opens = max(first_pin, moved_in) if (first_pin is not None and moved_in is not None) else first_pin
+    legmeta = leg or {}
+    until = legmeta.get("ends")              # a leg the conversation moved off served until that switch
     if not searches:
-        c.add(None, "searches inside the session's verified window", "no search in this record is attributed to this session")
+        c.add(None, "searches inside the session's verified window",
+              "no search in this record is attributed to this " + ("leg" if legmeta.get("leg") else "session"))
     elif verdict == "refused" or opens is None:
         c.add(False, "searches inside the session's verified window",
               f"{len(searches)} search(es) attributed to a session whose AI machine was never verified ({verdict or 'no verdict'})")
@@ -1086,17 +1105,42 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             # before it and before the search (a session can stop and resume more than once; honouring only the first
             # stop passed a search made after the second — review of a14e349).
             stop = max((x for x in stops if t is not None and x < t), default=None)
-            resumed = stop is None or any(stop < pt <= t for pt in pin_times) or any(
-                stop < r <= t and not any(r <= x <= t for x in lost) for r in rechecked)
-            if t is None or t < opens or (last is not None and t > last + dt.timedelta(minutes=5)) or not resumed:
+            # A passing re-check resumes only a stop that failed re-checks caused: after `refused` or
+            # `no-eligible-instance` there is no machine to keep, so only a new pin resumes (review of c5156d2).
+            resumed = stop is None or any(stop < pt <= t for pt in pin_times) or (
+                stop_kind.get(stop) == "reverify-failed"
+                and any(stop < r <= t and not any(r <= x <= t for x in lost) for r in rechecked))
+            late = (t > until or t == until) if (t is not None and until is not None) else (
+                last is not None and t is not None and t > last + dt.timedelta(minutes=5))
+            if t is None or t < opens or late or not resumed:
                 outside.append(str(s_.get("at")))
         began = "the switch that moved the conversation here" if moved_in is not None and opens == moved_in else "the first pin"
+        ends = (f"before the switch that moved the conversation off it ({until.strftime('%H:%M:%SZ')})" if until is not None
+                else "five minutes after the session's last activity")
         c.add(not outside, "searches inside the session's verified window",
-              f"{len(searches)} search(es) between {began} ({opens.strftime('%H:%M:%SZ')}) and five minutes after the session's last activity" if not outside
+              f"{len(searches)} search(es) between {began} ({opens.strftime('%H:%M:%SZ')}) and {ends}" if not outside
               else f"outside the window (before a verified machine of this receipt served, after the session, or after a stop with no machine selected again): {', '.join(outside)[:200]}")
 
 
-def verify_receipt(receipt: dict, *, bundle_dir: Optional[str] = None, searches: Optional[List[dict]] = None) -> Tuple[Checks, bool]:
+def _malformed(receipt: dict) -> str:
+    """What is the wrong shape in a receipt, or "" — checked before anything reads it."""
+    for key, kind in (("events", list), ("served_by", list), ("counters", dict), ("instance", dict),
+                      ("attestation", dict), ("checks", dict)):
+        v = receipt.get(key)
+        if v is not None and not isinstance(v, kind):
+            return f"'{key}' is a {type(v).__name__}, not a {kind.__name__}"
+    for key in ("events", "served_by"):
+        for i, x in enumerate(receipt.get(key) or []):
+            if not isinstance(x, dict):
+                return f"'{key}[{i}]' is a {type(x).__name__}, not an object"
+            for sub in ("instance",):
+                if x.get(sub) is not None and not isinstance(x.get(sub), dict):
+                    return f"'{key}[{i}].{sub}' is a {type(x.get(sub)).__name__}, not an object"
+    return ""
+
+
+def verify_receipt(receipt: dict, *, bundle_dir: Optional[str] = None, searches: Optional[List[dict]] = None,
+                   leg: Optional[Dict[str, Any]] = None) -> Tuple[Checks, bool]:
     """All rows for one receipt. Returns (checks, ok) where ok means NO FAIL and NO SKIP: a receipt an older
     client wrote is not 'ok' here even when nothing in it contradicts, because part of it was not re-checked."""
     c = Checks()
@@ -1109,14 +1153,23 @@ def verify_receipt(receipt: dict, *, bundle_dir: Optional[str] = None, searches:
           if schema_ok else f"not an {SCHEMA} receipt")
     if not schema_ok:
         return c, False
-    machines = _machines(receipt, bundle_dir, c)
-    infos = []
-    for label, att, at in machines:
-        try:
-            infos.append(check_machine(c, att, at, label=label))
-        except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal
-            c.add(False, f"{label}", f"verifier error: {type(exc).__name__}: {str(exc)[:100]}")
-    check_receipt_consistency(c, receipt, infos, list(searches or []))
+    bad = _malformed(receipt)
+    if bad:
+        # A receipt whose fields have the wrong shapes is reported, never a traceback (review of c5156d2).
+        c.add(False, "malformed receipt", bad)
+        return c, False
+    try:
+        machines = _machines(receipt, bundle_dir, c)
+        infos = []
+        for label, att, at in machines:
+            try:
+                infos.append(check_machine(c, att, at, label=label))
+            except Exception as exc:                            # noqa: BLE001 — a crash must read as a refusal
+                c.add(False, f"{label}", f"verifier error: {type(exc).__name__}: {str(exc)[:100]}")
+        check_receipt_consistency(c, receipt, infos, list(searches or []), leg=leg)
+    except (TypeError, AttributeError, ValueError, KeyError, IndexError) as exc:
+        c.add(False, "malformed receipt", f"{type(exc).__name__}: {str(exc)[:120]}")
+        return c, False
     for n in NOT_RECOMPUTED:
         c.add(None, "not recomputed", n)
     if receipt.get("preamble_path") != "home-relative":
@@ -1156,7 +1209,7 @@ def session_of(receipt_file: str) -> str:
 
 def _own_switch(receipt: dict) -> Optional[dt.datetime]:
     """When the conversation was switched INTO this leg: its own (untagged) `switched` event, or None for a first leg."""
-    for e in receipt.get("events") or []:
+    for e in _as_list(receipt.get("events")):
         if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "switched":
             t = _parse_time(e.get("ts"))
             if t is not None:
@@ -1169,7 +1222,7 @@ def _serving_from(receipt: dict) -> Optional[dt.datetime]:
     sw = _own_switch(receipt)
     if sw is not None:
         return sw
-    for e in receipt.get("events") or []:
+    for e in _as_list(receipt.get("events")):
         if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "pinned":
             t = _parse_time(e.get("ts"))
             if t is not None:
@@ -1188,7 +1241,7 @@ def _switches(receipt: dict) -> List[Tuple[dt.datetime, str]]:
     (in the order each leg carried them), then its own. Each is (time, detail); the detail names the move ("m1 -> m2
     (why)"), so two switches in the same second remain two (review of 24f5c42)."""
     out = []
-    for e in receipt.get("events") or []:
+    for e in _as_list(receipt.get("events")):
         if isinstance(e, dict) and e.get("kind") == "switched":
             t = _parse_time(e.get("ts"))
             if t is not None:
@@ -1197,7 +1250,7 @@ def _switches(receipt: dict) -> List[Tuple[dt.datetime, str]]:
 
 
 def _own_switch_event(receipt: dict) -> Optional[Tuple[dt.datetime, str]]:
-    for e in receipt.get("events") or []:
+    for e in _as_list(receipt.get("events")):
         if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "switched":
             t = _parse_time(e.get("ts"))
             if t is not None:
@@ -1206,6 +1259,10 @@ def _own_switch_event(receipt: dict) -> Optional[Tuple[dt.datetime, str]]:
 
 
 EVERY_LEG = "a receipt for every leg"
+SEARCHES_IN_MISSING_LEG = "searches in a leg whose receipt is not here"
+# Rows that only say a leg's receipt is absent from the record. Absence is a gap, never a contradiction: they are SKIP
+# (the receipt is not fully re-checked: exit 4), and a reader of the plain words is told the gap, not a failure.
+MISSING_LEG_ROWS = (EVERY_LEG, SEARCHES_IN_MISSING_LEG)
 
 
 def _plan(bundle_dir: str, searches: Optional[List[dict]]):
@@ -1269,33 +1326,41 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
                     given[legs[j]].append(x)
                 else:
                     lost.setdefault(j, []).append(str(x.get("at")))
-            cs = (top.get("counters") or {}).get("continuity_switches") if isinstance(top.get("counters"), dict) else None
+            cs = _as_dict(top.get("counters")).get("continuity_switches")
             want = (cs if isinstance(cs, int) else len(sw)) + 1
             readable = len([n for n in files if isinstance(docs.get(n), dict)])
+            gone = "; ".join(f"leg {j}'s receipt is not in this record" for j in missing)
             if not missing and readable == want:
                 extra[main].append((True, EVERY_LEG, f"{want} leg(s) by the conversation's switch count, a readable "
                                                      "receipt here for each"))
-            elif missing and not lost and readable == len(legs):
-                extra[main].append((None, EVERY_LEG,
-                                    f"not re-checked: leg(s) {', '.join(map(str, missing))} of this conversation, whose "
-                                    "receipt is not in this record (a record exported before receipts were carried for "
-                                    "each leg holds only one per session); no search in this record falls in "
-                                    + ("it" if len(missing) == 1 else "them")))
+            elif missing and readable == len(legs):
+                extra[main].append((None, EVERY_LEG, "not re-checked: " + gone + (
+                    " (a record exported before receipts were carried for each leg holds one receipt per session)"
+                    if len(files) == 1 else "")))
             else:
+                # Something present contradicts something present: receipts here that are no leg of this conversation.
                 extra[main].append((False, EVERY_LEG,
-                                    f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here; "
-                                    + (f"no readable receipt for leg(s) {', '.join(map(str, missing))}" if missing
-                                       else "the receipts here do not match its legs one to one")))
+                                    f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here, "
+                                    "and the receipts here do not match its legs one to one"
+                                    + (f"; {gone}" if missing else "")))
             for j, ats in sorted(lost.items()):
-                extra[main].append((False, "searches inside the session's verified window",
-                                    f"{len(ats)} search(es) fall in leg {j} of this conversation, whose receipt is not in "
-                                    f"this record, so nothing here shows a verified machine served them: {', '.join(ats)[:160]}"))
+                # Never a PASS: these searches are given to no receipt. Not a FAIL either: nothing here contradicts them.
+                extra[main].append((None, SEARCHES_IN_MISSING_LEG,
+                                    f"not re-checked: {len(ats)} search(es) fall in leg {j} of this conversation, whose "
+                                    f"receipt is not in this record, so nothing here shows which machine served them: "
+                                    f"{', '.join(ats)[:160]}"))
             continue
         if main not in files or not isinstance(top, dict):
             if any(_leg_number(n) for n in files):
-                extra[files[0]].append((False, EVERY_LEG,
-                                        "this conversation's earlier legs are here but its last leg's receipt "
-                                        f"({main}) is not, or cannot be read, so its legs cannot be told apart"))
+                # Without the last leg's receipt the legs' serving times are unknown, so no search can be placed on one:
+                # every search of this session is not re-checked, and none can pass.
+                extra[files[0]].append((None, EVERY_LEG, "not re-checked: the last leg's receipt is not in this record, "
+                                                         "so this conversation's legs cannot be told apart"))
+                if mine:
+                    extra[files[0]].append((None, SEARCHES_IN_MISSING_LEG,
+                                            f"not re-checked: {len(mine)} search(es) of a conversation whose last leg's "
+                                            "receipt is not in this record, so nothing here shows which machine served them"))
+                continue
         if len(files) == 1:
             given[files[0]] = mine
             continue
@@ -1343,7 +1408,7 @@ def verify_bundle(bundle_dir: str, searches: Optional[List[dict]] = None) -> Lis
             c.add(False, "receipt", f"unreadable ({type(exc).__name__})")
             out.append((name, c, False))
             continue
-        c, ok = verify_receipt(receipt, bundle_dir=bundle_dir, searches=given.get(name, []))
+        c, ok = verify_receipt(receipt, bundle_dir=bundle_dir, searches=given.get(name, []), leg=_legs.get(name))
         for row in extra.get(name, []):
             c.add(*row)
         if extra.get(name):

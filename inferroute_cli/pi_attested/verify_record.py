@@ -3177,8 +3177,8 @@ PLAIN_AI_LEG_INDEX = (
 PLAIN_AI_SEARCHES_LINKED_LEG = (
     "The app's own list links patent searches in this record to this conversation, and this check gave {n} of them to "
     "this leg by their times, as the app recorded them, against the moments the app records switching machines; it "
-    "checks only that each falls between the time this leg's machine began serving and five minutes after this leg's "
-    "last activity{refusal_bound}, not that it came from the conversation: the link rests on timing and on the app's "
+    "checks only that each falls between the time this leg's machine began serving and {until}{refusal_bound}, not that "
+    "it came from the conversation: the link rests on timing and on the app's "
     "list, not on anything the machines signed.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
@@ -3215,14 +3215,24 @@ PLAIN_AI_SESSION_EMPTY_LEG = _leg_of(PLAIN_AI_SESSION_EMPTY,
                                       "conversation, which ran"),
                                      ("show when the conversation ran", "show when this leg ran"))
 PLAIN_AI_SESSION_NOCOUNT_LEG = _leg_of(PLAIN_AI_SESSION_NOCOUNT, ("The app's record of this conversation", "The app's record of this leg"))
+# What the record checks of a leg's stop: that it lies between the leg's receipt being opened and its last recorded
+# activity (the timeline row), which is not the serving window the paragraph prints, so the sentence says which it is.
+_LEG_TIMELINE = "between the time this leg's receipt was opened and its last recorded activity"
 PLAIN_AI_REFUSED_LEG = _leg_of(PLAIN_AI_REFUSED, ("In this conversation the app", "In this leg of the conversation the app"),
-                               ("inside the conversation's time window", "inside this leg's time window"))
+                               ("inside the conversation's time window", _LEG_TIMELINE))
 PLAIN_AI_STOPPED_LEG = _leg_of(PLAIN_AI_STOPPED, ("in this conversation at {ts}", "in this leg of the conversation at {ts}"),
-                               ("inside the conversation's time window", "inside this leg's time window"))
-_STOPPED_TAIL = PLAIN_AI_STOPPED.split("time window. ", 1)[1]
+                               ("inside the conversation's time window", _LEG_TIMELINE))
+_STOPPED_TAIL = _leg_of(PLAIN_AI_STOPPED.split("time window. ", 1)[1],
+                        ("further requests after that moment", "further requests after the last of those stops"),
+                        ("requests sent after that moment", "requests sent after the last of those stops"))
 PLAIN_AI_STOPPED_MANY = (
     "By its own record the app stopped trusting a machine {where} more than once: {stops}; this record checks only that "
-    "each stop and the failures recorded before it lie inside {window}. " + _STOPPED_TAIL)
+    "each stop and the failures recorded before it lie {window}. " + _STOPPED_TAIL)
+# A leg the conversation was moved OFF: its end is that move, not the app's last save.
+PLAIN_AI_SESSION_LEG_MOVED = _leg_of(PLAIN_AI_SESSION_LEG, (
+    "The app writes the end time when it last touched the record, which can be after the last message or, if the app was "
+    "closed while a reply was arriving, before that reply.",
+    "This leg's end is the moment the app recorded moving the conversation off it."))
 PLAIN_AI_SEARCHES_NONE_LEG = (
     "This check gave none of the patent searches this record links to this conversation to this leg, so it does not show "
     "which searches, if any, the AI assistant ran during it.")
@@ -3287,7 +3297,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows, leg: Optional[Dict[str, Any]
     lims = " ".join(str(x.get("text") or "") for x in (receipt.get("limitations") or []) if isinstance(x, dict))
     old_lims = "readable nowhere else" in lims or "the words are not." in lims
     first_pin = str(pins[0].get("ts") or "") if pins else ""   # as the verifier's window
-    return {"leg": leg, "requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
+    return {"leg": leg, "moved_off": legmeta.get("ends") is not None, "requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
             "why": why[:240], "stopped_at": stopped_at, "first_pin": first_pin, "rever_n": len(rever), "old_lims": old_lims,
             "failed_recheck_at": str(pfr[0].get("ts") or "") if pfr else "", "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
@@ -3375,7 +3385,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                f"them only to those machines (on the way they pass through {path_words}, described below)") if f["requests"] is not None else
               (f"any message it sent in {'this leg' if leg else 'this conversation'} was encrypted so that only the machines named here could read "
                f"it, and was addressed only to those machines (on the way it passes through {path_words}, described below)"))
-    session = ((PLAIN_AI_SESSION_LEG if leg else PLAIN_AI_SESSION) if f["requests"] is not None
+    moved_off = bool(f.get("moved_off"))
+    session = (((PLAIN_AI_SESSION_LEG_MOVED if moved_off else PLAIN_AI_SESSION_LEG) if leg else PLAIN_AI_SESSION)
+               if f["requests"] is not None
                else (PLAIN_AI_SESSION_NOCOUNT_LEG if leg else PLAIN_AI_SESSION_NOCOUNT)).format(
         window=_plain_window(f["start"], f["end"]),
         credit=("" if not f["requests"] else
@@ -3409,7 +3421,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
     refusal = ("" if not f["refused"] else " " + (
         PLAIN_AI_STOPPED_MANY.format(
             where="in this leg of the conversation" if leg else "in this conversation",
-            window="this leg's time window" if leg else "the conversation's time window",
+            window=_LEG_TIMELINE if leg else "inside the conversation's time window",
             stops="; ".join(f"at {_plain_time(ts)}" + (f", because {w.rstrip('.')}" if w else "") for ts, w in stops))
         if len(stops) > 1 else
         (PLAIN_AI_STOPPED_LEG if leg else PLAIN_AI_STOPPED).format(ts=_plain_time(f["stopped_at"]), why=f["why"].rstrip("."))
@@ -3448,7 +3460,9 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                  places="the machines and the gateway" if direct else "the machines, the relay and the gateway",
                                  agreement=("which agreement covers this conversation, since you used your own account with the AI operator"
                                             if direct else "whether your agreement is with InferRoute alone")) + " " + (
-                 (PLAIN_AI_SEARCHES_LINKED_LEG if leg else PLAIN_AI_SEARCHES_LINKED).format(n=linked_searches, refusal_bound=(
+                 (PLAIN_AI_SEARCHES_LINKED_LEG if leg else PLAIN_AI_SEARCHES_LINKED).format(n=linked_searches, until=(
+                     f"before the switch that moved the conversation off it ({_plain_time(f['end'])})" if moved_off
+                     else "five minutes after this leg's last activity"), refusal_bound=(
                      ", and before the app stopped trusting a machine unless it selected one again before the search"
                      if f["refused"] else ""))
                  + ((" The app counted no request in this leg, although this check gave these searches to it by their times."
@@ -3490,12 +3504,13 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     # A conversation that moved between machines has a receipt per leg. A leg whose receipt is not in the record, with
     # no search in it, is only "not re-checked": the receipts that ARE here are still described in plain words.
     every_leg = getattr(v, "EVERY_LEG", None)
+    gap_rows = tuple(getattr(v, "MISSING_LEG_ROWS", (every_leg,)))
     ok_n = failed_n = 0
     plain_ok = []
     for name, c, ok in results:
         print(f"  {name}")
         c.dump(indent="    ")
-        rest = [x for x in v.blocking_skips(c) if x != every_leg]
+        rest = [x for x in v.blocking_skips(c) if x not in gap_rows]
         if c.failed:
             failed_n += 1
             gone = [d for st, n, d in c.rows if st == "FAIL" and "whose receipt is not in this record" in d]
@@ -3508,7 +3523,8 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
                   "recorded build all hold; SKIP rows name what no record can establish")
         elif not rest:
             print("    → INCOMPLETE: this receipt re-checks; another leg of its conversation was not re-checked, because "
-                  "its receipt is not in this record")
+                  "its receipt is not in this record" + (", and the searches made during that leg were not re-checked "
+                                                        "either" if any(n == gap_rows[-1] for _s, n, _d in c.rows) else ""))
         else:
             print(f"    → INCOMPLETE: {len(rest)} row(s) could not be re-checked from this receipt (an older "
                   "client did not keep the material); nothing in it contradicts")
@@ -3522,10 +3538,10 @@ def report_ai_receipts(bundle_dir: str, searches: List[Dict[str, Any]]) -> Optio
     if bool(results) and all(plain_ok) and not _AI_LANE_VERIFIED:
         for _name, c, _ok in results:
             for st, n, d in c.rows:
-                m = re.search(r"leg\(s\) ([\d, ]+) of this conversation", d) if (st == "SKIP" and n == every_leg) else None
-                if m:
-                    _AI_LANE_MISSING_LEGS += [f"leg {j.strip()}'s receipt is not in this record"
-                                              for j in m.group(1).split(",") if j.strip()]
+                if st == "SKIP" and n == every_leg:
+                    found = re.findall(r"leg (\d+)'s receipt is not in this record", d)
+                    _AI_LANE_MISSING_LEGS += [f"leg {j}'s receipt is not in this record" for j in found] or (
+                        ["the last leg's receipt is not in this record"] if "last leg's receipt" in d else [])
         if _AI_LANE_MISSING_LEGS:
             print("  AI receipts: incomplete (not re-checked: " + "; ".join(_AI_LANE_MISSING_LEGS) + "). The receipts "
                   "that are here re-check; the plain words below describe only them.")

@@ -3461,7 +3461,7 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                  agreement=("which agreement covers this conversation, since you used your own account with the AI operator"
                                             if direct else "whether your agreement is with InferRoute alone")) + " " + (
                  (PLAIN_AI_SEARCHES_LINKED_LEG if leg else PLAIN_AI_SEARCHES_LINKED).format(n=linked_searches, until=(
-                     f"before the switch that moved the conversation off it ({_plain_time(f['end'])})" if moved_off
+                     f"the switch that moved the conversation off it ({_plain_time(f['end'])})" if moved_off
                      else "five minutes after this leg's last activity"), refusal_bound=(
                      ", and before the app stopped trusting a machine unless it selected one again before the search"
                      if f["refused"] else ""))

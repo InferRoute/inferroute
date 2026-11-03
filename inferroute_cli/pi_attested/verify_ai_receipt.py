@@ -1115,7 +1115,7 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             if t is None or t < opens or late or not resumed:
                 outside.append(str(s_.get("at")))
         began = "the switch that moved the conversation here" if moved_in is not None and opens == moved_in else "the first pin"
-        ends = (f"before the switch that moved the conversation off it ({until.strftime('%H:%M:%SZ')})" if until is not None
+        ends = (f"the switch that moved the conversation off it ({until.strftime('%H:%M:%SZ')})" if until is not None
                 else "five minutes after the session's last activity")
         c.add(not outside, "searches inside the session's verified window",
               f"{len(searches)} search(es) between {began} ({opens.strftime('%H:%M:%SZ')}) and {ends}" if not outside

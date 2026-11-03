@@ -873,14 +873,14 @@ def test_a_leg_moved_off_ends_at_the_switch_in_the_verifier_and_the_plain_words(
     d = _bundle_of(tmp_path, legs)
     res = V.verify_bundle(str(d), [{"session_id": "S", "at": t(-900)}])
     c = next(c for n, c, _ in res if n == "session-S.leg-1.receipt.json")
-    assert "before the switch that moved the conversation off it (" in _detail(c, "searches inside the session's verified window")
+    assert ") and the switch that moved the conversation off it (" in _detail(c, "searches inside the session's verified window")
     last = next(c for n, c, _ in res if n == "session-S.receipt.json")
     assert _detail(last, "searches inside the session's verified window").endswith("to this leg")
     f = VR.ai_session_facts(legs[0], [], V.leg_facts(str(d))["session-S.leg-1.receipt.json"])
     txt = VR.plain_ai_lane(1, f)
     assert "This leg's end is the moment the app recorded moving the conversation off it." in txt
     assert "writes the end time when it last touched the record" not in txt
-    assert "between the time this leg's machine began serving and before the switch that moved the conversation off it (" in txt
+    assert "between the time this leg's machine began serving and the switch that moved the conversation off it (" in txt
     lastf = VR.ai_session_facts(legs[-1], [], V.leg_facts(str(d))["session-S.receipt.json"])
     assert "writes the end time when it last touched the record" in VR.plain_ai_lane(0, lastf)
 

@@ -753,14 +753,52 @@ def end_host_session_record(path: str | Path, **fields) -> None:
         pass
 
 
+def _model_lane(receipt) -> dict:
+    checks = dict(getattr(receipt, "checks", None) or {})
+    passed = sum(1 for c in checks.values() if isinstance(c, dict) and c.get("ok"))
+    return {
+        "verified": bool(getattr(receipt, "is_confidential", False)),
+        "checks": f"{passed}/{len(checks)}" if checks else "",
+        "receipt": str(getattr(receipt, "path", "") or ""),
+        "check_list": [{"label": c.get("label", k), "ok": bool(c.get("ok")), "why": c.get("why", "")}
+                       for k, c in checks.items() if isinstance(c, dict)],
+        "model": str(getattr(receipt, "model_short", "") or ""),
+        "instance": (getattr(receipt, "instance", None) or {}).get("id") if isinstance(
+            getattr(receipt, "instance", None), dict) else None,
+    }
+
+
+def update_host_session_receipt(path: str | Path, receipt) -> None:
+    """Point a host-written session record at the receipt the conversation is on NOW.
+
+    The record is written at launch, naming the receipt then active. When the lane moves the conversation to a
+    standby machine, the new leg's receipt holds it from then on (the `switched` note, and every earlier machine
+    carried into its `served_by`), so a record left naming the first leg would export an abandoned receipt. Called
+    on every switch and at the end. The receipts it named before are kept under `earlier_receipts`, so the change
+    is visible rather than silent. Never raises: a record that cannot be updated keeps what it had."""
+    try:
+        new = str(getattr(receipt, "path", "") or "")
+        p = Path(path)
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        lane = doc.get("model_lane") if isinstance(doc.get("model_lane"), dict) else {}
+        old = str(lane.get("receipt") or "")
+        if not new or new == old:
+            return
+        earlier = [e for e in (lane.get("earlier_receipts") or []) if isinstance(e, str)]
+        if old and old not in earlier:
+            earlier.append(old)
+        doc["model_lane"] = {**_model_lane(receipt), "earlier_receipts": earlier}
+        _write_atomic(p, doc)
+    except Exception:                                       # noqa: BLE001
+        pass
+
+
 def host_session_record(*, sess_id: str, receipt, surface: str, confinement: str, mode: str,
                         matter: str = "") -> dict:
     """The record body for a session the host records itself, in the shape the extension's records have
     (inferroute.attested-session/1), so the home page, `anteriora proof` and the export read it the same way."""
     import datetime as _dt
     now = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    checks = dict(getattr(receipt, "checks", None) or {})
-    passed = sum(1 for c in checks.values() if isinstance(c, dict) and c.get("ok"))
     return {
         "schema": "inferroute.attested-session/1",
         "session_id": sess_id,
@@ -770,16 +808,7 @@ def host_session_record(*, sess_id: str, receipt, surface: str, confinement: str
         "surface": surface,
         "started_at": now,
         "written_at": now,
-        "model_lane": {
-            "verified": bool(getattr(receipt, "is_confidential", False)),
-            "checks": f"{passed}/{len(checks)}" if checks else "",
-            "receipt": str(getattr(receipt, "path", "") or ""),
-            "check_list": [{"label": c.get("label", k), "ok": bool(c.get("ok")), "why": c.get("why", "")}
-                           for k, c in checks.items() if isinstance(c, dict)],
-            "model": str(getattr(receipt, "model_short", "") or ""),
-            "instance": (getattr(receipt, "instance", None) or {}).get("id") if isinstance(
-                getattr(receipt, "instance", None), dict) else None,
-        },
+        "model_lane": _model_lane(receipt),
         "search_lane": {"offered": False, "searches": []},
         "confinement": confinement,
         "note": ("Written by the launcher: this session had no search machine, so no search verifier to write it. "

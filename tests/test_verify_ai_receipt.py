@@ -460,3 +460,22 @@ def test_a_search_after_a_resumed_session_is_inside_the_window():
         V.check_receipt_consistency(c, receipt, [], [{"at": at, "session_id": "s"}])
         row = [r for r in c.rows if r[1] == "searches inside the session's verified window"]
         assert row and (row[0][0] == "PASS") is ok, (at, row)
+
+
+def test_a_failed_receipt_outranks_an_incomplete_one_in_the_exit_code(tmp_path, capsys):
+    """Review of 9eecef6 (3 Nov): the exit code was the numeric maximum over receipts, so a folder holding one
+    receipt that FAILED and one that was only INCOMPLETE exited 4 — and the FAIL read as "could not be re-checked".
+    A FAIL anywhere is exit 1. The tampered receipt sorts FIRST here, which is the order the old rule got wrong."""
+    b = _bundle(tmp_path, "fresh")
+    _mutate(b, FRESH, lambda att: att["checked_with"].__setitem__("challenge", "cd" * 32))
+    for f in (FIX / "legacy").iterdir():
+        shutil.copy(f, b / f.name)
+    results = V.verify_bundle(str(b))
+    by_name = {n: (c, ok) for n, c, ok in results}
+    assert by_name[FRESH][0].failed and not by_name[LEGACY][0].failed and not by_name[LEGACY][1]
+    assert sorted(by_name) == [FRESH, LEGACY]
+    assert V.exit_code(results) == 1
+    assert V.main([str(b)]) == 1
+    assert V.exit_code([r for r in results if r[0] == LEGACY]) == 4
+    ok_only = V.verify_bundle(str(_bundle(tmp_path / "ok", "fresh")))
+    assert V.exit_code(ok_only) == 0

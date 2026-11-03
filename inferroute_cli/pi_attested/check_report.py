@@ -67,6 +67,11 @@ def totals(manifest):
     return {6: c["searches"], 7: c["session_receipts"], 8: c["document_reads"]}, c["statements"]
 
 
+def unit_of(manifest):
+    """What one claim's count counts in this pack: receipts in a name check's, operations in a prior-art one's."""
+    return "receipts" if manifest.get("kind") == "name-check" else "operations"
+
+
 def claim_total(manifest, cid):
     # A pack whose claims are not the prior-art eight (a name check's) states each claim's count itself.
     stated = manifest.get("claim_totals")
@@ -210,7 +215,7 @@ def check_report(pack, report_path):
                 problems.append(("headings", f"'## {got}' is not one of the claims",
                                  "remove it or restore the claim's exact title; do not add or retitle claims"))
         if sorted(claim_heads) == sorted(expected_heads):
-            problems.append(("headings", "the claims are not in order 1..8", "put them back in the order of the template"))
+            problems.append(("headings", f"the claims are not in order 1..{len(wanted)}", "put them back in the order of the template"))
 
     for sec in SECTIONS:
         if sec not in heads:
@@ -241,14 +246,14 @@ def check_report(pack, report_path):
         covered[n] = cov
         total = claim_total(manifest, n)
         if cov["N"] is not None and cov["N"] != total:
-            problems.append((where, f"your 'Covered by' says {cov['N']} operations; this pack has {total} for this claim",
+            problems.append((where, f"your 'Covered by' says {cov['N']} {unit_of(manifest)}; this pack has {total} for this claim",
                              f"use 'of {total}'"))
         if cov["tool"] > total or cov["own"] > total:
-            problems.append((where, "a count is larger than the number of operations", f"counts cannot exceed {total}"))
+            problems.append((where, f"a count is larger than the number of {unit_of(manifest)}", f"counts cannot exceed {total}"))
         reached = max(cov["tool"], cov["own"])
         none_left = neither_is_none(cov["neither"])
         if total == 0 and v in ("VERIFIED", "VERIFIED IN PART"):
-            problems.append((where, f"{v}, but this pack holds 0 operations for this claim — there is nothing to have verified",
+            problems.append((where, f"{v}, but this pack holds 0 {unit_of(manifest)} for this claim — there is nothing to have verified",
                              "COULD NOT CHECK, with 'tool: 0 of 0 · my own recomputation: 0 of 0' and what is missing after 'neither:'"))
             continue
         if v == "VERIFIED" and (not none_left or reached != total):

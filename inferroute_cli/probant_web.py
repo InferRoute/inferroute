@@ -431,7 +431,7 @@ def audit_launch_script(pack: Path, command: str) -> Path:
     #     filing evidence tampering that was really a colleague's scratch edit;
     #   * anything an auditor writes in there is one more file the NEXT reader has to account for.
     # The copy sits beside the original as `audit-run-<pack>-<pid>`, so a report written "one directory
-    # up" lands in the exports folder where every other report already is, and the original is never
+    # up" lands in the pack's own folder under the audit packs root (nothing else is there), and the original is never
     # opened for writing by anyone.
     # One server can launch several auditors: its pid alone is not a unique run id.
     run = pack.parent / f"audit-run-{pack.name}-{os.getpid()}-{d.name}"

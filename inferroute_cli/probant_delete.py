@@ -64,15 +64,24 @@ def _exports_of(client: str, matter: str) -> List[Path]:
             shas.add(_sha256(d / "MANIFEST.json"))
         except OSError:
             pass
-    packs = []
-    for d in root.iterdir():
-        if d.is_dir() and d.name.startswith("audit-pack-"):
-            try:
-                m = json.loads((d / "MANIFEST.json").read_text())
-            except (OSError, ValueError):
-                continue
-            if m.get("derived_from_manifest_sha256") in shas:
-                packs.append(d)
+    from .probant_export import audit_packs_root
+
+    def made_from_these(pack: Path) -> bool:
+        try:
+            m = json.loads((pack / "MANIFEST.json").read_text())
+        except (OSError, ValueError):
+            return False
+        return m.get("derived_from_manifest_sha256") in shas
+
+    # Packs written before they moved out of the matters' tree sit in exports beside the records.
+    packs = [d for d in root.iterdir() if d.is_dir() and d.name.startswith("audit-pack-") and made_from_these(d)]
+    # Since then each pack sits alone in a random-named folder under audit_packs_root(), with the auditors'
+    # working copies and reports beside it: the whole folder goes with the matter.
+    neutral = audit_packs_root()
+    for holder in (neutral.iterdir() if neutral.is_dir() else []):
+        if holder.is_dir() and any(p.is_dir() and p.name.startswith("audit-pack-") and made_from_these(p)
+                                   for p in holder.iterdir()):
+            packs.append(holder)
     return sorted(records) + sorted(packs)
 
 
@@ -125,6 +134,10 @@ def delete(client: str, matter: str) -> Dict[str, Any]:
 
     moved: List[Dict[str, str]] = []
     left: List[str] = []
+    # Found BEFORE anything moves: telling this matter's records from a same-named older matter's reads the
+    # matter's creation stamp from matter.json, which is the first thing moved below. Read afterwards, every
+    # record whose manifest carries that stamp (all of today's) was left behind, and with it every audit pack.
+    exports = _exports_of(client, matter)
 
     def move(src: Path, name: str) -> None:
         if not src.exists():
@@ -153,7 +166,7 @@ def delete(client: str, matter: str) -> Dict[str, Any]:
             move(own, "workspace")
         elif named and Path(named).exists():
             left.append(named)
-        for d in _exports_of(client, matter):
+        for d in exports:
             move(d, f"exports/{d.name}")
     finally:
         (dest / MANIFEST).write_text(json.dumps(info, indent=1))
@@ -201,7 +214,8 @@ def restore(entry_id: str) -> str:
     taken = [m["from"] for m in moves if Path(m["from"]).exists()]
     if taken:
         raise S.ProbantError("a matter with the same name exists again. Rename or delete it, then restore.")
-    homes = (S.probant_root(), S._irhome() / "confidential")
+    from .probant_export import audit_packs_root
+    homes = (S.probant_root(), S._irhome() / "confidential", audit_packs_root())
     for m in moves:                                   # checked in full BEFORE anything moves back
         if not _within(d / m["to"], d) or not any(_within(Path(m["from"]), h) for h in homes):
             raise S.ProbantError("this deleted matter's list of files is not valid; it was not restored")

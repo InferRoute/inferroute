@@ -39,9 +39,13 @@ def restore(records_dir: Path | None, matter: str) -> dict:
             raise ValueError("saved audit association is not a regular small file")
         data = json.loads(state.read_text())
         pack, bundle = Path(data["pack"]), Path(data["bundle"])
+        from .probant_export import audit_packs_root
         exports = (S.probant_root() / client / "exports").resolve()
-        if pack.resolve().parent != exports or bundle.resolve().parent != exports:
-            raise ValueError("saved audit is outside this client's exports")
+        # A pack lives alone in a random-named folder under audit_packs_root(); one written before that moved
+        # sits in the client's exports beside the record.
+        where = pack.resolve().parent
+        if bundle.resolve().parent != exports or not (where == exports or where.parent == audit_packs_root().resolve()):
+            raise ValueError("saved audit is outside this client's exports and the audit packs folder")
         origin = json.loads((bundle / "MANIFEST.json").read_text())
         if origin.get("client") != client or origin.get("matter") != name or identity(pack) != data["identity"]:
             raise ValueError("saved audit association or pack has changed")
@@ -152,7 +156,7 @@ def validate(data, pack: Path, expected: dict) -> dict:
         total = _claim_total(manifest, wanted["id"])
         if type(coverage.get("total")) is not int or coverage["total"] != total:
             raise ValueError(f"claim {wanted['id']}: coverage total is {coverage.get('total')!r}; this pack holds "
-                             f"{total} operation(s) for this claim")
+                             f"{total} {_checker().unit_of(manifest)} for this claim")
         for key in ("tool", "independent"):
             if type(coverage.get(key)) is not int or not 0 <= coverage[key] <= total:
                 raise ValueError(f"claim {wanted['id']}: coverage '{key}' is {coverage.get(key)!r}; it must be a whole "

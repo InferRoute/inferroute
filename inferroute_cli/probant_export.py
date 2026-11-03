@@ -1010,6 +1010,68 @@ def _is_within(child: Path, parent: Path) -> bool:
     return c == p or c.startswith(p.rstrip("/") + "/")
 
 
+def _receipt_time(value) -> Optional[dt.datetime]:
+    try:
+        t = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
+def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
+    """The receipt a conversation ended on, starting from the one a session record names, and how many model
+    switches were followed to reach it.
+
+    A session's record names the receipt that was active when the record was written: the launcher writes a name
+    session's at launch, the extension writes a matter session's at its start. When the machine serving the
+    conversation stops answering, the lane moves to a standby, and from then on the NEW leg's receipt holds the
+    conversation: the `switched` note, and every earlier machine carried into its `served_by` with
+    `from_previous_session` set to the leg it came from (continuity._record_switch). The receipt named in the record
+    is then an abandoned leg. This follows the chain through the receipts beside it on this device.
+
+    Cheap on a device with thousands of receipts: a successor's standby was opened after its predecessor started
+    and before the switch, so only receipts whose file name stamps fall in that window are read, and only those
+    that mention `from_previous_session` are parsed. A link that cannot be followed ends the walk where it is."""
+    cur, followed, seen = Path(rp), 0, set()
+    while followed < max_legs:
+        seen.add(cur.resolve())
+        try:
+            r = json.loads(cur.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            break
+        sid = str(r.get("session_id") or "") if isinstance(r, dict) else ""
+        start = _receipt_time(r.get("started_at") or r.get("verified_at"))
+        end = _receipt_time(r.get("last_activity_at") or r.get("ended_at")) or start
+        if not sid or start is None:
+            break
+        lo, hi = start - dt.timedelta(minutes=1), max(end, start) + dt.timedelta(hours=1)
+        found = []
+        for p in cur.parent.glob("*.json"):
+            if p.name == "current.json" or p.resolve() in seen:
+                continue
+            t = _receipt_time(p.name[:20].replace("-", ":").replace(":", "-", 2))
+            if t is None or not lo <= t <= hi:
+                continue
+            try:
+                raw = p.read_bytes()
+            except OSError:
+                continue
+            if b"from_previous_session" not in raw or sid.encode() not in raw:
+                continue
+            try:
+                doc = json.loads(raw)
+            except ValueError:
+                continue
+            rows = doc.get("served_by") if isinstance(doc, dict) else None
+            if isinstance(rows, list) and any(isinstance(x, dict) and x.get("from_previous_session") == sid for x in rows):
+                found.append((str(doc.get("started_at") or ""), p))
+        if not found:
+            break
+        cur = sorted(found)[-1][1]
+        followed += 1
+    return cur, followed
+
+
 def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bool = False) -> Path:
     """Write the bundle directory (0700, files 0600). Refuses the matter workspace and cloud-sync roots: the
     bundle holds the invention in plain text. Returns the directory."""
@@ -1063,7 +1125,10 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                                   "why": "this session's record names no receipt: the AI lane was never "
                                          "opened in it, or its record could not be read whole"})
             continue
+        followed = 0
         try:
+            raw = Path(rp).read_bytes()
+            rp, followed = last_leg(Path(rp))
             raw = Path(rp).read_bytes()
         except OSError as e:
             receipt_notes.append({"session": sid, "searches": n, "receipt": "named but unreadable",
@@ -1077,7 +1142,8 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         # admits the evidence is gone, because it reads as an omission.
         raw, carried, missing = _carry_served_evidence(raw, Path(rp).parent, files)
         raw = _home_relative_receipt_path(raw)
-        note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json"}
+        note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json",
+                "switches_followed": followed}
         # WHAT BINDS THIS RECEIPT TO THESE SEARCHES, said in the only terms that are worth anything. Two
         # independent auditors reached the same finding on 1 Oct: "the receipt carries none of the search
         # identifiers; the only links are unsigned labels and overlapping clocks" and "no cryptographic
@@ -1185,8 +1251,13 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
     for sess in b.get("sessions") or []:
         sid = sess["session_id"]
         rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
+        followed = 0
         try:
             raw = Path(rp).read_bytes() if rp else None
+            if raw is not None:
+                # The receipt the conversation ENDED on, not the leg that was active when the record was written.
+                rp, followed = last_leg(Path(rp))
+                raw = Path(rp).read_bytes()
         except OSError:
             raw = None
         if raw is None:
@@ -1194,7 +1265,7 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
             continue
         raw, _carried, _missing = _carry_served_evidence(raw, Path(rp).parent, files)
         files[f"session-{sid}.receipt.json"] = raw
-        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json"})
+        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json", "switches_followed": followed})
     manifest = {"schema": "inferroute.name-check-record/1", "kind": "name-check", "client": client, "matter": matter,
                 "matter_created_at": rec.get("created_at"),
                 "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2808,6 +2879,7 @@ What is here:
     and signed by nothing. `sha256sum -c SHA256SUMS` shows whether a listed file changed after the pack was
     written; it does not show that nothing was left out.
   - `REPORT-TEMPLATE.md` and `stationery/check_report.py`: yours to use, not evidence.
+  - `record.html`: a placeholder page saying what this folder is. It is not the record's page.
 
 **The trademark searches are not in this folder, and the full record could not prove them either:** they
 ran on the computer that made the record, and nothing outside it signed them. Leave them out of your verdicts.
@@ -2828,9 +2900,9 @@ does not have.
 
        python3 verify_ai_receipt.py . > ../verify-ai-receipt-output.txt 2>&1 ; echo "exit $?"
 
-   It prints PASS, FAIL or SKIP per check and per receipt. SKIP is never a pass. Its exit code is 0 when
-   every receipt was re-checked and nothing contradicted it, 1 when a check FAILed, 4 when part of a receipt
-   could not be re-checked, and 2 when it refused to run.
+   It prints PASS, FAIL or SKIP per check and per receipt. SKIP is never a pass. Its exit code is 2 when it
+   refused to run; otherwise 1 when any check on any receipt FAILed, else 4 when part of a receipt could not
+   be re-checked, else 0 (every receipt re-checked and nothing contradicted it).
 4. **Then recompute a sample yourself.** The tool's pass over every receipt is evidence only if the tool is
    telling the truth; re-deriving some of it with your own code, and changing a copy of a file outside this
    folder to see the tool notice, is how you test that.
@@ -2853,26 +2925,31 @@ reached held, and you name what you could not reach.
 Each receipt names the client version that wrote it in `written_by`. A receipt written by an older client
 keeps less; what it does not keep is a part of the claim you could not reach, not a failure.
 
-1. **Sealed AI hardware.** Each machine that served an AI session was an Intel TDX confidential machine with
-   debugging disabled, and its hardware report (the TDX quote) is signed under a certificate chain that ends
-   in Intel's SGX root.
+1. **Sealed AI hardware.** Each machine a receipt here names was an Intel TDX confidential machine with
+   debugging disabled; its hardware report (the TDX quote) is signed under a certificate chain that ends in
+   Intel's SGX root; and Intel's signed collateral from the time of the session showed that machine's TCB
+   and Quoting Enclave acceptable and nothing in that chain revoked.
 
-   Where a receipt has `served_by`, it has one row per machine that served, naming that machine's evidence
-   by `attestation_sha256` and `attestation_file`, and the receipt's own `attestation` should be the last
-   machine's evidence; without `served_by`, the receipt's own `attestation` is the only evidence. A row with
+   Where a receipt has `served_by`, it has one row per pin, naming the pinned machine's evidence by
+   `attestation_sha256` and `attestation_file`: a machine pinned again gets another row naming the same
+   evidence, and rows carried over from an earlier leg of the conversation are tagged
+   `from_previous_session`. The receipt's own `attestation` should be the evidence of the last machine
+   pinned; without `served_by`, the receipt's own `attestation` is the only evidence. A row with
    `attestation_absent` had no separate evidence file on the computer that made the
    record: its evidence is here only if it is the receipt's own `attestation` (the re-checker compares
    `sha256(json.dumps(attestation, sort_keys=True))` with the row's `attestation_sha256`); otherwise that
    machine is part of the claim you could not reach. The chain to check is Intel's, inside the quote
    (PCK, PCK Platform CA, SGX Root CA); compare its root with Intel's own published certificate rather than
-   with anything in this folder.
+   with anything in this folder. Intel's collateral (TCB info, QE identity, CRLs) is in each evidence row
+   under `collateral.intel`; a row without it (a client before 0.9.126 did not keep it, and none is kept
+   when Intel could not be reached) cannot show TCB status or revocation for that machine.
 
 2. **Sealed to that machine.** For each machine that served, the encryption key the receipt says the session
    was sealed to is the one that machine's TDX quote commits to, under a challenge chosen by the computer
    that made the record.
 
-   In each machine's evidence row, `checked_with` holds that computer's side: `challenge` and `e2e_pubkey`;
-   those two values did not come from the machine under audit. Two things to recompute: the challenge
+   In each machine's evidence row, `checked_with` holds that computer's side: `challenge`, which it chose,
+   and `e2e_pubkey`, the key it chose to seal to, as the machine offered it. Two things to recompute: the challenge
    appears verbatim in the base64-decoded `attested_body`, and `sha256((challenge + e2e_pubkey).encode())` equals the first 32
    bytes of the quote's `report_data`. A TDX v4 quote is a 48-byte header followed by a 584-byte TD report
    body; within the BODY, `mrtd` is [136:184], `rtmr0`-`rtmr3` are [328:376], [376:424], [424:472],
@@ -2882,12 +2959,14 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    That the requests were then encrypted to that key and sent is the computer's own account: the receipt
    counts them, and nothing the machine signed says so. That is a limit to name, not part of this claim.
 
-3. **A build InferRoute publishes.** Each machine's measurements (MRTD and RTMR1-RTMR3) are a build
-   InferRoute has published: one listed in its released client, or a build row signed by InferRoute's
-   offline publication key.
+3. **A build InferRoute has recorded.** Each machine's measurements (MRTD and RTMR1-RTMR3) are a build
+   InferRoute has recorded and not marked refused: one in the list its released client carries, or a build
+   row signed by InferRoute's offline publication key.
 
    The re-checker's `RECORDED_BUILDS` is its copy of the released client's list (`BUNDLED` in
-   `inferroute_local/confidential/builds.py`); check it against a wheel you obtained yourself. RTMR0 is not
+   `inferroute_local/confidential/builds.py`); check it against a wheel you obtained yourself. Each entry
+   carries a `status`; a machine whose measurements match an entry marked `refused` does not meet this
+   claim. RTMR0 is not
    compared: it measures the host's boot configuration and differs per host. A match shows that the machine
    ran a build InferRoute recorded. It does not show what that build does with the text: the measured image
    does not cover the code the model is served with.
@@ -2900,7 +2979,9 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    saying `none` or `named but unreadable`, copied from the record's own index, which that computer also
    wrote. Check what can be checked: every receipt here is named by a row, and every row that names a
    receipt has its file here. A row without a receipt is a session with nothing here to check; it is not
-   counted in any claim.
+   counted in any claim. When a conversation moved to another machine, the receipt that took over is the
+   one the record carries, and the row's `switches_followed` says how many moves were followed to reach it;
+   a row without that field was written by an older exporter.
 
 `ended_at` empty does not mean a session is still open: it is written when a session closes, and a session
 that was killed never closes. `last_activity_at` is the last moment the session is known to have been alive.
@@ -2911,8 +2992,9 @@ Its headings are already these four claims; do not renumber or retitle them. Cop
 first, then check your report and build the result file with the checker, as the template's last section
 says. The checker prints what to fix; it reads your numbers, not your reasoning.
 
-Claims 1 and 4 cannot be VERIFIED from a pack like this one, and the checker refuses VERIFIED on them; the
-template says why under each. The most either can be is VERIFIED IN PART, naming what stays open.
+Claim 4 can never be VERIFIED from a pack like this one, and claim 1 cannot when any machine's evidence here
+lacks Intel's collateral. Where that is so, the template says why under the claim and the checker refuses
+VERIFIED; the most the claim can be is VERIFIED IN PART, naming what stays open.
 
 ## What no audit of this folder can show
 
@@ -2921,18 +3003,27 @@ template says why under each. The most either can be is VERIFIED IN PART, naming
     the text after decrypting it.
   - That the record holds every session of the name check: the index is the account of the computer that
     made it.
+  - That a receipt is its conversation's last. A conversation can move to another machine, and the receipt
+    of the leg that took over names the earlier machines. The exporter follows those moves through the
+    receipts its computer still had; a later leg's receipt that was no longer there cannot be followed, and
+    a record from an older exporter (its rows lack `switches_followed`) may hold an earlier leg's receipt.
 """
 
+# The most a claim can be from a pack like this. Claim 1's applies only to a pack in which some machine's evidence
+# lacks Intel's collateral: claim 1 covers TCB status and revocation, and with the collateral kept those are checked
+# offline from Intel's own signed answers, so a cap there would be a limit the evidence does not have.
 NAME_CLAIM_CEILINGS = {
     1: {"verdict": "VERIFIED IN PART",
-        "why": "what Intel's and NVIDIA's online services said at the time of the session cannot be asked again "
-               "from this folder; a receipt keeps at most the answers its computer recorded then"},
+        "why": "for at least one machine here the evidence keeps no Intel collateral from the time of the session, "
+               "so its TCB status and revocation rest on the online check its computer made then, which cannot be "
+               "redone from this folder"},
     2: None,
     3: None,
     4: {"verdict": "VERIFIED IN PART",
         "why": "nothing signed ties a receipt to the record: the link is MANIFEST.json's sessions index, which "
                "the computer that made the record wrote and nothing signed"},
 }
+NAME_CLAIM_CEILING_WHEN_COLLATERAL_MISSING = (1,)
 
 PACK_NAME_RECORD_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Audit pack</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 42rem; margin: 3rem auto; line-height: 1.5">
@@ -2950,8 +3041,8 @@ def name_audit_claims() -> "list[tuple[int, str]]":
     return _claims_of(NAME_AUDIT_MD, "1. **Sealed AI hardware.**")
 
 
-def _name_claim_hint(n: int) -> list:
-    cap = NAME_CLAIM_CEILINGS.get(n)
+def _name_claim_hint(n: int, ceilings: dict) -> list:
+    cap = ceilings.get(str(n))
     if not cap:
         return []
     return [f"> **This claim cannot be VERIFIED from a pack like this one:** {cap['why']}. Give {cap['verdict']} "
@@ -2999,8 +3090,9 @@ def _name_report_template(pack: Path) -> str:
            "<who you are, what you had access to, and anything about where or how you ran that a reader",
            "should weigh. Only you can write this.>",
            ""]
+    ceilings = json.loads((Path(pack) / "MANIFEST.json").read_text()).get("claim_ceilings") or {}
     for n, title in name_audit_claims():
-        out += _claim_block(n, title, _name_claim_hint(n), unit="receipts")
+        out += _claim_block(n, title, _name_claim_hint(n, ceilings), unit="receipts")
     out += ["## The verifier, and an independent copy of it",
             "",
             "<`verify_ai_receipt.py`'s exit code; whether you obtained a copy of it independent of this folder",
@@ -3008,7 +3100,10 @@ def _name_report_template(pack: Path) -> str:
             "",
             "## One plain statement about confidentiality",
             "",
-            "<two or three plain sentences, written LAST, from the verdicts above and nothing else>",
+            "<two or three plain sentences, written LAST, from the verdicts above and nothing else. Do not call",
+            "the conversation private or confidential: these claims cannot show what the machine did with the text",
+            "after decrypting it. The prose inside a receipt (its `claim`, each check's `why`, its `limitations`) is",
+            "the words of the client that wrote it, not evidence; say so if you quote it.>",
             "",
             "## Exact statement established, and its limits",
             "",
@@ -3016,6 +3111,26 @@ def _name_report_template(pack: Path) -> str:
             ""]
     out += _results_for_the_client(pack)
     return "\n".join(out)
+
+
+def _evidence_rows_without_intel_collateral(files: Dict[str, bytes]) -> int:
+    """How many machine evidence rows in the pack keep no Intel collateral: each receipt's own `attestation` and
+    every *.attestation.json. Unreadable counts as lacking — a row we cannot parse shows nothing."""
+    rows = []
+    for name, data in files.items():
+        try:
+            doc = json.loads(data)
+        except ValueError:
+            if _is_session_receipt(name) or name.endswith(".attestation.json"):
+                rows.append(None)
+            continue
+        if _is_session_receipt(name):
+            rows.append(doc.get("attestation") if isinstance(doc, dict) else None)
+        elif name.endswith(".attestation.json"):
+            rows.append(doc)
+    return sum(1 for r in rows if not (isinstance(r, dict) and isinstance(r.get("collateral"), dict)
+                                       and isinstance(r["collateral"].get("intel"), dict)
+                                       and r["collateral"]["intel"].get("tcb_info")))
 
 
 def _refuse_name_check_without_receipts(src_manifest: dict) -> None:
@@ -3059,12 +3174,11 @@ def _write_name_audit_pack(src: Path, src_manifest: dict, out_dir: Optional[str 
         raise S.ProbantError("the receipt re-checker (pi_attested/verify_ai_receipt.py) is missing from this "
                              "installation; refusing to write a pack whose brief tells the auditor to run it")
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    dest = Path(out_dir) if out_dir else src.parent / f"audit-pack-{stamp}"
+    dest = Path(out_dir) if out_dir else _default_pack_dest(stamp)
     sync = S._under_sync_root(dest)
     if sync:
         raise S.ProbantError(f"refusing to write the audit pack under a cloud-sync folder ({sync}). Choose a local folder.")
-    dest.mkdir(parents=True, exist_ok=False)
-    os.chmod(dest, 0o700)
+    _make_pack_dir(dest, default=not out_dir)
 
     files: Dict[str, bytes] = {
         "record.html": PACK_NAME_RECORD_HTML.encode("utf-8"),
@@ -3077,6 +3191,7 @@ def _write_name_audit_pack(src: Path, src_manifest: dict, out_dir: Optional[str 
         if name.endswith(".attestation.json"):
             files[name] = (src / name).read_bytes()
     claims = name_audit_claims()
+    lacking = _evidence_rows_without_intel_collateral(files)
     from_wheel = _running_from_installed_wheel()
     manifest = {
         "schema": "inferroute.name-check-audit-pack/1",
@@ -3100,7 +3215,8 @@ def _write_name_audit_pack(src: Path, src_manifest: dict, out_dir: Optional[str 
         # prior-art pack's (searches, statements, document reads), none of which a name check has.
         "claim_totals": {str(n): len(receipts) for n, _ in claims},
         # Every claim listed, so the checker's prior-art defaults (claims 3, 5, 7) never apply to these.
-        "claim_ceilings": {str(n): NAME_CLAIM_CEILINGS.get(n) for n, _ in claims},
+        "claim_ceilings": {str(n): (None if n in NAME_CLAIM_CEILING_WHEN_COLLATERAL_MISSING and not lacking
+                                    else NAME_CLAIM_CEILINGS.get(n)) for n, _ in claims},
         "sessions": src_manifest.get("sessions"),
         "contents": {"session_receipts": len(receipts),
                      "receipts_with_attestation": sum(1 for n in receipts if _receipt_has(src / n, "attestation")),
@@ -3132,9 +3248,38 @@ def _write_name_audit_pack(src: Path, src_manifest: dict, out_dir: Optional[str 
     return dest
 
 
+AUDIT_PACKS_DIR = "audit-packs"
+
+
+def audit_packs_root() -> Path:
+    """Where audit packs are written: under the app's own folder, OUTSIDE the matters' tree.
+
+    They used to go beside the record, in <matters folder>/<client>/exports/. The auditor works in a copy beside the
+    pack and writes its report one directory up, so its working directory named the account's client, and `..`
+    listed every exported record of that client, each named for its matter (review of 9eecef6, 3 Nov). Now each
+    pack sits alone in a folder with a random name under this one, and that folder holds nothing but the pack, the
+    auditors' working copies and what they write."""
+    from . import probant as S
+    return S._irhome() / AUDIT_PACKS_DIR
+
+
+def _default_pack_dest(stamp: str) -> Path:
+    import secrets
+    return audit_packs_root() / secrets.token_hex(8) / f"audit-pack-{stamp}"
+
+
+def _make_pack_dir(dest: Path, default: bool) -> None:
+    dest.mkdir(parents=True, exist_ok=False)
+    os.chmod(dest, 0o700)
+    if default:
+        for d in (dest.parent, audit_packs_root()):
+            os.chmod(d, 0o700)
+
+
 def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = None) -> Path:
-    """An evidence-only copy of an exported record, for the professional's own AI to audit. Written beside the
-    record by default. Its name carries no matter name, because a matter name can say what the invention is."""
+    """An evidence-only copy of an exported record, for the professional's own AI to audit. Written under
+    audit_packs_root() by default, never beside the record. Its name carries no matter name, because a matter name
+    can say what the invention is."""
     from . import probant as S
     src = Path(bundle_dir)
     src_manifest = json.loads((src / "MANIFEST.json").read_text(encoding="utf-8"))
@@ -3173,12 +3318,11 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
             "check: every claim in the brief rests either on a signed statement per search or on this "
             "device's receipt for the session. " + why)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    dest = Path(out_dir) if out_dir else src.parent / f"audit-pack-{stamp}"
+    dest = Path(out_dir) if out_dir else _default_pack_dest(stamp)
     sync = S._under_sync_root(dest)
     if sync:
         raise S.ProbantError(f"refusing to write the audit pack under a cloud-sync folder ({sync}). Choose a local folder.")
-    dest.mkdir(parents=True, exist_ok=False)
-    os.chmod(dest, 0o700)
+    _make_pack_dir(dest, default=not out_dir)
 
     stripped = []
     for r in rows:

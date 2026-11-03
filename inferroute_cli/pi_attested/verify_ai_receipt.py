@@ -1111,13 +1111,20 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         c, ok = verify_receipt(receipt, bundle_dir=os.path.dirname(os.path.abspath(a.target)) or ".")
         results = [(os.path.basename(a.target), c, ok)]
-    worst = 0
     for name, c, ok in results:
         print(f"\n{name}")
         c.dump()
         print(f"  → {'re-checked offline, nothing contradicts the receipt' if ok else ('FAILED: ' + str(len(c.failed)) + ' row(s)' if c.failed else 'INCOMPLETE: ' + str(len(blocking_skips(c))) + ' row(s) could not be re-checked')}")
-        worst = max(worst, 1 if c.failed else (4 if not ok else 0))
-    return worst
+    return exit_code(results)
+
+
+def exit_code(results: List[Tuple[str, Checks, bool]]) -> int:
+    """1 if ANY receipt has a failed row, else 4 if any could not be fully re-checked, else 0. A FAIL outranks
+    an incomplete re-check whatever the numbers: taking the numeric maximum let one incomplete receipt turn
+    another receipt's FAIL into exit 4, which reads as "incomplete" (review of 9eecef6, 3 Nov)."""
+    if any(c.failed for _, c, _ in results):
+        return 1
+    return 4 if any(not ok for _, _, ok in results) else 0
 
 
 if __name__ == "__main__":

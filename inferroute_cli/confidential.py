@@ -1074,6 +1074,16 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 except OSError as e:
                     console.print(f"[yellow]this session's record could not be written ({e}); the matter page "
                                   "will not list it.[/]")
+                if host_record is not None and hasattr(session, "_on_note"):
+                    # A model switch moves the conversation to the standby's receipt; the record follows it there.
+                    shown = session._on_note
+
+                    def _follow_switch(kind, detail, _shown=shown, _rec=host_record):
+                        if _shown is not None:
+                            _shown(kind, detail)
+                        if kind == "switched":
+                            pi_attested.update_host_session_receipt(_rec, session.receipt)
+                    session._on_note = _follow_switch
             signal.signal(signal.SIGINT, signal.SIG_IGN)          # Claude Code owns Ctrl-C; we outlive it
             page = None
             if web:
@@ -1134,6 +1144,7 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 ending: dict = {"exit_code": rc}
                 if page is not None:
                     ending.update(turns=page.bridge.turns, ended_by="person" if page.bridge.stop_requested else "itself")
+                pi_attested.update_host_session_receipt(host_record, session.receipt)
                 pi_attested.end_host_session_record(host_record, **ending)
             if agent == "pi":
                 from . import pi_attested

@@ -109,6 +109,11 @@ def name_matter(home):
     return home
 
 
+def _capped(pack: Path) -> set:
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    return {int(n) for n, cap in m["claim_ceilings"].items() if cap}
+
+
 def _pack_bytes(pack: Path) -> bytes:
     return b"".join(p.read_bytes() for p in sorted(pack.rglob("*")) if p.is_file())
 
@@ -223,7 +228,9 @@ def test_the_name_check_brief_borrows_nothing_false_from_the_prior_art_brief():
     assert "Do not try to recover any of them" in md
     # the claims the brief says cannot be VERIFIED are exactly the ones the pack caps
     capped = [n for n, cap in E.NAME_CLAIM_CEILINGS.items() if cap]
-    assert capped == [1, 4] and "Claims 1 and 4 cannot be VERIFIED" in md
+    assert capped == [1, 4] and "Claim 4 can never be VERIFIED" in md
+    assert "claim 1 cannot when any machine's evidence here\nlacks Intel's collateral" in md
+    assert E.NAME_CLAIM_CEILING_WHEN_COLLATERAL_MISSING == (1,)
     assert sorted(E.NAME_CLAIM_CEILINGS) == [n for n, _ in E.name_audit_claims()]
 
 
@@ -267,7 +274,8 @@ def test_the_checker_and_the_client_accept_a_report_on_a_name_check_pack(name_ma
     assert form["pack"] == R.identity(pack)
     assert [(c["id"], c["coverage"]["total"]) for c in form["claims"]] == [(n, 1) for n, _ in E.name_audit_claims()]
 
-    capped = {n for n, cap in E.NAME_CLAIM_CEILINGS.items() if cap}
+    capped = _capped(pack)
+    assert capped == {1, 4}          # the synthetic receipts keep no Intel collateral
     report = tmp_path / "REPORT.md"
     report.write_text(_filled(pack, lambda n: "VERIFIED IN PART" if n in capped else "VERIFIED"))
     problems, info = C.check_report(str(pack), str(report))
@@ -292,7 +300,7 @@ def test_the_checker_and_the_client_accept_a_report_on_a_name_check_pack(name_ma
 def test_the_checker_shipped_in_the_pack_runs_alone_on_it(name_matter, tmp_path):
     pack = E.write_audit_pack(_record(name_matter), tmp_path / "pack")
     report = tmp_path / "REPORT.md"
-    capped = {n for n, cap in E.NAME_CLAIM_CEILINGS.items() if cap}
+    capped = _capped(pack)
     report.write_text(_filled(pack, lambda n: "VERIFIED IN PART" if n in capped else "VERIFIED"))
     r = subprocess.run([sys.executable, "-I", str(pack / "stationery" / "check_report.py"), str(report)],
                        cwd=pack, capture_output=True, text=True)
@@ -319,7 +327,7 @@ def test_a_saved_name_check_audit_is_restored_for_its_matter(name_matter, tmp_pa
     bundle = exports / "record"
     rec.rename(bundle)
     pack = E.write_audit_pack(bundle)
-    assert pack.parent == exports
+    assert pack.parent.parent == E.audit_packs_root()
     rdir = S.records_dir("Acme", "bottle")
     R.remember(rdir, pack, bundle)
     got = R.restore(rdir, "Acme/bottle")
@@ -346,7 +354,7 @@ def test_the_panel_prepares_a_name_check_pack_and_reads_its_results(name_matter,
     r = c.post("/api/audit-pack", json={})
     assert r.status_code == 200, r.text
     pack = Path(r.json()["path"])
-    assert pack.parent == rec.parent and (pack / f"session-{SID_A}.receipt.json").is_file()
+    assert pack.parent.parent == E.audit_packs_root() and (pack / f"session-{SID_A}.receipt.json").is_file()
     got = c.get("/api/audit-results").json()
     assert got["prepared"] and got["pack"] == R.identity(pack) and got["results"] == [] and got["rejected"] == []
 
@@ -374,3 +382,171 @@ def _bare_name_record(tmp_path: Path) -> Path:
         "schema": "inferroute.name-check-record/1", "kind": "name-check", "client": "Acme", "matter": "bottle",
         "sessions": [{"session": SID_A, "receipt": "none"}], "trademark_searches": 0, "files": {}}))
     return d
+
+
+# ── review of 9eecef6: a conversation that moved machines ──────────────────────────────────────────────────
+
+def _leg(d: Path, stamp: str, sid: str, *, start: str, last: str, prev: str = "", att_extra=None) -> Path:
+    """One leg's receipt under the device's receipts folder, named the way receipt.py names them."""
+    d.mkdir(parents=True, exist_ok=True)
+    rows = [{"at": start, "attestation_sha256": "11" * 32, "requests": 1}]
+    if prev:
+        rows = [{"at": start, "attestation_sha256": "22" * 32, "requests": 3, "from_previous_session": prev}] + rows
+    p = d / f"{stamp}-{sid[:8]}-abcdef.json"
+    p.write_text(json.dumps({"schema": "inferroute.confidential.receipt/1", "session_id": sid, "verdict": "confidential",
+                             "started_at": start, "last_activity_at": last, "served_by": rows,
+                             "attestation": {"quote": "AAAA", **(att_extra or {})}, "path": str(p)}))
+    return p
+
+
+def test_the_exporter_follows_a_model_switch_to_the_receipt_the_conversation_ended_on(name_matter, tmp_path):
+    d = name_matter / "ir" / "confidential" / "receipts"
+    first = _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:glm-5.2", start="2026-11-03T08:33:19Z", last="2026-11-03T08:40:00Z")
+    _leg(d, "2026-11-03T08-34-00Z", "bbbb2222-0000:kimi-k2.6", start="2026-11-03T08:34:00Z", last="2026-11-03T09:00:00Z",
+         prev="aaaa1111-0000:glm-5.2")
+    last = _leg(d, "2026-11-03T08-50-00Z", "cccc3333-0000:deepseek", start="2026-11-03T08:50:00Z",
+                last="2026-11-03T09:10:00Z", prev="bbbb2222-0000:kimi-k2.6")
+    # Another conversation's leg that names the same predecessor but lies outside the window is never read.
+    _leg(d, "2026-11-09T10-00-00Z", "dddd4444-0000:x", start="2026-11-09T10:00:00Z", last="2026-11-09T10:00:00Z",
+         prev="aaaa1111-0000:glm-5.2")
+    assert E.last_leg(first) == (last, 2)
+    assert E.last_leg(last) == (last, 0)
+
+    # The name-check record names the FIRST leg (written at launch); the export carries the LAST.
+    rdir = S.records_dir("Acme", "bottle")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / f"{SID_A}.json").write_text(json.dumps({"schema": "inferroute.attested-session/1", "session_id": SID_A,
+                                                    "written_by": "host", "mode": "names",
+                                                    "model_lane": {"receipt": str(first)}}))
+    rec = E.write_bundle("Acme", "bottle", str(tmp_path / "rec"))
+    carried = json.loads((rec / f"session-{SID_A}.receipt.json").read_text())
+    assert carried["session_id"] == "cccc3333-0000:deepseek"
+    row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
+    assert row["switches_followed"] == 2
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    assert json.loads((pack / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 2
+    md = (pack / "AUDIT.md").read_text()
+    assert "switches_followed" in md and "That a receipt is its conversation's last" in md
+
+
+def test_a_prior_art_record_follows_a_model_switch_too(home, tmp_path):
+    assert S.cmd_new("Acme", "cooling", "2026-01-15") == 0
+    d = home / "ir" / "confidential" / "receipts"
+    first = _leg(d, "2026-11-03T08-33-19Z", "aaaa1111-0000:glm-5.2", start="2026-11-03T08:33:19Z", last="2026-11-03T08:40:00Z")
+    last = _leg(d, "2026-11-03T08-34-00Z", "bbbb2222-0000:kimi-k2.6", start="2026-11-03T08:34:00Z",
+                last="2026-11-03T09:00:00Z", prev="aaaa1111-0000:glm-5.2")
+    rdir = S.records_dir("Acme", "cooling")
+    rdir.mkdir(parents=True, exist_ok=True)
+    (rdir / "sess1.json").write_text(json.dumps({"session_id": "sess1", "surface": "browser",
+                                                 "model_lane": {"verified": True, "receipt": str(first)}}))
+    rec = E.write_bundle("Acme", "cooling", str(tmp_path / "out"))
+    assert json.loads((rec / "session-sess1.receipt.json").read_text())["session_id"] == "bbbb2222-0000:kimi-k2.6"
+    assert json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 1
+    assert last.is_file()
+
+
+def test_the_launcher_points_a_name_record_at_the_receipt_a_switch_moved_to(tmp_path):
+    from types import SimpleNamespace
+    from inferroute_cli import pi_attested as P
+    a = SimpleNamespace(path=str(tmp_path / "a.json"), checks={"x": {"ok": True}}, is_confidential=True,
+                        model_short="glm-5.2", instance={"id": "in_a"})
+    b = SimpleNamespace(path=str(tmp_path / "b.json"), checks={"x": {"ok": True}}, is_confidential=True,
+                        model_short="kimi-k2.6", instance={"id": "in_b"})
+    rec = P.begin_host_session_record(tmp_path / "records", SID_A, P.host_session_record(
+        sess_id=SID_A, receipt=a, surface="browser", confinement="x", mode="names"))
+    P.update_host_session_receipt(rec, b)
+    lane = json.loads(rec.read_text())["model_lane"]
+    assert lane["receipt"] == b.path and lane["model"] == "kimi-k2.6" and lane["earlier_receipts"] == [a.path]
+    P.update_host_session_receipt(rec, b)                       # idempotent: no second copy of anything
+    assert json.loads(rec.read_text())["model_lane"]["earlier_receipts"] == [a.path]
+    src = (Path(P.__file__).resolve().parent / "confidential.py").read_text()
+    assert 'if kind == "switched":\n                            pi_attested.update_host_session_receipt(' in src
+    assert "pi_attested.update_host_session_receipt(host_record, session.receipt)\n                pi_attested.end_host_session_record(" in src
+
+
+# ── review of 9eecef6: where the pack is written ───────────────────────────────────────────────────────────
+
+def test_a_pack_is_written_alone_outside_the_matters_tree(name_matter):
+    rec = _record(name_matter)
+    pack = E.write_audit_pack(rec)
+    root = E.audit_packs_root()
+    assert root == name_matter / "ir" / "audit-packs" and pack.parent.parent == root
+    assert not str(pack).startswith(str(S.probant_root()))
+    for word in ("Acme", "bottle", "exports", *NAMES):
+        assert word.lower() not in str(pack).lower(), word
+    assert [p.name for p in pack.parent.iterdir()] == [pack.name]           # nothing else in the auditor's `..`
+    assert all((p.stat().st_mode & 0o777) == 0o700 for p in (root, pack.parent, pack))
+    # Two packs never share a folder, so one auditor's `..` never lists another's.
+    other = E.write_audit_pack(rec)
+    assert other.parent != pack.parent
+    # The prior-art writer uses the same place.
+    src = Path(E.__file__).read_text()
+    assert src.count("dest = Path(out_dir) if out_dir else _default_pack_dest(stamp)") == 2
+    # and the cloud-sync refusal still holds there
+    import inferroute_cli.probant as P
+    orig = P._under_sync_root
+    try:
+        P._under_sync_root = lambda p: "Dropbox"
+        with pytest.raises(S.ProbantError, match="cloud-sync"):
+            E.write_audit_pack(rec)
+    finally:
+        P._under_sync_root = orig
+
+
+def test_deleting_the_matter_takes_its_audit_packs_and_restoring_brings_them_back(name_matter):
+    from inferroute_cli import probant_delete as D
+    rec = _record(name_matter)
+    exports = S.probant_root() / "Acme" / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    bundle = exports / "bottle-name-check-record-20261103T083450Z"
+    rec.rename(bundle)
+    pack = E.write_audit_pack(bundle)
+    (pack.parent / f"REPORT-{pack.name}.md").write_text("a report")
+    holder = pack.parent
+    assert holder in D._exports_of("Acme", "bottle")
+    out = D.delete("Acme", "bottle")
+    # the record went too: it used to stay behind, because delete read matter.json after moving it
+    assert not holder.exists() and not bundle.exists()
+    assert D.restore(out["id"]) == "Acme/bottle"
+    assert (holder / f"REPORT-{pack.name}.md").read_text() == "a report"
+
+
+# ── review of 9eecef6: claim 1's ceiling, the template's caution, the checker's words ─────────────────────
+
+def test_claim_one_is_capped_only_when_a_machine_s_evidence_lacks_intel_collateral(name_matter, tmp_path):
+    rec = _record(name_matter)
+    assert _capped(E.write_audit_pack(rec, tmp_path / "p1")) == {1, 4}
+    full = {"intel": {"tcb_info": "{}"}}
+    for f in [*rec.glob("*.attestation.json"), *rec.glob("session-*.receipt.json")]:
+        doc = json.loads(f.read_text())
+        (doc.get("attestation") if f.name.startswith("session-") else doc)["collateral"] = full
+        f.write_text(json.dumps(doc))
+    pack = E.write_audit_pack(rec, tmp_path / "p2")
+    assert _capped(pack) == {4}
+    assert "for at least one machine here" not in (pack / "REPORT-TEMPLATE.md").read_text()
+
+
+def test_the_name_template_cautions_the_confidentiality_statement(name_matter, tmp_path):
+    t = (E.write_audit_pack(_record(name_matter), tmp_path / "p") / "REPORT-TEMPLATE.md").read_text()
+    section = t.split("## One plain statement about confidentiality", 1)[1].split("## ", 1)[0]
+    assert "Do not call\nthe conversation private or confidential" in section
+    assert "is\nthe words of the client that wrote it, not evidence" in section
+
+
+def test_the_checker_and_the_client_count_receipts_in_a_name_pack(name_matter, tmp_path):
+    pack = E.write_audit_pack(_record(name_matter), tmp_path / "p")
+    m = json.loads((pack / "MANIFEST.json").read_text())
+    assert C.unit_of(m) == "receipts" and C.unit_of({}) == "operations"
+    report = tmp_path / "R.md"
+    report.write_text(_filled(pack, lambda n: "VERIFIED IN PART").replace("tool: 1 of 1 receipts", "tool: 1 of 3 receipts", 1))
+    problems, _ = C.check_report(str(pack), str(report))
+    said = " | ".join(what for _, what, _ in problems)
+    assert "says 3 receipts; this pack has 1" in said and "operations" not in said
+    data = json.loads(re.search(r"```json\n(.*?)\n```", (pack / "REPORT-TEMPLATE.md").read_text(), re.S)[1])
+    data.update(auditor={"name": "a", "model": "b"}, completed_at="2026-11-03T12:00:00Z", verified_statement="x",
+                limitations=["y"])
+    for c in data["claims"]:
+        c.update(verdict="COULD NOT CHECK", evidence="e", limitations=["l"])
+        c["coverage"].update(tool=0, independent=0, total=5)
+    with pytest.raises(ValueError, match="this pack holds 1 receipts for this claim"):
+        R.validate(data, pack, R.identity(pack))

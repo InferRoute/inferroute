@@ -622,6 +622,10 @@ def cmd_proof(spec: str) -> int:
     console = Console()
     console.print(Text(f"\nTechnical proof · {client}/{matter} · date bound {rec['date_bound']}", style="bold"))
     last = latest_session_record(client, matter)
+    if last is not None:
+        # The receipt the conversation ENDED on, as the export ships it, not the leg active when the record was written.
+        from .probant_export import settle_model_lane
+        last = settle_model_lane(last)
     if last is None:
         console.print(Text("  No session has been opened on this matter yet.", style="grey58"))
     else:

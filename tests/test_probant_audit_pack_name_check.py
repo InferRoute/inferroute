@@ -231,6 +231,15 @@ def test_the_name_check_brief_borrows_nothing_false_from_the_prior_art_brief():
     assert capped == [1, 4] and "Claim 4 can never be VERIFIED" in md
     assert "claim 1 cannot when any machine's evidence here\nlacks Intel's collateral" in md
     assert E.NAME_CLAIM_CEILING_WHEN_COLLATERAL_MISSING == (1,)
+    # claim 1 names its standard, and it is the verifier's
+    import importlib.util as _u
+    spec = _u.spec_from_file_location("_v", Path(E.__file__).resolve().parent / "pi_attested" / "verify_ai_receipt.py")
+    v = _u.module_from_spec(spec)
+    spec.loader.exec_module(v)
+    assert v.ACCEPTED_TCB == ("UpToDate", "SWHardeningNeeded")
+    assert "each `UpToDate` or `SWHardeningNeeded`" in md
+    assert "`switches_followed: 0` does not mean\n   the conversation never moved" in md
+    assert "`counters.continuity_switches`" in md and "`earlier_receipts`" in md
     assert sorted(E.NAME_CLAIM_CEILINGS) == [n for n, _ in E.name_audit_claims()]
 
 
@@ -394,6 +403,7 @@ def _leg(d: Path, stamp: str, sid: str, *, start: str, last: str, prev: str = ""
         rows = [{"at": start, "attestation_sha256": "22" * 32, "requests": 3, "from_previous_session": prev}] + rows
     p = d / f"{stamp}-{sid[:8]}-abcdef.json"
     p.write_text(json.dumps({"schema": "inferroute.confidential.receipt/1", "session_id": sid, "verdict": "confidential",
+                             "model_short": sid.split(":")[-1], "checks": {"quote": {"ok": True, "label": f"quote of {sid[:4]}"}},
                              "started_at": start, "last_activity_at": last, "served_by": rows,
                              "attestation": {"quote": "AAAA", **(att_extra or {})}, "path": str(p)}))
     return p
@@ -422,7 +432,10 @@ def test_the_exporter_follows_a_model_switch_to_the_receipt_the_conversation_end
     carried = json.loads((rec / f"session-{SID_A}.receipt.json").read_text())
     assert carried["session_id"] == "cccc3333-0000:deepseek"
     row = json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]
-    assert row["switches_followed"] == 2
+    assert row["switches_followed"] == 2 and row["earlier_receipts"] == 1
+    # The page describes the receipt it ships, and says the conversation moved.
+    html = (rec / "record.html").read_text()
+    assert "model deepseek" in html and "glm-5.2" not in html and "moved to another machine 2 times" in html
     pack = E.write_audit_pack(rec, tmp_path / "pack")
     assert json.loads((pack / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 2
     md = (pack / "AUDIT.md").read_text()
@@ -442,6 +455,8 @@ def test_a_prior_art_record_follows_a_model_switch_too(home, tmp_path):
     rec = E.write_bundle("Acme", "cooling", str(tmp_path / "out"))
     assert json.loads((rec / "session-sess1.receipt.json").read_text())["session_id"] == "bbbb2222-0000:kimi-k2.6"
     assert json.loads((rec / "MANIFEST.json").read_text())["sessions"][0]["switches_followed"] == 1
+    html = (rec / "record.html").read_text()
+    assert "quote of bbbb" in html and "quote of aaaa" not in html and "moved to another machine 1 time." in html
     assert last.is_file()
 
 

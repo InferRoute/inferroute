@@ -938,6 +938,13 @@ def _machines(receipt: dict, bundle_dir: Optional[str], c: Checks) -> List[Tuple
 def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str, Any]], searches: List[dict]) -> None:
     events = [e for e in (receipt.get("events") or []) if isinstance(e, dict)]
     pins = [e for e in events if e.get("kind") == "pinned"]
+    # A conversation that moved machines continues in the NEW leg's receipt, which carries the earlier legs' served_by
+    # rows and continuity events (and, from this change, their pins) tagged `from_previous_session`. Those happened
+    # before this leg started, so they are judged as the earlier legs' record, not against this leg's own window.
+    own_events = [e for e in events if not e.get("from_previous_session")]
+    carried_events = [e for e in events if e.get("from_previous_session")]
+    own_pins = [e for e in pins if not e.get("from_previous_session")]
+    carried_pins = [e for e in pins if e.get("from_previous_session")]
     served = receipt.get("served_by") if isinstance(receipt.get("served_by"), list) else []
     counters = receipt.get("counters") if isinstance(receipt.get("counters"), dict) else {}
     started, last = _parse_time(receipt.get("started_at")), _parse_time(receipt.get("last_activity_at") or receipt.get("ended_at"))
@@ -951,13 +958,15 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
               f"{len(pins)} pin event(s), {len(served)} served_by row(s), {len(set(served_ids))} distinct machine(s)" if not missing
               else f"pinned but no evidence row: {', '.join(m[:12] for m in missing)}")
         switches = counters.get("instance_switches")
+        # instance_switches counts THIS leg's re-pins; rows carried from an earlier leg are that leg's.
+        own_rows = [x for x in served if isinstance(x, dict) and not x.get("from_previous_session")]
         if isinstance(switches, int):
-            if switches == len(served) - 1:
-                c.add(True, "instance switches vs pins", f"{switches} switch(es) = {len(served)} pin(s) − 1")
-            elif switches > len(served) - 1:
-                c.add(False, "instance switches vs pins", f"{switches} switch(es) counted but only {len(served)} pin(s) recorded")
+            if switches == len(own_rows) - 1:
+                c.add(True, "instance switches vs pins", f"{switches} switch(es) = {len(own_rows)} pin(s) − 1")
+            elif switches > len(own_rows) - 1:
+                c.add(False, "instance switches vs pins", f"{switches} switch(es) counted but only {len(own_rows)} pin(s) recorded")
             else:
-                c.add(None, "instance switches vs pins", f"{switches} switch(es) for {len(served)} pin(s): a re-pin after a re-check is not counted as a switch; not contradictory, not confirmed")
+                c.add(None, "instance switches vs pins", f"{switches} switch(es) for {len(own_rows)} pin(s): a re-pin after a re-check is not counted as a switch; not contradictory, not confirmed")
         else:
             c.add(None, "instance switches vs pins", "the receipt carries no instance_switches counter (older client)")
         reqs = counters.get("requests")
@@ -972,13 +981,32 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
                               else f"only {credited} credited across machines for {reqs} counted"))
     else:
         c.add(None, "every pinned machine has an evidence row", "the receipt has no served_by rows (older client); only the last machine's evidence is kept")
-    # Timeline.
-    ts = [_parse_time(e.get("ts")) for e in events]
+    # Timeline: this leg's own events inside its window and in order.
+    ts = [_parse_time(e.get("ts")) for e in own_events]
     tl_ok = (started is not None and last is not None and started <= last and all(t is not None for t in ts)
              and all(started <= t <= last for t in ts if t) and ts == sorted(t for t in ts if t)
              and (verified is None or started <= verified <= last))
     c.add(tl_ok, "receipt timeline", f"{receipt.get('started_at')} → {receipt.get('last_activity_at') or receipt.get('ended_at')}, "
-          f"{len(events)} event(s) in order inside that window" if tl_ok else "events out of order, undated, or outside the session window")
+          f"{len(own_events)} event(s) in order inside that window" if tl_ok else "events out of order, undated, or outside the session window")
+    # Earlier legs carried in: dated, in order among themselves, none after this leg's last activity, and every carried
+    # pin backed by a carried evidence row from the same leg. Only then do their pins open the search window below.
+    carried_ok = None
+    if carried_events or any(isinstance(x, dict) and x.get("from_previous_session") for x in served):
+        cts = [_parse_time(e.get("ts")) for e in carried_events]
+        rows_by_leg = {(str(x.get("from_previous_session")), str((x.get("instance") or {}).get("id") or ""))
+                       for x in served if isinstance(x, dict) and x.get("from_previous_session")}
+        unbacked = [str(e.get("detail", "")).split(" ")[0] for e in carried_pins
+                    if (str(e.get("from_previous_session")), str(e.get("detail", "")).split(" ")[0]) not in rows_by_leg]
+        row_ts = [_parse_time(x.get("at")) for x in served if isinstance(x, dict) and x.get("from_previous_session")]
+        carried_ok = (last is not None and all(t is not None for t in cts + row_ts) and cts == sorted(t for t in cts if t)
+                      and all(t <= last for t in cts + row_ts if t) and not unbacked)
+        legs = {str(e.get("from_previous_session")) for e in carried_events} | {k for k, _ in rows_by_leg}
+        c.add(carried_ok, "earlier legs carried in",
+              f"{len(carried_events)} event(s) and {len(row_ts)} evidence row(s) from {len(legs)} earlier leg(s) of this "
+              f"conversation: dated, in order, none after this leg's last activity, every carried pin backed by a carried row"
+              if carried_ok else
+              ("a carried pin has no carried evidence row: " + ", ".join(u[:12] for u in unbacked)[:160] if unbacked
+               else "carried events undated, out of order, or after this leg's last activity"))
     # Searches attributed to this session fall inside the window in which a verified machine was pinned.
     verdict = str(receipt.get("verdict") or "")
     refused_at = next((_parse_time(e.get("ts")) for e in events if e.get("kind") in ("refused", "no-eligible-instance")), None)
@@ -987,7 +1015,15 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
         # a verdict; the plain words say the app stopped at the last of those, so searches must end there too.
         rever = [_parse_time(e.get("ts")) for e in events if e.get("kind") == "reverify-failed"]
         refused_at = next((t for t in reversed(rever) if t is not None), None)
-    first_pin = _parse_time(pins[0].get("ts")) if pins else verified
+    # The window opens at the conversation's first pin: this leg's, or an earlier leg's when the carried record held up
+    # above. A pin is carried as an event (from this change) or, for receipts written before it, as the `at` of a
+    # carried evidence row, which is the moment that machine was pinned.
+    starts = [_parse_time(e.get("ts")) for e in own_pins]
+    if carried_ok:
+        starts += [_parse_time(e.get("ts")) for e in carried_pins]
+        starts += [_parse_time(x.get("at")) for x in served if isinstance(x, dict) and x.get("from_previous_session")]
+    starts = [t for t in starts if t is not None]
+    first_pin = min(starts) if starts else verified
     if not searches:
         c.add(None, "searches inside the session's verified window", "no search in this record is attributed to this session")
     elif verdict == "refused" or first_pin is None:

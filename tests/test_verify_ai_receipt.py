@@ -479,3 +479,74 @@ def test_a_failed_receipt_outranks_an_incomplete_one_in_the_exit_code(tmp_path, 
     assert V.exit_code([r for r in results if r[0] == LEGACY]) == 4
     ok_only = V.verify_bundle(str(_bundle(tmp_path / "ok", "fresh")))
     assert V.exit_code(ok_only) == 0
+
+
+# ───────────────────────── a conversation that moved machines (review of 5c26ff3) ─────────────────────────
+
+def _switched_receipt(*, drop_carried_row: bool = False) -> tuple:
+    """A last leg built by the REAL continuity._record_switch from two real Receipts: leg 1 opened, pinned and
+    warmed a standby; leg 2 (the standby) pinned its own machine; then the lane switched. Times are relative to
+    now, because _record_switch stamps its own note with the current time."""
+    import dataclasses
+    import datetime as _dt
+    from types import SimpleNamespace
+    from inferroute_local.confidential import continuity as Cont
+    from inferroute_local.confidential.receipt import Receipt
+    now = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0)
+    t = lambda s: (now + _dt.timedelta(seconds=s)).strftime("%Y-%m-%dT%H:%M:%SZ")     # noqa: E731
+    old = Receipt(session_id="leg1:glm-5.2", model_short="glm-5.2", upstream_model="glm-5.2", fleet_id="f1",
+                  transport="relay", started_at=t(-600), verified_at=t(-590))
+    old.events = [{"ts": t(-600), "kind": "continuity-order", "detail": "glm-5.2 > kimi-k2.6"},
+                  {"ts": t(-599), "kind": "continuity-open", "detail": "serving from glm-5.2"},
+                  {"ts": t(-590), "kind": "pinned", "detail": "in_first — session opened"},
+                  {"ts": t(-560), "kind": "standby-ready", "detail": "kimi-k2.6 verified and held in reserve"}]
+    old.served_by = [{"at": t(-590), "instance": {"id": "in_first"}, "attestation_sha256": "11" * 32, "requests": 3}]
+    old.counters["requests"] = 3
+    new = Receipt(session_id="leg2:kimi-k2.6", model_short="kimi-k2.6", upstream_model="kimi-k2.6", fleet_id="f2",
+                  transport="relay", started_at=t(-570), verified_at=t(-565))
+    new.events = [{"ts": t(-565), "kind": "pinned", "detail": "in_second — session opened"}]
+    new.served_by = [{"at": t(-565), "instance": {"id": "in_second"}, "attestation_sha256": "22" * 32, "requests": 2}]
+    new.counters["requests"] = 2
+    new.events.append({"ts": t(-1), "kind": "switched", "detail": "glm-5.2 -> kimi-k2.6 (timeout)"})
+    Cont.Continuity._record_switch(SimpleNamespace(active=SimpleNamespace(receipt=new), switches=1),
+                                   SimpleNamespace(receipt=old, model_short="glm-5.2"))
+    new.last_activity_at = t(5)
+    d = dataclasses.asdict(new)
+    if drop_carried_row:
+        d["served_by"] = [r for r in d["served_by"] if not r.get("from_previous_session")]
+    return d, t
+
+
+def test_a_last_leg_built_by_the_real_switch_passes_its_timeline_and_its_first_leg_searches():
+    d, t = _switched_receipt()
+    carried = [e for e in d["events"] if e.get("from_previous_session")]
+    assert {e["kind"] for e in carried} >= {"continuity-order", "continuity-open", "pinned", "standby-ready"}
+    # Carried events predate this leg's start: judged as the earlier leg's record, not against this leg's window.
+    assert min(e["ts"] for e in carried) < d["started_at"]
+    c = V.Checks()
+    # A search made on leg 1, after leg 1's pin and BEFORE leg 2 pinned anything.
+    V.check_receipt_consistency(c, d, [], [{"at": t(-580)}])
+    rows = _rows(c)
+    assert rows["receipt timeline"] == "PASS", c.rows
+    assert rows["earlier legs carried in"] == "PASS", c.rows
+    assert rows["searches inside the session's verified window"] == "PASS", c.rows
+    assert rows["every pinned machine has an evidence row"] == "PASS", c.rows
+    assert not c.failed
+
+
+def test_carried_pins_open_the_window_only_when_the_carried_rows_back_them():
+    d, t = _switched_receipt(drop_carried_row=True)
+    c = V.Checks()
+    V.check_receipt_consistency(c, d, [], [{"at": t(-580)}])
+    rows = _rows(c)
+    assert rows["earlier legs carried in"] == "FAIL"
+    assert rows["searches inside the session's verified window"] == "FAIL"     # window stays at this leg's own pin
+
+
+def test_carried_events_out_of_order_are_still_caught():
+    d, t = _switched_receipt()
+    idx = [i for i, e in enumerate(d["events"]) if e.get("from_previous_session")]
+    d["events"][idx[0]]["ts"], d["events"][idx[-1]]["ts"] = d["events"][idx[-1]]["ts"], d["events"][idx[0]]["ts"]
+    c = V.Checks()
+    V.check_receipt_consistency(c, d, [], [])
+    assert _rows(c)["earlier legs carried in"] == "FAIL"

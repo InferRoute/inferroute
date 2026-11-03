@@ -463,7 +463,10 @@ class Continuity:
             # carrying `switched` and `carried` while the decisions that led there — which fleets were
             # considered and why, and that a standby had been verified and held — stayed behind on the
             # receipt nobody reads afterwards. Evidence without the reasoning is half a record.
-            carried_kinds = ("continuity-order", "continuity-open", "standby-ready",
+            # `pinned` too: the moment each earlier machine was selected opens the window in which the
+            # conversation's searches are checked, and without it a search made on the first leg read as made
+            # before any machine was verified (review of 5c26ff3).
+            carried_kinds = ("continuity-order", "continuity-open", "standby-ready", "pinned",
                              "switched", "carried", "no-standby", "standby-stale")
             prior_events = [dict(e, from_previous_session=old.receipt.session_id)
                             for e in (getattr(old.receipt, "events", []) or [])

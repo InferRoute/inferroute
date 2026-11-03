@@ -392,6 +392,8 @@ def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any
                          "date_bound": (x.get("statement") or {}).get("cutoff_date"),
                          "documents": [{"key": str(h.get("key")), "year": h.get("year"), "title": str(h.get("title") or "")}
                                        for h in hits]})
+    from .probant_export import settle_model_lane
+    rec = settle_model_lane(rec)              # the receipt the conversation ended on, as the export ships it
     model = rec.get("model_lane") or {}
     conv_file = rdir / f"{sid}.conversation.jsonl"
     summary = next((s for s in list_sessions(client, matter) if s["id"] == sid), {})

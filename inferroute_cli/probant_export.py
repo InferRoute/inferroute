@@ -370,7 +370,7 @@ def _load_sessions(S, client: str, matter: str) -> list:
                 except (OSError, ValueError):
                     rec = None
                 if rec is not None:
-                    sessions.append({"session_id": sid, "record": rec, "searches": searches})
+                    sessions.append({"session_id": sid, "record": settle_model_lane(rec), "searches": searches})
                     continue
                 # A session whose own metadata cannot be read used to be SKIPPED, silently, taking its
                 # searches with it. On 24 Sep that produced a record whose enclave-wide counter jumped from
@@ -386,7 +386,7 @@ def _load_sessions(S, client: str, matter: str) -> list:
                               "searches below are intact and still signed, but nothing here describes the "
                               "session itself",
                        "searches_kept": len(searches)}
-            sessions.append({"session_id": sid, "record": rec, "searches": searches})
+            sessions.append({"session_id": sid, "record": settle_model_lane(rec), "searches": searches})
     return sessions
 
 
@@ -575,7 +575,7 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
           f"<p class=note>Verified by this device's local sealed endpoint at session time. The session's receipt and the "
           f"evidence it references travel in this bundle when this device could read them (the manifest says which), "
           f"and verify_record.py re-checks them offline; the texts above are the receipt's own words, not that "
-          f"re-check.</p></td></tr>")
+          f"re-check.</p>{_switch_note(model, name=False)}</td></tr>")
         surf = r.get("which_surface_saw_what") or {}
         if surf:
             srows = "".join(f"<tr><td>{_e(k.replace('_', ' '))}</td><td>{_e(v)}</td></tr>" for k, v in surf.items())
@@ -855,7 +855,7 @@ def build_name_bundle(client: str, matter: str, rec: dict) -> Dict[str, Any]:
         A(f"<tr><th>The assistant's machine</th><td class={'ok' if model.get('verified') else 'bad'}>{head}"
           f"{('<details><summary class=note>Each check</summary><table>' + rows + '</table></details>') if rows else ''}"
           "<p class=note>Checked by this computer before the session started; its receipt is in this folder when this "
-          "computer still had it.</p></td></tr>")
+          f"computer still had it.</p>{_switch_note(model, name=True)}</td></tr>")
         conf = str(r.get("confinement") or "")
         if conf:
             plain = ("Closed: no internet, and no files beyond this matter's folder." if probant_trust.closed_box(conf)
@@ -1072,6 +1072,55 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
     return cur, followed
 
 
+def settle_model_lane(rec: dict) -> dict:
+    """A session record whose `model_lane` describes the receipt its conversation ENDED on.
+
+    The record's model lane is written from the receipt active when the record was written. If the conversation
+    then moved machines, the export ships the last leg's receipt (last_leg), and a page built from the record
+    would describe a different receipt from the one beside it. This rebuilds the lane from the last leg, keeps
+    the paths it replaced under `earlier_receipts`, and says how many switches it followed. A record that names
+    no readable receipt, or whose receipt is already the last leg, is returned unchanged."""
+    lane = rec.get("model_lane") if isinstance(rec, dict) else None
+    if not isinstance(lane, dict) or not lane.get("receipt"):
+        return rec
+    first = Path(str(lane["receipt"]))
+    try:
+        if not first.is_file():
+            return rec
+        final, n = last_leg(first)
+        if not n:
+            return rec
+        r = json.loads(final.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return rec
+    checks = r.get("checks") if isinstance(r.get("checks"), dict) else {}
+    cl = [{"label": c.get("label", k), "ok": bool(c.get("ok")), "why": c.get("why", "")}
+          for k, c in checks.items() if isinstance(c, dict)]
+    e2ee = r.get("e2ee") if isinstance(r.get("e2ee"), dict) else {}
+    earlier = [e for e in (lane.get("earlier_receipts") or []) if isinstance(e, str)]
+    lane = {**lane,
+            "verified": r.get("verdict") == "confidential",
+            "checks": f"{sum(1 for c in cl if c['ok'])}/{len(cl)}" if cl else "",
+            "check_list": cl,
+            "limitations": [str(x.get("text") or "") for x in (r.get("limitations") or []) if isinstance(x, dict)],
+            "model": str(r.get("model_short") or ""),
+            "sealing": " + ".join(str(x) for x in (e2ee.get("kem"), e2ee.get("aead")) if x),
+            "instance": str((r.get("instance") or {}).get("id") or "")[:8] if isinstance(r.get("instance"), dict) else "",
+            "receipt": str(final),
+            "earlier_receipts": earlier + [str(first)],
+            "switches_followed": int(lane.get("switches_followed") or 0) + n}
+    return {**rec, "model_lane": lane}
+
+
+def _switch_note(model: dict, *, name: bool) -> str:
+    n = int(model.get("switches_followed") or 0)
+    if not n:
+        return ""
+    return (f"<p class=note>This conversation moved to another machine {n} time{'s' if n != 1 else ''}. What is shown "
+            f"here is the receipt it ended on, which lists the earlier machines among its served_by rows; "
+            f"{'the receipt in this folder' if name else 'the receipt in this bundle'} is that one.</p>")
+
+
 def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bool = False) -> Path:
     """Write the bundle directory (0700, files 0600). Refuses the matter workspace and cloud-sync roots: the
     bundle holds the invention in plain text. Returns the directory."""
@@ -1125,10 +1174,11 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
                                   "why": "this session's record names no receipt: the AI lane was never "
                                          "opened in it, or its record could not be read whole"})
             continue
-        followed = 0
+        followed = int(((sess.get("record") or {}).get("model_lane") or {}).get("switches_followed") or 0)
         try:
             raw = Path(rp).read_bytes()
-            rp, followed = last_leg(Path(rp))
+            rp, more = last_leg(Path(rp))
+            followed += more
             raw = Path(rp).read_bytes()
         except OSError as e:
             receipt_notes.append({"session": sid, "searches": n, "receipt": "named but unreadable",
@@ -1144,6 +1194,9 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         raw = _home_relative_receipt_path(raw)
         note = {"session": sid, "searches": n, "receipt": f"session-{sid}.receipt.json",
                 "switches_followed": followed}
+        earlier = len(((sess.get("record") or {}).get("model_lane") or {}).get("earlier_receipts") or [])
+        if earlier:
+            note["earlier_receipts"] = earlier
         # WHAT BINDS THIS RECEIPT TO THESE SEARCHES, said in the only terms that are worth anything. Two
         # independent auditors reached the same finding on 1 Oct: "the receipt carries none of the search
         # identifiers; the only links are unsigned labels and overlapping clocks" and "no cryptographic
@@ -1251,12 +1304,13 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
     for sess in b.get("sessions") or []:
         sid = sess["session_id"]
         rp = ((sess.get("record") or {}).get("model_lane") or {}).get("receipt")
-        followed = 0
+        # _load_sessions has already moved the lane to the receipt the conversation ended on (settle_model_lane).
+        followed = int(((sess.get("record") or {}).get("model_lane") or {}).get("switches_followed") or 0)
         try:
             raw = Path(rp).read_bytes() if rp else None
             if raw is not None:
-                # The receipt the conversation ENDED on, not the leg that was active when the record was written.
-                rp, followed = last_leg(Path(rp))
+                rp, more = last_leg(Path(rp))
+                followed += more
                 raw = Path(rp).read_bytes()
         except OSError:
             raw = None
@@ -1265,7 +1319,9 @@ def _write_name_bundle(dest: Path, files: Dict[str, bytes], b: Dict[str, Any], c
             continue
         raw, _carried, _missing = _carry_served_evidence(raw, Path(rp).parent, files)
         files[f"session-{sid}.receipt.json"] = raw
-        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json", "switches_followed": followed})
+        earlier = len(((sess.get("record") or {}).get("model_lane") or {}).get("earlier_receipts") or [])
+        notes.append({"session": sid, "receipt": f"session-{sid}.receipt.json", "switches_followed": followed,
+                      **({"earlier_receipts": earlier} if earlier else {})})
     manifest = {"schema": "inferroute.name-check-record/1", "kind": "name-check", "client": client, "matter": matter,
                 "matter_created_at": rec.get("created_at"),
                 "generated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2927,8 +2983,9 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
 
 1. **Sealed AI hardware.** Each machine a receipt here names was an Intel TDX confidential machine with
    debugging disabled; its hardware report (the TDX quote) is signed under a certificate chain that ends in
-   Intel's SGX root; and Intel's signed collateral from the time of the session showed that machine's TCB
-   and Quoting Enclave acceptable and nothing in that chain revoked.
+   Intel's SGX root; and Intel's signed collateral from the time of the session showed that machine's
+   platform TCB status and its Quoting Enclave's status each `UpToDate` or `SWHardeningNeeded` (the two the
+   client accepts) and nothing in that chain revoked.
 
    Where a receipt has `served_by`, it has one row per pin, naming the pinned machine's evidence by
    `attestation_sha256` and `attestation_file`: a machine pinned again gets another row naming the same
@@ -2980,8 +3037,12 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    wrote. Check what can be checked: every receipt here is named by a row, and every row that names a
    receipt has its file here. A row without a receipt is a session with nothing here to check; it is not
    counted in any claim. When a conversation moved to another machine, the receipt that took over is the
-   one the record carries, and the row's `switches_followed` says how many moves were followed to reach it;
-   a row without that field was written by an older exporter.
+   one the record carries, and the row's `switches_followed` says how many moves the exporter followed to
+   reach it; a row without that field was written by an older exporter. `switches_followed: 0` does not mean
+   the conversation never moved: current clients point a name check's session record at the new receipt on
+   every move, so the exporter may have nothing left to follow. Whether it moved is in the receipt itself
+   (`counters.continuity_switches` and its `switched` events), and a row's `earlier_receipts`, when present,
+   counts the receipts the session's record named before the one carried here.
 
 `ended_at` empty does not mean a session is still open: it is written when a session closes, and a session
 that was killed never closes. `last_activity_at` is the last moment the session is known to have been alive.

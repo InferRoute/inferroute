@@ -77,6 +77,9 @@ def _exports_of(client: str, matter: str) -> List[Path]:
     packs = [d for d in root.iterdir() if d.is_dir() and d.name.startswith("audit-pack-") and made_from_these(d)]
     # Since then each pack sits alone in a random-named folder under audit_packs_root(), with the auditors'
     # working copies and reports beside it: the whole folder goes with the matter.
+    # A pack is matched through the record it was made from (its MANIFEST's hash). A pack whose record was removed
+    # by hand is therefore never matched and stays behind; that is accepted, because a pack holds no names, notes,
+    # queries or texts of the matter.
     neutral = audit_packs_root()
     for holder in (neutral.iterdir() if neutral.is_dir() else []):
         if holder.is_dir() and any(p.is_dir() and p.name.startswith("audit-pack-") and made_from_these(p)

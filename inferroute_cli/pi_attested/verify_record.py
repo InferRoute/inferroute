@@ -3167,6 +3167,15 @@ PLAIN_AI_ASK = (
 PLAIN_AI_SEARCHES_NONE = (
     "This record does not link any patent search to this conversation, so it does not show which searches, if any, the "
     "AI assistant ran during it.")
+PLAIN_AI_LEG_INDEX = (
+    "this receipt covers one leg of a conversation that moved between machines; the other legs have their own receipts,"
+    " and that this receipt belongs to this conversation is the app's own index, which nothing signs")
+PLAIN_AI_SEARCHES_LINKED_LEG = (
+    "The app's own list links patent searches in this record to this conversation, and this check gave {n} of them to "
+    "this leg by their times, as the app recorded them, against the moments the app records switching machines; it "
+    "checks only that each falls between the time this leg's machine began serving and five minutes after this leg's "
+    "last activity{refusal_bound}, not that it came from the conversation: the link rests on timing and on the app's "
+    "list, not on anything the machines signed.")
 PLAIN_AI_SEARCHES_LINKED = (
     "The app's own list links {n} of the patent searches in this record to this conversation; the record checks only "
     "that their times, as the app recorded them, fall between the time the app selected its first checked machine and"
@@ -3178,10 +3187,17 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
     """What the plain paragraph says about ONE conversation, read from its receipt and its rows. None = not recorded."""
     counters = receipt.get("counters") if isinstance(receipt.get("counters"), dict) else {}
     reqs = counters.get("requests") if isinstance(counters.get("requests"), int) else None
-    served = receipt.get("served_by") if isinstance(receipt.get("served_by"), list) else []
+    all_served = receipt.get("served_by") if isinstance(receipt.get("served_by"), list) else []
+    all_events = receipt.get("events") if isinstance(receipt.get("events"), list) else []
+    # One LEG of a conversation that moved between machines: this receipt's own rows and events only. Rows and events
+    # tagged `from_previous_session` describe earlier legs, which have their own receipts (review of a14e349).
+    served = [s for s in all_served if isinstance(s, dict) and not s.get("from_previous_session")]
+    events = [e for e in all_events if isinstance(e, dict) and not e.get("from_previous_session")]
+    leg = (len(served) != len([s for s in all_served if isinstance(s, dict)])
+           or len(events) != len([e for e in all_events if isinstance(e, dict)])
+           or (isinstance(counters.get("continuity_switches"), int) and counters["continuity_switches"] > 0))
     distinct = {str((s.get("instance") or {}).get("id") or s.get("attestation_sha256") or i)
                 for i, s in enumerate(served) if isinstance(s, dict)}           # the key the evidence row counts by
-    events = receipt.get("events") if isinstance(receipt.get("events"), list) else []
     stop = [e for e in events if isinstance(e, dict) and e.get("kind") in ("refused", "no-eligible-instance")]
     rever = [e for e in events if isinstance(e, dict) and e.get("kind") == "reverify-failed"]
     why = str(receipt.get("refusal") or "").strip()
@@ -3213,7 +3229,7 @@ def ai_session_facts(receipt: Dict[str, Any], rows) -> Dict[str, Any]:
     lims = " ".join(str(x.get("text") or "") for x in (receipt.get("limitations") or []) if isinstance(x, dict))
     old_lims = "readable nowhere else" in lims or "the words are not." in lims
     first_pin = str(pins[0].get("ts") or "") if pins else ""   # as the verifier's window
-    return {"requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
+    return {"leg": leg, "requests": reqs, "machines": len(distinct) or 1, "credited": credited, "refused": refused, "refused_at": refused_at,
             "why": why[:240], "stopped_at": stopped_at, "first_pin": first_pin, "rever_n": len(rever), "old_lims": old_lims,
             "failed_recheck_at": str(pfr[0].get("ts") or "") if pfr else "", "build_status": sorted(build_status),
             "transport": str(receipt.get("transport") or ""), "tcb_uniform": len(statuses) <= 1,
@@ -3362,7 +3378,20 @@ def plain_ai_lane(linked_searches: int, facts: Optional[Dict[str, Any]] = None) 
                                      + (" The app counted no request in this conversation, although it links these searches to it."
                                         if empty else "") if linked_searches
                                    else PLAIN_AI_SEARCHES_NONE)]
-    return "\n\n".join(parts)
+    text = "\n\n".join(parts)
+    if f.get("leg"):
+        # One leg of a conversation that moved between machines: say so where the paragraph names the receipt, and say
+        # "this leg" wherever it counts what happened, because the counts are this leg's own.
+        single = "that this receipt is the one for this conversation is the app's own index, which nothing signs"
+        linked = PLAIN_AI_SEARCHES_LINKED.format(n=linked_searches, refusal_bound=(
+            ", and before the app stopped trusting a machine unless it selected one again before the search" if f["refused"] else ""))
+        leg_linked = PLAIN_AI_SEARCHES_LINKED_LEG.format(n=linked_searches, refusal_bound=(
+            ", and before the app stopped trusting a machine unless it selected one again before the search" if f["refused"] else ""))
+        text = (text.replace(linked, "\x00LINKED\x00").replace(single, "\x00INDEX\x00")
+                .replace("this conversation", "this leg of the conversation")
+                .replace("This conversation", "This leg of the conversation")
+                .replace("\x00INDEX\x00", PLAIN_AI_LEG_INDEX).replace("\x00LINKED\x00", leg_linked))
+    return text
 
 
 PLAIN_AI_LANE = plain_ai_lane(0).replace("\n\n", " ")      # the default rendering, for readers of this constant

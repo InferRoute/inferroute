@@ -628,3 +628,79 @@ def test_carried_events_out_of_order_are_still_caught():
     c = V.Checks()
     V.check_receipt_consistency(c, d, [], [])
     assert _rows(c)["earlier legs carried in"] == "FAIL"
+
+
+# ───────────────────────── review of a14e349 ─────────────────────────
+
+def test_a_missing_leg_cannot_be_stood_in_for_by_the_next_one(tmp_path):
+    """The standby pins when it is warmed (-695 here), long before the switch (-500). With leg 1's receipt absent its
+    searches fell to leg 2 and passed on leg 2's early pin. Now the last leg's switches say leg 1 served until -500, and a
+    search there with no leg-1 receipt FAILs, naming the leg; a bundle-level row says a leg is missing."""
+    legs, t = _chain(2)
+    only_last = tmp_path / "last"
+    only_last.mkdir()
+    (only_last / "session-S.receipt.json").write_text(json.dumps(legs[-1]))
+    results = V.verify_bundle(str(only_last), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-600)}])
+    c = results[0][1]
+    fails = [d for s, n, d in c.rows if s == "FAIL" and n == "searches inside the session's verified window"]
+    assert fails and "fall in leg 1 of this conversation, whose receipt is not here" in fails[0] and t(-600) in fails[0]
+    assert _rows(c)["a receipt for every leg"] == "FAIL" and "leg(s) 1" in _detail(c, "a receipt for every leg")
+    assert V.exit_code(results) == 1
+    full = V.verify_bundle(str(_bundle_of(tmp_path, legs)), [{"session_id": "S", "at": t(-600)}])
+    assert _search_row(full, "session-S.leg-1.receipt.json") == "PASS"
+    assert next(c for n, c, _ in full if n == "session-S.receipt.json").rows[-1][:2] == ("PASS", "a receipt for every leg")
+
+
+def test_a_switched_in_leg_s_window_opens_at_the_switch_not_at_its_standby_pin():
+    legs, t = _chain(2)
+    c = V.Checks()
+    V.check_receipt_consistency(c, legs[-1], [], [{"at": t(-600)}])           # after its pin (-695), before the switch
+    assert _rows(c)["searches inside the session's verified window"] == "FAIL"
+    c = V.Checks()
+    V.check_receipt_consistency(c, legs[-1], [], [{"at": t(-400)}])
+    assert _rows(c)["searches inside the session's verified window"] == "PASS"
+    assert "the switch that moved the conversation here" in _detail(c, "searches inside the session's verified window")
+
+
+def test_every_stop_is_honoured_not_only_the_first():
+    r = {"verdict": "degraded", "started_at": "2026-11-03T09:00:00Z", "last_activity_at": "2026-11-03T09:06:40Z",
+         "events": [{"kind": "pinned", "ts": "2026-11-03T09:00:00Z", "detail": "a"},
+                    {"kind": "no-eligible-instance", "ts": "2026-11-03T09:01:40Z", "detail": "gone"},
+                    {"kind": "pinned", "ts": "2026-11-03T09:03:20Z", "detail": "b"},
+                    {"kind": "no-eligible-instance", "ts": "2026-11-03T09:05:00Z", "detail": "gone again"}]}
+    for at, ok in (("2026-11-03T09:00:50Z", True), ("2026-11-03T09:02:30Z", False), ("2026-11-03T09:04:10Z", True),
+                   ("2026-11-03T09:05:50Z", False)):
+        c = V.Checks()
+        V.check_receipt_consistency(c, r, [], [{"at": at}])
+        assert (_rows(c)["searches inside the session's verified window"] == "PASS") is ok, at
+
+
+def test_receipts_with_no_usable_time_fail_their_searches_and_leg_numbers_sort_as_numbers(tmp_path):
+    d = tmp_path / "rec"
+    d.mkdir()
+    for k in (1, 2):
+        (d / f"session-S.leg-{k}.receipt.json").write_text(json.dumps({"schema": V.SCHEMA, "session_id": f"x{k}"}))
+    results = V.verify_bundle(str(d), [{"session_id": "S", "at": "2026-11-03T09:00:00Z"}])
+    rows = [r for _n, c, _ok in results for r in c.rows]
+    assert any(s == "FAIL" and "give no time to judge them by" in det for s, _n, det in rows)
+    assert any(s == "FAIL" and n == "a receipt for every leg" for s, n, _d in rows)       # the last leg is missing
+    assert V._leg_number("session-S.leg-10.receipt.json") == 10 and V._leg_number("session-S.receipt.json") == 0
+
+
+def test_the_plain_words_of_a_last_leg_with_no_requests_of_its_own_count_only_that_leg():
+    import importlib.util, pathlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "verify_record.py"
+    spec = importlib.util.spec_from_file_location("vr_ai_leg", p)
+    VR = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(VR)
+    legs, _t = _chain(2, last_leg_requests=0)
+    f = VR.ai_session_facts(legs[-1], [])
+    assert f["leg"] and f["requests"] == 0 and f["machines"] == 1 and f["credited"] == 0
+    txt = VR.plain_ai_lane(1, f)
+    assert VR.PLAIN_AI_LEG_INDEX in txt and "the one for this conversation" not in txt
+    assert "no text of yours reached any of them in this leg of the conversation" in txt
+    assert "this check gave 1 of them to this leg by their times" in txt and "The app's own list links 1 of" not in txt
+    low = txt.lower()
+    assert not [w for w in VR.PLAIN_FORBIDDEN if w.lower() in low]
+    single = VR.plain_ai_lane(1, dict(f, leg=False))
+    assert "the one for this conversation" in single and "links 1 of the patent searches" in single

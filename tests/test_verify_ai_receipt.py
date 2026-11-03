@@ -643,7 +643,7 @@ def test_a_missing_leg_cannot_be_stood_in_for_by_the_next_one(tmp_path):
     results = V.verify_bundle(str(only_last), [{"session_id": "S", "at": t(-900)}, {"session_id": "S", "at": t(-600)}])
     c = results[0][1]
     fails = [d for s, n, d in c.rows if s == "FAIL" and n == "searches inside the session's verified window"]
-    assert fails and "fall in leg 1 of this conversation, whose receipt is not here" in fails[0] and t(-600) in fails[0]
+    assert fails and "fall in leg 1 of this conversation, whose receipt is not in this record" in fails[0] and t(-600) in fails[0]
     assert _rows(c)["a receipt for every leg"] == "FAIL" and "leg(s) 1" in _detail(c, "a receipt for every leg")
     assert V.exit_code(results) == 1
     full = V.verify_bundle(str(_bundle_of(tmp_path, legs)), [{"session_id": "S", "at": t(-600)}])
@@ -698,9 +698,113 @@ def test_the_plain_words_of_a_last_leg_with_no_requests_of_its_own_count_only_th
     assert f["leg"] and f["requests"] == 0 and f["machines"] == 1 and f["credited"] == 0
     txt = VR.plain_ai_lane(1, f)
     assert VR.PLAIN_AI_LEG_INDEX in txt and "the one for this conversation" not in txt
-    assert "no text of yours reached any of them in this leg of the conversation" in txt
+    assert "no text of yours reached any of them in this leg," in txt and "this leg of the conversation's id" not in txt
     assert "this check gave 1 of them to this leg by their times" in txt and "The app's own list links 1 of" not in txt
     low = txt.lower()
     assert not [w for w in VR.PLAIN_FORBIDDEN if w.lower() in low]
     single = VR.plain_ai_lane(1, dict(f, leg=False))
     assert "the one for this conversation" in single and "links 1 of the patent searches" in single
+
+
+# ───────────────────────── review of 24f5c42 ─────────────────────────
+
+def _vr():
+    import importlib.util, pathlib
+    p = pathlib.Path(__file__).resolve().parent.parent / "inferroute_cli" / "pi_attested" / "verify_record.py"
+    spec = importlib.util.spec_from_file_location("vr_r5", p)
+    VR = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(VR)
+    return VR
+
+
+def test_leg_one_is_described_as_a_leg_and_its_window_ends_at_the_switch_off_it(tmp_path):
+    """Leg 1 has no carried rows and no switch counter, so it read as the whole conversation; and its window ran to its
+    last save, which is stamped when the conversation closes. The bundle says it is a leg and when it was moved off."""
+    VR = _vr()
+    legs, t = _chain(2)
+    legs[0]["last_activity_at"] = t(0)                       # stamped at the conversation's close
+    d = _bundle_of(tmp_path, legs)
+    lf = V.leg_facts(str(d))
+    one = lf["session-S.leg-1.receipt.json"]
+    assert one["leg"] and one["index"] == 1 and one["of"] == 2 and one["ends"] == V._parse_time(t(-500))
+    f = VR.ai_session_facts(legs[0], [], one)
+    assert f["leg"] and f["end"] == t(-500)
+    txt = VR.plain_ai_lane(0, f)
+    assert txt.startswith("About one leg of your conversation") and "this leg of the conversation began sending" in txt
+    # the verifier never gives leg 1 a search after the switch, whatever its last save says
+    given = V.searches_by_receipt(str(d), [{"session_id": "S", "at": t(-450)}])
+    assert given["session-S.leg-1.receipt.json"] == [] and len(given["session-S.receipt.json"]) == 1
+    # a single-leg conversation is not called a leg anywhere
+    one_only = tmp_path / "single"
+    one_only.mkdir()
+    (one_only / "session-T.receipt.json").write_text(json.dumps(legs[0] | {"events": [e for e in legs[0]["events"]]}))
+    assert V.leg_facts(str(one_only))["session-T.receipt.json"]["leg"] is False
+
+
+def test_a_run_of_failed_rechecks_is_a_stop_and_a_passing_recheck_resumes():
+    r = {"verdict": "degraded", "started_at": "2026-11-03T09:00:00Z", "last_activity_at": "2026-11-03T09:10:00Z",
+         "refusal": "the enclave could not be re-verified 3 times in a row — refusing to continue on stale evidence",
+         "events": [{"kind": "pinned", "ts": "2026-11-03T09:00:00Z", "detail": "a"},
+                    {"kind": "no-eligible-instance", "ts": "2026-11-03T09:01:00Z", "detail": "gone"},
+                    {"kind": "pinned", "ts": "2026-11-03T09:02:00Z", "detail": "b"},
+                    {"kind": "reverify-failed", "ts": "2026-11-03T09:03:00Z", "detail": "x (1 in a row)"},
+                    {"kind": "reverify-failed", "ts": "2026-11-03T09:03:30Z", "detail": "x (2 in a row)"},
+                    {"kind": "reverify-failed", "ts": "2026-11-03T09:04:00Z", "detail": "x (3 in a row)"},
+                    {"kind": "reverified", "ts": "2026-11-03T09:06:00Z", "detail": "4/4 instances verified"},
+                    {"kind": "reverified", "ts": "2026-11-03T09:08:00Z", "detail": "3/4 instances verified"},
+                    {"kind": "pinned-failed-reverify", "ts": "2026-11-03T09:08:00Z", "detail": "b"}]}
+    stops = V.leg_stops(r)
+    assert [s[0] for s in stops] == [V._parse_time("2026-11-03T09:01:00Z"), V._parse_time("2026-11-03T09:04:00Z")]
+    assert stops[0][1] == V.NO_ELIGIBLE_WHY and stops[1][1] == r["refusal"]
+    for at, ok in (("2026-11-03T09:01:30Z", False), ("2026-11-03T09:02:30Z", True), ("2026-11-03T09:05:00Z", False),
+                   ("2026-11-03T09:07:00Z", True),                 # the re-check passed at 09:06: resumed
+                   ("2026-11-03T09:09:00Z", False)):               # the 09:08 re-check dropped the pinned machine
+        c = V.Checks()
+        V.check_receipt_consistency(c, r, [], [{"at": at}])
+        assert (_rows(c)["searches inside the session's verified window"] == "PASS") is ok, at
+    # the plain words list each stop with ITS OWN reason
+    VR = _vr()
+    txt = VR.plain_ai_lane(0, VR.ai_session_facts(r, []))
+    assert "more than once: at 3 Nov 2026, 09:01:00 UTC, because the verified instance is gone" in txt
+    assert "; at 3 Nov 2026, 09:04:00 UTC, because the enclave could not be re-verified 3 times in a row" in txt
+    one = dict(r, events=r["events"][:2], refusal="the verified instance is gone and no verified alternative is available")
+    f = VR.ai_session_facts(one, [])
+    assert f["stopped_at"] == "2026-11-03T09:01:00Z" and f["why"].startswith("the verified instance is gone")
+
+
+def test_an_old_single_receipt_record_is_not_failed_for_the_leg_it_never_carried(tmp_path, capsys):
+    """A record exported before receipts travelled per leg carries one receipt per session. With no search in the leg
+    it lacks, that leg is not re-checked (exit 4), not FAILED, and the plain words for the receipt that IS here print."""
+    b = _bundle(tmp_path, "fresh")
+    p = b / FRESH
+    r = json.loads(p.read_text())
+    sw = r["started_at"]
+    r["events"] = r["events"] + [{"ts": sw, "kind": "switched", "detail": "m1 -> m2 (fleet)"}]
+    r["events"].sort(key=lambda e: e["ts"])
+    r.setdefault("counters", {})["continuity_switches"] = 1
+    p.write_text(json.dumps(r))
+    results = V.verify_bundle(str(b), [])
+    c = results[0][1]
+    assert _rows(c)["a receipt for every leg"] == "SKIP" and not c.failed, c.failed
+    assert "not re-checked: leg(s) 1" in _detail(c, "a receipt for every leg")
+    assert V.exit_code(results) == 4
+    VR = _vr()
+    VR.report_ai_receipts(str(b), [])
+    out = capsys.readouterr().out
+    assert "another leg of its conversation was not re-checked" in out and "In plain words" in out
+    assert "FAILED" not in out and "contradict" not in out
+
+
+def test_two_switches_in_the_same_second_stay_two_legs(tmp_path):
+    legs, t = _chain(3)
+    same = [e for e in legs[1]["events"] if e["kind"] == "switched"][0]["ts"]
+    for e in legs[2]["events"]:
+        if e["kind"] == "switched" and not e.get("from_previous_session"):
+            e["ts"] = same                                     # leg 3 promoted in the very second leg 2 was
+    legs[2]["started_at"] = min(legs[2]["started_at"], same)
+    d = _bundle_of(tmp_path, legs)
+    lf = V.leg_facts(str(d))
+    assert [lf[n]["index"] for n in ("session-S.leg-1.receipt.json", "session-S.leg-2.receipt.json",
+                                     "session-S.receipt.json")] == [1, 2, 3]
+    c = next(c for n, c, _ in V.verify_bundle(str(d), []) if n == "session-S.receipt.json")
+    assert _rows(c)["a receipt for every leg"] == "PASS"

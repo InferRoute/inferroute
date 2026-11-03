@@ -939,6 +939,44 @@ def _machines(receipt: dict, bundle_dir: Optional[str], c: Checks) -> List[Tuple
     return out
 
 
+REVERIFY_LIMIT = 3            # session.py REVERIFY_FAILURES_ALLOWED: the run of failed re-checks that stops a session
+NO_ELIGIBLE_WHY = ("the verified instance is gone and no verified alternative is available — refusing to continue "
+                   "unverified")
+
+
+def leg_stops(receipt: dict) -> List[Tuple[dt.datetime, str]]:
+    """Every stop in this receipt's own leg, each with its own reason: a `refused` event (its detail is the reason), a
+    `no-eligible-instance` event, and each run of `reverify-failed` events that reaches the limit — the event whose
+    detail says "(3 in a row)". A receipt with a stopping verdict and no such event falls back to its last failed
+    re-check. The receipt's single `refusal` text is the reason of its LAST stop only, so it is never paired with an
+    earlier stop's time (review of 24f5c42)."""
+    import re as _re
+    own = [e for e in (receipt.get("events") or []) if isinstance(e, dict) and not e.get("from_previous_session")]
+    out: List[Tuple[dt.datetime, str]] = []
+    for e in own:
+        t = _parse_time(e.get("ts"))
+        if t is None:
+            continue
+        k, det = e.get("kind"), str(e.get("detail") or "")
+        if k == "refused":
+            out.append((t, det or str(receipt.get("refusal") or "")))
+        elif k == "no-eligible-instance":
+            out.append((t, NO_ELIGIBLE_WHY))
+        elif k == "reverify-failed":
+            m = _re.search(r"\((\d+) in a row\)", det)
+            if m and int(m.group(1)) >= REVERIFY_LIMIT:
+                out.append((t, f"the enclave could not be re-verified {m.group(1)} times in a row — refusing to "
+                               "continue on stale evidence"))
+    if not out and str(receipt.get("verdict") or "") not in ("", "confidential"):
+        rever = [t for t in (_parse_time(e.get("ts")) for e in own if e.get("kind") == "reverify-failed") if t]
+        if rever:
+            out.append((rever[-1], str(receipt.get("refusal") or "")))
+    out.sort(key=lambda x: x[0])
+    if out and receipt.get("refusal"):
+        out[-1] = (out[-1][0], str(receipt["refusal"]))     # the receipt's own reason belongs to its last stop
+    return out
+
+
 def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str, Any]], searches: List[dict]) -> None:
     events = [e for e in (receipt.get("events") or []) if isinstance(e, dict)]
     pins = [e for e in events if e.get("kind") == "pinned"]
@@ -1023,14 +1061,12 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             c.add(False, "continuity switches vs switched events", f"{cs} switch(es) counted but {sw} switched event(s) recorded")
     # Searches attributed to this receipt fall inside the window in which a verified machine of THIS leg served.
     verdict = str(receipt.get("verdict") or "")
-    stops = [t for t in (_parse_time(e.get("ts")) for e in own_events if e.get("kind") in ("refused", "no-eligible-instance"))
-             if t is not None]
-    if not stops and verdict not in ("", "confidential"):
-        # A stop after failed re-checks (session.py _reverify) writes no 'refused' event, only 'reverify-failed' ones and
-        # a verdict; the plain words say the app stopped at the last of those, so searches must end there too.
-        rever = [t for t in (_parse_time(e.get("ts")) for e in own_events if e.get("kind") == "reverify-failed") if t]
-        stops = rever[-1:]
+    stops = [t for t, _why in leg_stops(receipt)]
     pin_times = [t for t in (_parse_time(p.get("ts")) for p in own_pins) if t is not None]
+    # Resuming after a stop: a machine selected again, or a re-check that passed and was not followed by the pinned
+    # machine failing it (session.py _reverify writes `reverified`, then `pinned-failed-reverify` if the pin lost).
+    rechecked = [t for t in (_parse_time(e.get("ts")) for e in own_events if e.get("kind") == "reverified") if t]
+    lost = [t for t in (_parse_time(e.get("ts")) for e in own_events if e.get("kind") == "pinned-failed-reverify") if t]
     # The window opens at THIS leg's first pin, never an earlier leg's (review of 00a6650) — and for a leg the
     # conversation was switched INTO, not before that switch: a standby pins when it is warmed, long before it serves
     # (review of a14e349).
@@ -1050,13 +1086,14 @@ def check_receipt_consistency(c: Checks, receipt: dict, machines: List[Dict[str,
             # before it and before the search (a session can stop and resume more than once; honouring only the first
             # stop passed a search made after the second — review of a14e349).
             stop = max((x for x in stops if t is not None and x < t), default=None)
-            resumed = stop is None or any(stop < pt <= t for pt in pin_times)
+            resumed = stop is None or any(stop < pt <= t for pt in pin_times) or any(
+                stop < r <= t and not any(r <= x <= t for x in lost) for r in rechecked)
             if t is None or t < opens or (last is not None and t > last + dt.timedelta(minutes=5)) or not resumed:
                 outside.append(str(s_.get("at")))
         began = "the switch that moved the conversation here" if moved_in is not None and opens == moved_in else "the first pin"
         c.add(not outside, "searches inside the session's verified window",
               f"{len(searches)} search(es) between {began} ({opens.strftime('%H:%M:%SZ')}) and five minutes after the session's last activity" if not outside
-              else f"outside the window (before this leg's verified machine served, after the session, or after a stop with no machine selected again): {', '.join(outside)[:200]}")
+              else f"outside the window (before a verified machine of this receipt served, after the session, or after a stop with no machine selected again): {', '.join(outside)[:200]}")
 
 
 def verify_receipt(receipt: dict, *, bundle_dir: Optional[str] = None, searches: Optional[List[dict]] = None) -> Tuple[Checks, bool]:
@@ -1146,15 +1183,44 @@ def _leg_number(name: str) -> int:
     return int(sid[i + len(LEG_MARK):]) if i > 0 and sid[i + len(LEG_MARK):].isdigit() else 0
 
 
+def _switches(receipt: dict) -> List[Tuple[dt.datetime, str]]:
+    """The conversation's switches as a last leg's receipt holds them, in the order they happened: carried ones first
+    (in the order each leg carried them), then its own. Each is (time, detail); the detail names the move ("m1 -> m2
+    (why)"), so two switches in the same second remain two (review of 24f5c42)."""
+    out = []
+    for e in receipt.get("events") or []:
+        if isinstance(e, dict) and e.get("kind") == "switched":
+            t = _parse_time(e.get("ts"))
+            if t is not None:
+                out.append((t, str(e.get("detail") or "")))
+    return out
+
+
+def _own_switch_event(receipt: dict) -> Optional[Tuple[dt.datetime, str]]:
+    for e in receipt.get("events") or []:
+        if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "switched":
+            t = _parse_time(e.get("ts"))
+            if t is not None:
+                return (t, str(e.get("detail") or ""))
+    return None
+
+
+EVERY_LEG = "a receipt for every leg"
+
+
 def _plan(bundle_dir: str, searches: Optional[List[dict]]):
-    """(searches per receipt file, extra rows per receipt file) for every session in the record.
+    """(searches per receipt file, extra rows per receipt file, leg facts per receipt file) for every session.
 
     A conversation that moved machines has one receipt per leg. Its LAST leg's receipt (`session-<sid>.receipt.json`)
     holds every `switched` event of the conversation — its own and, carried, the earlier legs' — so it says where each
-    leg's serving began: leg 1 before the first switch, leg j from switch j-1 until switch j. Each search goes to the leg
-    serving at its time and is judged on that leg's receipt. A leg's receipt is recognised by its own `switched` event
-    (or, for leg 1, by having none), not by its file name. When the leg a search falls in has no readable receipt here,
-    the search FAILS and the row names the leg: the receipt of the next leg cannot vouch for it (review of a14e349)."""
+    leg's serving began and ended: leg 1 before the first switch, leg j from switch j-1 until switch j. Each search goes
+    to the leg serving at its time and is judged on that leg's receipt, so a leg's searches never run past the switch
+    that moved the conversation off it, whatever that leg's own last activity says. A leg's receipt is recognised by its
+    own `switched` event (time and detail), or for leg 1 by having none, not by its file name.
+
+    A leg with no readable receipt here: a search that falls in it FAILs, naming the leg (the next leg's receipt cannot
+    vouch for it). With no search in it, the leg is only not re-checked — a SKIP, never a FAIL: a record made before
+    receipts travelled per leg carries one receipt per session, and that is not a fault (review of 24f5c42)."""
     names = receipt_files(bundle_dir)
     docs: Dict[str, Optional[dict]] = {}
     for n in names:
@@ -1168,23 +1234,22 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
         groups.setdefault(session_of(n), []).append(n)
     given: Dict[str, List[dict]] = {n: [] for n in names}
     extra: Dict[str, List[Tuple[Optional[bool], str, str]]] = {n: [] for n in names}
+    facts: Dict[str, Dict[str, Any]] = {n: {"leg": False} for n in names}
     for sid, files in groups.items():
         files = sorted(files, key=lambda n: (_leg_number(n) == 0, _leg_number(n)))    # leg-1, leg-2, … then the last
+        for n in files:
+            facts[n]["leg"] = len(files) > 1 or bool(_leg_number(n))
         mine = [x for x in (searches or []) if isinstance(x, dict) and str(x.get("session_id") or "") == sid]
         main = f"session-{sid}.receipt.json"
         top = docs.get(main)
-        sw = []
-        if isinstance(top, dict):
-            sw = sorted(t for t in (_parse_time(e.get("ts")) for e in (top.get("events") or [])
-                                    if isinstance(e, dict) and e.get("kind") == "switched") if t is not None)
+        sw = _switches(top) if isinstance(top, dict) else []
         if isinstance(top, dict) and (sw or len(files) > 1):
-            # leg j (1-based) begins at sw[j-2] (j >= 2); its receipt is the one whose own switch is that moment.
             legs: Dict[int, str] = {}
             for n in files:
                 d = docs.get(n)
                 if not isinstance(d, dict):
                     continue
-                own = _own_switch(d)
+                own = _own_switch_event(d)
                 if own is None:
                     j = 1
                 elif own in sw:
@@ -1193,34 +1258,44 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
                     continue
                 legs.setdefault(j, n)
             k = len(sw) + 1
+            for j, n in legs.items():
+                facts[n].update(leg=True, index=j, of=k, ends=(sw[j - 1][0] if j <= len(sw) else None))
             missing = [j for j in range(1, k + 1) if j not in legs]
-            cs = (top.get("counters") or {}).get("continuity_switches") if isinstance(top.get("counters"), dict) else None
-            if isinstance(cs, int) or sw:
-                want = (cs if isinstance(cs, int) else len(sw)) + 1
-                ok = not missing and len([n for n in files if isinstance(docs.get(n), dict)]) == want
-                extra[main].append((ok, "a receipt for every leg",
-                                    f"{want} leg(s) by the conversation's switch count, a readable receipt here for each" if ok else
-                                    f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here; "
-                                    + (f"no readable receipt for leg(s) {', '.join(map(str, missing))}" if missing
-                                       else "the receipts here do not match its legs one to one")))
             lost: Dict[int, List[str]] = {}
             for x in mine:
                 t = _parse_time(x.get("at"))
-                j = 1 + sum(1 for w in sw if t is not None and w <= t)
+                j = 1 + sum(1 for w, _d in sw if t is not None and w <= t)
                 if j in legs:
                     given[legs[j]].append(x)
                 else:
                     lost.setdefault(j, []).append(str(x.get("at")))
+            cs = (top.get("counters") or {}).get("continuity_switches") if isinstance(top.get("counters"), dict) else None
+            want = (cs if isinstance(cs, int) else len(sw)) + 1
+            readable = len([n for n in files if isinstance(docs.get(n), dict)])
+            if not missing and readable == want:
+                extra[main].append((True, EVERY_LEG, f"{want} leg(s) by the conversation's switch count, a readable "
+                                                     "receipt here for each"))
+            elif missing and not lost and readable == len(legs):
+                extra[main].append((None, EVERY_LEG,
+                                    f"not re-checked: leg(s) {', '.join(map(str, missing))} of this conversation, whose "
+                                    "receipt is not in this record (a record exported before receipts were carried for "
+                                    "each leg holds only one per session); no search in this record falls in "
+                                    + ("it" if len(missing) == 1 else "them")))
+            else:
+                extra[main].append((False, EVERY_LEG,
+                                    f"{want} leg(s) by the conversation's switch count, {len(files)} receipt file(s) here; "
+                                    + (f"no readable receipt for leg(s) {', '.join(map(str, missing))}" if missing
+                                       else "the receipts here do not match its legs one to one")))
             for j, ats in sorted(lost.items()):
                 extra[main].append((False, "searches inside the session's verified window",
-                                    f"{len(ats)} search(es) fall in leg {j} of this conversation, whose receipt is not here, "
-                                    f"so nothing here shows a verified machine served them: {', '.join(ats)[:160]}"))
+                                    f"{len(ats)} search(es) fall in leg {j} of this conversation, whose receipt is not in "
+                                    f"this record, so nothing here shows a verified machine served them: {', '.join(ats)[:160]}"))
             continue
         if main not in files or not isinstance(top, dict):
             if any(_leg_number(n) for n in files):
-                extra[files[0]].append((False, "a receipt for every leg",
+                extra[files[0]].append((False, EVERY_LEG,
                                         "this conversation's earlier legs are here but its last leg's receipt "
-                                        f"({main}) is missing or unreadable, so its legs cannot be told apart"))
+                                        f"({main}) is not, or cannot be read, so its legs cannot be told apart"))
         if len(files) == 1:
             given[files[0]] = mine
             continue
@@ -1239,7 +1314,13 @@ def _plan(bundle_dir: str, searches: Optional[List[dict]]):
                 if t is not None and st <= t:
                     pick = n
             given[pick].append(x)
-    return given, extra
+    return given, extra, facts
+
+
+def leg_facts(bundle_dir: str) -> Dict[str, Dict[str, Any]]:
+    """Per receipt file: whether it is one leg of a conversation that moved between machines (`leg`), and for a leg
+    that is not the last, when the switch that moved the conversation off it happened (`ends`)."""
+    return _plan(bundle_dir, [])[2]
 
 
 def searches_by_receipt(bundle_dir: str, searches: Optional[List[dict]] = None) -> Dict[str, List[dict]]:
@@ -1253,7 +1334,7 @@ def verify_bundle(bundle_dir: str, searches: Optional[List[dict]] = None) -> Lis
     (an unsigned index written by the exporter; the rows then check those searches' TIMES against that receipt), plus
     the session-level rows _plan adds to a conversation's last receipt."""
     out = []
-    given, extra = _plan(bundle_dir, searches)
+    given, extra, _legs = _plan(bundle_dir, searches)
     for name in receipt_files(bundle_dir):
         try:
             receipt = json.load(open(os.path.join(bundle_dir, name)))

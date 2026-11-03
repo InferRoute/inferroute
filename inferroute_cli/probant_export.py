@@ -1079,6 +1079,16 @@ def last_leg(rp: Path, *, max_legs: int = 32) -> Tuple[Path, int]:
     return cur, followed
 
 
+def _own_switch_event(doc: dict) -> Optional[Tuple[dt.datetime, str]]:
+    """The switch INTO this leg as (time, detail): its own (untagged) `switched` event."""
+    for e in (doc.get("events") or []) if isinstance(doc, dict) else []:
+        if isinstance(e, dict) and not e.get("from_previous_session") and e.get("kind") == "switched":
+            t = _receipt_time(e.get("ts"))
+            if t is not None:
+                return (t, str(e.get("detail") or ""))
+    return None
+
+
 def _own_switch_time(doc: dict) -> Optional[dt.datetime]:
     """When the conversation was switched INTO this leg: its own (untagged) `switched` event."""
     for e in (doc.get("events") or []) if isinstance(doc, dict) else []:
@@ -1224,8 +1234,9 @@ def _leg_files(sess: dict, sid: str, files: Dict[str, bytes], *, home_relative: 
         last = json.loads(Path(str(lane.get("receipt"))).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         last = {}
-    sw = sorted(t for t in (_receipt_time(e.get("ts")) for e in (last.get("events") or [])
-                            if isinstance(e, dict) and e.get("kind") == "switched") if t is not None)
+    # Each switch as (time, detail), in the order the last leg holds them: two switches in the same second stay two.
+    sw = [(t, str(e.get("detail") or "")) for e in (last.get("events") or [])
+          if isinstance(e, dict) and e.get("kind") == "switched" for t in [_receipt_time(e.get("ts"))] if t is not None]
     placed: Dict[int, Path] = {}
     unread: Dict[int, str] = {}
     for lp in legs:
@@ -1233,7 +1244,7 @@ def _leg_files(sess: dict, sid: str, files: Dict[str, bytes], *, home_relative: 
             doc = json.loads(lp.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
             doc, err = None, type(e).__name__
-        own = _own_switch_time(doc) if isinstance(doc, dict) else None
+        own = _own_switch_event(doc) if isinstance(doc, dict) else None
         j = 1 if own is None else (2 + sw.index(own) if own in sw else 0)
         if not j:
             j = next(n for n in range(1, len(sw) + len(legs) + 2) if n not in placed and n not in unread)
@@ -1986,7 +1997,8 @@ other order would have been marked down by a rule this brief had broken itself.
    others under `earlier_leg_receipts`, and any leg whose receipt this device could not supply under
    `missing_leg_receipts`. The re-checker gives each search to the leg that was serving at its time (the last
    leg's receipt holds every `switched` event of the conversation) and judges it on that leg's receipt alone; a
-   search falling in a leg with no receipt here FAILs. A later leg's receipt also lists earlier legs' machines and
+   search falling in a leg with no receipt here FAILs, and a leg with no receipt here and no search in it is
+   reported as not re-checked. A later leg's receipt also lists earlier legs' machines and
    events, tagged `from_previous_session`: that is information about those legs, never evidence for the later
    one.
 
@@ -3191,7 +3203,7 @@ keeps less; what it does not keep is a part of the claim you could not reach, no
    written by an older exporter, which carried one receipt per session. Whether a conversation moved is in its last leg's
    receipt: `counters.continuity_switches`, and its `switched` events (the one that moved it into that leg
    is the leg's own, earlier ones are carried). The re-checker compares the two, and its row "a receipt for
-   every leg" FAILs when a leg of the conversation has no readable receipt here.
+   every leg" reports a leg of the conversation with no readable receipt here as not re-checked.
 
 `ended_at` empty does not mean a session is still open: it is written when a session closes, and a session
 that was killed never closes. `last_activity_at` is the last moment the session is known to have been alive.
@@ -3213,8 +3225,9 @@ VERIFIED; the most the claim can be is VERIFIED IN PART, naming what stays open.
     the text after decrypting it.
   - That the record holds every session of the name check: the index is the account of the computer that
     made it.
-  - What happened in a leg whose receipt is not here. The re-checker names such a leg (from the last leg's
-    switch count), but nothing here can show what machine served it.
+  - What happened in a leg whose receipt is not here. The re-checker names such a leg from the switches the
+    last leg's receipt records (the switch counter gives only how many legs to expect), but nothing here can
+    show what machine served it.
 """
 
 # The most a claim can be from a pack like this. Claim 1's applies only to a pack in which some machine's evidence

@@ -1765,11 +1765,14 @@
       for (const draft of d.drafts) {
         const details = el("details", "fold", el("summary", "", "AI description and supporting passage"),
           el("p", "", draft.summary), el("blockquote", "quote", draft.quote));
-        p.append(el("div", "card proposal", el("h3", "", draft.title),
-          el("p", "sub", draft.needs_review ? "Needs disclosure and date review" : "Reviewed"),
-          details, button(draft.needs_review ? "Review draft" : "Open matter", "primary small", () => {
+        // Body and actions in their own padded parts, as a proposal card has them: placed straight in the
+        // card, the title, text and button sat flush against its edge (Henry's video notes, 4 Nov).
+        p.append(el("div", "card proposal draft-card",
+          el("div", "card-body", el("h3", "", draft.title),
+            el("p", "sub", draft.needs_review ? "Needs disclosure and date review" : "Reviewed"), details),
+          el("div", "card-actions", button(draft.needs_review ? "Review draft" : "Open matter", "primary small", () => {
             location.hash = `#/matter/${enc(draft.id)}`;
-          })));
+          }))));
       }
     }
     if (d.proposals.length) p.append(el("h2", "section", "Proposed matters"));

@@ -5,11 +5,13 @@ be RE-DERIVED by a stranger from the bundle alone, with no InferRoute code and n
       record.html            the human record: matter, disclosure, marks, sessions, reports, statements
       searches.json          the machine record: per sealed search — signed statement, opened result,
                              query text, date bound, and the evidence file it names (by sha256)
-      <sha16>.evidence.json  per search: the attestation evidence the local verifier used (SNP report,
-                             AMD endorsements, Microsoft UVM endorsement, runtime_data, container policy)
+      <sha16>.evidence.json  per search: the attestation evidence the local verifier used (an Intel TDX
+                             quote, boot event log, Intel collateral and Google's launch endorsement; for an
+                             older search, an SNP report, AMD and Microsoft endorsements and the container policy)
       MANIFEST.json          sha256 of every file above, plus the matter's date bound
       verify_record.py       a single-file independent verifier (stdlib + `cryptography` only)
-      VERIFY.md              how to redo every check, here and with AMD's / Google's / Microsoft's own tools
+      VERIFY.md              how to redo every check, here and with the hardware makers' own tools, written for
+                             the hardware this record's searches ran on
       MANIFEST.json.ots      (optional, --anchor) an OpenTimestamps proof of when this manifest existed
 
 Every claim in record.html that a third party CAN check has its inputs in the bundle; every claim that
@@ -633,7 +635,14 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
             A(f"<p class=note>Enclave-signed statement (Ed25519 over the canonical JSON minus <code>sig</code>, under "
               f"<span class=mono>{_e(x.get('signer_pub'))}</span>, a key the hardware report binds):</p>")
             A(f"<pre>{_e(json.dumps(stmt, indent=1, ensure_ascii=False))}</pre>")
-            if ev_file:
+            if ev_file and search_hardware([ev.get("offer")]) == {"tdx"}:
+                A(f"<p class=note>Attestation evidence: <code>{_e(ev_file)}</code> (sha256 <span class=mono>{_e(ev_sha)}</span>). "
+                  "From it alone, without trusting this device: recompute the quote's report_data = SHA-256(runtime_data) "
+                  "and find the signing key committed in it; verify the Intel TDX quote chains to Intel's root and "
+                  "Intel's collateral from the time of the search; check that Google's launch endorsement lists the "
+                  "firmware and that the boot event log replays to the quote. "
+                  "<code>verify_record.py</code> does all of this; <code>VERIFY.md</code> names independent tools that do too.</p>")
+            elif ev_file:
                 A(f"<p class=note>Attestation evidence: <code>{_e(ev_file)}</code> (sha256 <span class=mono>{_e(ev_sha)}</span>). "
                   "From it alone, without trusting this device: recompute REPORT_DATA = SHA-256(runtime_data) and find "
                   "the signing key committed in it; verify the SEV-SNP report chains to AMD's root and the utility-VM "
@@ -649,18 +658,40 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
 
     A("<h2>What this record does and does not prove</h2>")
     any_policy = any(x.get("evidence", {}).get("policy_b64") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict))
-    A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
-      "result was signed by a key bound into an AMD SEV-SNP hardware report; that the report chains to AMD's published "
-      "root and the utility VM to Microsoft's"
-      + ("; that the archived container policy agrees with the report's HOST_DATA" if any_policy else "")
-      + "; that each signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
-    A("<p class=note><b>What that does NOT establish on its own</b>: that the container was InferRoute's. A SEV-SNP "
-      "report and Microsoft's endorsement prove a genuine confidential container inside Microsoft's utility VM — the "
-      "MEASUREMENT endorses that utility VM, not our container. Only comparing the policy hash and the index / encoder "
-      "manifest hashes against values obtained from InferRoute <i>independently of this bundle</i> shows our code and our "
-      "index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root pins plus "
-      "signature links: no revocation checking, no certificate-path constraints. The MANIFEST is an unsigned index; the "
-      "enclave-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
+    kinds = search_hardware([x["evidence"].get("offer") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict)])
+    if kinds == {"tdx"}:
+        # 4 Nov: the search machine is Intel TDX since 1 Nov; this section used to describe every record's searches
+        # as AMD SEV-SNP in Microsoft's utility VM.
+        A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
+          "result was signed by a key bound into an Intel TDX hardware report (the quote); that the quote chains to Intel's "
+          "root, judged with Intel's own collateral from the time of the search; that the firmware it measured is a build "
+          "Google endorsed and its boot event log replays to the quote; that each signed statement is about exactly the "
+          "query text and result shown, on the index and date bound shown.</p>")
+        A("<p class=note><b>What that does NOT establish on its own</b>: that the machine was InferRoute's. A TDX quote and "
+          "Google's endorsement prove a genuine confidential virtual machine on Google's firmware — <code>mrtd</code> measures "
+          "that firmware, not our image. Only comparing the boot application's hash, the machine's RTMR0 and the index / "
+          "encoder manifest hashes against values obtained from InferRoute <i>independently of this bundle</i> shows our "
+          "image and our index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root "
+          "pins (Intel's and Google's) plus signature links, with Intel's revocation lists from the time of the search. "
+          "The MANIFEST is an unsigned index; the enclave-signed statements are the seal. The record proves what it shows, "
+          "never that it shows every search.</p>")
+    else:
+        A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
+          "result was signed by a key bound into an AMD SEV-SNP hardware report; that the report chains to AMD's published "
+          "root and the utility VM to Microsoft's"
+          + ("; that the archived container policy agrees with the report's HOST_DATA" if any_policy else "")
+          + "; that each signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
+        A("<p class=note><b>What that does NOT establish on its own</b>: that the container was InferRoute's. A SEV-SNP "
+          "report and Microsoft's endorsement prove a genuine confidential container inside Microsoft's utility VM — the "
+          "MEASUREMENT endorses that utility VM, not our container. Only comparing the policy hash and the index / encoder "
+          "manifest hashes against values obtained from InferRoute <i>independently of this bundle</i> shows our code and our "
+          "index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root pins plus "
+          "signature links: no revocation checking, no certificate-path constraints. The MANIFEST is an unsigned index; the "
+          "enclave-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
+        if kinds == {"tdx", "snp"}:
+            A("<p class=note><b>Two kinds of search machine</b>: the searches made since 1 Nov 2026 ran on Intel TDX. For "
+              "those, the report is an Intel TDX quote chaining to Intel's root, the firmware is a build Google endorsed, and "
+              "the image is identified by the boot application its event log measures. VERIFY.md describes both.</p>")
     if sessions and all(_is_hosted(s.get("record")) for s in sessions):     # HOSTED
         A("<p class=note><b>What only the page reports</b>: that no AI assistant took part, which text each search was "
           "given before it was sealed, and the date bound it gave each search (the search machine signs the bound it was "
@@ -1350,7 +1381,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
         return _write_name_bundle(dest, files, b, client, matter, rec)
     files = {"record.html": b["html"].encode("utf-8"),
              "searches.json": json.dumps(b["searches"], indent=1, ensure_ascii=False).encode("utf-8"),
-             "VERIFY.md": VERIFY_MD.encode("utf-8")}
+             "VERIFY.md": verify_md(search_hardware(_evidence_offers(b["evidence"].values()))).encode("utf-8")}
     # The CONVERSATION's own proof, not only the searches' (Henry, 23 Sep: "can't it check that the part
     # that checks that the chat I had with the confidential AI was confidential?"). The record already
     # describes the model lane, verbatim from this device's receipt — but the receipt stayed on the device,
@@ -1477,7 +1508,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
           "--reference-key <its key>")
     print("                        (in that folder; needs Python's cryptography 42 or newer. Without those "
           "two it can only show a genuine")
-    print("                        Azure confidential machine, not that it was InferRoute's — every identity "
+    print("                        confidential machine, not that it was InferRoute's — every identity "
           "line FAILs and it exits 1.)")
     print("  contains the disclosure in plain text — store it accordingly")
     if anchor:
@@ -1578,8 +1609,8 @@ def verify_bundle(bundle_dir: str, extra_args: Optional[List[str]] = None) -> in
             print(f"  using this computer's own reference ({ref}) — corroboration, not an independent check: "
                   "an auditor must obtain it from InferRoute out of band and rerun.")
         else:
-            print("  NO REFERENCE on this computer: the run below can only show a genuine Azure confidential "
-                  "container, not that it was InferRoute's. Every identity line will FAIL for that reason.")
+            print("  NO REFERENCE on this computer: the run below can only show a genuine confidential "
+                  "machine, not that it was InferRoute's. Every identity line will FAIL for that reason.")
     import sys
     r = subprocess.run([sys.executable, str(script), str(d), *args])
     return r.returncode
@@ -2580,11 +2611,275 @@ def _receipt_for_pack(raw: bytes) -> bytes:
     return raw
 
 
-def _brief(has_searches: bool) -> str:
+
+# ─────────────── the search machine's own words, for a record whose searches ran on Intel TDX (4 Nov) ───────────────
+# VERIFY_MD and AUDIT_MD were written for the AMD SEV-SNP search machine (Azure confidential containers). Since
+# 1 Nov the search machine is an Intel TDX confidential VM on Google Cloud running InferRoute's own image, and
+# the verifier checks those records — but the exported guide and the audit brief still told every reader that
+# each search "ran inside an AMD SEV-SNP confidential machine". Each pair below replaces one SEV-SNP passage
+# with what is true of a TDX search; a test asserts every `old` still occurs exactly once, so a reworded base
+# cannot silently leave a TDX record with the AMD sentence. The SEV-SNP texts stay the base for older records.
+
+def search_hardware(offers: list) -> set:
+    """{"tdx"} / {"snp"} / both / empty, from the evidence offers of a record's searches. A TDX offer carries a
+    quote (evidence.quote); a SEV-SNP offer carries the 1184-byte report as a base64 string."""
+    kinds = set()
+    for o in offers:
+        if not isinstance(o, dict):
+            continue
+        ev = o.get("evidence")
+        kinds.add("tdx" if isinstance(ev, dict) and ev.get("quote") else "snp")
+    return kinds
+
+
+def _evidence_offers(blobs) -> list:
+    """The `offer` of each evidence file (JSON text or bytes); unreadable ones are skipped, not guessed."""
+    out = []
+    for b in blobs:
+        try:
+            d = json.loads(b)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(d, dict) and isinstance(d.get("offer"), dict):
+            out.append(d["offer"])
+    return out
+
+
+TDX_VERIFY_SUBS = [
+    ("""## 3. IDENTITY — the step that separates InferRoute's enclave from anyone's Azure container
+
+A SEV-SNP report and Microsoft's endorsement prove that SOME confidential container ran on a genuine AMD
+chip inside Microsoft's utility VM. Anyone with an Azure account can produce such a bundle with their own
+key, their own statement over any text, and their own policy. The MEASUREMENT endorses Microsoft's utility
+VM, not our container. What identifies InferRoute's enclave is the container-policy hash (HOST_DATA) and the
+index / encoder manifest hashes — and they mean nothing unless compared against values you obtained from
+InferRoute INDEPENDENTLY of this bundle:
+
+    reference.json  =  {"policy_sha256": [...], "index_manifest_sha256": [...], "model_manifest_sha256": [...],
+                        "source": "<where you got it>", "published_at": "...", "sig": "<optional, see below>"}
+""",
+     """## 3. IDENTITY — the step that separates InferRoute's enclave from anyone's confidential machine
+
+An Intel TDX quote and Google's launch endorsement prove that SOME confidential virtual machine ran on a
+genuine Intel processor, with firmware Google built and endorsed. Anyone with a cloud account can produce such
+a bundle with their own key, their own statement over any text, and their own image. What identifies
+InferRoute's enclave is what the quote's boot event log measures — the SHA-384 of the boot application the
+firmware handed over to, with what it loads — the firmware-stage measurement RTMR0 for the machine's shape,
+and the index / encoder manifest hashes. They mean nothing unless compared against values you obtained from
+InferRoute INDEPENDENTLY of this bundle:
+
+    reference.json  =  {"tdx_image_sha384": [...], "tdx_rtmr0": [...], "index_manifest_sha256": [...],
+                        "model_manifest_sha256": [...], "source": "<where you got it>", "published_at": "...",
+                        "sig": "<optional, see below>"}
+
+`tdx_image_sha384` entries carry `loads` (what the image may load after it) and `tdx_rtmr0` entries carry the
+`shape` they were observed on; a reference may also name SEV-SNP `policy_sha256` values for older records.
+"""),
+    ("""That is how a policy later withdrawn cannot pass as current""",
+     """That is how an image later withdrawn cannot pass as current"""),
+    ("""`searches.json` holds one entry per sealed search: `statement` (with `sig`), `result`, `query_text`,
+`signer_pub`, and `evidence_file`. That evidence file is JSON: `offer.evidence` (base64 of the 1184-byte
+SEV-SNP report), `offer.endorsements` (base64 PEM: VCEK, ASK, ARK), `offer.uvm_endorsements` (base64
+COSE_Sign1), `offer.runtime_data` (base64 JSON), and `policy_b64` (a sibling of `offer`, when archived).
+
+* **Statement signature** — Ed25519 over the canonical JSON of `statement` (keys sorted, no spaces,
+  `sig` removed) under `signer_pub`.
+* **Signer is hardware-bound** — `signer_pub` == `statement_signer_pub` inside `runtime_data`, and the
+  report's `REPORT_DATA` (bytes 0x50..0x90) == SHA-256(runtime_data bytes) ‖ 32 zero bytes. The bytes are the
+  base64-DECODED content of `offer.runtime_data`, exactly as decoded: do not parse and re-serialise them, and
+  do not hash the base64 text. The statement's `runtime_data_sha256` is the same hash.
+* **AMD chain** — report signed (ECDSA P-384, R/S little-endian at 0x2A0) under the VCEK; VCEK ← ASK ← ARK;
+  ARK SPKI SHA-256 == AMD's published root for the product (printed with the KDS URL — compare it yourself);
+  VCEK hwID and TCB match the report; VMPL 0; debug off; AMD certificate dates enforced.
+* **Utility VM** — COSE_Sign1 PS384 under its x5chain; chain root == Microsoft Supply Chain RSA Root CA 2022
+  (printed); payload launch measurement == report `MEASUREMENT` (0x90..0xC0).
+* **Policy consistency** — SHA-256(base64-decoded `policy_b64`) == report `HOST_DATA` (0xC0..0xE0). This is
+  agreement within the bundle; identity is step 3.
+""",
+     """`searches.json` holds one entry per sealed search: `statement` (with `sig`), `result`, `query_text`,
+`signer_pub`, and `evidence_file`. That evidence file is JSON: `offer.evidence.quote` (base64 of the TDX
+quote), `offer.evidence.ccel` (base64 of the boot event log), `offer.endorsements.intel` (Intel's TCB info,
+QE identity and revocation lists, each with its issuer chain, as fetched at the time of the search),
+`offer.endorsements.google_launch_endorsement` (base64), and `offer.runtime_data` (base64 JSON).
+
+A TDX v4 quote is a 48-byte header followed by a 584-byte TD report body; within the BODY, `mrtd` is
+[136:184], `rtmr0`-`rtmr3` are [328:376], [376:424], [424:472], [472:520], and `report_data` is [520:584].
+
+* **Statement signature** — Ed25519 over the canonical JSON of `statement` (keys sorted, no spaces,
+  `sig` removed) under `signer_pub`.
+* **Signer is hardware-bound** — `signer_pub` == `statement_signer_pub` inside `runtime_data`, and the TD
+  report's `report_data` == SHA-256(runtime_data bytes) ‖ 32 zero bytes. The bytes are the base64-DECODED
+  content of `offer.runtime_data`, exactly as decoded: do not parse and re-serialise them, and do not hash the
+  base64 text. The statement's `runtime_data_sha256` is the same hash.
+* **Intel chain** — the quote is signed (ECDSA P-256) under an attestation key; the Quoting Enclave's report
+  binds that key (its REPORTDATA == SHA-256(attestation key ‖ QE auth data) ‖ zeros) and is signed by the PCK
+  certificate; PCK ← Intel SGX PCK Platform CA ← Intel SGX Root CA, the root's public key compared with a pin
+  (printed — compare it with Intel's own published certificate yourself). The chain sits in the quote's
+  certification data as type 6 NESTING a type 5 PEM chain: a parse that misses the nesting fails on the QE
+  report and reads like a defect in the record. Intel's TCB info, QE identity and revocation lists are checked
+  against Intel's signature and at the search's time, offline; the platform's and the TDX module's TCB status
+  is printed as Intel states it. The TD attributes' DEBUG bit is clear.
+* **Firmware** — Google's launch endorsement (RSA-PSS, under the pinned GCE-cc-tcb-root) lists the quote's
+  `mrtd`, so the firmware is a build Google published and endorsed. Its source is not published.
+* **Boot** — the event log replays to `rtmr0`-`rtmr3` exactly; RTMR2 and RTMR3 are empty (nothing was
+  measured after the image); the firmware's boot entries pass no command line; and the first EFI application's
+  SHA-384 is the image that step 3 compares with the reference.
+"""),
+    ("""writes, per search, `raw/search-N/report.bin`, `vcek.pem`, `ask_ark.pem`, `uvm_endorsement.cose`,
+`runtime_data.json`, `policy.rego`, `statement.json` — the exact bytes the checks above consume, as files.
+These tools consume the same bytes: AMD's `snpguest` (github.com/virtee/snpguest) and Google's
+`go-sev-guest` (github.com/google/go-sev-guest) for the report and certificate chain; `go-cose` or
+`pycose` for the COSE endorsement; `az confcom acipolicygen` to regenerate a policy from a container image
+and compare its hash. We have NOT run those invocations on this bundle here; we make no claim about their
+exact command lines, only that the extracted files are their inputs.""",
+     """writes, per search, `raw/search-N/quote.bin`, `ccel.bin`, `endorsements.json`, `runtime_data.json` and
+`statement.json` — the exact bytes the checks above consume, as files. These tools consume the same bytes:
+Google's `go-tdx-guest` (github.com/google/go-tdx-guest) and Intel's DCAP quote verification library
+(github.com/intel/SGXDataCenterAttestationPrimitives) for the quote, its certificate chain and Intel's
+collateral; any TCG event-log parser for `ccel.bin`. We have NOT run those invocations on this bundle here;
+we make no claim about their exact command lines, only that the extracted files are their inputs."""),
+]
+
+
+TDX_AUDIT_SUBS = [
+    ("""and things the platform does not offer (AMD publishes no per-chip revocation
+   list for Genoa) belong""",
+     """and things the platform does not offer belong"""),
+    ("""1. **Sealed hardware.** Each search ran inside an AMD SEV-SNP confidential machine with debugging
+   disabled. The report is signed by a chip key (VCEK) that chains to AMD's root.
+2. **The signing key belongs to that machine.** The key that signed each statement is the key the hardware
+   report commits to (REPORT_DATA binds the runtime data, which names the key).
+3. **InferRoute's software, not merely someone's.** The machine's container policy hash (HOST_DATA) and its
+   index and model manifests match the reference InferRoute published, and that reference is signed by
+   InferRoute's publication key.""",
+     """1. **Sealed hardware.** Each search ran inside an Intel TDX confidential machine with debugging
+   disabled. Its report (the TDX quote) is signed under a certificate chain that ends in Intel's SGX root, and
+   Intel's signed collateral from the time of the search states the machine's TCB status; the firmware it
+   measured (`mrtd`) is a build Google endorsed, and its boot event log replays to the quote.
+2. **The signing key belongs to that machine.** The key that signed each statement is the key the hardware
+   report commits to (the TD report's `report_data` binds the runtime data, which names the key).
+3. **InferRoute's software, not merely someone's.** The machine's boot application (its SHA-384, with what it
+   loads), its RTMR0 for its machine shape, and its index and model manifests match the reference InferRoute
+   published, and that reference is signed by InferRoute's publication key."""),
+    ("""   **Read the archived policy itself, not only its hash.** `HOST_DATA` pins the file, so what that file
+   PERMITS is attested too — and the verifier's confidentiality section now reports those permissions as
+   named rows rather than leaving them to be discovered. Check its reading against your own: the document
+   is in `policy_b64` in every evidence file, base64, a few kilobytes of Rego. Two auditors found the same
+   consequential thing in it by hand on 25 Sep, on a brief whose only mention of it was an instruction not
+   to worry about it.""",
+     """   **Read the boot event log itself, not only the hashes.** The quote's RTMRs pin the log
+   (`offer.evidence.ccel`), so every step it records is attested: what the firmware loaded, its boot entries
+   and their command lines, and the application it handed over to. The verifier reports those as named rows;
+   check its reading against your own. What the image does once it runs is not in the log — the log names the
+   image, and the reference says whose it is."""),
+    ("""      Tying a rebuild to a specific record's image runs through `acipolicygen` and needs rung 4.""",
+     """      **They are measurements of the earlier container image**, the one the SEV-SNP search machine ran. The
+      image a TDX record names is a different build: its SHA-384 is in the reference, and no rebuild recipe
+      for it is published as this brief is written. Read the reference's `image_source` and say whether what it
+      points at describes the image this record names."""),
+    ("""   4. **The deployment template is NOT published**, and `HOST_DATA` cannot be derived without it.
+
+   **Do not expect to compare a rebuild against the policy's `layers` arrays directly — that comparison does
+   not typecheck.** Those values are dm-verity roots over layer filesystems, not layer digests, and getting
+   from a built image to them runs through Azure's `acipolicygen`, which needs the unpublished template. An
+   earlier revision of this brief told you to make that comparison; it was wrong, and the correction is here
+   because an instruction that cannot be completed wastes your time and reads as our evidence failing.""",
+     """   4. **What the image runs is measured, its build is not yet reproducible by you.** The boot application's
+      hash ties a record to one image file. `verify_record.py --tdx-image DIR` checks an image directory
+      against what the quote measured, for the images it pins; say whether it applied to this record."""),
+    ("""Claims 1-6 and 8 are about the SEARCH machine: AMD SEV-SNP, attested with a VCEK
+   chaining to AMD's root. This claim is about the AI machine: **Intel TDX**, attested with a quote
+   carrying `mrtd` and `rtmr0`-`rtmr3`. A receipt here naming Intel TDX while claim 1 names AMD SEV-SNP is""",
+     """Claims 1-6 and 8 are about the SEARCH machine: Intel TDX, attested with a quote
+   chaining to Intel's root. This claim is about the AI machine: **also Intel TDX**, attested with a quote
+   carrying `mrtd` and `rtmr0`-`rtmr3`, but a different machine with its own receipt. Two TDX machines here is"""),
+    ("""it describes the SEV-SNP search lane and carries no `mrtd` or `rtmrs` at all.""",
+     """it describes the search machine, not the AI machine, and carries no `mrtd` or `rtmrs` for it."""),
+    ("""   Then run it a SECOND time with `--check-revocation` added. The first run is offline and
+   deterministic, which is what makes it reproducible; the second asks AMD whether the signing
+   certificates have been withdrawn, which needs the network. Without the second run the record
+   prints "certificate revocation was not checked successfully" as an open gap — not because the
+   check is unavailable, but because it was never asked for. A fetch that fails is reported as
+   not-checked, never as revoked: "I could not reach AMD" and "this certificate is revoked" must
+   not produce the same row, and they do not.""",
+     """   Revocation needs no second run for a TDX search: Intel's revocation lists from the time of the search
+   are in each evidence file and are checked offline, against Intel's signature, in the first run (the
+   `Intel revocation lists` row). Whether a certificate was withdrawn AFTER the search is a question for
+   Intel's live service, which this folder does not reach; say so if it matters to the reader."""),
+    ("""   `python3 verify_record.py . --extract ../extracted` writes each search's raw report, certificates, runtime
+   data and statement as separate files. Get AMD's certificate chain for the product line named in the VCEK
+   (Genoa, Milan or Turin) from AMD's key distribution service — `https://kdsintf.amd.com/vcek/v1/<Product>/cert_chain`
+   — then check the chain and the report signature with your own tools. Recompute REPORT_DATA from the
+   runtime data, and the statement signature from the signer key.""",
+     """   `python3 verify_record.py . --extract ../extracted` writes each search's quote, boot event log, Intel's
+   collateral, runtime data and statement as separate files. Get Intel's SGX Root CA from Intel itself and
+   check the quote's certificate chain and signature against it with your own tools (VERIFY.md §4 gives the
+   offsets and the one parse that trips people). Recompute `report_data` from the runtime data, and the
+   statement signature from the signer key."""),
+    ("""flip a bit in a hardware report, edit a field inside a signed statement,
+   change a byte of an archived policy, delete a file the manifest lists.""",
+     """flip a bit in a quote, edit a field inside a signed statement,
+   change a byte of the boot event log, delete a file the manifest lists."""),
+    ("""The AMD ROOT (ARK) is self-signed; that is correct for a root and is not a finding.""",
+     """Intel's SGX Root CA is self-signed; that is correct for a root and is not a finding."""),
+    ("""What matters is that it's AMD's.
+- The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The container is
+  identified by HOST_DATA, checked against the reference.""",
+     """What matters is that it's Intel's.
+- `mrtd` measures Google's firmware, not InferRoute's image. The image is identified by the boot application
+  the event log measures, checked against the reference."""),
+    ("""- A SKIP for "configured firmware TCB floor" means no floor was in force AT THE SEARCH'S TIME —
+  either none was pinned, or the reference's floor carries no validity window covering it. It
+  does not mean the firmware was old. A PASS establishes only that the observed TCB is not
+  below the declared threshold, not that the threshold is AMD guidance or an independent
+  firmware is old. Report the levels you see.""",
+     """- "Intel TCB status" is Intel's own statement, from the collateral kept with the search, about the platform
+  and the TDX module at the search's time. It PASSES only when both read UpToDate; anything else is a FAIL
+  and names what Intel said. A reference's `min_tcb` values are AMD firmware floors and do not apply to a TDX
+  search: the verifier says so rather than printing them as a pass. Report the levels you see."""),
+]
+
+# A record mixing the two (a matter that searched before and after 1 Nov) keeps the SEV-SNP base and says so
+# where both apply, rather than describing every search as the other kind.
+MIXED_NOTE = ("\n**This record mixes two kinds of search machine.** Searches made before 1 Nov 2026 ran on AMD SEV-SNP; "
+              "later ones ran on Intel TDX. `verify_record.py` checks each search by its own evidence and its rows "
+              "name the hardware. The hardware paragraphs below are the SEV-SNP ones; for the TDX searches use the "
+              "section \"For the searches that ran on Intel TDX\" at the end of VERIFY.md.\n")
+
+
+def _apply(base: str, subs: list) -> str:
+    for old, new in subs:
+        base = base.replace(old, new, 1)
+    return base
+
+
+def verify_md(kinds: set) -> str:
+    """VERIFY.md for the hardware this record's searches actually ran on."""
+    if kinds == {"tdx"}:
+        return _apply(VERIFY_MD, TDX_VERIFY_SUBS)
+    if kinds == {"tdx", "snp"}:
+        head, sep, rest = VERIFY_MD.partition("\n## 1.")
+        tdx = "\n".join(new for _, new in (TDX_VERIFY_SUBS[0], TDX_VERIFY_SUBS[2], TDX_VERIFY_SUBS[3]))
+        return (head + MIXED_NOTE + sep + rest.rstrip("\n") + "\n\n## For the searches that ran on Intel TDX\n\n"
+                + tdx.replace("## 3. IDENTITY", "### Identity") + "\n")
+    return VERIFY_MD
+
+
+def audit_md(kinds: set) -> str:
+    if kinds == {"tdx"}:
+        return _apply(AUDIT_MD, TDX_AUDIT_SUBS)
+    if kinds == {"tdx", "snp"}:
+        head, sep, rest = AUDIT_MD.partition("\n## The claims to test")
+        return head + MIXED_NOTE + sep + rest
+    return AUDIT_MD
+
+
+def _brief(has_searches: bool, kinds: Optional[set] = None) -> str:
     """The brief, banner-first when nothing in the folder can evidence claims 1-6 and 8."""
+    brief = audit_md(kinds or set())
     if has_searches:
-        return AUDIT_MD
-    head, _, rest = AUDIT_MD.partition("\n")
+        return brief
+    head, _, rest = brief.partition("\n")
     return head + "\n\n" + NO_SEARCHES_BANNER.strip() + "\n" + rest
 
 
@@ -3557,6 +3852,8 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
                              "check, so this client cannot tell what kind of record it is; refusing to make an "
                              "audit pack from it. Export the record again and make the pack from the new export.")
     rows = json.loads((src / "searches.json").read_text(encoding="utf-8"))
+    # Which search machine the record's searches ran on decides which hardware the guide and the brief describe.
+    kinds = search_hardware(_evidence_offers(p.read_bytes() for p in src.glob("*.evidence.json")))
     if not isinstance(rows, list):
         raise S.ProbantError("this record's searches.json is not a list; refusing to make an audit pack from it")
     receipts = sorted(p.name for p in src.iterdir() if _is_session_receipt(p.name))
@@ -3600,8 +3897,8 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         "searches.json": json.dumps(stripped, indent=1, ensure_ascii=False).encode("utf-8"),
         "record.html": PACK_RECORD_HTML.encode("utf-8"),
         # Instructions must describe the verifier shipped by this client, not an older record exporter.
-        "VERIFY.md": VERIFY_MD.encode("utf-8"),
-        "AUDIT.md": _brief(bool(rows)).encode("utf-8"),
+        "VERIFY.md": verify_md(kinds).encode("utf-8"),
+        "AUDIT.md": _brief(bool(rows), kinds).encode("utf-8"),
         # THIS CLIENT'S verifier, not the record bundle's. The pack reports `client_version` and links to
         # that version's wheel; shipping the copy that came with the RECORD — written by whatever client
         # exported it, possibly months earlier — guarantees a mismatch the moment an auditor does what the

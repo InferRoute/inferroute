@@ -28,19 +28,28 @@ RESULT = re.compile(r"^RESULT:\s*(.*)$")
 GROUPS: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
     ("intact", "Is the record whole and unaltered?",
      "Every file is present and matches the hashes written when the record was made.",
-     ("manifest", "bundle integrity", "searches.json", "evidence file", "malformed")),
+     # "manifest.json", not "manifest": the enclave's "index manifest names real bytes" is about WHICH index it
+     # served (identity), and the bare word filed it here (4 Nov).
+     ("manifest.json", "bundle integrity", "searches.json", "evidence file", "malformed")),
+    # The answer here is a placeholder: machine_answer() writes it from the hardware the rows show. It used to be
+    # one fixed sentence naming AMD's and Microsoft's roots, printed for an Intel TDX record too (4 Nov).
     ("machine", "Was this really a sealed machine?",
-     "The hardware signed its own report, under AMD's and Microsoft's roots, with debugging off.",
+     "The hardware signed its own report under its maker's published root, with debugging off.",
      ("amd", "vcek", "snp report", "hardware report", "debug", "chip key", "vmpl", "report signature",
       "certificates parse", "chain present", "product line", "firmware tcb", "uvm", "measurement",
-      "report_data", "runtime data", "ark self-signed", "signed by ark")),
+      "report_data", "runtime data", "ark self-signed", "signed by ark",
+      # Intel TDX (a Google Confidential VM running InferRoute's own image): the quote, Intel's chain and
+      # collateral, Google's firmware endorsement and the measured boot. Without these the TDX hardware checks
+      # fell through to "Other checks" and the answer rested on two incidental rows.
+      "td quote", "tdx quote", "intel", "pck", "quoting enclave", "attestation key", "reportdata",
+      "google launch", "mrtd", "boot event log", "nothing measured", "boot entries", "boot application")),
     ("identity", "Was it InferRoute's machine, and not merely someone's?",
      "The sealed machine ran the software named in InferRoute's published reference.",
-     ("enclave identity", "reference", "archived policy")),
+     ("enclave identity", "reference", "archived policy", "index manifest", "encoder manifest")),
     ("truthful", "Does the record tell the truth about your search?",
      "The query, the results, the recorded recipient key and the date bound match what the machine signed.",
      ("query text", "signed recipient matches recorded key", "result is the signed result", "hit count", "statement",
-      "sealing key", "signer key", "document", "date bound", "predates")),
+      "sealing key", "signer key", "document", "date bound", "predates", "machine clock")),
     ("complete", "Could a search have been taken out of it?",
      "The searches are numbered without a gap, so none was removed.",
      ("completeness",)),
@@ -82,7 +91,7 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
         "The verifier refused to start — usually a missing file or an option it would not accept. Nothing "
         "about the record itself is claimed either way."),
     3: ("test", "This was a test run, not a verification.",
-        "Test roots were used, so this says nothing about whether a real Azure machine was involved. Run it "
+        "Test roots were used, so this says nothing about whether a real sealed machine was involved. Run it "
         "again without the test options."),
     4: ("unauthenticated", "Everything passed, but the reference was not authenticated.",
         "The checks passed against a reference file nobody's signature vouched for. Pass the publication key "
@@ -94,9 +103,33 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
 # words): they describe what the evidence licenses, not whether the record checked out.
 DISCLOSURE_HEADING = "What this evidence licenses you to say about confidentiality"
 
-DISCLOSED_TEXT = ("Not a failure: these lines name what the hardware check cannot cover, such as a part of the "
-                  "sealed machine's policy that the cloud platform signs and updates. The record names it, with its "
-                  "permissions, instead of leaving it out.")
+DISCLOSED_TEXT = ("Not a failure: these lines name what the hardware check cannot cover. The record names each "
+                  "one instead of leaving it out.")
+
+
+# Which hardware a row is evidence from, read from the verifier's own row names. Intel TDX rows name the quote,
+# Intel's chain or Google's firmware endorsement; AMD SEV-SNP rows name the VCEK, the SNP report or the utility VM.
+TDX_ROWS = ("td quote", "tdx quote", "intel", "pck", "quoting enclave", "mrtd", "google launch", "boot event log")
+SNP_ROWS = ("vcek", "snp report", "amd", "uvm", "vmpl", "ark self-signed", "signed by ark")
+MACHINE_ANSWER = {
+    "tdx": ("The Intel processor signed its own report under Intel's published root, with debugging off, and the "
+            "firmware and the boot that the report records were checked."),
+    "snp": "The hardware signed its own report under the published roots of its chip maker and its platform, with debugging off.",
+    "mixed": "Each search's hardware signed its own report under its maker's published root, with debugging off.",
+}
+
+
+def machine_answer(rows: List[Dict[str, str]]) -> str:
+    names = [r["name"].lower() for r in rows]
+    tdx = any(w in n for n in names for w in TDX_ROWS)
+    snp = any(w in n for n in names for w in SNP_ROWS)
+    if tdx and snp:
+        return MACHINE_ANSWER["mixed"]
+    if tdx:
+        return MACHINE_ANSWER["tdx"]
+    if snp:
+        return MACHINE_ANSWER["snp"]
+    return GROUPS[1][2]
 
 
 LIMITED_ANSWER = "Passed, with limits noted below."
@@ -160,6 +193,8 @@ def parse(text: str, code: int) -> Dict[str, Any]:
         mine = [r for r in rows if r["group"] == key]
         if not mine:
             continue
+        if key == "machine":
+            ok_text = machine_answer(mine)
         if key == "disclosed":
             groups.append({"key": key, "question": question, "rows": mine, "status": "info", "answer": ok_text})
             continue

@@ -474,6 +474,16 @@ button.link { border: 0; background: none; color: var(--action-text); padding: 0
 .session-row:hover { background: var(--user); }
 .session-row .matter-of { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .session-row, .session-row:not(:has(.matter-of)), .record-row { grid-template-columns: 1fr 1fr; } }
+/* An exported record's folder path is one long unbroken string. In a 1fr grid column its min-content width
+   widened the whole records box past a phone screen, and "Check this record" then scrolled the box sideways,
+   so its verdict read flush to the edge and the button ran off it (390 px, 4 Nov). Let the path wrap, and on a
+   phone give the date and the path a line each above the two buttons. */
+.record-row > * { min-width: 0; }
+.record-row .mono { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .record-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .record-row > .when, .record-row > .mono { grid-column: 1 / -1; }
+}
 /* What a record licenses us to say, above the audit button. Quiet rather than promotional: it is a claim we
    are inviting someone to falsify, and a box that looks like a badge would read as the opposite. */
 .licensed { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; margin: 0 0 16px; }
@@ -586,6 +596,9 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .proposal .quote { margin: 0 0 8px; padding: 6px 0 6px 12px; border-left: 3px solid var(--line); color: var(--muted);
   font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .proposal .card-actions { padding: 10px 14px; border-top: 1px solid var(--line); }
+.draft-card .card-body { padding: 14px 16px 6px; }
+.draft-card .card-body h3 { margin: 0 0 6px; }
+.draft-card .card-body details.fold { margin: 4px 0 6px; }
 
 /* sharing: a fingerprint is read aloud, so it is shown big enough to read aloud */
 .fingerprint-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);

@@ -132,7 +132,7 @@ def test_a_disclosure_line_under_a_passing_verdict_is_shown_as_a_disclosure_not_
     platform's policy fragment) as a FAIL line beside RESULT "no failing record checks", and exits 0."""
     from inferroute_cli import probant_check as C
     # As the verifier prints it: the disclosure rows sit under its confidentiality report, after RESULT.
-    out = ("  PASS manifest: all files match\n"
+    out = ("  PASS MANIFEST.json: all files match\n"
            "RESULT: no failing record checks under production roots; SKIP rows remain unverified\n"
            "\nWhat this evidence licenses you to say about confidentiality\n"
            "  policy 380e3707bca09f61…\n"
@@ -199,3 +199,68 @@ def test_only_the_confidentiality_report_is_read_as_a_disclosure():
 def test_a_clean_pass_still_says_so():
     r = C.parse(PASSING, 0)
     assert r["verdict"] == "passed" and r["headline"] == "Everything checked out."
+
+
+# ── an Intel TDX record (4 Nov): the rows below are the verifier's own, printed by verify_record.verify_offer on the
+# real c3-standard-22 offer in sealed-research's tests/fixtures/tdx (details shortened), plus the record rows every
+# record carries. The sealed-machine answer used to be one fixed sentence naming AMD's and Microsoft's roots, and
+# most TDX hardware rows matched no question and fell to "Other checks".
+TDX_PASSING = """Verifying record in /home/henry/Anteriora/Acme/exports/cooling-prior-art-record-20261104T010203Z
+
+  PASS MANIFEST.json: 14 files listed, all present
+  PASS bundle integrity (MANIFEST is an index, not a seal): every listed file matches its sha256
+  PASS runtime data present: 4079 bytes of readable runtime data
+  PASS sealing key committed in runtime data: the query would be sealed to ffc38677ba635ec3…
+  PASS signer key committed in runtime data: answers would be signed by b2b2108b1628e6e5…
+  PASS index manifest names real bytes: 4d9c239b596946c5… identifies the files this enclave serves
+  PASS encoder manifest names real bytes: 7f31cb3ff91adaea… identifies the files this enclave serves
+  PASS REPORTDATA binds runtime data: REPORTDATA == SHA-256(runtime data) ‖ zeros
+  PASS TD debug disabled: TD attributes 0000001000000000: DEBUG bit clear
+  PASS Intel PCK certificate chain: PCK ← Intel SGX PCK Platform CA ← Intel SGX Root CA
+  PASS Quoting Enclave report signed by the PCK key: ECDSA P-256 over the 384-byte QE report verifies
+  PASS attestation key bound by the Quoting Enclave: QE REPORTDATA == SHA-256(attestation key ‖ QE auth data) ‖ zeros
+  PASS TD quote signature: ECDSA P-256 over the quote header and TD report verifies under the bound attestation key
+  PASS Intel TCB info: signed by Intel SGX TCB Signing under the pinned root, TDX v3
+  PASS Intel QE identity: signed by Intel SGX TCB Signing under the pinned root, TD_QE v2
+  PASS Intel revocation lists: Intel's root and PCK CRLs verify
+  PASS Intel TCB status (platform, TDX module): FMSPC 00806f050000, platform UpToDate, TDX module UpToDate
+  PASS Intel Quoting Enclave identity and status: QE is Intel's (MRSIGNER, product, attributes), ISVSVN 6: UpToDate
+  PASS Google launch endorsement: RSA-PSS signature by GCE-uefi-signer, issued by the pinned GCE-cc-tcb-root
+  PASS firmware (MRTD) is a build Google endorsed: MRTD f21e6b48743fe14c… is listed, firmware SVN 2
+  PASS boot event log replays to the quote: 22 events replay to RTMR0-3 exactly
+  PASS nothing measured after the image: RTMR2 and RTMR3 are empty
+  PASS firmware boot entries pass no command line: Boot0001 'UEFI nvme_card-pd': no command line
+  PASS boot application measured: first EFI application 07d49e2137bf87f4… (2 measured in total)
+  PASS enclave identity (InferRoute's image, host configuration, index, encoders): image: current
+  PASS reference signature: verifies under the publication key 748e4c8e4ca334c5… you recorded at first use
+  PASS statement matches enclave commitments: index, encoders and keys are the ones the hardware report commits to
+  PASS machine clock agrees with the client's: 0 s apart
+  PASS signed recipient matches recorded key: signed hash matches the public key recorded in this search row
+  PASS query text is the one searched: sha256 of the query matches the signed statement
+  PASS completeness (per-session sequence): 3 searches, seq 1..3, no gap
+
+RESULT: every check PASSED under production roots
+"""
+
+
+def test_a_tdx_record_is_answered_as_intel_hardware_and_every_row_has_a_question():
+    out = C.parse(TDX_PASSING, 0)
+    assert sum(len(g["rows"]) for g in out["groups"]) == out["checks"] == 31
+    assert [g["key"] for g in out["groups"]] == ["intact", "machine", "identity", "truthful", "complete"]
+    machine = next(g for g in out["groups"] if g["key"] == "machine")
+    assert "Intel" in machine["answer"]
+    names = {r["name"] for r in machine["rows"]}
+    assert {"TD quote signature", "Intel PCK certificate chain", "Google launch endorsement",
+            "boot event log replays to the quote", "TD debug disabled"} <= names
+    identity = next(g for g in out["groups"] if g["key"] == "identity")
+    assert "index manifest names real bytes" in {r["name"] for r in identity["rows"]}
+
+
+def test_no_answer_names_a_vendor_the_record_does_not_show():
+    tdx = C.parse(TDX_PASSING, 0)
+    snp = C.parse(PASSING, 0)
+    text = json.dumps([g["answer"] for g in tdx["groups"]])
+    for word in ("AMD", "Microsoft", "Azure"):
+        assert word not in text
+    assert "Intel" not in json.dumps([g["answer"] for g in snp["groups"]])
+    assert "Azure" not in json.dumps(C.VERDICTS)

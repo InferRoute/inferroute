@@ -160,3 +160,23 @@ def main() -> int:  # `sealed-index-verify <index_dir>`
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def tree_sha256(root: str) -> str:
+    """A deterministic hash over EVERY file under an index root, committed into REPORT_DATA so the client can pin the
+    exact bytes that were searchable. Order-independent (sorted path+sha lines), like sha256 over a manifest."""
+    # os.walk(followlinks=True), not Path.rglob: on Python 3.12 rglob does NOT descend symlinked
+    # directories, and a pre-mounted path can be a symlink tree. rglob would then find zero files and this
+    # would return sha256 of an empty list — e3b0c442…, identical for every index — a real-looking digest
+    # committing to nothing while real files are served. Found by the attested session before the first
+    # reference was signed.
+    files = []
+    for dirpath, _dirs, names in os.walk(root, followlinks=True):
+        for name in names:
+            files.append(os.path.join(dirpath, name))
+    n_shards = sum(1 for _ in json.load(open(os.path.join(root, "ann", "layout.json")))["shards"])
+    if len(files) < n_shards:
+        raise SystemExit(f"manifest refuses: found {len(files)} files under {root} but the index declares "
+                         f"{n_shards} shards. A short or empty manifest would commit to bytes that were not served.")
+    lines = [f"{sha256_file(p)}  {os.path.relpath(p, root)}\n" for p in files]
+    return hashlib.sha256("".join(sorted(lines)).encode()).hexdigest()

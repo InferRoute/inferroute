@@ -79,7 +79,12 @@ def test_the_tdx_answer_states_both_bounds_and_leaves_a_next_step(V):
         if r == 0:
             assert "cannot tell you whether your text stayed private" in text
             assert "What you can do:" in text
-            assert "For future searches:" in text and "cannot change this record" in text
+            # Image v14 (sealed-research 8843ba8): when the image was not supplied to the run, the next step is the
+            # re-run with --tdx-image/--tdx-source, said as a re-run and not as a deployment change; otherwise it is
+            # the deployment change, said as one that cannot change this record. Either way, a next step is left.
+            assert ("For future searches:" in text and "cannot change this record" in text) or \
+                   ("What you can do now:" in text and "--tdx-image" in text
+                    and "it is not a change to the deployment" in text)
 
 
 def test_the_app_pass_summary_says_what_it_cannot_show():

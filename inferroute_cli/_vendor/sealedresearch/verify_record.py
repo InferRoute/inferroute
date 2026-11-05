@@ -112,6 +112,7 @@ class Checks:
         self.rows: List[Tuple[str, str, str]] = []      # (status, name, detail)  status ∈ PASS FAIL SKIP
         # Set only by check_tdx_image (--tdx-image): True iff every required image row passed. None = not assessed.
         self.tdx_posture_verified: Optional[bool] = None
+        self.tdx_posture_state: Optional[str] = None
 
     def add(self, ok: Optional[bool], name: str, detail: str) -> bool:
         self.rows.append(("SKIP" if ok is None else "PASS" if ok else "FAIL", name, detail))
@@ -958,8 +959,31 @@ TDX_NOT_ESTABLISHED = ("client-side sealing, exclusive key custody, runtime egre
                        "non-disclosure were not established")
 # image_source is a generic top-level field; nothing binds it to the TDX image and this verifier reads no TDX
 # source field. So the gap is stated as the verifier's limit, not as a fact about the reference's contents.
-TDX_NO_SOURCE = ("this verifier does not look in the reference for a source of the Intel TDX image; "
-                 "source-to-image verification is absent")
+TDX_NO_SOURCE = ("this run was not given the image's source, so source-to-image verification was not made (see "
+                 "--tdx-source)")
+# Level 0 has two states (fifth audit): the published image was NOT SUPPLIED to this run (tdx_posture_verified None),
+# or it was checked and a required row FAILED (False). The first is an omission the reader can repair; the second is a
+# finding. Neither is "not assessed".
+TDX_IMAGE_NOT_SUPPLIED = ("the published boot image was not supplied to this run, so nothing here is about what the image "
+                          "permits; run this verifier again with --tdx-image (uki.efi, root.img, verity.img) and --tdx-source "
+                          "(the source commit the image names) for the image check")
+TDX_IMAGE_INCOMPLETE = ("the published image was supplied but the check could not be completed (see the image rows above for "
+                        "what was missing: the image's artefact files (uki.efi, root.img, verity.img), the source commit it "
+                        "names, or a tool; or for a supplied file that could not be read as what it should be — obtain a fresh "
+                        "copy; if a fresh copy reads the same way, the supplied file is not the published artefact, which is a "
+                        "finding); supply it and run again")
+# The one incomplete cause the reader cannot repair by supplying something: a root tree given with --tdx-root-tree
+# cannot be tied to root.img here. Said instead of the generic ask when that row is the only required row not PASS.
+TDX_ROOT_TREE_ASK = ("the supplied root tree cannot be tied to root.img on this machine; re-run on a host with fsck.erofs "
+                     "and without --tdx-root-tree, or ask InferRoute to run it")
+TDX_ROOT_TREE_ROW = "D. root tree is root.img's contents"
+TDX_IMAGE_FAILED = ("the published image was checked and a required row found a difference (see the image rows above); the "
+                    "image statement is not licensed")
+# The ordinary run without --reference-key: the image passed every required row, and the reference that names it as
+# the one these searches measured was checked against no key. Its own gap and ask; not "not supplied".
+TDX_IMAGE_UNAUTHENTICATED = ("the published image was supplied and passed every required row, but the reference that names "
+                             "it was not verified under a supplied key, so the image statement is not licensed; run again "
+                             "with --reference-key")
 TDX_IMAGE_UNASSESSED = (
     "the Intel TDX image's own permissions were not assessed: these checks establish which signed image "
     "and boot configuration booted, not what that image lets the machine's operator observe (its console "
@@ -1045,8 +1069,9 @@ STATEMENT_TDX_IMAGE_CHECKED = (
     "with its output discarded; the published entry point binds its socket, applies a seal refusing new sockets to "
     "every thread, and only then loads the search engine; hardware quotes come from a separate helper with no "
     "network; the files under /opt/ir/app equal the published commit, except that the ranking modules' source is "
-    "not published; the installed Python packages match their own install records and a hash-pinned requirements "
-    "file; the operating system files were compared to nothing but the published image. This establishes the "
+    "not published; the installed Python packages match the install records that travel inside the image (not an "
+    "independent hash) and their names and versions are those of a hash-pinned requirements file, whose wheel hashes "
+    "are not re-checked; the operating system files were compared to nothing but the published image. This establishes the "
     "image's contents and its published code's configuration, not its behaviour while it ran.")
 TDX_RANKER_CLOSED = ("the ranking modules inside the image are pinned by hash, but their source is not published, so "
                      "what they do with a query cannot be reviewed")
@@ -1065,6 +1090,244 @@ TDX_PARTIES = ("the physical machine is Google's and the virtual machine on it i
                "is not established, and the reference is InferRoute's own")
 TDX_PRESEAL = ("before the firewall and seal are installed the program fetches its index over the network, and its "
                "ranking modules have already run with full control of the machine")
+
+# ── Intel TDX image v14: wording keyed to the rows the posture checker PASSED for this image ──
+# The v13 sentence above stays for v13 images. A v14 image (its command line names ir-sealed-search-tdx-v14 and the
+# checker's v14 rows exist for it) gets the clauses below, each printed only when the row that establishes it PASSED.
+# Every clause describes what the image CONTAINS and how its published code is CONFIGURED; none describes a run.
+TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
+TDX_V14_INTRO = ("For these searches, the Intel TDX boot image the quote names was also checked against the files InferRoute "
+                 "publishes (image v14). Established by the rows that passed:")
+# Each clause: (the rows that establish it, its words). {slot}/{survey_slot} are the reply intervals read from the image's
+# unit ({budget}/{survey_budget} the engine's), {waiting} the queue bound read from the published front.
+TDX_V14_HEAD_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("B. UKI command line",),
+     "its command line names no console, silences kernel messages and imports no host-supplied credentials"),
+    (("C. root bytes hash to the roothash",),
+     "its root filesystem matches the integrity hash on that command line"),
+    (("D6. firewall rules",),
+     "a firewall ruleset, loaded before the network comes up, whose output policy drops everything except loopback, "
+     "replies from the search port by the search account, DHCP by the network daemon's account, and — in a fetch "
+     "chain that the fetch step's close empties and reads back as empty before the search service starts — any "
+     "traffic by a separate fetch account (its program is published and compared, not checked here for what it "
+     "fetches), and the resolver's DNS"),
+    (("D1. published files equal the source", "D1. closed engine files match their published hashes"),
+     "the files under /opt/ir/app equal the published commit, except that the ranking modules' source is not "
+     "published and those files are matched by hash only"),
+    (("D3. installed packages match their RECORDs", "D3. requirements equal the source", "D3. installed distributions are the pinned requirements",
+      "D3. no interpreter start-up hook"),
+     "the installed Python packages match the install records that travel inside the image (not an independent hash); "
+     "their names and versions are those of a hash-pinned requirements file; the wheel hashes are not re-checked; and "
+     "the package directory holds no interpreter start-up hook"),
+)
+TDX_V14_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("D7. the warm parent imports no closed module", "D7. one engine process per request"),
+     "the search engine's long-lived process imports no unpublished code, statically or dynamically, among the "
+     "published files under /opt/ir/app: the ranking modules are loaded only inside a child process started for one "
+     "request, which answers that request and exits"),
+    (("D7. seal before serve", "D7. no memory outlives a request", "D4. engine unit properties", "D7. no writable kernel object"),
+     "that child is already sealed when it loads them: the no-socket and no-shared-memory seals its parent installed "
+     "before any request are inherited, the unit gives it no path to write, and every descriptor it inherited but its "
+     "own channel (and standard streams that lead nowhere) is closed first"),
+    (("D7. one engine process per request",),
+     "the parent reads no request and ends a child that outruns its kind's fixed budget ({budget} s, or "
+     "{survey_budget} s for a survey), the kind being named by the published code before any closed code runs"),
+    (("D7. one reply size and two reply slots",),
+     "every reply on the search path to a request of acceptable length (not empty, not over the size limit; one "
+     "outside it, or a POST to another path, gets an unpadded refusal at the HTTP layer) has one length, and a reply "
+     "to a request the box accepts — one it could read and had room for — is held until a fixed interval has elapsed "
+     "since the box took it up, never earlier: {survey_slot} s in this image for a request whose payload declares "
+     "itself a survey, {slot} s for any other, chosen from that declared kind alone, so the interval shows whether a "
+     "request declared itself a survey; requests are taken up one at a time, so the time from arrival also includes "
+     "waiting for those ahead of it; the engine's whole share of the interval, including starting its helper process, "
+     "is bounded by one deadline, {survey_budget} s for a declared survey and {budget} s otherwise, counted from "
+     "take-up, at which the front stops waiting; the engine ends that request's process at the same budget counted "
+     "from when the process read the request, plus up to a second to collect it; that the rest fits is a "
+     "first-boot measurement (FIRST-BOOT items 3-4), not part of this record; a refusal of bytes the box cannot open, "
+     "or of a request arriving while {waiting} are "
+     "already queued or being answered, is padded to that same length, unsigned, and leaves at once, so it is visible "
+     "by its timing; a request it opens but cannot answer to is answered with a signed, sealed refusal of that same "
+     "length at the end of its interval (one it opens that names no key to reply to gets the unsigned padded "
+     "refusal instead, also at the end of its interval); the bound is per call to the engine, and the published entry "
+     "configures one call per request"),
+    (("D7. one quote per boot", "D4. quote helper properties"),
+     "the hardware quote comes from a separate helper process that the unit gives no network; it answers the fetch "
+     "account once, with a fixed all-zero request, and the search account once (what it bound is checked by this "
+     "record's quote rows), and refuses "
+     "after that"),
+    (("D7. offer served from immutable bytes",),
+     "the attestation offer is written once when the service starts and served as those bytes"),
+    (("D4. pin unit properties", "D4. engine unit properties"),
+     "its published pin step is written to read and lock every regular non-empty file of the root filesystem in memory "
+     "before the engine starts, and to refuse if the locked total falls short; whether reads then reached the disk is "
+     "a first-boot measurement, not part of this record; directory lookups are not locked"),
+    (("D7. no writable kernel object",),
+     "no object the kernel would keep for the engine — a queue, a shared segment, a device that maps as memory, a "
+     "scratch file — is writable to it, apart from per-process entries that end with it"),
+    (("D7. the warm parent parses data, not code",),
+     "the engine's parent is written to read exactly four paths of the fetched index (the vector index, the encoder "
+     "directory, two ranking models) through the pinned libraries' own readers; its published loading step opens "
+     "nothing else, refuses an encoder directory holding a file of a code-bearing kind (.bin, .pt, .pth, .pkl, .pickle, "
+     ".ckpt, .py, .so) or naming a module outside sentence_transformers, and requires safetensors weights; what the "
+     "ranking modules open inside the child is not checked"),
+    (("D7. front imports no closed module",),
+     "the published front that holds the keys, signs the statements and serves the port reaches no unpublished "
+     "module by import, static or dynamic, among the published files under /opt/ir/app"),
+    (("D3. no interpreter start-up hook",),
+     "no interpreter start-up hook — a sitecustomize or usercustomize module, or a .pth file with an import line "
+     "that is not byte-pinned — sits on the interpreters' paths to run code before any of this"),
+    (("D4. search unit properties",),
+     "the published front runs as an unprivileged account with no devices, a read-only system apart from scratch space "
+     "of its own, and its output discarded"),
+    (("D7. results reduced to the published shape",),
+     "the closed code's answer is cut to a published shape before it is sealed; unknown fields are dropped"),
+)
+TDX_V14_TAIL = ("The operating system files were compared to nothing but the published image. This establishes the "
+                "image's contents and its published code's configuration, not its behaviour while it ran.")
+TDX_V14_RANKER_SEES = ("the ranking modules' source is not published; inside the per-request child they receive each "
+                       "query in plain text from the published front and choose what goes into that client's own "
+                       "reply, within its published shape, and what they do within that cannot be reviewed")
+TDX_V14_METADATA = ("when, how often and from where requests arrive, the size class of what was sent (the client pads a "
+                    "request to a power-of-two bucket, so a long disclosure lands in a bigger one; that padding is "
+                    "not checked by this record), whether the machine is busy or idle inside a reply "
+                    "interval, and a queue-full or unreadable refusal (which leaves at once), remain visible outside "
+                    "the machine, and so does whether a request declared itself a survey, by how long its reply is "
+                    "held (a request declaring itself a survey holds the machine for that longer interval whether or "
+                    "not it is valid); as configured, an accepted reply has one size and is held until a fixed interval "
+                    "has elapsed since the machine took it up — {survey_slot} s in this image for a declared survey, "
+                    "{slot} s for any other request, never earlier, after any wait behind requests taken up before it; "
+                    "the engine's whole share, including starting its helper, is bounded at {survey_budget} s for a "
+                    "declared survey and {budget} s otherwise, from take-up (its process is ended at the same budget "
+                    "from when it read the request, plus up to a second); how long the machine is busy inside a "
+                    "survey's interval roughly follows how many sub-searches it ran; that the rest fits is a "
+                    "first-boot measurement "
+                    "(FIRST-BOOT items 3-4), not part of this record")
+TDX_V14_TRUST_BOUNDARY = ("the libraries the front and the engine run are pinned by hash and taken as published; the engine's "
+                          "parent is written to read exactly four paths of the fetched index through those libraries' own "
+                          "readers, to refuse an encoder directory holding a file of a code-bearing kind (.bin, .pt, .pth, "
+                          ".pkl, .pickle, .ckpt, .py, .so) or naming a module outside sentence_transformers, and to require "
+                          "safetensors weights; a defect in a pinned library's parser is outside what this record establishes")
+TDX_V14_TRUSTED_BASE = ("Intel's CPU and TDX module, Google's firmware and host-supplied boot configuration, the Linux "
+                        "kernel in the image (trusted for what it does; only its identity is checked), and the operating "
+                        "system's own network daemon (which keeps raw network access) are trusted here without being checked; "
+                        "nothing from Intel or Google in this record speaks to this program: their documents vouch for the chip "
+                        "and the firmware")
+TDX_V14_FIRST_BOOT = ("the checks InferRoute publishes for a first start of this image (its FIRST-BOOT list, "
+                      "enclave/gcp-tdx/FIRST-BOOT.md in the published source, staged into the image) are not part of "
+                      "this record; ask InferRoute whether it has run them on a machine started from this image, and "
+                      "for the results")
+
+
+def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
+    """What the posture checker established for THIS image: its version, read off the checked command line, and the
+    names of the rows that PASSED. None when no image was checked. The wording functions key on this, never on a
+    version number alone."""
+    if image_report is None:
+        return None
+    cmdline = str((getattr(image_report, "values", None) or {}).get("cmdline") or "")
+    m = re.search(r"inferroute\.image=(ir-sealed-search-tdx-v\d+)", cmdline)
+    name = m.group(1) if m else None
+    passed = {n for s, n, _d in getattr(image_report, "rows", []) if s == "PASS"}
+    skipped = {n for s, n, _d in getattr(image_report, "rows", []) if s == "SKIP"}
+    rnp = getattr(image_report, "required_not_passed", None)
+    required_not_passed = set(rnp()) if callable(rnp) else set()
+    values = getattr(image_report, "values", None) or {}
+    slot, waiting, budget = values.get("reply_slot_seconds"), values.get("max_waiting"), values.get("engine_budget_seconds")
+    sslot, sbudget = values.get("survey_slot_seconds"), values.get("survey_budget_seconds")
+    num = lambda v: f"{float(v):g}" if isinstance(v, (int, float)) else "the configured number of"   # noqa: E731
+    return {"image": name, "v14": name == TDX_V14_IMAGE_NAME, "passed": passed, "skipped": skipped,
+            "required_not_passed": required_not_passed,
+            "slot": num(slot), "budget": num(budget), "survey_slot": num(sslot), "survey_budget": num(sbudget),
+            "waiting": str(waiting) if isinstance(waiting, int) else "the configured number of"}
+
+
+_NUMBERS = ("slot", "budget", "waiting", "survey_slot", "survey_budget")
+
+
+def _numbers(facts: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """The image's own numbers for a clause's placeholders; an unknown one reads "the configured number of"."""
+    f = facts or {}
+    return {k: f.get(k, "the configured number of") for k in _NUMBERS}
+
+
+def tdx_root_tree_is_the_only_gap(facts: Optional[Dict[str, Any]]) -> bool:
+    """True when the one required image row that did not PASS is the root-tree provenance row: the tree was supplied
+    with --tdx-root-tree, so the reader has nothing to supply; a run that opens root.img itself is what is needed."""
+    return bool(facts) and facts.get("required_not_passed") == {TDX_ROOT_TREE_ROW}
+
+
+def format_blocker(text: str, facts: Optional[Dict[str, Any]]) -> str:
+    """A gap that names the image's own numbers ({slot}, {budget}, {waiting}, {survey_slot}, {survey_budget}) formatted from the checker's facts; any
+    other text returned as is (no other gap carries braces)."""
+    if not any("{" + k + "}" in text for k in _NUMBERS):
+        return text
+    return text.format(**_numbers(facts))
+
+
+def tdx_image_is_v14(facts: Optional[Dict[str, Any]]) -> bool:
+    """Whether the checker identified THIS image as v14 (its checked command line names it). Each v14 claim then
+    rests on its own row: a clause or plain sentence whose row did not pass is not printed."""
+    return bool(facts) and bool(facts.get("v14"))
+
+
+# The plain level-1 answer for a v14 image, sentence by sentence, each keyed to the rows that establish it.
+PLAIN_ANSWER_TDX_V14_HEAD = (
+    "Everything below is about which program the search machine started with. None of it is about what happened to "
+    "your text: on that question this record says only that it records which machine and which program image ran "
+    "your search, not whether anyone read your text. What it adds: the "
+    "program the machine started is exactly the one InferRoute published. Inside it, the search program's own code "
+    "matches the code InferRoute publishes; its ranking part is secret (its exact version is pinned, but you cannot "
+    "read it); and the operating system was compared only with InferRoute's own published copy, not with anything "
+    "independent.")
+PLAIN_ANSWER_TDX_V14_PARTS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("D7. the warm parent imports no closed module", "D7. no memory outlives a request", "D7. one engine process per request"),
+     "As published, the secret ranking part is loaded only inside a short-lived helper process started for one search, "
+     "which inherits the shut-off its parent installed before any search — no network, no memory it could share with "
+     "another process, no place to write — drops every connection but its own, then answers that one search and ends; "
+     "the long-running part of the search program never loads the secret part at all."),
+    (("D7. one reply size and two reply slots",),
+     "As published, every reply to a request the machine accepts is the same size and is held until a fixed interval "
+     "has passed since the machine took it up: {survey_slot} seconds in this image for a request that says it is a "
+     "survey, {slot} seconds for any other, so, as configured, no reply is released before then; the length of the "
+     "hold shows whether a request said it was a survey, though not what it was about, while time spent queued behind "
+     "earlier requests, and how long the machine is busy inside the hold (for a survey, roughly how many sub-searches "
+     "it ran), can also be seen (whether a reply never takes longer is a first-start check, not part of this record); "
+     "a search the "
+     "machine turns away at once (one it could not read, or one arriving while {waiting} are already queued or being "
+     "answered) is "
+     "padded to the same size but is visibly quicker."),
+    (("D7. one quote per boot", "D4. quote helper properties"),
+     "The program is written to take the chip's signed measurement of what it loaded once per start (a measurement, "
+     "not an endorsement)."),
+    (("D7. offer served from immutable bytes",),
+     "The program is written to fix its public description of itself then."),
+)
+PLAIN_ANSWER_TDX_V14_TAIL = ("All of this is InferRoute checking its own work against its own published list: nobody "
+                             "outside InferRoute has confirmed it.")
+
+
+def plain_answer_tdx_v14(facts: Optional[Dict[str, Any]]) -> str:
+    passed = (facts or {}).get("passed", set())
+    slot = (facts or {}).get("slot", "the configured number of")
+    waiting = (facts or {}).get("waiting", "the configured number of")
+    budget = (facts or {}).get("budget", "the configured number of")
+    parts = [words.format(**_numbers(facts)) for rows, words in PLAIN_ANSWER_TDX_V14_PARTS if all(r in passed for r in rows)]
+    return " ".join([PLAIN_ANSWER_TDX_V14_HEAD] + parts + [PLAIN_ANSWER_TDX_V14_TAIL])
+
+
+def tdx_image_statement(facts: Optional[Dict[str, Any]]) -> str:
+    """The level-1 image sentence: v13's for a v13 image; for a v14 image, the head, then each v14 clause whose row
+    PASSED (a clause whose row did not pass is not printed), then the tail."""
+    if not facts or not facts.get("v14"):
+        return STATEMENT_TDX_IMAGE_CHECKED
+    passed = facts.get("passed", set())
+    slot, waiting = facts.get("slot", "the configured number of"), facts.get("waiting", "the configured number of")
+    budget = facts.get("budget", "the configured number of")
+    head = [words for rows, words in TDX_V14_HEAD_CLAUSES if all(r in passed for r in rows)]
+    body = [words.format(**_numbers(facts)) for rows, words in TDX_V14_CLAUSES if all(r in passed for r in rows)]
+    numbered = "; ".join(f"({i}) {w}" for i, w in enumerate(body, 1))
+    return (TDX_V14_INTRO + (" " + "; ".join(head) + "." if head else "")
+            + (" As configured: " + numbered + "." if body else "") + " " + TDX_V14_TAIL)
 
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_RANKER_CLOSED,
@@ -1087,6 +1350,39 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_PRESEAL,
      "the program shuts its network only after downloading its index and running its secret ranking part with the "
      "network open and full control of the machine, so that part was not locked in when it ran"),
+    (TDX_V14_RANKER_SEES,
+     "your search is decrypted by the published part of the program and handed in plain text to the secret ranking "
+     "part, which decides what goes into the reply sent back to you, within a published shape that the open part "
+     "trims it to; its exact version is pinned, but you cannot read it, so what it does inside that reply cannot be "
+     "checked"),
+    (TDX_V14_METADATA,
+     "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how often "
+     "and from where you searched, and roughly how large what you sent was (your app rounds it up to a size class, so "
+     "a long disclosure is visibly larger; this record does not check that rounding); as published, every accepted "
+     "reply is the same size and is held back until a fixed interval has passed since the machine took it up, after "
+     "any requests ahead of it — a longer one for a request that says it is a survey than for any other, so they can "
+     "tell those from the rest by the timing, though not what they were about (whether a reply ever takes longer is a "
+     "first-start check, not part of this record) — but whether the machine was busy inside that interval can be "
+     "observed, and a request turned "
+     "away at once (unreadable, or arriving while the queue is full) can be seen to have been turned away"),
+    (TDX_V14_TRUST_BOUNDARY,
+     "the ready-made software libraries both parts of the program use, to decrypt and to search, are pinned to exact "
+     "versions; the search part is written to read exactly four index files before any search, through those "
+     "libraries' own readers, and to refuse an encoder folder holding a file of a kind that can carry a program "
+     "(such as .bin, .pt, .pkl or .py) or naming a module from outside the expected library; "
+     "a flaw in one of those libraries is outside "
+     "what this record can show"),
+    (TDX_V14_TRUSTED_BASE,
+     "the Intel and Google hardware and firmware the machine runs on, the Linux kernel inside the program image "
+     "(trusted for what it does; only its identity is checked), "
+     "and the operating system's own network program are trusted here without being checked; "
+     "nothing from Intel or Google in this record speaks to this program: their documents vouch for the chip and the "
+     "firmware"),
+    (TDX_V14_FIRST_BOOT,
+     "InferRoute publishes, with the program's source, a list of checks to make when a machine first starts from "
+     "this program image (its FIRST-BOOT list); their results are not part of this record, and this record does not "
+     "say whether they were run. Ask InferRoute whether it has run them on a machine started from this image, and "
+     "what they showed"),
     (TDX_OWN_KEY,
      "which program counts as InferRoute's rests on InferRoute's own signature, and nobody outside InferRoute "
      "has rebuilt it"),
@@ -1096,14 +1392,31 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_NOT_ESTABLISHED,
      "this verifier did not establish encryption before sending, who held the keys, or whether the "
      "program disclosed or retained your text"),
+    (TDX_IMAGE_NOT_SUPPLIED,
+     "the published program image was not given to this run, so nothing below is about what the image permits; ask "
+     "InferRoute for the published image (uki.efi, root.img, verity.img) and the source commit the image names, and run "
+     "this verifier again with --tdx-image and --tdx-source: the longer statement then rests on that check"),
+    (TDX_IMAGE_INCOMPLETE,
+     "the published program image was supplied but the check could not be completed: something it needed was missing "
+     "(see the image rows above for which: the image's artefact files (uki.efi, root.img, verity.img), the source "
+     "commit it names, or a tool), or a supplied file could not be read as what it should be (obtain a fresh copy; if "
+     "a fresh copy reads the same way, the supplied file is not the published artefact, which is a finding); supply it "
+     "and run this verifier again"),
+    (TDX_IMAGE_FAILED,
+     "the published image was checked and a required check found a difference (see the image rows above): the longer "
+     "statement is not licensed, and this is a finding, not an omission"),
+    (TDX_IMAGE_UNAUTHENTICATED,
+     "the published program image was supplied and passed every required check, but the reference file that names it "
+     "as the image these searches measured was not checked against a key you supplied, so the longer statement is "
+     "not licensed; run this verifier again with --reference-key and the key you obtained from InferRoute"),
     (TDX_IMAGE_UNASSESSED,
      "this verifier checked which program image the machine started, but not what that image lets "
      "whoever runs the machine see (anything it wrote to the machine's console, for example) or where it "
      "can send data; this record cannot tell whether anyone looked or anything was sent, or whether your text "
      "was involved"),
     (TDX_NO_SOURCE,
-     "this verifier does not look for the source code of the program image the machine started, and it did "
-     "not verify a match between source code and that image"),
+     "this run was not given the program's source code, so whether the image was built from it was not checked; "
+     "supply it with --tdx-source"),
     ("the policy does not satisfy: policy denies host access to the enclave's stdio",
      "the checked settings do not establish that operator access to the program's input and output "
      "streams was disabled; this does not show that anyone accessed them or that they contained your text"),
@@ -1271,6 +1584,28 @@ PLAIN_CLOSED_WORDS: Tuple[Tuple[str, str], ...] = (
 # provider can actually act on, so the ask moves to the next open gap instead of vanishing with the
 # first one closed.
 PLAIN_ASKS: Tuple[Tuple[str, str], ...] = (
+    # Level 0, by the state of the image check (first: at level 0 the standing gaps below are also listed, and
+    # their level-1 asks must not take precedence over the one thing the reader can do about the image).
+    (TDX_IMAGE_NOT_SUPPLIED,
+     "ask InferRoute for the published image (uki.efi, root.img, verity.img) and the source commit it names, and run "
+     "this verifier again with --tdx-image and --tdx-source"),
+    (TDX_IMAGE_INCOMPLETE,
+     "supply what the image rows above name as missing (the image's artefact files (uki.efi, root.img, verity.img), the "
+     "source commit it names, or a tool) — or, for a supplied file that could not be read as what it should be, obtain "
+     "a fresh copy (if a fresh copy reads the same way, the supplied file is not the published artefact, which is a "
+     "finding) — and run this verifier again with --tdx-image and --tdx-source"),
+    (TDX_IMAGE_FAILED,
+     "read the image rows above for the row that found a difference and put it to InferRoute; a record from a machine "
+     "started from an image that passes every required row is what would license the longer statement"),
+    (TDX_IMAGE_UNAUTHENTICATED,
+     "run this verifier again with --reference-key and the key you obtained from InferRoute (the same --tdx-image and "
+     "--tdx-source; the image check itself needs nothing more)"),
+    # Level 1, image v14: what a reader can ask for that this record does not hold.
+    (TDX_V14_FIRST_BOOT,
+     "ask (a) whether InferRoute has run its published FIRST-BOOT checks on a machine started from this image, and "
+     "what they showed; (b) whether your own expert may inspect the secret ranking part; (c) for a record whose "
+     "program someone outside InferRoute has rebuilt. None of these changes this record; (b) and (c) are changes your "
+     "provider could make for future searches"),
     # Level 1 (image checked). Naive reader, 2 Nov: level 1 had lost the one thing a reader can act on.
     (TDX_OWN_KEY,
      "ask for a record whose program someone outside InferRoute has rebuilt and confirmed, and ask whether your "
@@ -1313,7 +1648,8 @@ def _join_plain(items: List[str]) -> str:
 
 
 def report_plain(reach: int, blockers: Optional[List[str]] = None,
-                 closed: Optional[Dict[str, Optional[bool]]] = None, tee: str = "amd-sev-snp") -> None:
+                 closed: Optional[Dict[str, Optional[bool]]] = None, tee: str = "amd-sev-snp",
+                 image_facts: Optional[Dict[str, Any]] = None) -> None:
     print()
     print("  In plain words, for a reader who will not read the table above")
     pair = plain_statement(reach)
@@ -1323,9 +1659,11 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
               "licenses.")
         return
     headline, caveat = pair           # pair is still the LEVEL GUARD: an unwritten level prints nothing
-    reasons = plain_blockers(blockers or [])
+    reasons = [format_blocker(r, image_facts) for r in plain_blockers(blockers or [])]
     tdx = tee == "intel-tdx"
     answer = (PLAIN_ANSWER_TDX if tdx else PLAIN_ANSWER).get(reach)
+    if tdx and reach == 1 and tdx_image_is_v14(image_facts):
+        answer = plain_answer_tdx_v14(image_facts)
     if answer is None:
         print(f"    No plain statement is written for reach level {reach}, so none is given. This is "
               "deliberate: the nearest available sentence would be a stronger claim than this level "
@@ -1403,6 +1741,8 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
                   "your text reached them.")
         raw = blockers or []
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
+        if ask and TDX_IMAGE_INCOMPLETE in raw and tdx_root_tree_is_the_only_gap(image_facts):
+            ask = TDX_ROOT_TREE_ASK                      # nothing is missing; the generic "supply it" would mislead
         print()
         # NOT "assume it was disclosed": that instructs a legal posture the evidence does not support,
         # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
@@ -1420,7 +1760,16 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
               f"clean bill of health, and {recheck}. If the "
               "uncertainty bears on what you are filing, that part is a question for someone qualified; "
               "this record cannot settle it either way.")
-        if ask:
+        if ask and tdx and any(t in raw for t in (TDX_IMAGE_NOT_SUPPLIED, TDX_IMAGE_INCOMPLETE, TDX_IMAGE_UNAUTHENTICATED)):
+            # A re-run with the image supplied can change what THIS record licenses: it is not a deployment change,
+            # so the generic frame ("for future searches ... cannot change this record") would contradict the gap.
+            print(f"    What you can do now: {ask}. That re-run can change what this record licenses; it is not a "
+                  "change to the deployment.")
+        elif ask and tdx and (tdx_image_is_v14(image_facts) or TDX_IMAGE_FAILED in raw):
+            # The v14 ask carries its own frame: (a) is a question, not a provider change, so the generic
+            # "that is a change your provider can make" would misdescribe it.
+            print(f"    What to ask: {ask}.")
+        elif ask:
             # "It cannot change this one" -- a naive-reader test on 2026-09-29 read "this one" as
             # pointing at a GAP and found no antecedent, in the single actionable instruction the
             # statement gives. The intended referent was this RECORD. Say which.
@@ -1472,7 +1821,10 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
     if True:  # printed whether or not there are blockers: an EMPTY list is the strongest invitation
               # to read it as a census, so the warning must not disappear with it.
         # D5's reason applies here too: "protected" primes before the reader reaches what is not established.
+        # TDX images pad and slot every accepted reply, so "how long your search took" is what the image is built to
+        # hide; what stays observable is the size class of what was sent (v14 wording audit 4).
         print("    " + (PLAIN_CANNOT_SEE.replace("the layer underneath the protected machine", "the layer underneath the machine")
+                        .replace("how long your search took and how large it was", "roughly how large what you sent was")
                         if tdx else PLAIN_CANNOT_SEE))
 
 
@@ -1540,7 +1892,8 @@ def confidentiality_reach(posture: Dict[str, Optional[bool]], *, floor_pinned: b
 
 
 def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
-                              image_checked: bool = False) -> Tuple[int, List[str]]:
+                              image_checked: bool = False, image_facts: Optional[Dict[str, Any]] = None,
+                              image_state: Optional[str] = None) -> Tuple[int, List[str]]:
     """The TDX ladder: -1 when the record did not verify; 1 only when every search's image passed every required
     image row (verify_record --tdx-image) AND the reference naming it is authenticated; otherwise 0.
 
@@ -1551,17 +1904,35 @@ def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
     if record_ok is not True:
         return -1, ["this record did not verify — no sentence is licensed"]
     if image_checked is True and authenticated is True:
+        if tdx_image_is_v14(image_facts):
+            # v14: the ranking modules run only in a sealed per-request child; what remains is what they do inside
+            # that child's own reply, the traffic's shape, the trust boundary of data and pinned libraries, the
+            # trusted base, and the first-boot measurements this record does not hold.
+            # TDX_V14_METADATA carries {slot}/{budget}: it stays the exact template here (plain_blockers matches it
+            # exactly) and is formatted where it is printed (format_blocker).
+            return 1, [TDX_V14_RANKER_SEES, TDX_PARTIES, TDX_KEYS_RETENTION, TDX_V14_TRUSTED_BASE, TDX_V14_TRUST_BOUNDARY,
+                       TDX_V14_METADATA, TDX_OWN_KEY, TDX_V14_FIRST_BOOT, TDX_LEVEL1_NOT_ESTABLISHED]
         # v13+: the engine loads after the seal and runs unprivileged (the image check pins v13), so neither the
         # pre-seal window nor full privileges is a gap any more.
         return 1, [TDX_RANKER_CLOSED, TDX_PARTIES, TDX_KEYS_RETENTION, TDX_TRUSTED_BASE, TDX_METADATA, TDX_OWN_KEY,
                    TDX_LEVEL1_NOT_ESTABLISHED]
-    blockers = [TDX_IMAGE_UNASSESSED]
+    # image_state: None = the image was not supplied to this run; "incomplete" = supplied but a required row was
+    # skipped or failed only for something missing or a tool; "differs" = a real comparison found a difference.
+    if (image_checked is True or image_state == "verified") and not authenticated:
+        # The image is not the gap: the key is. Said as its own gap, with its own ask; the source gap is D1's and
+        # D1 passed, so it is not repeated here.
+        return 0, [TDX_IMAGE_UNAUTHENTICATED, TDX_NOT_ESTABLISHED, TDX_PARTIES, TDX_OWN_KEY, TDX_KEYS_RETENTION]
+    blockers = [TDX_IMAGE_FAILED if image_state == "differs" else TDX_IMAGE_INCOMPLETE if image_state == "incomplete"
+                else TDX_IMAGE_NOT_SUPPLIED]
     if not authenticated:
         blockers.append("the reference signature was not verified under a supplied key; independently "
                         "establishing who owns that key remains the reader's responsibility")
-    # The reference's image_source names the AMD container image's source. No TDX entry names one.
-    blockers.append(TDX_NO_SOURCE)
+    # The source gap is the D1 row's: SKIP when no --tdx-source was given (whatever else the run found), absent when
+    # the row compared something, and said once when no image was supplied at all.
+    if image_state is None or "D1. published files equal the source" in (image_facts or {}).get("skipped", set()):
+        blockers.append(TDX_NO_SOURCE)
     blockers.append(TDX_NOT_ESTABLISHED)
+    blockers += [TDX_PARTIES, TDX_OWN_KEY, TDX_KEYS_RETENTION]        # the standing gaps, at level 0 as at level 1
     return 0, blockers
 
 
@@ -1569,7 +1940,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
                            floor_pinned: bool, revocation_checked: bool, authenticated: bool,
                            record_ok: bool, committed: Optional[set] = None,
                            production_roots: bool = False, tdx_searches: int = 0,
-                           searches_total: Optional[int] = None, tdx_image_checked: bool = False) -> None:
+                           searches_total: Optional[int] = None, tdx_image_checked: bool = False,
+                           tdx_image_facts: Optional[Dict[str, Any]] = None, tdx_image_state: Optional[str] = None) -> None:
     """Describe the archived SEARCH evidence only; never lift it to a session-wide claim."""
     print()
     print("What this evidence licenses you to say about confidentiality")
@@ -1610,7 +1982,8 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         return
     if tdx_searches:
         reach, blockers = tdx_confidentiality_reach(record_ok=record_ok, authenticated=authenticated,
-                                                    image_checked=tdx_image_checked)
+                                                    image_checked=tdx_image_checked, image_facts=tdx_image_facts,
+                                                    image_state=tdx_image_state)
         print(f"  Intel TDX — {tdx_searches} search(es) ran on a boot image the supplied reference names as "
               "InferRoute's. There is no container "
               "policy to read, so this record has none of the policy rows an AMD record shows and cannot earn the "
@@ -1620,17 +1993,17 @@ def report_confidentiality(policies: List[Tuple[str, str]], *, reference: Option
         print("  You may write:")
         print(f"    1. {STATEMENT_SEALED_TDX}")
         if reach >= 1:
-            print(f"    2. {STATEMENT_TDX_IMAGE_CHECKED}")
+            print(f"    2. {tdx_image_statement(tdx_image_facts)}")
         print("  You may NOT write that the text was never exposed, could not have been read, or remained "
               "confidential. What is missing:")
         for blocker in dict.fromkeys(blockers):
-            print(f"    - {blocker}")
+            print(f"    - {format_blocker(blocker, tdx_image_facts)}")
         print(f"  {STATEMENT_CONFIDENTIAL}")
         print("  AI receipts require a separate verification and privacy argument. The following are necessary "
               "binding checks, NOT a sufficient privacy checklist:")
         for cond in AI_LANE_CONDITIONS:
             print(f"    - {cond}")
-        report_plain(reach, blockers, None, tee="intel-tdx")
+        report_plain(reach, blockers, None, tee="intel-tdx", image_facts=tdx_image_facts)
         return
     if not policies or committed is None or set(hd for hd, _ in policies) != committed:
         print("  REFUSED — archived policies do not cover every hardware policy commitment in this record.")
@@ -2687,9 +3060,21 @@ def check_tdx_image(c: "Checks", info: Optional[Dict[str, Any]], image_report: A
     """The PUBLISHED image behind this search (--tdx-image): the rows of tdx_image.py, re-anchored to the
     image this search's quote measured. Prefixed "image:" so a reader can tell them from the record's own rows.
     Returns the posture verdict: True only if every required image row PASSED and none FAILED."""
-    rows, verified = image_report.rows_for_measured((info or {}).get("image_sha384"), (info or {}).get("boot_apps"))
+    make = getattr(image_report, "rows_for_measured_report", None)
+    if make is not None:
+        anchored = make(info)
+        rows, verified, reasons = anchored.rows, anchored.posture_verified, dict(getattr(anchored, "reasons", {}))
+        c.tdx_posture_state = anchored.state()
+    else:
+        rows, verified = image_report.rows_for_measured((info or {}).get("image_sha384"), (info or {}).get("boot_apps"))
+        reasons, c.tdx_posture_state = {}, ("verified" if verified else "incomplete")
     for status, name, detail in rows:
-        c.add(None if status == "SKIP" else status == "PASS", f"image: {name}", detail)
+        # A row that is not PASS says why, machine-readably: missing (an input the reader supplies), tool, malformed
+        # (a supplied file that could not be read as what it should be), or differs. The checker names its own flags;
+        # this program's are --tdx-source and --tdx-root-tree.
+        detail = re.sub(r"(?<![\w-])--source\b", "--tdx-source", re.sub(r"(?<![\w-])--root-tree\b", "--tdx-root-tree", detail))
+        why = f" [{reasons[name]}]" if status != "PASS" and name in reasons else ""
+        c.add(None if status == "SKIP" else status == "PASS", f"image: {name}", detail + why)
     c.tdx_posture_verified = verified
     return verified
 
@@ -4260,6 +4645,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
     firmware_floor_results: List[bool] = []
     posture_results: List[bool] = []
+    posture_states: List[Optional[str]] = []
     for i, row in enumerate(searches, 1):
         if not isinstance(row, dict):
             print(f"\nSearch {i}: FAIL malformed row")
@@ -4324,9 +4710,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         # TDX grade below and never the exit code.
         fails += len([f for f in c.failed if not str(f).startswith("image:")])
         posture_results.append(c.tdx_posture_verified is True)
+        posture_states.append(getattr(c, "tdx_posture_state", None))
         if c.tdx_posture_verified is not None:
+            st = getattr(c, "tdx_posture_state", None)
             print("  image posture: " + ("VERIFIED — every required image row passed for this search" if c.tdx_posture_verified
-                                         else "NOT VERIFIED — see the image rows above"))
+                                         else "NOT VERIFIED (found a difference) — see the image rows above" if st == "differs"
+                                         else "NOT VERIFIED (incomplete: a missing input, a tool, or a supplied file that could not be "
+                                         "read — see the image rows above)"))
         firmware_floor_results.append(any(status == "PASS" and name == "configured firmware TCB floor"
                                           for status, name, _ in c.rows))
     if searches:
@@ -4394,7 +4784,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             committed=seen_host_data,
             production_roots=not test_roots,
             tdx_searches=tdx_searches, searches_total=len(searches),
-            tdx_image_checked=bool(searches) and len(posture_results) == len(searches) and all(posture_results))
+            tdx_image_checked=bool(searches) and len(posture_results) == len(searches) and all(posture_results),
+            tdx_image_facts=tdx_image_facts(tdx_image_report),
+            # None: no --tdx-image; else the worst of the searches' states: a found difference anywhere outranks an
+            # incomplete check, which outranks verified.
+            tdx_image_state=None if tdx_image_report is None else
+            ("differs" if "differs" in posture_states else "incomplete" if ("incomplete" in posture_states or not searches
+             or len(posture_states) != len(searches)) else "verified"))
     # A reference that is signed but was checked against no key: every other line can pass, and the identity
     # still rests on a file nobody authenticated. That is not a clean verification, and the exit code has to
     # say so — a reader who only reads the number would otherwise be told the strongest verdict.

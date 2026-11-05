@@ -17,7 +17,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Callable, Dict, List, Optional, Protocol
+
+from . import result_schema
 
 MAX_PLAINTEXT = 262_144
 MIN_QUERY, MAX_QUERY = 20, 60_000
@@ -259,6 +261,15 @@ def _searcher_failed(exc: Exception, code: str = "searcher_failed") -> "RefusedP
     return RefusedPayload(code)
 
 
+def _shaped(clean: Callable[[Any], Dict[str, Any]], res: Any) -> Dict[str, Any]:
+    """The engine's result reduced to its published shape (result_schema), or a searcher_failed refusal: a wrong
+    shape is an engine defect to surface, never coerced, and the refusal names no value."""
+    try:
+        return clean(res)
+    except result_schema.SchemaError:
+        raise RefusedPayload("searcher_failed") from None
+
+
 def run(job: Dict[str, Any], searcher: Searcher, canaries: List[Dict[str, Any]]) -> Dict[str, Any]:
     """A searcher that raises or returns a malformed result is a REFUSAL, not a crash: the statement
     must still be signed so the client can tell "the enclave could not search" from "nothing came back"."""
@@ -274,7 +285,10 @@ def run(job: Dict[str, Any], searcher: Searcher, canaries: List[Dict[str, Any]])
         extra = {"marks": marks} if marks is not None else {}
         res = searcher.search(job["query"], k=job["k"], cutoff_date=job.get("cutoff_date"),
                               from_date=job.get("from_date"), offices=job.get("offices"), **extra)
-        if not isinstance(res, dict) or not isinstance(res.get("hits"), list) or not all(isinstance(h, dict) and "key" in h for h in res["hits"]):
+        # v14: the result is reduced to the published shape (result_schema) BEFORE anything is sealed or signed:
+        # known keys only, known types, bounded lengths — an extra field on a hit cannot ride to the client.
+        res = _shaped(result_schema.clean_search, res)
+        if not isinstance(res.get("hits"), list) or not all("key" in h for h in res["hits"]):
             raise RefusedPayload("searcher_failed")
     except RefusedPayload:
         raise
@@ -313,8 +327,8 @@ def _run_survey(job: Dict[str, Any], searcher: Searcher, canaries: List[Dict[str
         canary = run_canaries(searcher, canaries) if canaries else []
         res = svy(job["disclosure"], max_legs=job["max_legs"], cutoff_date=job.get("cutoff_date"),
                   from_date=job.get("from_date"), offices=job.get("offices"))
-        if not isinstance(res, dict) or not isinstance(res.get("union"), list) \
-                or not isinstance(res.get("manifest"), dict):
+        res = _shaped(result_schema.clean_survey, res)
+        if not isinstance(res.get("union"), list) or not isinstance(res.get("manifest"), dict):
             raise RefusedPayload("searcher_failed")
     except RefusedPayload:
         raise
@@ -338,7 +352,8 @@ def _run_document(job: Dict[str, Any], searcher: Searcher) -> Dict[str, Any]:
     `date_out_of_bound` are signed refusals, not crashes."""
     try:
         res = searcher.document(job["key"], cutoff_date=job.get("cutoff_date"))
-        if not isinstance(res, dict) or "text" not in res:
+        res = _shaped(result_schema.clean_document, res)
+        if "text" not in res:
             raise RefusedPayload("searcher_failed")
     except RefusedPayload:
         raise

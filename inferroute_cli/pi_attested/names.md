@@ -28,7 +28,7 @@ product does, which names), ask one short question rather than guessing.
    start from the top rather than weighing every mark. For each mark that matters, say
    what it is, its register, number, status and classes, and WHY it resembles the name,
    using the reasons the tool gives (same spelling, sounds alike, spelled closely,
-   contains the name, shares a word).
+   contains the name, shares a word, a word spelled closely, a word that starts the same).
    Marks in the founder's classes matter most. Marks outside them are worth a short
    mention only when they are the same or nearly the same word.
 4. If asked to propose names, propose a few candidates that fit the product, search
@@ -76,7 +76,8 @@ The founder is not a lawyer. Write for them, in this order:
    classes, and its reason in plain words. Classes: either every class the tool lists for
    the mark, or only the shared ones written as "overlaps your classes 7, 21"; never a few
    of its classes written as if they were all of them. Then its reason: same spelling, sounds alike, one letter
-   different, spelled closely, has your whole name inside it, is part of your name, shares a word
+   different, spelled closely, has your whole name inside it, is part of your name, shares a word,
+   a word spelled closely, a word that starts the same
    (copy the tool's own words for these two: they point in opposite directions); plus "in your classes"
    or "outside your classes". Then how many other close marks each search found. Do not
    copy the other results: the matter page lists every search in full.

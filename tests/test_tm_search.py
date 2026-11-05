@@ -168,7 +168,10 @@ def test_containing_the_name_means_containing_it_within_words(tmp_path):
                               ("US", "2", "AIR BNB", "registered", ["43"], ""),
                               ("US", "3", "ECHLORIAL", "registered", ["3"], ""),
                               ("US", "4", "L'OREAL", "registered", ["3"], "")])
-    assert not ix.search("Anteriora")["hits"]                 # the letters only run on across a space
+    # The letters "anteriora" only run on across a space, so the mark does not contain the name; it is found for
+    # its word one letter from the name, and says so.
+    hits = ix.search("Anteriora")["hits"]
+    assert [h["reasons"] for h in hits] == [["a word spelled closely (“anteriora” / “anterior”)"]]
     assert ix.search("Airbnb")["hits"][0]["number"] == "2"
     order = [h["number"] for h in ix.search("Lorial", ["3"])["hits"]]
     assert order.index("4") < order.index("3")               # the name inside a longer word ranks low
@@ -254,3 +257,39 @@ def test_containment_says_which_way_round(tmp_path):
     hits = {h["number"]: h["reasons"] for h in T.Index(path).search("Tidevell")["hits"]}
     assert "is part of your name" in hits["1"] and "has your whole name inside it" not in hits["1"]
     assert "has your whole name inside it" in hits["2"]
+
+
+def test_a_mark_close_to_one_word_of_a_long_name_is_found_and_ranked_above_common_words(tmp_path):
+    """INPI oppositions (Nov 2026): ERAM against "ETAM ON THE BEACH", CIEL against "Ingeciel", MILLENIUM against
+    "MILLENNIUM ROBOTICS", MAGIMIX against "MAGIMAN". The fragment vote sums over the whole name, so a short mark
+    close to one of its words never reached the floor, and the scorer had no reason for a word-to-word match."""
+    rows = [("FR", "1", "ERAM", "registered", ["25"], ""), ("FR", "2", "CIEL", "registered", ["9"], ""),
+            ("FR", "3", "MILLENIUM", "registered", ["7"], ""), ("FR", "4", "MAGIMIX", "registered", ["7"], "")]
+    rows += [("US", str(100 + i), f"THE {w} BEACH", "registered", ["25"], "")
+             for i, w in enumerate(["SUN", "SEA", "SAND", "SURF", "PALM", "WAVE", "BLUE", "GOLD", "PINK", "LONG"])]
+    ix = _index_of(tmp_path, rows)
+    def found(name, number):
+        return next((k, h) for k, h in enumerate(ix.search(name)["hits"]) if h["number"] == number)
+    rank, hit = found("ETAM ON THE BEACH", "1")
+    assert hit["reasons"] == ["a word spelled closely (“etam” / “eram”)"] and rank == 0
+    assert found("Ingeciel", "2")[1]["reasons"] == ["is part of your name"]
+    assert "a word spelled closely (“millennium” / “millenium”)" in found("MILLENNIUM ROBOTICS", "3")[1]["reasons"]
+    assert found("Magiman", "4")[1]["reasons"] == ["a word that starts the same (“magim…”)"]
+
+
+def test_the_banded_distance_agrees_with_the_full_one():
+    import random
+    def full(a, b):
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            for j, cb in enumerate(b, 1):
+                cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+            prev = cur
+        return prev[-1]
+    rnd = random.Random(7)
+    for _ in range(20000):
+        a = "".join(rnd.choice("abcd") for _ in range(rnd.randint(0, 9)))
+        b = "".join(rnd.choice("abcd") for _ in range(rnd.randint(0, 9)))
+        cap = rnd.randint(0, 10)
+        assert min(T.distance(a, b, cap), cap + 1) == min(full(a, b), cap + 1)

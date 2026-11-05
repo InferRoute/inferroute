@@ -2070,6 +2070,23 @@ def _reference_confine_source() -> str:
     return open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "confine.py"), encoding="utf-8").read()
 
 
+def _reference_confine_module() -> Any:
+    """The reference confine module whose programs the D7 rows execute. Imported from the package when this module
+    is part of one; otherwise (verify_record.py loads this file by path, with no package, as an exported record and
+    the client do) the same confine.py beside this file is loaded by path. `from . import confine` alone raises
+    ImportError there, and verify_record --tdx-image then refused every v14 image whose root it could open."""
+    if __package__:
+        from . import confine
+        return confine
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confine.py")
+    spec = importlib.util.spec_from_file_location("ir_tdx_confine_reference", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"{path} is not beside this checker")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def _same_ast(a_text: str, b_text: str) -> bool:
     try:
         return ast.dump(_ast_parse(a_text)) == ast.dump(_ast_parse(b_text))
@@ -2118,7 +2135,7 @@ def check_memory_seal(rep: ImageReport, tree: str, paths: Dict[str, str], ltext:
         pr.append("confine.seal_memory does not install memory_seal_program")
     # The image's confine.py is never executed: it must equal the verifier's reference to the AST, and the program
     # judged below is the reference's own.
-    from . import confine as reference
+    reference = _reference_confine_module()
     if not _same_ast(ctext, _reference_confine_source()):
         pr.append("the image's sealedresearch/confine.py differs from the verifier's reference confine.py (AST): a seal that "
                   "could answer the checker one way and the kernel another is not accepted")

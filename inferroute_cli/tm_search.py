@@ -39,6 +39,7 @@ SCHEMA = "anteriora.tm-index/1"
 GRAM = 3
 MAX_CANDIDATES = 12000      # scored in full; ties are broken by id so a search always returns the same list
 NEIGHBOURS = 4000          # marks found word by word (_word_neighbours), scored on top of those
+CLASS_BONUS = 0.15          # added to the score of a mark in the founder's classes (see search())
 POOL = 8                    # how many times that many are gathered before the length-aware shortlist
 
 _DIGITS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
@@ -406,7 +407,11 @@ class Index:
             hit = self._score(row, flat, key, ws, wanted, rarity)
             if hit:
                 hits.append(hit)
-        hits.sort(key=lambda h: (-h["class_overlap"], -h["score"], h["text"].lower()))
+        # The founder's classes count for CLASS_BONUS, not for everything: the same spelling in another class
+        # ranks above a loosely similar mark in theirs. With every in-class mark first, 50 of 195 earlier marks
+        # spelled exactly like the later one sat past the 40th place in decided French oppositions; class lists
+        # in the register are often narrower than the goods an opposition turns on.
+        hits.sort(key=lambda h: (-(h["score"] + CLASS_BONUS * h["class_overlap"]), h["text"].lower()))
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 **coverage(self.meta.get("sources", "")),

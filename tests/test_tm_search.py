@@ -54,12 +54,15 @@ def test_a_long_composite_mark_is_not_close_because_it_is_long(index):
     assert T.similarity("anteriora", "x" * 900) == 0.0
 
 
-def test_marks_in_the_classes_asked_about_come_first(index):
+def test_marks_in_the_classes_asked_about_rank_higher_but_not_above_the_same_spelling(index):
     r = index.search("Anteriora", ["9", "42"])
     order = [h["number"] for h in r["hits"]]
     overlapping = [h["number"] for h in r["hits"] if h["overlapping_classes"]]
-    assert order[:len(overlapping)] == overlapping and set(overlapping) == {"3", "4", "5"}
-    assert r["classes"] == ["9", "42"]
+    assert set(overlapping) == {"3", "4", "5"} and r["classes"] == ["9", "42"]
+    # Antériora (same spelling, class 45) above the merely close marks in the founder's classes; Anteriora Labs
+    # (the whole name inside it, class 42) above it.
+    assert order.index("5") < order.index("8") < min(order.index("3"), order.index("4"))
+    assert order.index("3") < order.index("9")               # ANTERIOR: in class 42 above the same mark in 35
 
 
 def test_the_same_search_returns_the_same_list(index):

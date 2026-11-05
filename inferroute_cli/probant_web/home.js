@@ -1074,7 +1074,9 @@
           const inYours = (sr.hits || []).filter((h) => (h.overlapping_classes || []).length).length;
           // Counts, not "40+ similar marks" on every row: the cap read as a verdict (UX review, 21 Oct).
           const total = n + (sr.more || 0);
-          const yours = (sr.classes || []).length ? ` · ${inYours}${inYours === n && sr.more ? "+" : ""} in your classes` : "";
+          // Closest first, with the founder's classes raised but not first: past the shown marks there can be more
+          // in their classes, so with more marks the count is of those shown.
+          const yours = (sr.classes || []).length ? ` · ${inYours} ${sr.more ? "of these " : ""}in your classes` : "";
           const what = !n ? "no close registered word marks found in this data"
             : sr.more ? `${n} shown of ${total} close marks${yours}` : `${plural(n, "close mark", "close marks")}${yours}`;
           const box = el("details", "search-log",

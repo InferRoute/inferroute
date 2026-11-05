@@ -1443,9 +1443,13 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
     if ti_src.exists():
         files["tdx_image.py"] = ti_src.read_bytes()
         # v14+: the image checker compares the image's confine.py with this reference and runs its seal programs.
+        # Required with it: without the reference, the checker's D7 group stops on the reader's machine and reads
+        # as a difference in the image, which would blame the image for this installation's missing file.
         cf_src = verifier_src.with_name("confine.py")
-        if cf_src.exists():
-            files["confine.py"] = cf_src.read_bytes()
+        if not cf_src.exists():
+            raise S.ProbantError("pi_attested/confine.py is missing from this installation; the image checker "
+                                 "(tdx_image.py) needs it beside itself. Reinstall the client.")
+        files["confine.py"] = cf_src.read_bytes()
     manifest = {"schema": "inferroute.prior-art-record/1", "client": client, "matter": matter,
                 # Which matter this was made from, beyond its name (export_belongs_to).
                 "matter_created_at": rec.get("created_at"),
@@ -3627,9 +3631,12 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
     if _ti.is_file():
         files["tdx_image.py"] = _ti.read_bytes()
         # v14+: the reference confine.py the image checker compares with and runs, beside it.
+        # Required with it (see write_bundle): a missing reference would read as a difference in the image.
         _cf = _ti.with_name("confine.py")
-        if _cf.is_file():
-            files["confine.py"] = _cf.read_bytes()
+        if not _cf.is_file():
+            raise S.ProbantError("pi_attested/confine.py is missing from this installation; the image checker "
+                                 "(tdx_image.py) needs it beside itself. Reinstall the client.")
+        files["confine.py"] = _cf.read_bytes()
     for name in sorted(p.name for p in src.iterdir()):
         # *.attestation.json: the per-machine evidence rows the receipts' served_by point at — measurements, the
         # device's challenge, public keys and the vendors' signed answers; no text. Without them the pack names

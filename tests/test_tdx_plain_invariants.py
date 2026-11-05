@@ -91,3 +91,38 @@ def test_the_app_pass_summary_says_what_it_cannot_show():
     """'Everything checked out.' appears in ad screenshots; without its limit it reads as a privacy verdict."""
     from inferroute_cli import probant_check
     assert "does not show whether anyone read your text" in probant_check.VERDICTS[0][2]
+
+
+def _v14_facts(V, failed=()):
+    rows = sorted({r for rows, _ in V.TDX_V14_HEAD_CLAUSES + V.TDX_V14_CLAUSES for r in rows})
+    return {"image": V.TDX_V14_IMAGE_NAME, "v14": True, "passed": set(rows) - set(failed), "skipped": set(),
+            "slot": "10", "waiting": "8", "budget": "8", "survey_slot": "45", "survey_budget": "42"}, rows
+
+
+def _v14_renderings(V):
+    """Image v14 (0.9.126-v14): the states the record's ladder can reach once an image is in play, through the same
+    door as above. The no-image renderings above no longer print the console gap, so these are what keep the
+    composition invariants honest for v14."""
+    facts, rows = _v14_facts(V)
+    cases = [dict(image_checked=True, authenticated=True), dict(image_checked=True, authenticated=False)]
+    cases += [dict(image_checked=False, authenticated=a, image_state=s)
+              for a in (True, False) for s in (None, "incomplete", "differs", "verified")]
+    for kw in cases:
+        for f in (facts, _v14_facts(V, failed=rows[:1])[0]):
+            reach, blockers = V.tdx_confidentiality_reach(record_ok=True, image_facts=f, **kw)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                V.report_plain(reach, blockers, None, tee="intel-tdx", image_facts=f)
+            yield reach, kw, buf.getvalue()
+
+
+def test_v14_renderings_reach_both_levels_and_keep_the_invariants(V):
+    seen = set()
+    for reach, kw, text in _v14_renderings(V):
+        seen.add(reach)
+        assert not [p for p in V.PLAIN_FORBIDDEN if p.lower() in text.lower()], (kw, text)
+        assert not [n for n in _ABSENT_IN_TDX if n in text], (kw, text)
+        assert "Chutes" not in text
+        if reach == 0:
+            assert "What you can do" in text, (kw, text)
+    assert seen == {0, 1}

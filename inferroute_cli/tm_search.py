@@ -24,6 +24,7 @@ registers are not in it).
 from __future__ import annotations
 
 import array
+import functools
 import math
 import datetime as dt
 import re
@@ -37,6 +38,8 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 SCHEMA = "anteriora.tm-index/1"
 GRAM = 3
 MAX_CANDIDATES = 12000      # scored in full; ties are broken by id so a search always returns the same list
+NEIGHBOURS = 4000          # marks found word by word (_word_neighbours), scored on top of those
+CLASS_BONUS = 0.15          # added to the score of a mark in the founder's classes (see search())
 POOL = 8                    # how many times that many are gathered before the length-aware shortlist
 
 _DIGITS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
@@ -93,6 +96,7 @@ _FINE = [
 _FINE = [(re.compile(a), b) for a, b in _FINE]
 
 
+@functools.lru_cache(maxsize=200_000)
 def sound_fine(text: str) -> str:
     """A finer sound key: sound()'s spelling rules with the vowels and the w of "qu" kept. sound() is what the
     index is built on and only gathers candidates; with every vowel read as "a" and "qu"/"kw" as "k", "Kwik",
@@ -121,28 +125,114 @@ def _runs_of_words(flat: str, ws: Sequence[str]) -> bool:
     return False
 
 
+_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def _edits(word: str) -> set:
+    """Every string one deletion, insertion, substitution or swap of two neighbours away from `word`."""
+    split = [(word[:i], word[i:]) for i in range(len(word) + 1)]
+    out = {a + b[1:] for a, b in split if b}
+    out |= {a + b[1] + b[0] + b[2:] for a, b in split if len(b) > 1}
+    out |= {a + c + b[1:] for a, b in split if b for c in _ALPHABET}
+    out |= {a + c + b for a, b in split for c in _ALPHABET}
+    out.discard(word)
+    return out
+
+
+def _common_start(a: str, b: str) -> str:
+    n = 0
+    while n < min(len(a), len(b)) and a[n] == b[n]:
+        n += 1
+    return a[:n]
+
+
+@functools.lru_cache(maxsize=500_000)
+def _word_match(a: str, b: str) -> float:
+    """How closely one word stands for another: 1 the same; 0.9 x similarity for a close spelling or sound; 0.7
+    one inside the other, or the same first five letters; else 0."""
+    if a == b:
+        return 1.0
+    if len(a) < 4 or len(b) < 4:
+        return 0.0
+    sim = similarity(a, b)
+    if len(a) >= 5 and len(b) >= 5:
+        sim = max(sim, similarity(sound_fine(a), sound_fine(b)))
+    if sim >= 0.75:
+        return 0.9 * sim
+    p = len(_common_start(a, b))
+    if a in b or b in a or (p >= 5 and p >= 0.6 * min(len(a), len(b))):
+        return 0.7
+    return 0.0
+
+
+def _alignment(ws: Sequence[str], mws: Sequence[str], rarity: Dict[str, float]) -> float:
+    """How much of a mark's wording and of the name's stand for each other, word by word. Each word is weighted
+    by its rarity squared, so a mark sharing only "the", "de" or "beach" with the name scores low and one holding
+    its rare word (or a word one letter from it) high; and the first word of each counts three times, being the
+    one a buyer reads and remembers (ETAM in "Etam on the beach"). The two coverages are combined as an F-score
+    leaning to the mark's side: a short mark wholly inside the name is close to it, a long mark that holds the
+    name among many other words less so. The weights were chosen on 3,870 decided French oppositions (Nov 2026)."""
+    if not ws or not mws:
+        return 0.0
+    def cover(src: Sequence[str], dst: Sequence[str]) -> float:
+        num = den = 0.0
+        for k, w in enumerate(src):
+            r = max(0.0025, rarity.get(w, 1.0) ** 2) * (3.0 if k == 0 else 1.0)
+            num += r * max(_word_match(w, d) for d in dst)
+            den += r
+        return num / den
+    of_mark, of_name = cover(mws, ws), cover(ws, mws)
+    if not of_mark or not of_name:
+        return 0.0
+    return 1.25 * of_mark * of_name / (0.25 * of_mark + of_name)
+
+
 def grams(key: str) -> List[str]:
     padded = f"^{key}$"
     return [padded[i:i + GRAM] for i in range(max(1, len(padded) - GRAM + 1))]
 
 
 def distance(a: str, b: str, cap: int = 99) -> int:
-    """Levenshtein distance, stopping early once it exceeds `cap`."""
+    """Levenshtein distance, or cap + 1 for anything above `cap`. Only the cells within `cap` of the diagonal can
+    stay within it, so only those are computed; and two strings whose letters differ by more than `cap` (counted
+    as a multiset, a lower bound on the distance) are not compared at all."""
     if a == b:
         return 0
     if abs(len(a) - len(b)) > cap:
         return cap + 1
-    prev = list(range(len(b) + 1))
-    for i, ca in enumerate(a, 1):
-        cur = [i] + [0] * len(b)
-        best = i
-        for j, cb in enumerate(b, 1):
-            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
-            best = min(best, cur[j])
-        if best > cap:
+    if cap < max(len(a), len(b)):
+        more = fewer = 0
+        for c in set(a) | set(b):
+            d = a.count(c) - b.count(c)
+            if d > 0:
+                more += d
+            else:
+                fewer -= d
+        if max(more, fewer) > cap:
             return cap + 1
+    big = cap + 1
+    n = len(b)
+    prev = [j if j <= cap else big for j in range(n + 1)]
+    for i in range(1, len(a) + 1):
+        lo, hi = max(1, i - cap), min(n, i + cap)
+        cur = [big] * (n + 1)
+        if i <= cap:
+            cur[0] = i
+        ch = a[i - 1]
+        best = cur[0]
+        for j in range(lo, hi + 1):
+            v = prev[j - 1] + (ch != b[j - 1])
+            if prev[j] + 1 < v:
+                v = prev[j] + 1
+            if cur[j - 1] + 1 < v:
+                v = cur[j - 1] + 1
+            cur[j] = v if v < big else big
+            if v < best:
+                best = v
+        if best > cap:
+            return big
         prev = cur
-    return prev[-1]
+    return prev[n] if prev[n] <= cap else big
 
 
 def similarity(a: str, b: str) -> float:
@@ -153,7 +243,11 @@ def similarity(a: str, b: str) -> float:
     longest = max(len(a), len(b))
     if abs(len(a) - len(b)) > longest // 2:
         return 0.0
-    return max(0.0, 1.0 - distance(a, b, cap=longest) / longest)
+    # Below one half nothing reads the value but a 0.05 tie-break, so the distance stops there: a long name against
+    # a long mark was most of a search's time when the full distance was computed (0.9 s of 1.4 s).
+    cap = longest // 2
+    d = distance(a, b, cap=cap)
+    return 0.0 if d > cap else 1.0 - d / longest
 
 
 # ── what a search covers, said the same way on the page, in the report and to the assistant ──
@@ -263,19 +357,24 @@ class Index:
         if not flat:
             raise ValueError("type a name with at least one letter or digit")
         votes: Counter = Counter()
+        total = max(1, int(self.meta.get("marks", 1)))
         for i in self._ids("c:" + flat):
             votes[i] += 100
+        # A whole word of the name counts 40 when it is rare enough to say something ("quench" is in a few hundred
+        # marks) and less as it gets common: "the", "de" and "paris" are in tens of thousands, and at a flat 40
+        # they pushed every other candidate of a long name past the shortlist.
         for w in ws:
-            for i in self._ids("w:" + w):
-                votes[i] += 40
+            ids = self._ids("w:" + w)
+            for i in ids:
+                votes[i] += self._word_vote(len(ids))
         if len(flat) >= 4:                                 # a name typed as one word may be a word inside a mark
-            for i in self._ids("w:" + flat):
-                votes[i] += 40
+            ids = self._ids("w:" + flat)
+            for i in ids:
+                votes[i] += self._word_vote(len(ids))
         # Every fragment votes, weighted by how rare it is (log of marks / marks holding it): a mark sharing the
         # rare fragments of the name ranks above one sharing only "ant" and "ara". (An earlier version skipped
         # common fragments outright and counted them in the threshold anyway, so on the 5.7M-mark index
         # "Anteriora" returned nothing; counting every list costs about 0.3 s.)
-        total = max(1, int(self.meta.get("marks", 1)))
         weights = []
         for g in sorted(set(grams(key))):
             ids = self._ids("g:" + g)
@@ -285,24 +384,124 @@ class Index:
             weights.append(w)
             for i in ids:
                 votes[i] += w
-        need = 0.3 * sum(weights) if weights else 1.0       # a floor; the weighted ranking and the cap do the rest
+        # The floor grows with the name's length, so a short mark inside a long name never reached it (CIEL in
+        # "Ingeciel"); a mark found word by word passes on that vote instead.
+        need = 0.3 * sum(weights) if weights else 1.0
         cand = [i for i, v in votes.items() if v >= need]
         cand.sort(key=lambda i: (-votes[i], i))
         cand = self._shortlist(cand[:MAX_CANDIDATES * POOL], votes, sum(weights), len(grams(key)))
+        # Marks found word by word are scored on their own quota, best first, so a long name's many fragment
+        # candidates cannot crowd them out (ERAM for "Etam on the beach" was one of 12,000 at the same vote).
+        near = self._word_neighbours(flat, ws)
+        seen = set(cand)
+        cand += [i for i in sorted(near, key=lambda i: (-near[i], i)) if i not in seen][:NEIGHBOURS]
         wanted = {str(int(c)) for c in classes if str(c).strip().isdigit()}
-        hits = []
+        rows = []
         for chunk in range(0, len(cand), 900):
             part = cand[chunk:chunk + 900]
             q = f"SELECT id, register, number, text, status, classes, filed FROM marks WHERE id IN ({','.join('?' * len(part))})"
-            for row in self.db.execute(q, part):
-                hit = self._score(row, flat, key, ws, wanted)
-                if hit:
-                    hits.append(hit)
-        hits.sort(key=lambda h: (-h["class_overlap"], -h["score"], h["text"].lower()))
+            rows += self.db.execute(q, part).fetchall()
+        rarity = self._rarity({w for r in rows for w in words(r[3]) if len(w) >= 2} | set(ws))
+        hits = []
+        for row in rows:
+            hit = self._score(row, flat, key, ws, wanted, rarity)
+            if hit:
+                hits.append(hit)
+        # The founder's classes count for CLASS_BONUS, not for everything: the same spelling in another class
+        # ranks above a loosely similar mark in theirs. With every in-class mark first, 50 of 195 earlier marks
+        # spelled exactly like the later one sat past the 40th place in decided French oppositions; class lists
+        # in the register are often narrower than the goods an opposition turns on.
+        hits.sort(key=lambda h: (-(h["score"] + CLASS_BONUS * h["class_overlap"]), h["text"].lower()))
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 **coverage(self.meta.get("sources", "")),
                 "hits": hits[:limit], "more": max(0, len(hits) - limit)}
+
+    def _keys(self, keys: Iterable[str]) -> List[Tuple[str, array.array]]:
+        """(key, ids) for every key of `keys` that exists, in IN (...) lookups of 900."""
+        keys = list(dict.fromkeys(keys))
+        out: List[Tuple[str, array.array]] = []
+        swap = self.meta.get("byteorder") != __import__("sys").byteorder
+        for chunk in range(0, len(keys), 900):
+            part = keys[chunk:chunk + 900]
+            for k, blob in self.db.execute(f"SELECT key, ids FROM post WHERE key IN ({','.join('?' * len(part))})", part):
+                a = array.array("I")
+                a.frombytes(blob)
+                if swap:
+                    a.byteswap()
+                out.append((k, a))
+        return out
+
+    def _prefixed(self, prefix: str, max_keys: int = 200) -> List[Tuple[str, array.array]]:
+        """The ids under every key starting with `prefix` ("w:magim" finds MAGIMIX), unless too many keys do."""
+        rows = self.db.execute("SELECT key FROM post WHERE key >= ? AND key < ? LIMIT ?",
+                               (prefix, prefix + "￿", max_keys + 1)).fetchall()
+        if len(rows) > max_keys:
+            return []
+        return self._keys(k for (k,) in rows)
+
+    def _word_neighbours(self, flat: str, ws: List[str]) -> set:
+        """Marks found word by word, which the fragment vote misses for a long name or a one-letter change:
+        * a mark that is a whole word, or a run of the name's letters inside one word (CIEL in "Ingeciel", L'OEIL
+          in "L'Oeil2"): the fragment vote sums over the whole name, so a short mark inside a long name never
+          reached its floor;
+        * a word one edit away from a word of the name (ERAM for "Etam on the beach", MILLENIUM for "Millennium
+          Robotics"): one changed letter removes three of a four-letter word's four fragments;
+        * a word starting with the same five letters (MAGIMIX for "Magiman", CORALTRAVEL for "Corall")."""
+        units = [w for w in ws if len(w) >= 4]
+        if len(flat) >= 4 and flat not in units and len(flat) <= 24:
+            units.append(flat)
+        quality: Dict[str, float] = {}                     # key -> how much of the name it stands for
+        def offer(k: str, q: float) -> None:
+            if q > quality.get(k, 0):
+                quality[k] = q
+        for u in units:
+            for i in range(len(u)):
+                for j in range(i + 4, len(u) + 1):
+                    if j - i < len(u):
+                        offer("c:" + u[i:j], 0.8 * (j - i) / len(u))
+                        offer("w:" + u[i:j], 0.8 * (j - i) / len(u))
+            if len(u) <= 24:
+                for e in _edits(u):
+                    if len(e) >= 4:
+                        offer("c:" + e, 0.9 * (1 - 1 / len(u)))
+                        offer("w:" + e, 0.9 * (1 - 1 / len(u)))
+        for n in range(2, min(4, len(ws)) + 1):              # a run of words written as one ("airbnb" in "Air BnB")
+            for i in range(len(ws) - n + 1):
+                offer("c:" + "".join(ws[i:i + n]), 1.0)
+        found: Dict[int, float] = {}
+        def take(lists: List[Tuple[str, array.array]], q_of) -> None:
+            for k, ids in lists:
+                v = q_of(k) * self._word_vote(len(ids)) / 40
+                for i in ids:
+                    if v > found.get(i, 0):
+                        found[i] = v
+        take(self._keys(quality), lambda k: quality[k])
+        for u in units:
+            if len(u) >= 5:
+                take(self._prefixed("w:" + u[:5]) + self._prefixed("c:" + u[:5]), lambda k: 0.6)
+        return found
+
+    def _word_vote(self, n: int) -> float:
+        """40 for a word in up to 1,000 marks, falling with how common it is (about 19 at 100,000)."""
+        total = max(1, int(self.meta.get("marks", 1)))
+        return 40 * min(1.0, math.log(1 + total / max(1, n)) / math.log(1 + total / 1000))
+
+    def _rarity(self, ws: Iterable[str]) -> Dict[str, float]:
+        """How much each word says, from 0 (in every mark) to 1 (in one): log(marks / marks with the word), scaled.
+        Remembered per index, since the same words come back search after search."""
+        cache = self.__dict__.setdefault("_rarity_cache", {})
+        todo = [w for w in set(ws) if w not in cache]
+        total = max(2, int(self.meta.get("marks", 2)))
+        for chunk in range(0, len(todo), 900):
+            part = todo[chunk:chunk + 900]
+            got = dict(self.db.execute(f"SELECT key, length(ids) / 4 FROM post WHERE key IN ({','.join('?' * len(part))})",
+                                       ["w:" + w for w in part]))
+            for w in part:
+                cache[w] = math.log(total / max(1, got.get("w:" + w, 1))) / math.log(total)
+        if len(cache) > 200_000:
+            cache.clear()
+        return {w: cache.get(w, 1.0) for w in ws}
 
     def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
         """The candidates scored in full: those sharing the most of the name's sound fragments RELATIVE TO THEIR
@@ -323,7 +522,8 @@ class Index:
         return kept[:MAX_CANDIDATES]
 
     @staticmethod
-    def _score(row, flat: str, key: str, ws: List[str], wanted: set) -> Optional[Dict[str, Any]]:
+    def _score(row, flat: str, key: str, ws: List[str], wanted: set,
+               rarity: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
         _, register, number, text, status, classes, filed = row
         mflat, mws = compact(text), words(text)
         fine, mfine = sound_fine(flat), sound_fine(text)
@@ -353,6 +553,25 @@ class Index:
         shared = sorted({w for w in ws if w in mws and len(w) >= 3} - {flat if flat in mws and mflat == flat else ""})
         if shared and "same spelling" not in reasons:
             reasons.append("shares the word " + ", ".join(f"“{w}”" for w in shared))
+        # A word of the name close to a word of the mark, when the whole of each is not: ERAM / "Etam on the beach",
+        # MILLENIUM / "Millennium Robotics", MAGIMIX / "Magiman". Only when nothing closer was found.
+        near_word = start = None
+        best = 0.0
+        if not reasons or reasons == ["sounds close"]:
+            for w in ws:
+                for m in mws:
+                    if len(w) < 4 or len(m) < 4 or w == m:
+                        continue
+                    sim = max(similarity(w, m), similarity(sound_fine(w), sound_fine(m)) if len(w) >= 5 else 0.0)
+                    if sim >= 0.75 and sim > best:
+                        best, near_word = sim, (w, m)
+                    p = len(_common_start(w, m))
+                    if near_word is None and p >= 5 and p >= 0.6 * min(len(w), len(m)):
+                        start = (w, m, p) if not start or p > start[2] else start
+            if near_word:
+                reasons.append(f"a word spelled closely (“{near_word[0]}” / “{near_word[1]}”)")
+            elif start:
+                reasons.append(f"a word that starts the same (“{start[0][:start[2]]}…”)")
         if not reasons:
             return None
         mclasses = [c for c in (classes or "").split(",") if c]
@@ -365,7 +584,7 @@ class Index:
         whole_word = flat in mws or bool(_runs_of_words(flat, mws))
         tiers = [1.0 if mflat == flat else 0, 0.95 if "sounds alike" in reasons else 0,
                  0.9 - 0.02 * min(5, len(mws) - len(ws)) if whole_word and mflat != flat else 0,
-                 0.9 * max(spell, hear), 0.75 if shared else 0,
+                 0.9 * max(spell, hear), 0.95 * _alignment(ws, [m for m in mws if len(m) >= 2], rarity or {}),
                  0.7 if inside else 0,          # inside a longer word ("ECHLORIAL") ranked above L'OREAL at 0.8
                  0.5 + 0.15 * len(mflat) / len(flat) if holds else 0]
         score = round(max(tiers) + 0.05 * spell, 3)

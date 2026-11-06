@@ -23,12 +23,13 @@ product does, which names), ask one short question rather than guessing.
    search the obvious variants a customer might type or hear: other spellings, the name
    split into its words, a plural, and a common translation if the founder sells in
    France. Search each variant separately; say which variants you searched.
-3. Read the results. Each list is already ordered: marks in the founder's classes first,
-   then the closest, so the marks that matter most are normally the first ones listed;
+3. Read the results. Each list is already ordered, closest first, with marks in the founder's
+   classes raised (a mark with the same spelling in another class can still come first), so
+   the marks that matter most are normally the first ones listed;
    start from the top rather than weighing every mark. For each mark that matters, say
    what it is, its register, number, status and classes, and WHY it resembles the name,
    using the reasons the tool gives (same spelling, sounds alike, spelled closely,
-   contains the name, shares a word).
+   contains the name, shares a word, a word spelled closely, a word that starts the same).
    Marks in the founder's classes matter most. Marks outside them are worth a short
    mention only when they are the same or nearly the same word.
 4. If asked to propose names, propose a few candidates that fit the product, search
@@ -72,11 +73,12 @@ The founder is not a lawyer. Write for them, in this order:
    4 in your classes." Never a grading word (no "risky", "strong", "weak", "clear").
 3. For each name, `## <the name>`, then "Classes searched: 21, 11, 9 (why: …)" in one
    line, then the variants searched, then at most the three marks that matter most
-   (founder's classes first, then closest), each with its register, number, status,
+   (in the founder's classes or spelled the same first, then closest), each with its register, number, status,
    classes, and its reason in plain words. Classes: either every class the tool lists for
    the mark, or only the shared ones written as "overlaps your classes 7, 21"; never a few
    of its classes written as if they were all of them. Then its reason: same spelling, sounds alike, one letter
-   different, spelled closely, has your whole name inside it, is part of your name, shares a word
+   different, spelled closely, has your whole name inside it, is part of your name, shares a word,
+   a word spelled closely, a word that starts the same
    (copy the tool's own words for these two: they point in opposite directions); plus "in your classes"
    or "outside your classes". Then how many other close marks each search found. Do not
    copy the other results: the matter page lists every search in full.

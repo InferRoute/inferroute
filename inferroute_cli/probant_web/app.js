@@ -39,7 +39,9 @@ function matterName(id) {
   // ir-attested.ts and probant_export.py (tests/test_asia_list.py). Text nodes only, like everything else here.
   const ASIA_HEADING = "Separate list: CN, JP, KR and TW patent families";
   const ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it.";
+  const ASIA_SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search.";
   const ASIA_CLASS = "It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their English title + abstract (some have a title only).";
+  const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 (September–October 2026 only partly), as of index 2611.";
   const ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked.";
   const ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched.";
   const ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown.";
@@ -52,13 +54,13 @@ function matterName(id) {
     `Not in this index: ${asiaListOf(offices)}. Nothing from ${offices.length === 1 ? "this office" : "these offices"} was searched.`;
   const mainNotRunLine = (asked, asiaRan) =>
     `No US, EP or WO ranking ran: this search asked only for ${asiaListOf(asked)}.${asiaRan ? " Its results are in the separate list below." : ""}`;
-  // A family row stands for every CN/JP/KR/TW publication in it; say how many (the members are in the tooltip,
-  // capped by the engine, with the true count beside them).
+  // A family row stands for its CN/JP/KR/TW publications; say how many (the members are in the tooltip, capped by the
+  // engine, with the true count beside them). The engine counts those four offices' members only, so the words do too.
   function familyOf(doc) {
     const f = Array.isArray(doc && doc.family) ? doc.family.map(String) : [];
     const total = typeof (doc && doc.familyTotal) === "number" ? doc.familyTotal : f.length;
     if (total < 2) return null;
-    const n = el("span", "year", `family of ${total} publications`);
+    const n = el("span", "year", `${total} CN/JP/KR/TW publications in this family`);
     n.title = f.join(", ") + (total > f.length ? ` and ${total - f.length} more` : "");
     return n;
   }
@@ -93,7 +95,8 @@ function matterName(id) {
       } else if (!docs.length) {
         sec.append(el("div", "card-note", asiaEmpty(offices)));
       } else {
-        sec.append(el("div", "card-note", `${ASIA_SEPARATE} ${ASIA_CLASS} ${ASIA_RANK} ${asiaSearched(offices)}`));
+        const separate = asiaCodes(d.mainNotRun).length ? ASIA_SEPARATE_NO_MAIN : ASIA_SEPARATE;
+        sec.append(el("div", "card-note", `${separate} ${ASIA_CLASS} ${ASIA_DATES} ${ASIA_RANK} ${asiaSearched(offices)}`));
         const list = el("ol", "docs");
         const [lo, hi] = scoreRange(docs);
         docs.forEach((doc, idx) => {
@@ -1982,7 +1985,7 @@ function matterName(id) {
           d.because ? el("div", "deep-because", `Why this round: ${d.because}`) : null,
           deepCoverage(d)));
         for (const leg of d.legs || []) {
-          const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
+          const mark = leg.status === "ok" ? "·" : leg.status === "empty" || leg.status === "asia_only" ? "–" : "✗";
           // A leg that returns ten documents the other legs already returned looks like the strongest leg
           // in the press when only the hit count is shown. What it ADDED is the number that says whether
           // this part of the description was reached by anything else.
@@ -1990,7 +1993,10 @@ function matterName(id) {
           const contributed = typeof added === "number"
             ? (added === 0 ? ", none new" : ` (${added} new)`) : "";
           const count = leg.status === "ok" ? `${leg.hits} document(s)${contributed}`
-            : leg.status === "empty" ? "nothing returned" : (leg.why || "did not complete");
+            : leg.status === "empty" ? "nothing returned"
+            // no US/EP/WO ranking ran for this leg, and its separate list has rows: it did not find nothing
+            : leg.status === "asia_only" ? "no US/EP/WO ranking ran; see its separate list"
+            : (leg.why || "did not complete");
           // A press puts up to eight searches, each with ten documents and its own marking controls. Opened
           // all at once that is most of a screen per leg and the SHAPE of the survey — which parts of the
           // description were reached, and by what — is somewhere inside it. So a leg folds, and starts

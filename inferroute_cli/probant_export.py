@@ -294,8 +294,12 @@ def _e(s: Any) -> str:
 # Asia at all. The same sentences as ir-attested.ts and app.js (tests/test_asia_list.py holds them together).
 ASIA_HEADING = "Separate list: CN, JP, KR and TW patent families"
 ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it."
+ASIA_SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search."
 ASIA_CLASS = ("It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their "
               "English title + abstract (some have a title only).")
+# the family's earliest CN/JP/KR/TW publication dates it (sealed-research, measured on the asia-2611 root)
+ASIA_DATES = ("Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 "
+              "(September–October 2026 only partly), as of index 2611.")
 ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked."
 ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched."
 ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown."
@@ -336,7 +340,8 @@ def _asia_html(result: Any) -> str:
     labelled = (isinstance(a, dict) and a.get("kind") == "dense_only" and a.get("expanded") is False
                 and a.get("reranked") is False and isinstance(a.get("hits"), list))
     offices = _codes(a.get("offices")) if labelled else []
-    if asked and not any(o in _MAIN_OFFICES for o in asked):
+    main_not_run = bool(asked) and not any(o in _MAIN_OFFICES for o in asked)
+    if main_not_run:
         out.append(f"<p class=note>{_e(_main_not_run(asked, bool(offices)))}</p>")
     if not labelled:
         out.append(f"<p class=warn>{_e(ASIA_UNLABELLED)}</p>")
@@ -348,15 +353,16 @@ def _asia_html(result: Any) -> str:
         elif not hits:
             out.append(f"<p class=note>{_e(_asia_empty(offices))}</p>")
         else:
-            out.append(f"<p class=note>{_e(ASIA_SEPARATE)} {_e(ASIA_CLASS)} {_e(ASIA_RANK)} "
+            out.append(f"<p class=note>{_e(ASIA_SEPARATE_NO_MAIN if main_not_run else ASIA_SEPARATE)} {_e(ASIA_CLASS)} {_e(ASIA_DATES)} {_e(ASIA_RANK)} "
                        f"{_e('Searched for this list: ' + _list_of(offices) + '.')}</p>")
-            out.append("<table><tr><th>#</th><th>Publication</th><th>Year</th><th>Title</th><th>Family</th></tr>")
+            out.append("<table><tr><th>#</th><th>Publication</th><th>Year</th><th>Title</th><th>CN/JP/KR/TW members</th></tr>")
             for i, h in enumerate(hits, 1):
                 h = h if isinstance(h, dict) else {}
                 fm = h.get("family_members") if isinstance(h.get("family_members"), list) else []
                 total = h.get("family_members_total")
                 total = total if isinstance(total, int) and not isinstance(total, bool) else len(fm)
-                fam = f"family of {total} publications" if total >= 2 else ""
+                # the engine counts the family's CN/JP/KR/TW members only (build_asia_increment.py)
+                fam = f"{total} CN/JP/KR/TW publications in this family" if total >= 2 else ""
                 out.append(f"<tr><td>A{i}</td><td class=mono>{_e(h.get('key'))}</td><td>{_e(h.get('year') or '')}</td>"
                            f"<td>{_e(h.get('title') or '')}</td><td>{_e(fam)}</td></tr>")
             out.append("</table>")

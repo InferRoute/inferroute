@@ -568,10 +568,13 @@ def test_like_accepts_a_document_an_earlier_session_returned():
     body = ts[a:ts.index("\t\t\t// The hints, normalised", a)]
     js = ("const docText = new Map([['US-1-A1', 'Routing a request by the permission of its sender']]);\n"
           "const priorDocs = new Map([['EP-7-A1', 'Sealed replay of agent traces across model updates']]);\n"
-          "function resolve(params) {\n" + body + "\nreturn text; }\n"
+          # 0.9.128: a key from a search's separate CN/JP/KR/TW list is refused with its own words (the real arrow)
+          "const asiaKeys = new Set(['CN-5-A']);\n"
+          + ts[ts.index("const asiaKeyRefusal = "):ts.index(";\n", ts.index("const asiaKeyRefusal = ")) + 2]
+          + "function resolve(params) {\n" + body + "\nreturn text; }\n"
           "const tryIt = (p) => { try { return resolve(p); } catch (e) { return 'ERR ' + e.message; } };\n"
           "console.log(JSON.stringify({ now: tryIt({ like: 'us-1-a1' }), before: tryIt({ like: 'EP-7-A1' }),"
-          " never: tryIt({ like: 'WO-9-A1' }) }));")
+          " never: tryIt({ like: 'WO-9-A1' }), asia: tryIt({ like: 'cn-5-a' }) }));")
     r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0 and "input-type" in r.stderr:
@@ -582,6 +585,8 @@ def test_like_accepts_a_document_an_earlier_session_returned():
     assert out["before"] == "Sealed replay of agent traces across model updates"
     assert out["never"].startswith("ERR WO-9-A1 was not returned by any search on this matter")
     assert "nothing was sent" in out["never"]
+    assert out["asia"] == ("ERR CN-5-A is in a search's separate CN/JP/KR/TW list, not in a ranking. Those rows cannot "
+                           "be opened or used as a 'like' seed here; nothing was sent. Tell the professional so.")
 
 
 def test_the_launcher_hands_the_matters_earlier_documents_to_the_extension(tmp_path, monkeypatch):

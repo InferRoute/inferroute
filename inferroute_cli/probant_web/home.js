@@ -1339,7 +1339,7 @@
       el("p", "sub", "An assistant for founders, for what came before your product: earlier patents, registered trademarks, and the inventions in your own work. It runs on a sealed machine this computer checks before a word is sent.")));
     p.append(
       sec("What you can do",
-        list("Prior-art survey: describe an invention and the assistant searches about 29.6 million US, European and WIPO patent publications (titles and abstracts, to mid-April 2026) for the closest earlier ones.",
+        list("Prior-art survey: describe an invention and the assistant searches about 29.6 million US, European and WIPO patent publications (titles and abstracts, to late October 2026) for the closest earlier ones.",
           "Read a document or a repository: point it at a text file, a folder, a git link or a GitHub repository. It lists each distinct invention it finds and drafts a matter for each, for you to review.",
           "Name check: list the names you are considering for a product. It searches the US and French trademark registers on this computer and reports the registered marks that resemble each name, and why.")),
       sec("1. Create a matter",
@@ -1379,7 +1379,7 @@
           "A search finds related documents. It doesn't prove novelty or that nothing else exists, and a name check is not a clearance search. None of this is legal advice.",
           "Browser extensions allowed to read every page can read these pages too. For sensitive work, use a browser profile without extensions.")),
       sec("Limits right now",
-        list("Patent search reads each document's title and the start of its abstract, not the full text or the claims; its ranked results cover US, EP and WO publications to mid-April 2026. Documents from any other office appear only as a separate list under a search's ranked results, when that search shows one.",
+        list("Patent search reads each document's title and the start of its abstract, not the full text or the claims. Its ranked results cover US, EP and WO publications to late October 2026. Some search machines also return a short, separate list of patent families from a few further offices, shown under the ranking and labelled there with the offices it covers; any office not named on that label is not searched at all.",
           "There are no filters yet for classification, country or applicant.",
           "The name check covers the US and France only; EU marks are not included yet.")),
       sec("In the terminal",

@@ -18,7 +18,7 @@ def test_the_extension_carries_family_members_on_the_asian_list_not_on_the_ranki
 
 def test_the_page_shows_the_family_size_on_the_asian_list_only_from_text_nodes():
     js = (ROOT / "probant_web" / "app.js").read_text()
-    assert "function familyOf(doc)" in js and "family of ${total} publications" in js
+    assert "function familyOf(doc)" in js and "${total} CN/JP/KR/TW publications in this family" in js
     assert js.count("familyOf(doc), title)") == 1, "the Asian rows only"
     block = js[js.index("  // ── the Asian list ──"):js.index("  // ── end Asian list ──")]
     assert "familyOf(doc), title)" in block

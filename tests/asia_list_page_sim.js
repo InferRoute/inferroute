@@ -59,7 +59,7 @@ for (const [name, d] of Object.entries(states)) {
     ranks: sec ? find(sec, (n) => n.className === "rank").map(text) : [],
     marks: sec ? find(sec, (n) => /\bmarks\b/.test(n.className)).length : 0,
     keyLinks: sec ? find(sec, (n) => /key-link/.test(n.className)).length : 0,
-    families: sec ? find(sec, (n) => n.className === "year" && /family of/.test(text(n))).map((n) => [text(n), n.title]) : [],
+    families: sec ? find(sec, (n) => n.className === "year" && /in this family/.test(text(n))).map((n) => [text(n), n.title]) : [],
     barTitles: sec ? find(sec, (n) => n.className === "relbar").map((n) => n.title) : [],
   };
 }

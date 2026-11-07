@@ -336,7 +336,12 @@ function asiaOf(result: unknown): AsiaPart {
 const listOf = (xs: string[]) => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : (xs[0] ?? "");
 const ASIA_HEADING = "Separate list: CN, JP, KR and TW patent families";
 const ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it.";
+// state (d): there is no ranking above to be apart from
+const ASIA_SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search.";
 const ASIA_CLASS = "It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their English title + abstract (some have a title only).";
+// Measured by sealed-research on the asia-2611 root (ann/dates.npy, corpus_sorted.parquet): the row date is the
+// family's earliest CN/JP/KR/TW publication, dense through August 2026, ~1% of a month in Sept-Oct (DOCDB lag).
+const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 (September–October 2026 only partly), as of index 2611.";
 const ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked.";
 const ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched.";
 const ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown.";
@@ -352,7 +357,12 @@ function familySize(d: AsiaDoc): number {
 }
 // The lines the terminal card and the assistant are given, in the order the page shows them. `numbered` rows
 // are "A1.", "A2." — never the main ranking's numbers, so no reader can take one for a ranked result.
-function asiaLines(p: AsiaPart): { notes: string[]; rows: string[] } {
+// The engine's count covers the family's CN/JP/KR/TW members only (sealed-research build_asia_increment.py aggregates
+// those countries alone), so the words say exactly that and never "family of N publications".
+const familyBadge = (n: number) => `${n} CN/JP/KR/TW publications in this family`;
+// `titleMax` bounds the TITLE before the row is composed, so a narrow surface never cuts the row itself — a cut row
+// could end inside the family count and show a wrong number.
+function asiaLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: string[] } {
 	const notes: string[] = [];
 	const rows: string[] = [];
 	if (p.mainNotRun) notes.push(mainNotRunLine(p.mainNotRun, Boolean(p.asia && p.asia.offices.length)));
@@ -364,10 +374,11 @@ function asiaLines(p: AsiaPart): { notes: string[]; rows: string[] } {
 		} else if (!p.asia.docs.length) {
 			notes.push(asiaEmpty(p.asia.offices));
 		} else {
-			notes.push(ASIA_SEPARATE, ASIA_CLASS, ASIA_RANK, asiaSearched(p.asia.offices));
+			notes.push(p.mainNotRun ? ASIA_SEPARATE_NO_MAIN : ASIA_SEPARATE, ASIA_CLASS, ASIA_DATES, ASIA_RANK, asiaSearched(p.asia.offices));
 			p.asia.docs.forEach((d, i) => {
 				const n = familySize(d);
-				rows.push(`A${i + 1}. ${d.key}${d.year ? ` (${d.year})` : ""}${d.title ? ` ${d.title}` : ""}${n >= 2 ? ` [family of ${n} publications]` : ""}`);
+				const t = titleMax && d.title && d.title.length > titleMax ? `${d.title.slice(0, titleMax).trimEnd()}…` : d.title;
+				rows.push(`A${i + 1}. ${d.key}${d.year ? ` (${d.year})` : ""}${t ? ` ${t}` : ""}${n >= 2 ? ` [${familyBadge(n)}]` : ""}`);
 			});
 		}
 	}
@@ -596,13 +607,14 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 		line(theme.fg("dim", "  mark one: /relevant <number> · /not-relevant"));
 	}
 	// The Asian list, below the ranking and apart from it (asia root only; nothing on an older root).
-	const { notes: asiaNotes, rows: asiaRows } = asiaLines(p);
+	const { notes: asiaNotes, rows: asiaRows } = asiaLines(p, 96);
 	if (asiaNotes.length) {
 		line("");
 		for (const n of asiaNotes) line(theme.fg("muted", `  ${n}`));
 		const shownA = expanded ? asiaRows : asiaRows.slice(0, 5);
-		for (const r of shownA) line(`  ${r.slice(0, 120)}`);
+		for (const r of shownA) line(`  ${r}`);
 		if (!expanded && asiaRows.length > shownA.length) line(theme.fg("dim", `  … ${asiaRows.length - shownA.length} more in this list (expand)`));
+		if (asiaRows.length) line(theme.fg("dim", "  (these rows cannot be marked)"));
 	}
 	return box;
 }
@@ -671,9 +683,10 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 		lines.push(...notes, ...rows);
 		if (rows.length) {
 			lines.push("Keep this list apart from the ranking: do not merge it into the ranking, renumber it, or count it " +
-				"toward the ranking's references. What it holds for each family is an English title + abstract (some " +
-				"have a title only), matched in English: describe it as nothing more, and say nothing about where the " +
-				"English text came from. The professional's screen shows this list below the ranking.");
+				"toward the ranking's references. You have been given these rows' titles only — not their abstracts — so " +
+				"say nothing about what any of them discloses beyond its title. What the index holds for each is an " +
+				"English title + abstract (some have a title only), matched in English; describe it as nothing more, and " +
+				"say nothing about where the English text came from. The professional's screen shows this list below the ranking.");
 		}
 	}
 	return lines.join("\n");
@@ -881,6 +894,11 @@ export default function (pi: ExtensionAPI) {
 	// Documents this matter's searches returned in EARLIER sessions (the launcher writes them; numbers and public
 	// titles only), so "like" and the marks note work for them too — not only for this session's results.
 	const priorDocs = new Map<string, string>();
+	// Keys that came back ONLY in a search's separate CN/JP/KR/TW list (this session). They are not in any ranking,
+	// so a read or a `like` on one must say that, not "not returned by any search".
+	const asiaKeys = new Set<string>();
+	const asiaKeyRefusal = (key: string) =>
+		`${key} is in a search's separate CN/JP/KR/TW list, not in a ranking. Those rows cannot be opened or used as a 'like' seed here; nothing was sent. Tell the professional so.`;
 	try {
 		const f = process.env.IR_MATTER_DOCS;
 		if (f) for (const [k, t] of Object.entries(JSON.parse(readFileSync(f, "utf8")) as Record<string, string>)) priorDocs.set(k, String(t));
@@ -1796,6 +1814,7 @@ export default function (pi: ExtensionAPI) {
 			// number grades. hit.text is the representation the index DOES embed.
 			if (d.text || d.title) docText.set(d.key, d.text || String(d.title));
 		}
+		for (const d of sp.asia?.docs ?? []) asiaKeys.add(String(d.key).toUpperCase());
 		sessionTotals = { searches: searchNo, documents: firstSeen.size };
 		searchStatus(ctx, sp);
 		return { sp, out, earlier };
@@ -1847,6 +1866,7 @@ export default function (pi: ExtensionAPI) {
 			if (like) {
 				const known = docText.get(like) ?? priorDocs.get(like);
 				if (!known) {
+					if (asiaKeys.has(like)) throw new Error(asiaKeyRefusal(like));
 					throw new Error(`${like} was not returned by any search on this matter, so there is nothing to search like; nothing was sent`);
 				}
 				text = known;
@@ -1923,6 +1943,7 @@ export default function (pi: ExtensionAPI) {
 			// string on the wire — including one it invented, which would both leak an interest this matter
 			// never had and invite an answer about a document nobody surfaced.
 			if (!docText.has(key) && !priorDocs.has(key)) {
+				if (asiaKeys.has(key)) throw new Error(asiaKeyRefusal(key));
 				throw new Error(`${key} was not returned by any search on this matter, so there is nothing to open; nothing was sent`);
 			}
 			let out: { sp: SearchProof; out: SearchVerdict };
@@ -2393,7 +2414,11 @@ export default function (pi: ExtensionAPI) {
 				for (const d of r.sp.docs) {
 					if (!union.has(d.key)) union.set(d.key, { title: d.title ?? "", first: n });
 				}
-				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : "empty",
+				// "asia_only": no US/EP/WO ranking ran for this leg (it named no such office) and its separate list has
+				// rows. Neither "ok" (nothing entered the union) nor "empty" (it did not find nothing), so it is in
+				// neither count and never asked for as a gap.
+				const asiaOnly = !r.sp.docs.length && Boolean(r.sp.mainNotRun) && Boolean(r.sp.asia?.docs.length);
+				results.push({ feature: leg.feature, about: deepAbout(leg), status: r.sp.docs.length ? "ok" : asiaOnly ? "asia_only" : "empty",
 				               hits: r.sp.docs.length, searchNo: n, docs: r.sp.docs, added: union.size - before,
 				               // the leg's own Asian list, shown under its documents and never in the union above
 				               asia: r.sp.asia, asiaUnlabelled: r.sp.asiaUnlabelled,
@@ -2582,9 +2607,10 @@ export default function (pi: ExtensionAPI) {
 			box.addChild(new Text(theme.bold("Deep prior-art search")
 				+ theme.fg("dim", `  ${d.sent ?? 0}/${d.planned ?? 0} queries · ${d.documents ?? 0} documents`), 0, 0));
 			for (const leg of d.legs ?? []) {
-				const mark = leg.status === "ok" ? "·" : leg.status === "empty" ? "–" : "✗";
+				const mark = leg.status === "ok" ? "·" : leg.status === "empty" || leg.status === "asia_only" ? "–" : "✗";
 				const tail = leg.status === "ok"
 					? ` (${leg.hits}${(leg.added ?? 0) === 0 ? ", none new" : `, ${leg.added} new`})`
+					: leg.status === "asia_only" ? " — no US/EP/WO ranking ran; see its separate list"
 					: ` — ${leg.status}`;
 				box.addChild(new Text(`  ${mark} ${leg.feature}${tail}`, 0, 0));
 			}

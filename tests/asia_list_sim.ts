@@ -38,27 +38,37 @@ const hit = (i: number, extra: Record<string, unknown> = {}) => ({
 const asia = (offices: string[], hits: unknown[]) =>
   ({ kind: "dense_only", expanded: false, reranked: false, offices, k: 20, hits });
 const mainHit = { key: "US-1-A", score: 1, title: "Main" };
-const results: Record<string, Record<string, unknown>> = {
-  long_title: { hits: [mainHit], offices: null, offices_unindexed: [],
-                asia: asia(["CN", "JP", "KR", "TW"], [hit(1, { title: "A".repeat(150), family_members: ["CN-101-A"], family_members_total: 642 })]) },
-  with_hits: { hits: [mainHit], offices: null, offices_unindexed: [],
+// Each case is (the sealed result, the office scope the REQUEST was sent with, the answering index id). mainNotRun is
+// derived from the request only; a result never carries a top-level `offices` the engine attested.
+const I2611 = "patent1m-asia-2611+epwo+usall@88844190";
+type Case = { r: Record<string, unknown>; req?: string[]; index?: string };
+const cases: Record<string, Case> = {
+  long_title: { r: { hits: [mainHit], offices_unindexed: [],
+                asia: asia(["CN", "JP", "KR", "TW"], [hit(1, { title: "A".repeat(150), family_members: ["CN-101-A"], family_members_total: 642 })]) } },
+  with_hits: { r: { hits: [mainHit], offices_unindexed: [],
                asia: asia(["CN", "JP", "KR", "TW"], [hit(1, { family_members: ["CN-101-A", "JP-1-A"], family_members_total: 2 }),
-                                                    hit(2, { family_members: ["KR-1-B"], family_members_total: 90 }), hit(3)]) },
-  empty: { hits: [mainHit], offices: ["CN", "JP", "US"], offices_unindexed: [], asia: asia(["CN", "JP"], []) },
-  not_requested: { hits: [mainHit], offices: ["US"], offices_unindexed: [], asia: asia([], []) },
-  cn_only: { hits: [], offices: ["CN"], offices_unindexed: [], asia: asia(["CN"], [hit(1)]) },
-  unindexed: { hits: [], offices: ["DE"], offices_unindexed: ["DE"], asia: asia([], []) },
-  old_root: { hits: [mainHit], offices: null },
-  unlabelled: { hits: [mainHit], asia: { kind: "dense_only", expanded: true, reranked: false, offices: ["CN"], k: 20, hits: [hit(1)] } },
+                                                    hit(2, { family_members: ["KR-1-B"], family_members_total: 90 }), hit(3)]) } },
+  // another index carrying a layer: the asia-2611 dating sentence is not said under it
+  index_2612: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], [hit(1)]) },
+                index: "patent1m-asia-2612+epwo+usall@90000000" },
+  // a result carrying a top-level offices:["CN"] and no main hits, from a request that named no office: state (a)
+  result_offices: { r: { hits: [], offices: ["CN"], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], [hit(1)]) } },
+  empty: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP"], []) }, req: ["CN", "JP", "US"] },
+  not_requested: { r: { hits: [mainHit], offices_unindexed: [], asia: asia([], []) }, req: ["US"] },
+  cn_only: { r: { hits: [], offices_unindexed: [], asia: asia(["CN"], [hit(1)]) }, req: ["CN"] },
+  unindexed: { r: { hits: [], offices_unindexed: ["DE"], asia: asia([], []) }, req: ["DE"] },
+  old_root: { r: { hits: [mainHit] }, index: "patent1m-epwo+usall@30398469" },
+  unlabelled: { r: { hits: [mainHit], asia: { kind: "dense_only", expanded: true, reranked: false, offices: ["CN"], k: 20, hits: [hit(1)] } } },
 };
 const out: Record<string, unknown> = {};
-for (const [name, r] of Object.entries(results)) {
-  const p = asiaOf(r);
-  const { notes, rows } = asiaLines(p);
-  const verdict = { ok: true, steps: [], enclave: { index_snapshot: "patent1m-asia-2611+epwo+usall@1" }, statement: { hits_n: (r.hits as unknown[]).length }, result: r };
-  const sp = searchProofOf(verdict, "search");
+for (const [name, c] of Object.entries(cases)) {
+  const index = c.index ?? I2611;
+  const p = asiaOf(c.r, c.req);
+  const { notes, rows } = asiaLines(p, undefined, index);
+  const verdict = { ok: true, steps: [], enclave: { index_snapshot: index }, statement: { hits_n: (c.r.hits as unknown[]).length }, result: c.r };
+  const sp = searchProofOf(verdict, "search", undefined, c.req);
   out[name] = { part: p, notes, rows, docKeys: sp.docs.map((d: { key: string }) => d.key), spAsia: sp.asia ?? null,
-                model: hitsText(verdict, "Search 1", new Map()),
+                model: hitsText(verdict, "Search 1", new Map(), c.req),
                 terminal: renderSearchProof(sp, true, theme).lines, terminalFolded: renderSearchProof(sp, false, theme).lines };
 }
 console.log(JSON.stringify(out));

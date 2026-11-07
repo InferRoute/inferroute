@@ -306,8 +306,11 @@ interface AsiaPart {
 }
 const officeCodes = (v: unknown): string[] =>
 	Array.isArray(v) ? v.map(String).filter((o) => /^[A-Z]{2}$/.test(o)) : [];
-function asiaOf(result: unknown): AsiaPart {
-	const r = (result ?? {}) as { asia?: unknown; offices_unindexed?: unknown; offices?: unknown };
+// `requestOffices`: the `offices` scope THIS CLIENT SENT with the search (undefined = none). Whether a main ranking ran
+// is read from the request, never from the result: the engine's result schema has no top-level `offices`, so a value
+// there is not something the engine attested and must not decide what the reader is told.
+function asiaOf(result: unknown, requestOffices?: unknown): AsiaPart {
+	const r = (result ?? {}) as { asia?: unknown; offices_unindexed?: unknown };
 	if (r.asia === undefined || r.asia === null) return {};          // the older root: no claim about Asia
 	const out: AsiaPart = {};
 	const a = r.asia as { kind?: unknown; expanded?: unknown; reranked?: unknown; offices?: unknown; k?: unknown; hits?: unknown };
@@ -329,7 +332,7 @@ function asiaOf(result: unknown): AsiaPart {
 	}
 	const un = officeCodes(r.offices_unindexed);
 	if (un.length) out.officesUnindexed = un;
-	const asked = officeCodes(r.offices);
+	const asked = officeCodes(requestOffices);
 	if (asked.length && !asked.some((o) => MAIN_OFFICE_CODES.includes(o))) out.mainNotRun = asked;
 	return out;
 }
@@ -340,8 +343,13 @@ const ASIA_SEPARATE = "A separate list, not part of the ranking above, and never
 const ASIA_SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search.";
 const ASIA_CLASS = "It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their English title + abstract (some have a title only).";
 // Measured by sealed-research on the asia-2611 root (ann/dates.npy, corpus_sorted.parquet): the row date is the
-// family's earliest CN/JP/KR/TW publication, dense through August 2026, ~1% of a month in Sept-Oct (DOCDB lag).
-const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 (September–October 2026 only partly), as of index 2611.";
+// family's earliest CN/JP/KR/TW publication; dense through August 2026, then September 9,215 rows (~3%) and October
+// 5,006 (~1.7%) of a normal ~300k/month (DOCDB lag). A fact about THAT index only: said only when the answering
+// index's identifier names asia-2611, and omitted under any other.
+const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list is dense to August 2026, and September and October 2026 are almost absent (about 3% and under 2% of a normal month), as of index 2611.";
+const ASIA_DATES_INDEX = "asia-2611";
+// 5: the identifier's row count covers both layers; said to the assistant only
+const ASIA_COUNT_NOTE = "The index identifier's row count includes this separate list's families; the ranking's pool is its US/EP/WO part only — do not quote that count as the size of the ranking.";
 const ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked.";
 const ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched.";
 const ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown.";
@@ -362,7 +370,7 @@ function familySize(d: AsiaDoc): number {
 const familyBadge = (n: number) => `${n} CN/JP/KR/TW publications in this family`;
 // `titleMax` bounds the TITLE before the row is composed, so a narrow surface never cuts the row itself — a cut row
 // could end inside the family count and show a wrong number.
-function asiaLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: string[] } {
+function asiaLines(p: AsiaPart, titleMax?: number, indexId?: string): { notes: string[]; rows: string[] } {
 	const notes: string[] = [];
 	const rows: string[] = [];
 	if (p.mainNotRun) notes.push(mainNotRunLine(p.mainNotRun, Boolean(p.asia && p.asia.offices.length)));
@@ -374,7 +382,8 @@ function asiaLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: str
 		} else if (!p.asia.docs.length) {
 			notes.push(asiaEmpty(p.asia.offices));
 		} else {
-			notes.push(p.mainNotRun ? ASIA_SEPARATE_NO_MAIN : ASIA_SEPARATE, ASIA_CLASS, ASIA_DATES, ASIA_RANK, asiaSearched(p.asia.offices));
+			notes.push(p.mainNotRun ? ASIA_SEPARATE_NO_MAIN : ASIA_SEPARATE, ASIA_CLASS,
+				...(String(indexId ?? "").includes(ASIA_DATES_INDEX) ? [ASIA_DATES] : []), ASIA_RANK, asiaSearched(p.asia.offices));
 			p.asia.docs.forEach((d, i) => {
 				const n = familySize(d);
 				const t = titleMax && d.title && d.title.length > titleMax ? `${d.title.slice(0, titleMax).trimEnd()}…` : d.title;
@@ -387,7 +396,7 @@ function asiaLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: str
 }
 // ── end Asian list ──
 
-function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict): SearchProof {
+function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict, requestOffices?: string[]): SearchProof {
 	return {
 		ok: out.ok && phase !== "declined",
 		refusal: phase === "declined" ? "the user declined to send a sealed query" : String(out.refusal ?? ""),
@@ -405,7 +414,7 @@ function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?
 			text: typeof (h as { text?: unknown }).text === "string" ? String((h as { text?: string }).text) : undefined,
 			score: h.score })),
 		// Never merged into `docs`: a separate list with its own labels (the Asian list, above).
-		...asiaOf(out.result),
+		...asiaOf(out.result, requestOffices),
 		at: new Date().toISOString(),
 	};
 }
@@ -607,7 +616,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 		line(theme.fg("dim", "  mark one: /relevant <number> · /not-relevant"));
 	}
 	// The Asian list, below the ranking and apart from it (asia root only; nothing on an older root).
-	const { notes: asiaNotes, rows: asiaRows } = asiaLines(p, 96);
+	const { notes: asiaNotes, rows: asiaRows } = asiaLines(p, 96, p.index);
 	if (asiaNotes.length) {
 		line("");
 		for (const n of asiaNotes) line(theme.fg("muted", `  ${n}`));
@@ -626,8 +635,13 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 // It refuses rather than guesses. An identifier it does not recognise gets no friendly name at all — a
 // corpus described as covering territories it does not cover would be worse than one that looks technical.
 function corpusName(id: string): string {
-	const m = /^[a-z0-9]+-([a-z+]+)@(\d+)$/i.exec(String(id || "").trim());
+	// The scope is split on "+" and EVERY part must be a known US/EP/WO corpus: an identifier carrying any other
+	// layer (e.g. "asia-2611", or a digitless "asia") counts that layer's rows too, so a "from the United States,
+	// Europe and WIPO" name with that count would be false.
+	const m = /^[a-z0-9]+-([a-z0-9+-]+)@(\d+)$/i.exec(String(id || "").trim());
 	if (!m) return "";
+	const parts = m[1].toLowerCase().split("+");
+	if (!parts.every((t) => ["usall", "epwo", "us", "ep", "wo"].includes(t))) return "";
 	const where: string[] = [];
 	const scope = m[1].toLowerCase();
 	if (scope.includes("us")) where.push("the United States");
@@ -648,7 +662,7 @@ function corpusPhrase(id: string): string {
 	return name ? `${name} (${id})` : (id || "the index");
 }
 
-function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number>): string {
+function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number>, requestOffices?: string[]): string {
 	const hits = out.result?.hits ?? [];
 	const lines = [
 		`${label}: ${hits.length} references surfaced by a sealed search over ${corpusPhrase(String(out.enclave?.index_snapshot ?? ""))}. ` +
@@ -675,8 +689,8 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 	});
 	// The Asian list (asia root only), AFTER the ranking and in its own words: the assistant must not fold it into
 	// the ranking, count it toward it, or describe it as more than it is. Titles only, to bound what a search adds.
-	const ap = asiaOf(out.result);
-	const { notes, rows } = asiaLines(ap);
+	const ap = asiaOf(out.result, requestOffices);
+	const { notes, rows } = asiaLines(ap, undefined, String(out.enclave?.index_snapshot ?? ""));
 	if (notes.length) {
 		lines.push("");
 		if (ap.mainNotRun) lines.push("0 references above does not mean nothing was found: no US, EP or WO ranking ran in this search.");
@@ -688,6 +702,8 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 				"English title + abstract (some have a title only), matched in English; describe it as nothing more, and " +
 				"say nothing about where the English text came from. The professional's screen shows this list below the ranking.");
 		}
+		// The identifier above (e.g. …@88844190) counts both layers; the ranking searched only its US/EP/WO part.
+		if (ap.asia) lines.push(ASIA_COUNT_NOTE);
 	}
 	return lines.join("\n");
 }
@@ -1745,6 +1761,9 @@ export default function (pi: ExtensionAPI) {
 	async function sealedSearch(o: {
 		text: string; k: number; feature?: string; like?: string;
 		ctx: ExtensionContext; signal: AbortSignal | undefined; phase: (name: string) => void;
+		// The office scope this search was SENT with. This client sends none today (no tool offers it), so it is
+		// undefined and the engine searches every office; it is the only source mainNotRun may be derived from.
+		offices?: string[];
 	}): Promise<{ sp: SearchProof; out: SearchVerdict; earlier: Map<string, number> }> {
 		const { text, k, ctx, signal } = o;
 		const feature = o.feature ?? "";
@@ -1780,7 +1799,7 @@ export default function (pi: ExtensionAPI) {
 		} finally {
 			if (beat) clearInterval(beat);
 		}
-		const sp = searchProofOf(out, "search", verified);
+		const sp = searchProofOf(out, "search", verified, o.offices);
 		sp.feature = feature || undefined;
 		sp.like = like || undefined;
 		sp.k = k;
@@ -1867,7 +1886,7 @@ export default function (pi: ExtensionAPI) {
 				const known = docText.get(like) ?? priorDocs.get(like);
 				if (!known) {
 					if (asiaKeys.has(like)) throw new Error(asiaKeyRefusal(like));
-					throw new Error(`${like} was not returned by any search on this matter, so there is nothing to search like; nothing was sent`);
+					throw new Error(`${like} was not returned by any search's ranking on this matter — or came back only in a search's separate CN/JP/KR/TW list, which cannot be opened here; nothing was sent`);
 				}
 				text = known;
 			}
@@ -1885,7 +1904,7 @@ export default function (pi: ExtensionAPI) {
 			const k = Math.min(50, Math.max(1, Math.round(Number(asked) || 10)));
 			const { sp, out, earlier } = await sealedSearch({ text, k, feature, like, ctx, signal, phase });
 			const label = `Search ${searchNo}${feature ? ` (feature: ${feature})` : ""}${like ? ` (documents like ${like})` : ""}`;
-			return { content: [{ type: "text", text: hitsText(out, label, earlier) }], details: sp };
+			return { content: [{ type: "text", text: hitsText(out, label, earlier, undefined) }], details: sp };
 		},
 
 		renderResult(result, { expanded }, theme) {
@@ -1944,7 +1963,7 @@ export default function (pi: ExtensionAPI) {
 			// never had and invite an answer about a document nobody surfaced.
 			if (!docText.has(key) && !priorDocs.has(key)) {
 				if (asiaKeys.has(key)) throw new Error(asiaKeyRefusal(key));
-				throw new Error(`${key} was not returned by any search on this matter, so there is nothing to open; nothing was sent`);
+				throw new Error(`${key} was not returned by any search's ranking on this matter — or came back only in a search's separate CN/JP/KR/TW list, which cannot be opened here; nothing was sent`);
 			}
 			let out: { sp: SearchProof; out: SearchVerdict };
 			try {
@@ -2381,7 +2400,7 @@ export default function (pi: ExtensionAPI) {
 			// results and its marking controls, not a count. Without them the outline entry for a leg had
 			// nowhere to arrive and nothing to mark.
 			const results: ({ feature: string; about: string; status: string; hits: number; searchNo?: number;
-			                 why?: string; docs?: unknown[]; added?: number } & AsiaPart)[] = [];
+			                 why?: string; docs?: unknown[]; added?: number; index?: string } & AsiaPart)[] = [];
 			const blocks: string[] = [];
 			const union = new Map<string, { title: string; first: number }>();
 			let sent = 0;
@@ -2422,8 +2441,8 @@ export default function (pi: ExtensionAPI) {
 				               hits: r.sp.docs.length, searchNo: n, docs: r.sp.docs, added: union.size - before,
 				               // the leg's own Asian list, shown under its documents and never in the union above
 				               asia: r.sp.asia, asiaUnlabelled: r.sp.asiaUnlabelled,
-				               officesUnindexed: r.sp.officesUnindexed, mainNotRun: r.sp.mainNotRun });
-				blocks.push(hitsText(r.out, `Search ${n} — ${leg.feature}`, r.earlier));
+				               officesUnindexed: r.sp.officesUnindexed, mainNotRun: r.sp.mainNotRun, index: r.sp.index });
+				blocks.push(hitsText(r.out, `Search ${n} — ${leg.feature}`, r.earlier, undefined));
 			}
 
 			// Computed BEFORE the record is written, because the record now carries whether this press
@@ -2446,7 +2465,8 @@ export default function (pi: ExtensionAPI) {
 			const roundsLeft = DEEP_GENERATIONS - generation;
 			const nextRound = (gaps.length && roundsLeft > 0 && sent > 0)
 				? `NEXT ROUND — for you, the assistant, not for the professional to answer. ${gaps.length} of `
-					+ `${legs.length} queries reached nothing new: ${gaps.join("; ")}. You can see every document `
+					// the denominator leaves out asia_only legs: they ran no ranking, so no gap can be counted against them
+					+ `${results.filter((x) => x.status !== "asia_only").length} queries reached nothing new: ${gaps.join("; ")}. You can see every document `
 					+ `above. Compose up to ${Math.min(DEEP_MAX, gaps.length + 2)} NEW sealed queries that go at `
 					+ `those gaps specifically — reword what found nothing, and go outward from the documents that `
 					+ `did come back rather than repeating them — then call deep_prior_art_search again with `

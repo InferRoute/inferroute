@@ -31,14 +31,18 @@ SEPARATE = "A separate list, not part of the ranking above, and never merged int
 CLASS = ("It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their "
          "English title + abstract (some have a title only).")
 RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked."
-DATES = ("Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 "
-         "(September–October 2026 only partly), as of index 2611.")
+DATES = ("Families are dated by their earliest CN/JP/KR/TW publication; the list is dense to August 2026, and "
+         "September and October 2026 are almost absent (about 3% and under 2% of a normal month), as of index 2611.")
+I2611 = "patent1m-asia-2611+epwo+usall@88844190"
+NO_MARKS = "These rows cannot be marked or opened."
+COUNT_NOTE = ("The index identifier's row count includes this separate list's families; the ranking's pool is its "
+              "US/EP/WO part only — do not quote that count as the size of the ranking.")
 SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search."
 HOME_LIMIT = ("Patent search reads each document's title and the start of its abstract, not the full text or the "
               "claims. Its ranked results cover US, EP and WO publications to late October 2026. Some search machines "
               "also return a short, separate list of patent families from a few further offices, shown under the "
-              "ranking and labelled there with the offices it covers; any office not named on that label is not "
-              "searched at all.")
+              "ranking and labelled there with the offices it covers. Offices beyond US, EP and WO are searched only "
+              "when that label names them; no other office is searched at all.")
 ASIAN_KEY = re.compile(r"^(CN|JP|KR|TW)-")
 NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched."
 UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown."
@@ -266,24 +270,25 @@ def test_page_builds_the_ranking_from_docs_and_the_list_from_asia_only():
 
 # ── the export ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-def _export(result):
+def _export(result, offices=None, index=I2611):
+    """The export's Asian section; `offices` is the REQUEST's scope as the signed statement records it."""
     from inferroute_cli import probant_export as E
-    return E._asia_html(result)
+    return E._asia_html(result, {"offices": offices, "index_snapshot": index}, index)
 
 
 def test_export_states():
-    a = _export({"hits": [], "offices": None, "offices_unindexed": [],
+    a = _export({"hits": [], "offices_unindexed": [],
                  "asia": _asia(["CN", "JP", "KR", "TW"], [_hit(1, family_members=["CN-101-A", "JP-1-A"],
                                                                     family_members_total=5)])})
     assert HEADING in a and SEPARATE in a and RANK in a and "English title + abstract" in a
     assert "<td>A1</td>" in a and "5 CN/JP/KR/TW publications in this family" in a and "CN/JP/KR/TW members" in a and DATES in a                         # (a)
-    b = _export({"hits": [], "offices": ["CN", "US"], "asia": _asia(["CN"], [])})
+    b = _export({"hits": [], "asia": _asia(["CN"], [])}, ["CN", "US"])
     assert "This list is empty for this search: CN was searched and no family came back." in b   # (b)
-    c = _export({"hits": [], "offices": ["US"], "asia": _asia([], [])})
+    c = _export({"hits": [], "asia": _asia([], [])}, ["US"])
     assert NOT_REQUESTED in c and "empty" not in c                                           # (c)
-    d = _export({"hits": [], "offices": ["CN"], "asia": _asia(["CN"], [_hit(1)])})
+    d = _export({"hits": [], "asia": _asia(["CN"], [_hit(1)])}, ["CN"])
     assert "No US, EP or WO ranking ran: this search asked only for CN. Its results are in the separate list below." in d
-    e = _export({"hits": [], "offices": ["DE"], "offices_unindexed": ["DE"], "asia": _asia([], [])})
+    e = _export({"hits": [], "offices_unindexed": ["DE"], "asia": _asia([], [])}, ["DE"])
     assert "Not in this index: DE. Nothing from this office was searched." in e             # (e)
     assert _export({"hits": [{"key": "US-1-A"}]}) == "" and _export(None) == ""             # (f)
     bad = _asia(["CN"], [_hit(1)])
@@ -305,7 +310,7 @@ def test_the_per_search_report_shows_the_main_ranking_only():
     assert '"asia"' not in src and "'asia'" not in src
     py = PY.read_text()
     a = py.index('A("<p class=note>No report was rendered for this search.</p>")')
-    assert "_asia_html(x.get(\"result\"))" in py[a:a + 400]
+    assert '_asia_html(x.get("result"), stmt, x.get("index_snapshot"))' in py[a:a + 400]
 
 
 def test_the_wording_scan_reads_the_sentences_it_claims_to_check():
@@ -345,7 +350,7 @@ def test_state_d_does_not_point_at_a_ranking_that_did_not_run(ext, page):
     """With no US/EP/WO ranking, "not part of the ranking above" points at nothing; state (d) says what happened."""
     assert SEPARATE_NO_MAIN in ext["cn_only"]["notes"] and SEPARATE not in ext["cn_only"]["notes"]
     assert SEPARATE_NO_MAIN in page["cn_only"]["section"] and SEPARATE not in page["cn_only"]["section"]
-    d = _export({"hits": [], "offices": ["CN"], "asia": _asia(["CN"], [_hit(1)])})
+    d = _export({"hits": [], "asia": _asia(["CN"], [_hit(1)])}, ["CN"])
     assert SEPARATE_NO_MAIN in d and SEPARATE not in d
     assert SEPARATE in ext["with_hits"]["notes"] and SEPARATE_NO_MAIN not in ext["with_hits"]["notes"]
 
@@ -390,10 +395,14 @@ def test_a_read_or_like_on_an_asian_key_says_where_it_came_from():
            "a 'like' seed here; nothing was sent. Tell the professional so.`")
     assert msg in ts
     assert "for (const d of sp.asia?.docs ?? []) asiaKeys.add(String(d.key).toUpperCase());" in ts
-    for generic in ("so there is nothing to search like; nothing was sent", "so there is nothing to open; nothing was sent"):
-        g = ts.index(generic)
+    generic = ("was not returned by any search's ranking on this matter — or came back only in a search's separate "
+               "CN/JP/KR/TW list, which cannot be opened here; nothing was sent`")
+    assert ts.count(generic) == 2, "read_patent and like say the same thing"
+    g = 0
+    for _ in range(2):
+        g = ts.index(generic, g + 1)
         line_start = ts.rindex("\n", 0, ts.rindex("\n", 0, g))
-        assert "if (asiaKeys.has(" in ts[line_start:g], generic
+        assert "if (asiaKeys.has(" in ts[line_start:g], "the in-session message comes first"
     # runtime: the refusal itself, built by the same arrow function
     a = ts.index("const asiaKeyRefusal = ")
     fn = ts[a:ts.index(";\n", a) + 2]
@@ -449,3 +458,79 @@ def test_the_searched_pool_is_stated_as_about_30_4_million():
     if r.returncode != 0 and "input-type" in r.stderr:
         pytest.skip("this node cannot run TypeScript from -e")
     assert r.stdout.strip() == "30.4 million published patents from the United States, Europe and WIPO"
+
+
+# ── second review of f347470 ─────────────────────────────────────────────────────────────────────────────────────────
+
+def test_the_dating_sentence_is_said_only_under_index_asia_2611(ext, page):
+    """It is a measurement of asia-2611. Under any other index carrying a layer it is omitted, on every surface."""
+    assert DATES in ext["with_hits"]["notes"]
+    assert DATES not in ext["index_2612"]["notes"] and DATES not in ext["index_2612"]["model"]
+    assert not any(DATES in ln for ln in ext["index_2612"]["terminal"])
+    assert HEADING in ext["index_2612"]["notes"] and RANK in ext["index_2612"]["notes"]      # the list itself is shown
+    assert DATES in page["with_hits"]["section"] and DATES not in page["index_2612"]["section"]
+    assert "A1" in page["index_2612"]["ranks"]
+    res = {"hits": [], "asia": _asia(["CN"], [_hit(1)])}
+    assert DATES in _export(res)
+    assert DATES not in _export(res, index="patent1m-asia-2612+epwo+usall@90000000") and RANK in _export(res, index="x")
+    for block in _asia_blocks()[:3]:
+        assert "only partly" not in block and "~1% of a month" not in block
+
+
+def test_state_d_comes_from_the_request_never_from_a_result_key(ext):
+    """The engine's result schema drops a top-level `offices`, so a result carrying one is not engine-attested. A
+    result with offices:["CN"] and no main hits, from a request that named no office, is state (a), not (d)."""
+    s = ext["result_offices"]
+    assert "mainNotRun" not in s["part"]
+    assert s["notes"][:3] == [HEADING, SEPARATE, CLASS]
+    assert not any("No US, EP or WO ranking ran" in n for n in s["notes"])
+    assert "0 references above does not mean" not in s["model"]
+    ts = TS.read_text()
+    a = ts.index("function asiaOf(")
+    body = ts[a:ts.index("\n}\n", a)]
+    assert "officeCodes(requestOffices)" in body and "r.offices)" not in body
+    assert '"/search", { text, k, expect_lifetime_id' in ts, "this client sends no office scope today"
+    py = PY.read_text()
+    body = py[py.index("def _asia_html("):py.index("# ── end Asian list ──")]
+    assert 'stmt.get("offices")' in body and 'result.get("offices")' not in body
+    # the export: the same result with no request scope is state (a)
+    a_ = _export({"hits": [], "offices": ["CN"], "asia": _asia(["CN", "JP", "KR", "TW"], [_hit(1)])})
+    assert "No US, EP or WO ranking ran" not in a_ and SEPARATE in a_
+
+
+def _corpus_name(*ids):
+    ts = TS.read_text()
+    fn = ts[ts.index("function corpusName("):ts.index("\n}\n", ts.index("function corpusName(")) + 3]
+    r = subprocess.run([_node(), "--experimental-strip-types", "--input-type=module-typescript", "-e",
+                        fn + f"\nconsole.log(JSON.stringify({json.dumps(list(ids))}.map(corpusName)));"],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.returncode == 0, r.stderr[-600:]
+    return json.loads(r.stdout)
+
+
+def test_corpus_name_names_only_an_identifier_made_of_us_ep_wo_parts():
+    assert _corpus_name("patent1m-asia-2611+epwo+usall@88844190", "patent1m-asia+epwo+usall@88844190",
+                        "patent1m-epwo+usall@30398469", "patent1m-epwo+usall+kr@30398469") == [
+        "", "", "30.4 million published patents from the United States, Europe and WIPO", ""]
+
+
+def test_the_assistant_is_told_the_identifier_count_is_not_the_rankings_pool(ext):
+    for name in ("with_hits", "empty", "not_requested", "index_2612"):
+        assert COUNT_NOTE in ext[name]["model"], name
+    assert COUNT_NOTE not in ext["old_root"]["model"] and COUNT_NOTE not in ext["unlabelled"]["model"]
+
+
+def test_the_page_and_export_say_the_rows_cannot_be_marked_or_opened(page):
+    assert page["with_hits"]["section"].endswith(f"Cooling plate 3 {NO_MARKS}")
+    assert NO_MARKS not in (page["empty"]["section"] or "") and NO_MARKS not in (page["not_requested"]["section"] or "")
+    assert NO_MARKS in _export({"hits": [], "asia": _asia(["CN"], [_hit(1)])})
+
+
+def test_the_next_round_denominator_leaves_out_asia_only_legs():
+    ts = TS.read_text()
+    a = ts.index("const nextRound = (gaps.length")
+    brief = ts[a:ts.index("reached nothing new", a)]
+    assert 'results.filter((x) => x.status !== "asia_only").length} queries' in brief
+    assert "${legs.length} queries reached" not in ts

@@ -583,7 +583,8 @@ def test_like_accepts_a_document_an_earlier_session_returned():
     out = json.loads(r.stdout.strip().splitlines()[-1])
     assert out["now"].startswith("Routing a request")
     assert out["before"] == "Sealed replay of agent traces across model updates"
-    assert out["never"].startswith("ERR WO-9-A1 was not returned by any search on this matter")
+    assert out["never"].startswith("ERR WO-9-A1 was not returned by any search's ranking on this matter — or came back "
+                                   "only in a search's separate CN/JP/KR/TW list, which cannot be opened here")
     assert "nothing was sent" in out["never"]
     assert out["asia"] == ("ERR CN-5-A is in a search's separate CN/JP/KR/TW list, not in a ranking. Those rows cannot "
                            "be opened or used as a 'like' seed here; nothing was sent. Tell the professional so.")

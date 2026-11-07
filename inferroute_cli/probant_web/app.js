@@ -41,7 +41,11 @@ function matterName(id) {
   const ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it.";
   const ASIA_SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search.";
   const ASIA_CLASS = "It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their English title + abstract (some have a title only).";
-  const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list reaches August 2026 (September–October 2026 only partly), as of index 2611.";
+  // A fact about index asia-2611 only (sealed-research's measurement): shown only when the answering index's identifier
+  // names it, and omitted under any other.
+  const ASIA_DATES = "Families are dated by their earliest CN/JP/KR/TW publication; the list is dense to August 2026, and September and October 2026 are almost absent (about 3% and under 2% of a normal month), as of index 2611.";
+  const ASIA_DATES_INDEX = "asia-2611";
+  const ASIA_NO_MARKS = "These rows cannot be marked or opened.";
   const ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked.";
   const ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched.";
   const ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown.";
@@ -96,7 +100,8 @@ function matterName(id) {
         sec.append(el("div", "card-note", asiaEmpty(offices)));
       } else {
         const separate = asiaCodes(d.mainNotRun).length ? ASIA_SEPARATE_NO_MAIN : ASIA_SEPARATE;
-        sec.append(el("div", "card-note", `${separate} ${ASIA_CLASS} ${ASIA_DATES} ${ASIA_RANK} ${asiaSearched(offices)}`));
+        const dated = String(d.index || "").includes(ASIA_DATES_INDEX) ? ` ${ASIA_DATES}` : "";
+        sec.append(el("div", "card-note", `${separate} ${ASIA_CLASS}${dated} ${ASIA_RANK} ${asiaSearched(offices)}`));
         const list = el("ol", "docs");
         const [lo, hi] = scoreRange(docs);
         docs.forEach((doc, idx) => {
@@ -110,6 +115,7 @@ function matterName(id) {
           list.append(row);
         });
         sec.append(list);
+        sec.append(el("div", "card-note", ASIA_NO_MARKS));
       }
     }
     if (unindexed.length) sec.append(el("div", "card-note", officesUnindexedLine(unindexed)));

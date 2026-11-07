@@ -21,6 +21,7 @@ SPEC FORMS (a spec is a tuple; the first element names the form):
     ("map", key_max_len, spec, max_items)   a dict with free str keys (bounded), values spec
     ("any_scalar", max_len)         None, bool, int, finite float, or a str of at most max_len (tunables)
     ("tunable", max_len, max_items) an any_scalar, or ONE level of {str key: any_scalar} (e.g. survey_legs.KIND_CAPS)
+    ("const", value)                exactly `value` (a str or bool): a label the client's wording depends on
 """
 from __future__ import annotations
 
@@ -46,6 +47,7 @@ MAX_MARKS = 50
 MAX_SOURCES = 16
 MAX_STAGES = 16
 MAX_TUNABLES = 32
+MAX_ASIA_HITS = 50              # m2_searcher.ASIA_K is the constant 20; the bound leaves room, the reply-size gate decides
 
 _HEX = re.compile(r"^[0-9a-f]+$")
 
@@ -107,6 +109,11 @@ def shape(value: Any, spec: tuple, path: str = "result") -> Any:
         if isinstance(value, str) and len(value) <= spec[1]:
             return value
         raise SchemaError(f"{path}: not a scalar of at most {spec[1]} chars")
+    if form == "const":
+        # type AND value: True == 1 in Python, so a bare == would let an int through where a bool is published
+        if type(value) is not type(spec[1]) or value != spec[1]:
+            raise SchemaError(f"{path}: not the published constant")
+        return value
     if form == "tunable":
         # v14 rc7 (4 Nov 2026): survey_legs.TUNABLES carries KIND_CAPS, a small dict of per-kind caps; a scalar-only
         # spec refused EVERY real survey as searcher_failed on the box. One level of scalars, bounded; no deeper nesting.
@@ -124,6 +131,20 @@ HIT = ("dict", {
     "legs": ("list", ("str", MAX_SHORT), 8), "source": ("str", MAX_SHORT),
     "year": ("opt", ("int",)), "date_known": ("bool",),
     "title": ("str", MAX_TITLE), "text": ("str", MAX_HIT_TEXT),
+})
+
+# The Asian layer's own list (asia root, 2026-11-06): CN/JP/KR/TW families with no US/EP/WO member, ranked by
+# dense cosine only. kind/expanded/reranked are CONSTANTS, not merely typed: the client tells its reader this list
+# was neither citation-expanded nor reranked, so an engine that said otherwise is a defect to refuse, not to print.
+ASIA_HIT = ("dict", {
+    **HIT[1],
+    "family_members": ("opt", ("list", ("str", MAX_KEY), MAX_FAMILY_KEYS)),   # None = unknown, never "none"
+    "family_members_total": ("opt", ("int",)),
+})
+ASIA = ("dict", {
+    "kind": ("const", "dense_only"), "expanded": ("const", False), "reranked": ("const", False),
+    "offices": ("list", ("str", MAX_SHORT), MAX_OFFICES), "k": ("int",),
+    "hits": ("list", ASIA_HIT, MAX_ASIA_HITS),
 })
 
 _FILTER_INTS = {"candidates_considered": ("int",)}
@@ -144,6 +165,8 @@ SEARCH = ("dict", {
     "stages_applied": ("opt", ("map", MAX_SHORT, ("map", MAX_SHORT, ("int",), MAX_STAGES), MAX_STAGES)),
     "marks_applied": ("opt", ("map", MAX_SHORT, ("int",), MAX_STAGES)),
     "marks_unresolved": ("opt", ("list", ("str", MAX_KEY), MAX_MARKS)),
+    "asia": ("opt", ASIA),
+    "offices_unindexed": ("opt", ("list", ("str", MAX_SHORT), MAX_OFFICES)),   # requested, but no such rows here
 })
 
 DOCUMENT = ("dict", {
@@ -181,8 +204,17 @@ SURVEY = ("dict", {
 })
 
 
+ASIA_REQUIRED = ("kind", "expanded", "reranked", "hits")
+
+
 def clean_search(res: Any) -> Dict[str, Any]:
-    return shape(res, SEARCH)
+    out = shape(res, SEARCH)
+    # dict specs check only the keys PRESENT; the Asian list's labels are what the client's wording states, so a list
+    # without them is refused here rather than printed with a label nobody attested.
+    asia = out.get("asia")
+    if asia is not None and any(k not in asia for k in ASIA_REQUIRED):
+        raise SchemaError("result.asia: a required label is missing")
+    return out
 
 
 def clean_document(res: Any) -> Dict[str, Any]:

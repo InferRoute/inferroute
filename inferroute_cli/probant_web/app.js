@@ -30,15 +30,89 @@ function matterName(id) {
   }
 
   const { el, clear, markdown, renderCheck } = window.ProbantUI;
-  // A Chinese, Japanese, Korean or Taiwanese hit stands for a whole patent family; say how many publications
-  // (the list is in the tooltip). Built from text nodes like everything else here.
+  // ── the Asian list ──
+  // On an index carrying the Asian layer, a search also returns its OWN list of CN/JP/KR/TW patent families with no
+  // US/EP/WO member, ranked by dense similarity alone (not citation-expanded, not reranked). It is shown BELOW the
+  // ranking, as its own section, and never interleaved with it: no rank numbers from the ranking, no marks, no
+  // "also in", and nothing here enters the results panel or the document counts. On an older index the search
+  // carries no `asia` and nothing here is drawn, so the page says nothing about Asia at all. Same sentences as
+  // ir-attested.ts and probant_export.py (tests/test_asia_list.py). Text nodes only, like everything else here.
+  const ASIA_HEADING = "Separate list: CN, JP, KR and TW patent families";
+  const ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it.";
+  const ASIA_CLASS = "It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their English title + abstract (some have a title only).";
+  const ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked.";
+  const ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched.";
+  const ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown.";
+  const asiaListOf = (xs) => xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}` : (xs[0] || "");
+  const asiaCodes = (v) => (Array.isArray(v) ? v : []).map(String).filter((o) => /^[A-Z]{2}$/.test(o));
+  const asiaSearched = (offices) => `Searched for this list: ${asiaListOf(offices)}.`;
+  const asiaEmpty = (offices) =>
+    `This list is empty for this search: ${asiaListOf(offices)} ${offices.length === 1 ? "was" : "were"} searched and no family came back. That is not evidence that none exists.`;
+  const officesUnindexedLine = (offices) =>
+    `Not in this index: ${asiaListOf(offices)}. Nothing from ${offices.length === 1 ? "this office" : "these offices"} was searched.`;
+  const mainNotRunLine = (asked, asiaRan) =>
+    `No US, EP or WO ranking ran: this search asked only for ${asiaListOf(asked)}.${asiaRan ? " Its results are in the separate list below." : ""}`;
+  // A family row stands for every CN/JP/KR/TW publication in it; say how many (the members are in the tooltip,
+  // capped by the engine, with the true count beside them).
   function familyOf(doc) {
-    const f = Array.isArray(doc && doc.family) ? doc.family : [];
-    if (f.length < 2) return null;
-    const n = el("span", "year", `family of ${f.length} publications`);
-    n.title = f.join(", ");
+    const f = Array.isArray(doc && doc.family) ? doc.family.map(String) : [];
+    const total = typeof (doc && doc.familyTotal) === "number" ? doc.familyTotal : f.length;
+    if (total < 2) return null;
+    const n = el("span", "year", `family of ${total} publications`);
+    n.title = f.join(", ") + (total > f.length ? ` and ${total - f.length} more` : "");
     return n;
   }
+  // The note under a ranking that did not run (only non-US/EP/WO offices were asked for): 0 there is not "nothing".
+  function mainNotRunNote(d) {
+    const asked = asiaCodes(d && d.mainNotRun);
+    if (!asked.length) return null;
+    const ran = Boolean(d.asia && asiaCodes(d.asia.offices).length);
+    return el("div", "card-note", mainNotRunLine(asked, ran));
+  }
+  // Its bar is relative to THIS list only: the two lists are ranked by different scores and are never compared.
+  function asiaBar(score, lo, hi) {
+    const bar = relBar(score, lo, hi);
+    if (bar.children && bar.children.length) {
+      bar.title = "how strongly this matched, relative to the others in this separate list only";
+      bar.setAttribute("aria-label", bar.title);
+    }
+    return bar;
+  }
+  // The section itself, or null when the search carried nothing about it (an older index).
+  function asiaSection(d) {
+    const unindexed = asiaCodes(d && d.officesUnindexed);
+    if (!d || (!d.asia && !d.asiaUnlabelled && !unindexed.length)) return null;
+    const sec = el("section", "asia-list");
+    if (d.asiaUnlabelled) sec.append(el("div", "card-note warn", ASIA_UNLABELLED));
+    if (d.asia) {
+      const offices = asiaCodes(d.asia.offices);
+      const docs = Array.isArray(d.asia.docs) ? d.asia.docs : [];
+      sec.append(el("h4", "asia-head", ASIA_HEADING));
+      if (!offices.length) {
+        sec.append(el("div", "card-note", ASIA_NOT_REQUESTED));
+      } else if (!docs.length) {
+        sec.append(el("div", "card-note", asiaEmpty(offices)));
+      } else {
+        sec.append(el("div", "card-note", `${ASIA_SEPARATE} ${ASIA_CLASS} ${ASIA_RANK} ${asiaSearched(offices)}`));
+        const list = el("ol", "docs");
+        const [lo, hi] = scoreRange(docs);
+        docs.forEach((doc, idx) => {
+          const title = el("div", "dtitle", String(doc.title || ""));
+          const row = el("li", "doc asia-doc",
+            el("span", "rank", `A${idx + 1}`),
+            asiaBar(doc.score, lo, hi),
+            el("div", "", el("span", "key", String(doc.key || "")), doc.year ? el("span", "year", String(doc.year)) : null,
+              familyOf(doc), title));
+          title.addEventListener("click", () => row.classList.toggle("open"));
+          list.append(row);
+        });
+        sec.append(list);
+      }
+    }
+    if (unindexed.length) sec.append(el("div", "card-note", officesUnindexedLine(unindexed)));
+    return sec;
+  }
+  // ── end Asian list ──
 
   // ── talking to the bridge ──
   async function api(path, body) {
@@ -1955,13 +2029,18 @@ function matterName(id) {
                 el("span", "rank", String(idx + 1)),
                 relBar(doc.score, _llo, _lhi),
                 el("div", "", docLink(keyNo), doc.year ? el("span", "year", String(doc.year)) : null,
-                  doc.alsoIn ? seenIn(doc.alsoIn) : null, familyOf(doc), title),
+                  doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
                 markButtons(keyNo, e.card));
               title.addEventListener("click", () => row.classList.toggle("open"));
               list.append(row);
             });
             legBody.append(list);
           }
+          // The leg's own Asian list, under its documents and apart from them (nothing on an older index).
+          const legNotRun = mainNotRunNote(leg);
+          if (legNotRun) legBody.append(legNotRun);
+          const legAsia = asiaSection(leg);
+          if (legAsia) legBody.append(legAsia);
           e.body.append(block);
           // The outline points at THIS leg, not at the card: being sent to the top of a six-search card is
           // not arriving at search 5.
@@ -2046,13 +2125,18 @@ function matterName(id) {
         el("span", "rank", String(idx + 1)),
         relBar(doc.score, _lo, _hi),
         el("div", "", keyEl, doc.year ? el("span", "year", String(doc.year)) : null,
-          doc.alsoIn ? seenIn(doc.alsoIn) : null, familyOf(doc), title),
+          doc.alsoIn ? seenIn(doc.alsoIn) : null, title),
         markButtons(keyNo, card));
       title.addEventListener("click", () => row.classList.toggle("open"));
       list.append(row);
     });
     body.append(list);
     body.append(el("div", "card-foot", "Mark what matters: saved as you click, kept with the matter. The assistant can read your marks to steer its next searches, but can't make or change them. A search finds related documents; it doesn't prove novelty. The bar shows how strongly each one matched RELATIVE TO THE OTHERS IN THIS SEARCH — a search returns the best it found, not only the ones worth reading, so a short bar means this one was among the weakest here, not that it is irrelevant."));
+    // After the ranking and its footnote, never inside it: the Asian list, and what the search could not reach (asia index only).
+    const notRun = mainNotRunNote(d);
+    if (notRun) body.append(notRun);
+    const asia = asiaSection(d);
+    if (asia) body.append(asia);
     if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));

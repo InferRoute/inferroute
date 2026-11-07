@@ -1483,7 +1483,9 @@ def test_the_model_is_given_the_abstract_that_arrived_with_every_hit():
     hits = [{"key": "US-1-A", "year": 1999, "title": "Title X", "text": long_abs},
             {"key": "US-2-B", "year": 2001, "title": "Title Y", "text": "Title Y. A short abstract."},
             {"key": "US-3-C", "year": 2003, "title": "Title Z"}]
-    js = (fn + "\nconst corpusPhrase = () => 'the index';\n"
+    # hitsText words the Asian list too (asia root): its block is lifted with it, verbatim.
+    asia = ts[ts.index("// ── the Asian list ──"):ts.index("// ── end Asian list ──")]
+    js = (asia + "\n" + fn + "\nconst corpusPhrase = () => 'the index';\n"
           + f"console.log(JSON.stringify(hitsText({json.dumps({'result': {'hits': hits}, 'enclave': {}, 'statement': {}})},"
             " 'Search 1', new Map())));")
     r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],

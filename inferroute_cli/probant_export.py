@@ -286,6 +286,87 @@ def _e(s: Any) -> str:
     return html.escape(str(s if s is not None else ""))
 
 
+# ── the Asian list ──
+# On an index carrying the Asian layer, each search result also carries `asia`: its OWN list of CN/JP/KR/TW patent
+# families with no US/EP/WO member, ranked by dense similarity alone (not citation-expanded, not reranked), never
+# merged into the main ranking. The per-search report (sealed-research's search_report) shows the main ranking only,
+# so this section is rendered here, after it. On an older index neither key is present and nothing is said about
+# Asia at all. The same sentences as ir-attested.ts and app.js (tests/test_asia_list.py holds them together).
+ASIA_HEADING = "Separate list: CN, JP, KR and TW patent families"
+ASIA_SEPARATE = "A separate list, not part of the ranking above, and never merged into it."
+ASIA_CLASS = ("It holds patent families from CN, JP, KR and TW that have no US, EP or WO member, matched on their "
+              "English title + abstract (some have a title only).")
+ASIA_RANK = "Ranked by dense similarity alone: not citation-expanded and not reranked."
+ASIA_NOT_REQUESTED = "CN, JP, KR and TW families were not requested in this search, so this list was not searched."
+ASIA_UNLABELLED = "A separate list came back without the labels this page needs to describe it, so it is not shown."
+_MAIN_OFFICES = ("US", "EP", "WO")
+
+
+def _codes(v: Any) -> list:
+    import re
+    return [str(o) for o in (v if isinstance(v, list) else []) if re.fullmatch(r"[A-Z]{2}", str(o))]
+
+
+def _list_of(xs: list) -> str:
+    return f"{', '.join(xs[:-1])} and {xs[-1]}" if len(xs) > 1 else (xs[0] if xs else "")
+
+
+def _asia_empty(offices: list) -> str:
+    return (f"This list is empty for this search: {_list_of(offices)} {'was' if len(offices) == 1 else 'were'} "
+            "searched and no family came back. That is not evidence that none exists.")
+
+
+def _offices_unindexed(offices: list) -> str:
+    return (f"Not in this index: {_list_of(offices)}. Nothing from "
+            f"{'this office' if len(offices) == 1 else 'these offices'} was searched.")
+
+
+def _main_not_run(asked: list, asia_ran: bool) -> str:
+    return (f"No US, EP or WO ranking ran: this search asked only for {_list_of(asked)}."
+            + (" Its results are in the separate list below." if asia_ran else ""))
+
+
+def _asia_html(result: Any) -> str:
+    """The Asian list of one search result, as HTML after its report; '' on an older index (no `asia` key)."""
+    if not isinstance(result, dict) or result.get("asia") is None:
+        return ""
+    a = result["asia"]
+    out = []
+    asked = _codes(result.get("offices"))
+    labelled = (isinstance(a, dict) and a.get("kind") == "dense_only" and a.get("expanded") is False
+                and a.get("reranked") is False and isinstance(a.get("hits"), list))
+    offices = _codes(a.get("offices")) if labelled else []
+    if asked and not any(o in _MAIN_OFFICES for o in asked):
+        out.append(f"<p class=note>{_e(_main_not_run(asked, bool(offices)))}</p>")
+    if not labelled:
+        out.append(f"<p class=warn>{_e(ASIA_UNLABELLED)}</p>")
+    else:
+        hits = a["hits"]
+        out.append(f"<h4>{_e(ASIA_HEADING)}</h4>")
+        if not offices:
+            out.append(f"<p class=note>{_e(ASIA_NOT_REQUESTED)}</p>")
+        elif not hits:
+            out.append(f"<p class=note>{_e(_asia_empty(offices))}</p>")
+        else:
+            out.append(f"<p class=note>{_e(ASIA_SEPARATE)} {_e(ASIA_CLASS)} {_e(ASIA_RANK)} "
+                       f"{_e('Searched for this list: ' + _list_of(offices) + '.')}</p>")
+            out.append("<table><tr><th>#</th><th>Publication</th><th>Year</th><th>Title</th><th>Family</th></tr>")
+            for i, h in enumerate(hits, 1):
+                h = h if isinstance(h, dict) else {}
+                fm = h.get("family_members") if isinstance(h.get("family_members"), list) else []
+                total = h.get("family_members_total")
+                total = total if isinstance(total, int) and not isinstance(total, bool) else len(fm)
+                fam = f"family of {total} publications" if total >= 2 else ""
+                out.append(f"<tr><td>A{i}</td><td class=mono>{_e(h.get('key'))}</td><td>{_e(h.get('year') or '')}</td>"
+                           f"<td>{_e(h.get('title') or '')}</td><td>{_e(fam)}</td></tr>")
+            out.append("</table>")
+    un = _codes(result.get("offices_unindexed"))
+    if un:
+        out.append(f"<p class=note>{_e(_offices_unindexed(un))}</p>")
+    return "".join(out)
+# ── end Asian list ──
+
+
 def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -630,6 +711,8 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
                   f'sandbox srcdoc="{_e(rp)}"></iframe>')
             else:
                 A("<p class=note>No report was rendered for this search.</p>")
+            # The Asian list, after the report and apart from it (asia index only; nothing on an older one).
+            A(_asia_html(x.get("result")))
             A(f"<p class=note>Enclave-signed statement (Ed25519 over the canonical JSON minus <code>sig</code>, under "
               f"<span class=mono>{_e(x.get('signer_pub'))}</span>, a key the hardware report binds):</p>")
             A(f"<pre>{_e(json.dumps(stmt, indent=1, ensure_ascii=False))}</pre>")

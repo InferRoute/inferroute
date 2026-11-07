@@ -1379,7 +1379,7 @@
           "A search finds related documents. It doesn't prove novelty or that nothing else exists, and a name check is not a clearance search. None of this is legal advice.",
           "Browser extensions allowed to read every page can read these pages too. For sensitive work, use a browser profile without extensions.")),
       sec("Limits right now",
-        list("Patent search reads each document's title and the start of its abstract, not the full text or the claims; it covers US, EP and WO publications to mid-April 2026, not other national offices.",
+        list("Patent search reads each document's title and the start of its abstract, not the full text or the claims; its ranked results cover US, EP and WO publications to mid-April 2026. Documents from any other office appear only as a separate list under a search's ranked results, when that search shows one.",
           "There are no filters yet for classification, country or applicant.",
           "The name check covers the US and France only; EU marks are not included yet.")),
       sec("In the terminal",

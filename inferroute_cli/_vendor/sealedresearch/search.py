@@ -300,7 +300,11 @@ def run(job: Dict[str, Any], searcher: Searcher, canaries: List[Dict[str, Any]])
     # request they are None whatever the engine says. When marks WERE given and the engine returns no
     # marks_applied, None stands — never fabricated — so the verifier can see marks were not applied.
     unresolved = res.get("marks_unresolved") if marks is not None else None
-    return {"kind": "search", "hits": res["hits"], "legs": dict(res.get("legs", {})), "candidates": int(res.get("candidates", 0)),
+    # The Asian layer's own list and the offices nothing here indexes (asia root only). The reply is built from named
+    # keys, so these must be named too: the v14-asia1 boot test (7 Nov 2026) found every Asian list dropped HERE,
+    # after the schema had accepted it. Absent on a root without the layer, so that reply is unchanged.
+    asia = {k: res[k] for k in ("asia", "offices_unindexed") if res.get(k) is not None}
+    return {**asia, "kind": "search", "hits": res["hits"], "legs": dict(res.get("legs", {})), "candidates": int(res.get("candidates", 0)),
             "cpc": list(res.get("cpc", [])), "calibration": res.get("calibration"), "paper_coverage": res.get("paper_coverage"),
             "cutoff_applied": res.get("cutoff_applied"), "from_date_applied": res.get("from_date_applied"),
             "offices_applied": res.get("offices_applied"), "undated_hits": sum(1 for h in res["hits"] if not h.get("date_known", True)),

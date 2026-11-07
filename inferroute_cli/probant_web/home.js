@@ -311,7 +311,7 @@
       const o = document.createElement("option"); o.value = v; o.textContent = label; kind.append(o);
     }
     // The hint under the choice speaks about the choice made (21 Oct audit: the trademark hint showed under "An invention").
-    const KIND_HINT = { invention: "The assistant searches about 29.6 million US, European and WIPO patent publications, through a sealed machine this computer checks first.",
+    const KIND_HINT = { invention: "The assistant searches about 30.4 million US, European and WIPO patent publications, through a sealed machine this computer checks first.",
       name: "Names are searched on this computer, in a copy of the French and US trademark registers. EU trade marks are not included yet." };
     const nf = nameFields();
     const nameBox = el("div", "name-fields", ...nf.nodes);
@@ -1339,7 +1339,7 @@
       el("p", "sub", "An assistant for founders, for what came before your product: earlier patents, registered trademarks, and the inventions in your own work. It runs on a sealed machine this computer checks before a word is sent.")));
     p.append(
       sec("What you can do",
-        list("Prior-art survey: describe an invention and the assistant searches about 29.6 million US, European and WIPO patent publications (titles and abstracts, to late October 2026) for the closest earlier ones.",
+        list("Prior-art survey: describe an invention and the assistant searches about 30.4 million US, European and WIPO patent publications (titles and abstracts, to late October 2026) for the closest earlier ones.",
           "Read a document or a repository: point it at a text file, a folder, a git link or a GitHub repository. It lists each distinct invention it finds and drafts a matter for each, for you to review.",
           "Name check: list the names you are considering for a product. It searches the US and French trademark registers on this computer and reports the registered marks that resemble each name, and why.")),
       sec("1. Create a matter",

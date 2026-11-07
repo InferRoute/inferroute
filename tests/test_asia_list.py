@@ -430,3 +430,22 @@ def test_a_deep_leg_with_only_an_asian_list_is_not_counted_as_finding_nothing():
     only, mixed = json.loads(r.stdout)
     assert only == ""
     assert "1 query found nothing: x." in mixed and "cn leg" not in mixed
+
+
+def test_the_searched_pool_is_stated_as_about_30_4_million():
+    """The 2610 root (and the main part of the asia root) holds 30,398,469 US/EP/WO rows, measured and attested
+    (88,844,190 = 30,398,469 + 58,445,721 Asian rows). "about 29.6 million" was the older root's count."""
+    for p in (ROOT / "inferroute_cli").rglob("*"):
+        if p.is_file() and "_vendor" not in p.parts and p.suffix in (".js", ".ts", ".py", ".html"):
+            assert not re.search(r"29[.,]6 million", p.read_text(errors="ignore")), p
+    home = (ROOT / "inferroute_cli" / "probant_web" / "home.js").read_text()
+    assert home.count("about 30.4 million US, European and WIPO patent publications") == 2   # the hint, and the help
+    # corpusName has no table: it derives the count from the signed identifier itself, so the 2610 root names itself
+    ts = TS.read_text()
+    fn = ts[ts.index("function corpusName("):ts.index("\n}\n", ts.index("function corpusName(")) + 3]
+    r = subprocess.run([_node(), "--experimental-strip-types", "--input-type=module-typescript", "-e",
+                        fn + "\nconsole.log(corpusName('patent1m-epwo+usall@30398469'));"],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0 and "input-type" in r.stderr:
+        pytest.skip("this node cannot run TypeScript from -e")
+    assert r.stdout.strip() == "30.4 million published patents from the United States, Europe and WIPO"

@@ -77,8 +77,11 @@ LOCK = {
     "pyc": "3.14.10-r1", "python3": "3.14.10-r1", "python3-pyc": "3.14.10-r1",
     "python3-pycache-pyc0": "3.14.10-r1", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
     "simdutf": "9.0.0-r0", "sqlite-libs": "3.53.4-r0", "ssl_client": "1.37.0-r31", "xz-libs": "5.8.4-r0",
-    "zlib": "1.3.2-r1", "zstd-libs": "1.5.7-r2",
+    "zlib": "1.4-r0", "zstd-libs": "1.5.7-r2",
 }
+# 2026-11-07: zlib 1.3.2-r1 -> 1.4-r0 is Alpine aports bdf501c8 (2026-11-06 18:22Z), "main/zlib: security upgrade to
+# 1.4", within v3.24; it still provides so:libz.so.1, so python3 and nodejs link it unchanged. The mirror no longer
+# serves 1.3.2-r1. Taken on purpose for 0.9.128; nothing else in the resolved set moved.
 # 2026-10-08: zlib 1.3.2-r0 -> r1 is Alpine aports 0afa2da0 (2026-10-06), "backport fix for CVE-2026-85091";
 # the stable mirror no longer serves r0. Reviewed and taken on purpose: a security fix, nothing else in the package.
 # 2026-11-03: libexpat 2.9.0-r0 -> 2.10.0-r0 (a dependency of python3; the mirror no longer serves 2.9.0, and apk.static

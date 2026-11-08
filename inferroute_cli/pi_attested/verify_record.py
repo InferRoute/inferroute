@@ -529,11 +529,18 @@ def _is_hex32(v: Any) -> bool:
 # ───────────────────────────── the reference (identity), signed and time-bounded ─────────────────────────────
 
 
-def _ref_entries(reference: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
+def _ref_entries(reference: Dict[str, Any], field: str, image: Optional[str] = None) -> List[Dict[str, Any]]:
     """Entries may be plain hashes or objects {value, valid_from, valid_to, retired}. Times are ISO-8601 UTC
-    ('YYYY-MM-DDTHH:MM:SSZ'), compared lexicographically against the statement's started_utc."""
+    ('YYYY-MM-DDTHH:MM:SSZ'), compared lexicographically against the statement's started_utc.
+
+    Index entries added under a delegated key count ONLY for a machine whose measured boot image the delegation names
+    (`image`, the quoted tdx_image_sha384): without that binding a delegated "index" could carry other ranking models
+    to an image whose model fingerprint does not cover them (v14). Callers that pass no image get the publication
+    key's own entries only."""
     out: List[Dict[str, Any]] = []
-    extra = list(reference.get(INDEX_ADDED_KEY) or []) if field == "index_manifest_sha256" else []
+    extra = []
+    if field == "index_manifest_sha256" and isinstance(image, str):
+        extra = [e for e in (reference.get(INDEX_ADDED_KEY) or []) if image.lower() in e.get("images", ())]
     for e in list(reference.get(field, []) or []) + extra:
         if isinstance(e, str):
             out.append({"value": e.lower(), "valid_from": None, "valid_to": None, "retired": False})
@@ -1097,8 +1104,12 @@ TDX_PRESEAL = ("before the firewall and seal are installed the program fetches i
 # checker's v14 rows exist for it) gets the clauses below, each printed only when the row that establishes it PASSED.
 # Every clause describes what the image CONTAINS and how its published code is CONFIGURED; none describes a run.
 TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
-TDX_V14_INTRO = ("For these searches, the Intel TDX boot image the quote names was also checked against the files InferRoute "
-                 "publishes (image v14). Established by the rows that passed:")
+# v15 = v14 + idle=poll (8 Nov 2026). It gets every v14 clause; idle=poll is recorded as its own fact, and no sentence
+# says anything about it until the signed release image has been measured the same way and the wording reviewed.
+TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME, "ir-sealed-search-tdx-v15")
+TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
+                      "InferRoute publishes (image {version}). Established by the rows that passed:")
+TDX_V14_INTRO = TDX_INTRO_TEMPLATE.format(version="v14")      # v15 names itself (review 8 Nov: it printed "v14")
 # Each clause: (the rows that establish it, its words). {slot}/{survey_slot} are the reply intervals read from the image's
 # unit ({budget}/{survey_budget} the engine's), {waiting} the queue bound read from the published front.
 TDX_V14_HEAD_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
@@ -1236,7 +1247,8 @@ def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
     slot, waiting, budget = values.get("reply_slot_seconds"), values.get("max_waiting"), values.get("engine_budget_seconds")
     sslot, sbudget = values.get("survey_slot_seconds"), values.get("survey_budget_seconds")
     num = lambda v: f"{float(v):g}" if isinstance(v, (int, float)) else "the configured number of"   # noqa: E731
-    return {"image": name, "v14": name == TDX_V14_IMAGE_NAME, "passed": passed, "skipped": skipped,
+    return {"image": name, "v14": name in TDX_V14_FAMILY, "idle_poll": name == "ir-sealed-search-tdx-v15"
+            and "idle=poll" in cmdline.split(), "passed": passed, "skipped": skipped,
             "required_not_passed": required_not_passed,
             "slot": num(slot), "budget": num(budget), "survey_slot": num(sslot), "survey_budget": num(sbudget),
             "waiting": str(waiting) if isinstance(waiting, int) else "the configured number of"}
@@ -1327,7 +1339,8 @@ def tdx_image_statement(facts: Optional[Dict[str, Any]]) -> str:
     head = [words for rows, words in TDX_V14_HEAD_CLAUSES if all(r in passed for r in rows)]
     body = [words.format(**_numbers(facts)) for rows, words in TDX_V14_CLAUSES if all(r in passed for r in rows)]
     numbered = "; ".join(f"({i}) {w}" for i, w in enumerate(body, 1))
-    return (TDX_V14_INTRO + (" " + "; ".join(head) + "." if head else "")
+    version = (str(facts.get("image") or "").rsplit("-", 1)[-1] or "v14") if facts else "v14"
+    return (TDX_INTRO_TEMPLATE.format(version=version) + (" " + "; ".join(head) + "." if head else "")
             + (" As configured: " + numbered + "." if body else "") + " " + TDX_V14_TAIL)
 
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
@@ -2261,8 +2274,10 @@ REFERENCE_SCHEMA = "inferroute.enclave-reference/1"
 #
 # Henry: refresh the US/EP/WO index weekly, without a trip to the offline publication key each time. So the reference
 # HE signs may name, in `index_delegates`, keys allowed to add ONE kind of entry, index_manifest_sha256, and nothing
-# else: never an image, a machine shape, an encoder or a policy, so what happens to a user's text still rests on his
-# key alone. Their additions travel in a separate file, `<reference>.index-extension.json`, because the signature
+# else: never an image, a machine shape, an encoder or a policy, and (since 8 Nov) only for the boot images the
+# delegation names. Not "nothing else matters": an index chooses which bytes the engine's native parsers (faiss,
+# LightGBM features) read inside the machine, so a crafted index could try a parser bug there, and it decides what is
+# found. The image, its network and no-write rules still come only from his key. Their additions travel in a separate file, `<reference>.index-extension.json`, because the signature
 # covers every field of the reference: a new field there would break every client already installed. The extension
 # is bound to the exact reference it extends (base_sig = that reference's sig), so a re-signed reference voids it.
 #
@@ -2270,7 +2285,7 @@ REFERENCE_SCHEMA = "inferroute.enclave-reference/1"
 # PASSES under the publication key, check_reference_signature validates it and puts the accepted entries under
 # INDEX_ADDED_KEY, which _ref_entries reads for the index field. Both keys are excluded from the signed body, and the
 # signed fields themselves are never changed, so checking the same reference twice gives the same answer.
-INDEX_EXTENSION_SCHEMA = "inferroute.reference-index-extension/1"
+INDEX_EXTENSION_SCHEMA = "inferroute.reference-index-extension/2"   # /2: entries bound to named images (8 Nov)
 INDEX_EXTENSION_SUFFIX = ".index-extension.json"
 class _MemoryOnlyKey:
     """A dict key no JSON document can produce (JSON object keys are always strings), so neither a reference file
@@ -2289,6 +2304,7 @@ INDEX_EXTENSION_KEY = _MemoryOnlyKey("index extension")
 INDEX_ADDED_KEY = _MemoryOnlyKey("index entries added under a delegated key")
 INDEX_EXTENSION_MAX_ENTRIES = 1000     # weekly for ~19 years; closed entries may be pruned, never live ones
 _HEX64 = re.compile(r"[0-9a-f]{64}")
+_HEX96 = re.compile(r"[0-9a-f]{96}")
 
 
 def load_reference(path: str) -> Dict[str, Any]:
@@ -2340,10 +2356,20 @@ def _apply_index_extension(c: "Checks", reference: Dict[str, Any]) -> None:
             if r_at is None:
                 continue
             d_to = r_at if d_to is None else min(d_to, r_at)
+        images = d.get("images")
+        if not (isinstance(images, list) and images and all(isinstance(i, str) and _HEX96.fullmatch(i.lower()) for i in images)):
+            continue                                        # a delegation naming no image delegates nothing
+        # Only images whose own entry, signed by the publication key, says their model fingerprint covers all of
+        # models/ (v15+): on any other image a delegated "index" could carry other ranking models (review 8 Nov).
+        covered = {str(e.get("value") or "").lower() for e in (reference.get("tdx_image_sha384") or [])
+                   if isinstance(e, dict) and e.get("models_tree") is True}
+        images = [i for i in images if i.lower() in covered]
+        if not images:
+            continue
         if d_from is not None and (d_to is None or d_to > d_from):
-            windows.append((d_from, d_to))
+            windows.append((d_from, d_to, frozenset(i.lower() for i in images)))
     if not _HEX64.fullmatch(key) or not windows:
-        return ignore("its key is not one the signed reference names (and has not retired) in index_delegates")
+        return ignore("its key is not one the signed reference names, for named images and not retired, in index_delegates")
     body = {k: v for k, v in ext.items() if k != "sig"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(bytes.fromhex(str(ext.get("sig") or "")), canonical(body))
@@ -2364,20 +2390,22 @@ def _apply_index_extension(c: "Checks", reference: Dict[str, Any]) -> None:
             return ignore("an entry's value is not a lowercase sha256")
         if f is None or (e.get("valid_to") and t is None) or (t is not None and t <= f):
             return ignore(f"entry {v[:16]}… has no usable validity window")
-        inside = [(w_from, w_to) for w_from, w_to in windows
+        inside = [(w_from, w_to, imgs) for w_from, w_to, imgs in windows
                   if f >= w_from and (w_to is None or (f < w_to and (t is None or t <= w_to)))]
         if not inside:
             return ignore(f"entry {v[:16]}… reaches outside every window the reference delegates to this key")
         if v in base_values:
             continue                                        # already named by the publication key itself
-        # An open entry under a delegation that ends, ends with it: the delegate cannot outlast its own mandate.
-        w_to = inside[0][1]
-        to = e.get("valid_to") or (w_to.strftime("%Y-%m-%dT%H:%M:%SZ") if w_to is not None else None)
-        accepted.append({"value": v, "valid_from": e["valid_from"], "valid_to": to})
+        # One record PER WINDOW, each with that window's end and images: an open entry under a delegation that ends,
+        # ends with it, and never borrows another window's images or end (review 8 Nov).
+        for _w_from, w_to, imgs in inside:
+            to = e.get("valid_to") or (w_to.strftime("%Y-%m-%dT%H:%M:%SZ") if w_to is not None else None)
+            accepted.append({"value": v, "valid_from": e["valid_from"], "valid_to": to, "images": imgs})
     reference[INDEX_ADDED_KEY] = accepted
-    c.add(True, name, f"{len(accepted)} index entr{'y' if len(accepted) == 1 else 'ies'} added under the delegated key "
+    n_values = len({a["value"] for a in accepted})
+    c.add(True, name, f"{n_values} index entr{'y' if n_values == 1 else 'ies'} added under the delegated key "
           f"{key[:16]}…, which the signed reference names as allowed to add index entries ONLY (no image, machine "
-          "shape, encoder or policy)")
+          "shape, encoder or policy), and only for the boot images that delegation names")
 
 
 def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Optional[str]) -> None:
@@ -3165,7 +3193,7 @@ def check_tdx_identity(c: "Checks", rd: Dict[str, Any], info: Optional[Dict[str,
     h_ok, h_why = (_ref_match(_ref_entries(reference, "tdx_rtmr0"), host, at, live) if host else (False, "no RTMR0"))
     if h_ok and shapes.get(str(host)):
         h_why += f", machine shape {shapes[str(host)]}"
-    idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256"), rd.get("index_manifest_sha256"), at, live) if rd else (False, "no runtime data")
+    idx_ok, idx_why = _ref_match(_ref_entries(reference, "index_manifest_sha256", image=img), rd.get("index_manifest_sha256"), at, live) if rd else (False, "no runtime data")
     mdl_ok, mdl_why = _ref_match(_ref_entries(reference, "model_manifest_sha256"), rd.get("model_manifest_sha256"), at, live) if rd else (False, "no runtime data")
     c.add(img_ok and h_ok and idx_ok and mdl_ok, name,
           f"image: {img_why}; host configuration (RTMR0): {h_why}; index manifest: {idx_why}; encoder manifest: {mdl_why} — "

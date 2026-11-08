@@ -34,7 +34,7 @@ const PROOF_ENTRY = "ir-attested-proof";
 const SEARCH_PROOF_ENTRY = "ir-search-proof";
 const REFRESH_MS = 30_000;
 const MATTER = process.env.IR_REPORT_MATTER ?? "";
-const SEARCH_TIMEOUT_MS = 300_000;
+const SEARCH_TIMEOUT_MS = 600_000;   // v15: up to 8 queued + 1 surveys x 55 s slot = 495 s before a reply starts
 
 // ───────────────────────── model enclave ─────────────────────────
 

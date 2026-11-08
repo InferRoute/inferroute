@@ -164,7 +164,14 @@ if __name__ == "__main__":
 
 def tree_sha256(root: str) -> str:
     """A deterministic hash over EVERY file under an index root, committed into REPORT_DATA so the client can pin the
-    exact bytes that were searchable. Order-independent (sorted path+sha lines), like sha256 over a manifest."""
+    exact bytes that were searchable. Order-independent (sorted path+sha lines), like sha256 over a manifest.
+    It is sha256 over exactly the text tree_lines() returns, so a saved lines file proves which root a hash names."""
+    return hashlib.sha256("".join(tree_lines(root)).encode()).hexdigest()
+
+
+def tree_lines(root: str) -> List[str]:
+    """The sorted "sha256  relpath\n" lines tree_sha256 hashes, one per file under root (symlinks followed). The
+    index delegate's tool reads them to check that a refreshed root changes data only, never models/."""
     # os.walk(followlinks=True), not Path.rglob: on Python 3.12 rglob does NOT descend symlinked
     # directories, and a pre-mounted path can be a symlink tree. rglob would then find zero files and this
     # would return sha256 of an empty list — e3b0c442…, identical for every index — a real-looking digest
@@ -179,4 +186,21 @@ def tree_sha256(root: str) -> str:
         raise SystemExit(f"manifest refuses: found {len(files)} files under {root} but the index declares "
                          f"{n_shards} shards. A short or empty manifest would commit to bytes that were not served.")
     lines = [f"{sha256_file(p)}  {os.path.relpath(p, root)}\n" for p in files]
-    return hashlib.sha256("".join(sorted(lines)).encode()).hexdigest()
+    return sorted(lines)
+
+
+def models_sha256(root: str) -> str:
+    """v15's model_manifest_sha256: the same tree hash over root/models/ ONLY (the encoder's weights, tokenizer and
+    config, and the stage-1/2 ranking models), paths relative to root. Before v15 it covered model.safetensors alone,
+    so a different ranking model rode inside the index fingerprint (found by sealed-research, 8 Nov). Refuses an empty
+    models/: a hash of nothing would commit to nothing."""
+    return models_sha256_from_lines(tree_lines(root), where=root)
+
+
+def models_sha256_from_lines(lines: List[str], where: str = "the root") -> str:
+    """models_sha256 from lines tree_lines already produced, so the box hashes its 119 GiB root ONCE at boot for both
+    fingerprints (sealed-research review, 8 Nov)."""
+    lines = [l for l in lines if l.split("  ", 1)[1].startswith("models/")]
+    if not any(l.rstrip("\n").endswith("/model.safetensors") for l in lines):
+        raise SystemExit(f"models refuses: no models/…/model.safetensors under {where}")
+    return hashlib.sha256("".join(lines).encode()).hexdigest()

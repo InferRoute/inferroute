@@ -47,8 +47,17 @@ CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet"
                     "accept_memory=eager", "systemd.import_credentials=no")
 # v13 is RETIRED: this checker accepts v14 only; a v13 image fails row B by name and reaches no level-1 sentence. The
 # verifier keeps v13's wording for reports a v13-era checker produced, never for an image this one checked.
-IMAGE_NAME = "ir-sealed-search-tdx-v14"
-CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"), re.compile(r"inferroute\.image=" + re.escape(IMAGE_NAME)))
+IMAGE_NAME = "ir-sealed-search-tdx-v15"          # the current release
+# v15 (8 Nov 2026) adds idle=poll: the guest never halts, which removes the halt exits that show the hypervisor when a
+# vCPU is idle (measured: Google's per-minute cpu/utilization of a v14 box reads idle 0.03 % vs searching 1.26 %; with
+# idle=poll a flat 99.8-99.97 %, shared/qa/2026-11-08/idle-poll-test). NOT removed: per-request bursts of
+# interprocessor interrupts (TLB shootdowns from the engine child's fork/exit), virtio interrupts, power and frequency,
+# cache and memory-bandwidth contention. v14 stays accepted exactly as before, so records made on
+# signed v14 images keep their level; each version must carry exactly its own required tokens.
+IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15")
+CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",)}
+CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"),
+                    re.compile(r"inferroute\.image=(?:" + "|".join(re.escape(n) for n in IMAGE_NAMES) + r")"))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.
 CMDLINE_FORBIDDEN_PREFIXES = ("console=", "root=", "init=", "systemd.unit=", "rd.", "systemd.debug_shell",
                               "systemd.import_credentials=yes", "systemd.import_credentials=1", "enforcing=",
@@ -298,7 +307,7 @@ REQUIRED_ROWS = (
     "D7. one quote per boot", "D7. offer served from immutable bytes", "D7. a reply is delivered before its socket is let go", "D7. one engine process per request",
     "D7. one reply size and two reply slots", "D7. results reduced to the published shape",
     "D7. no memory outlives a request", "D7. the warm parent imports no closed module", "D7. no writable kernel object",
-    "D7. the warm parent parses data, not code",
+    "D7. the warm parent parses data, not code", "D7. the front names its private keys only to open and sign",
     "D8. initrd",
 )
 
@@ -408,12 +417,14 @@ def cmdline_tokens(section: bytes) -> List[str]:
 def check_cmdline(tokens: List[str]) -> Tuple[bool, str]:
     """Every token allowed, every required token present, exactly one roothash= and one inferroute.image=."""
     problems: List[str] = []
+    names = [t.split("=", 1)[1] for t in tokens if t.startswith("inferroute.image=")]
+    required = CMDLINE_REQUIRED + (CMDLINE_REQUIRED_BY_IMAGE.get(names[0], ()) if len(names) == 1 else ())
     for t in tokens:
         if any(t.startswith(p) for p in CMDLINE_FORBIDDEN_PREFIXES):
             problems.append(f"forbidden token {t!r}")
-        elif t not in CMDLINE_REQUIRED and not any(p.fullmatch(t) for p in CMDLINE_PATTERNS):
+        elif t not in required and not any(p.fullmatch(t) for p in CMDLINE_PATTERNS):
             problems.append(f"unexpected token {t!r}")
-    for r in CMDLINE_REQUIRED:
+    for r in required:
         if r not in tokens:
             problems.append(f"missing {r!r}")
     for p in CMDLINE_PATTERNS:
@@ -1850,6 +1861,107 @@ def front_closure(tree: str, entry: str = FRONT_ENTRY, closed_set: Tuple[str, ..
     return sorted(os.path.relpath(x, app) for x in seen), sorted(set(closed))
 
 
+_KEY_ATTRS = ("_x_priv", "_signer")
+_KEY_INIT = ("self._x_priv, x_pub = envelope.gen_keypair()", "self._signer = Ed25519PrivateKey.generate()")
+_REFLECTION_CALLS = ("getattr", "setattr", "delattr", "vars", "globals", "locals", "eval", "exec", "compile")
+_REFLECTION_MODULES = ("pickle", "copy", "copyreg", "marshal", "shelve", "inspect", "gc", "ctypes", "dill", "operator",
+                       "importlib", "builtins")
+_KEY_STRING = re.compile(r"_x_priv|private_bytes|(?<![A-Za-z0-9_])_signer(?![A-Za-z0-9_])")
+
+
+def _private_key_problems(stext: str, smod: Any, svc: Any, init: Any, app: str) -> List[str]:
+    """For "D7. the front names its private keys only to open and sign" (review 8 Nov: a first version passed 8 ways to leak a key). Syntactic:
+    it reads the published source, so it says what that source does, not what a library under it might do."""
+    kp: List[str] = []
+    if svc is None or init is None:
+        return ["no SearchService.__init__ to check"]
+    want = {ast.dump(ast.parse(src).body[0]) for src in _KEY_INIT}
+    have = [n for n in ast.walk(svc) if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+            and any(isinstance(t, ast.Attribute) and t.attr in _KEY_ATTRS for tt in getattr(n, "targets", [getattr(n, "target", None)])
+                    for t in ast.walk(tt) if tt is not None)]
+    if len(have) != 2 or {ast.dump(n) for n in have} != want or not all(any(n is m for m in ast.walk(init)) for n in have):
+        kp.append("the two keys are not made by exactly the published statements in SearchService.__init__ "
+                  f"({' / '.join(_KEY_INIT)})")
+    parents = {c: p for p in ast.walk(smod) for c in ast.iter_child_nodes(p)}
+    for n in ast.walk(smod):
+        if not (isinstance(n, ast.Attribute) and n.attr in _KEY_ATTRS and isinstance(n.ctx, ast.Load)):
+            continue
+        up = parents.get(n)
+        if n.attr == "_x_priv":
+            f = getattr(up, "func", None)
+            if not (isinstance(up, ast.Call) and isinstance(f, ast.Attribute) and f.attr == "open_"
+                    and isinstance(f.value, ast.Name) and f.value.id == "envelope" and up.args and up.args[0] is n):
+                kp.append(f"search_service line {n.lineno}: the sealing key is used other than as envelope.open_'s key")
+        elif not (isinstance(up, ast.Attribute) and up.attr in ("sign", "public_key") and isinstance(parents.get(up), ast.Call)
+                  and getattr(parents.get(up), "func", None) is up):
+            kp.append(f"search_service line {n.lineno}: the signing key is used other than to sign or give its public half")
+    for n in ast.walk(smod):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _REFLECTION_CALLS:
+            a0 = n.args[0] if n.args else None
+            a1 = n.args[1] if len(n.args) > 1 else None
+            harmless = (n.func.id == "getattr" and not (isinstance(a0, ast.Name) and a0.id == "self")
+                        and isinstance(a1, ast.Constant) and isinstance(a1.value, str) and not _KEY_STRING.search(a1.value))
+            if not harmless:
+                kp.append(f"search_service line {n.lineno}: {n.func.id}() (reflection could reach a key)")
+        elif isinstance(n, ast.Attribute) and n.attr.startswith("__"):
+            kp.append(f"search_service line {n.lineno}: .{n.attr} (no dunder attribute is used by the published front)")
+        elif isinstance(n, ast.Attribute) and isinstance(n.ctx, (ast.Store, ast.Del)) and isinstance(n.value, ast.Name) \
+                and n.value.id in ("envelope", "statement", "search", "builtins"):
+            kp.append(f"search_service line {n.lineno}: assigns {n.value.id}.{n.attr} (patching a module the keys pass through)")
+        elif isinstance(n, ast.Name) and n.id in ("builtins", "operator", "importlib", "__import__", "__builtins__"):
+            kp.append(f"search_service line {n.lineno}: {n.id}")
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            mods = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module or ""]
+            for m in mods:
+                if m.split(".")[0] in _REFLECTION_MODULES:
+                    kp.append(f"search_service line {n.lineno}: imports {m}")
+    # The one name the sealing key may be handed to: envelope.open_, with `envelope` the package module imported once.
+    binds = []
+    for n in ast.walk(smod):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.name in ("envelope", "open_"):
+            binds.append(n.lineno)
+        elif isinstance(n, ast.Name) and n.id in ("envelope", "open_") and isinstance(n.ctx, (ast.Store, ast.Del)):
+            binds.append(n.lineno)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                if (a.asname or a.name.split(".")[0]) in ("envelope", "open_") and not (
+                        isinstance(n, ast.ImportFrom) and a.name == "envelope" and a.asname is None
+                        and ((n.module is None and n.level == 1) or (n.module == "sealedresearch" and n.level == 0))):
+                    binds.append(n.lineno)
+    if binds:
+        kp.append(f"search_service binds envelope/open_ other than by importing the package's envelope module (line(s) {binds})")
+    for dirpath, _dirs, names in os.walk(app):
+        for name in sorted(names):
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, name)
+            rel = os.path.relpath(path, app)
+            try:
+                mod = _ast_parse(_text(path))
+            except Exception:                               # noqa: BLE001
+                kp.append(f"{rel} does not parse")
+                continue
+            in_gen = set()
+            if rel == "sealedresearch/envelope.py":
+                for fn in mod.body:
+                    if isinstance(fn, ast.FunctionDef) and fn.name == "gen_keypair":
+                        in_gen = {id(x) for x in ast.walk(fn)}
+            for n in ast.walk(mod):
+                if isinstance(n, ast.Attribute) and n.attr == "private_bytes" and id(n) not in in_gen:
+                    kp.append(f"{rel} line {n.lineno}: private_bytes outside envelope.gen_keypair")
+                if rel == "sealedresearch/search_service.py":
+                    continue
+                if isinstance(n, ast.Attribute) and n.attr in _KEY_ATTRS:
+                    kp.append(f"{rel} line {n.lineno}: reaches into the machine's private keys (.{n.attr})")
+                elif isinstance(n, ast.Constant) and isinstance(n.value, str) and _KEY_STRING.search(n.value):
+                    kp.append(f"{rel} line {n.lineno}: names a private key in a string")
+            if rel == "sealedresearch/search_service.py":
+                for n in ast.walk(mod):
+                    if isinstance(n, ast.Constant) and isinstance(n.value, str) and _KEY_STRING.search(n.value):
+                        kp.append(f"{rel} line {n.lineno}: names a private key in a string")
+    return kp
+
+
 def check_seal_order(rep: ImageReport, tree: str) -> None:
     """D7: the seal (sealedresearch/confine.py: no-new-privs + seccomp over EVERY thread, TSYNC, read back per task)
     sits between binding and serving in the Azure entry, and in the TDX front between bind and the engine; the
@@ -2037,6 +2149,19 @@ def check_seal_order(rep: ImageReport, tree: str) -> None:
     rep.add(not op, "D7. offer served from immutable bytes",
             "SearchService.offer_bytes written once at init (json of the offer), frozen into the server when the service is "
             "attached, GET /offer writes those bytes and reads no dictionary" if not op else "; ".join(op))
+    # Who could open a query (verifier blocker TDX_KEYS_RETENTION, 8 Nov 2026). The machine's two private keys are made
+    # in the front's memory at start-up and their public halves go into the hardware-signed report. This row checks the
+    # published code only ever USES them: the X25519 key as the key argument of envelope.open_, the signing key to sign
+    # or to give its public half; one assignment each, at init; no other published module touches either attribute;
+    # nothing in the front serialises a private key. (What the hardware keeps from the host is the trusted base.)
+    kp = _private_key_problems(stext, smod, svc, init, app)
+    rep.add(not kp, "D7. the front names its private keys only to open and sign",
+            "a syntactic check of the front's published code (reflection elsewhere and libraries underneath are not "
+            "established): SearchService makes its X25519 key (envelope.gen_keypair) and its "
+            "signing key (Ed25519PrivateKey.generate) in exactly the published statements at init; the sealing key appears "
+            "only as envelope.open_'s key and the signing key only to sign or give its public half; the front uses no "
+            "reflection (getattr/setattr/vars/__dict__ on itself, pickle, copy, inspect, gc); no other published module "
+            "names either key; private_bytes appears only in envelope.gen_keypair" if not kp else "; ".join(kp))
     # The firewall passes a reply only while its socket is owned by the search account; a closed socket has no owner.
     # So every accepted connection must linger until the peer has acknowledged everything (v14 rc6: the /offer was cut).
     lp = []

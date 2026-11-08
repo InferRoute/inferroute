@@ -82,7 +82,7 @@ def padded_plain(payload: Dict[str, Any]) -> Tuple[bytes, str]:
 
 class Verifier:
     def __init__(self, enclave_url: str, *, expect_host_data: Optional[str], pins: Optional[Dict[str, Any]] = None,
-                 expect_index: Optional[str] = None, timeout: float = 300.0,
+                 expect_index: Optional[str] = None, timeout: float = 600.0,   # v15: 8 queued + 1 surveys x 55 s slot = 495 s
                  reference: Optional[Dict[str, Any]] = None, session_id: Optional[str] = None):
         self.url = enclave_url.rstrip("/")
         self.expect_host_data, self.expect_index, self.timeout = expect_host_data, expect_index, timeout

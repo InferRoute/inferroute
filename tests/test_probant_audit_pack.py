@@ -2353,3 +2353,18 @@ def test_the_template_settles_the_claim_the_two_2_oct_audits_split_on():
     assert "Verify the signatures as written" in tmpl
     assert "uncheckable text-to-hash bindings separately as a limit" in tmpl
     assert "never as something you checked" in tmpl
+
+
+def test_the_delegated_index_extension_travels_beside_the_reference(tmp_path, V, kms, monkeypatch):
+    """0.9.130: index entries added under the reference's delegated key live in a file beside the reference; the
+    record's verifier reads it from beside trust-anchors/reference.json, so the folder must carry it there."""
+    from inferroute_cli import probant_export as E
+    from inferroute_cli import probant_check
+    ref = tmp_path / "ref.json"
+    ref.write_text('{"schema": "inferroute.enclave-reference/1"}')
+    (tmp_path / "ref.json.index-extension.json").write_bytes(b'{"schema": "inferroute.reference-index-extension/1"}\n')
+    monkeypatch.setattr(probant_check, "published_reference", lambda: (str(ref), "ab" * 32))
+    rec = _synthetic_bundle(tmp_path, V, kms)
+    pack = E.write_audit_pack(rec, tmp_path / "pack")
+    got = pack / "trust-anchors" / "reference.json.index-extension.json"
+    assert got.read_bytes() == b'{"schema": "inferroute.reference-index-extension/1"}\n'

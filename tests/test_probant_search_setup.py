@@ -286,3 +286,18 @@ def test_a_wake_service_reaches_the_configuration_only_on_inferroute_hosts(site,
     files["/probant/search.json"] = json.dumps(where).encode()
     SS.setup(force=True, now=NOW)
     assert cfg(tmp).get("wake") == kept
+
+
+def test_the_delegated_index_extension_is_kept_beside_the_reference_byte_for_byte(site):
+    """0.9.130: index entries added under the reference's delegated key travel in a file beside it, where the search
+    verifier looks for it. Kept byte for byte when published; removed when the site no longer has one."""
+    files, key, pub, tmp = site
+    blob = b'{"schema": "inferroute.reference-index-extension/1", "entries": []}\n'
+    files["/reference/current.json.index-extension.json"] = blob
+    SS.setup(force=True, now=NOW)
+    p = tmp / "ir/confidential/reference.json.index-extension.json"
+    assert p.read_bytes() == blob
+    assert SS.setup(now=NOW)[0] == "unchanged"
+    del files["/reference/current.json.index-extension.json"]
+    SS.setup(force=True, now=NOW)
+    assert not p.exists()

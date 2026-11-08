@@ -3816,6 +3816,12 @@ def write_audit_pack(bundle_dir: str | Path, out_dir: Optional[str | Path] = Non
         ots = Path(str(ref) + ".ots")
         if ots.is_file():
             anchor_files["trust-anchors/reference.json.ots"] = ots.read_bytes()
+        # Index entries added under the key the reference delegates for indexes only (0.9.130). The verifier
+        # reads the file beside the reference and judges it against the reference's own signature, so it travels
+        # beside it here too; without it a search on a delegated index would fail identity in the folder.
+        ext = Path(str(ref) + ".index-extension.json")
+        if ext.is_file():
+            anchor_files["trust-anchors/reference.json.index-extension.json"] = ext.read_bytes()
     if key:
         anchor_files["trust-anchors/publication-key.txt"] = (str(key).strip() + "\n").encode("utf-8")
         # The attestation and its Sigstore bundle, when this installation has them. They are the only

@@ -917,7 +917,7 @@ def main(argv: Optional[list] = None) -> int:
     reference: Optional[Dict[str, Any]] = None
     reference_info: Optional[Dict[str, Any]] = None
     if a.reference:
-        reference = json.load(open(a.reference))
+        reference = verify_record.load_reference(a.reference)
         c = verify_record.Checks()
         verify_record.check_reference_signature(c, reference, a.reference_key)
         signed_ok = any(s == "PASS" and n == "reference signature" for s, n, _ in c.rows)

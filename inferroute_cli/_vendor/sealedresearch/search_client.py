@@ -99,7 +99,7 @@ def _verify_aci_offer(offer_dir: str, offer: dict, expect_index: Optional[str]):
     ref = None
     ref_path = os.path.join(offer_dir, "reference.json")
     if os.path.exists(ref_path):
-        ref = json.load(open(ref_path))
+        ref = V.load_reference(ref_path)
     policy_b64 = None
     pol_path = os.path.join(offer_dir, "policy.base64")
     if os.path.exists(pol_path):

@@ -187,6 +187,11 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     # The independent date for the reference. Optional on the site (an unanchored reference simply has none),
     # and it must be the proof for THESE bytes: a stale one beside a newer reference is removed, not kept.
     ots = _get_optional(f"{SITE}/reference/current.json.ots")
+    # Index entries added under the reference's delegated index key (0.9.130): kept byte for byte beside the
+    # reference, where the search verifier looks for it and judges it against the reference's signature. Optional;
+    # a stale one beside a newer reference is removed (it would be ignored anyway: it names another base).
+    ext = _get_optional(f"{SITE}/reference/current.json.index-extension.json")
+    ext_path = Path(str(ref_path) + ".index-extension.json")
     wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key, "provisioned_by": MARK}
     if policy_path is not None:
         wanted["policy_file"] = str(policy_path)
@@ -197,12 +202,17 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     if wake:
         wanted["wake"] = wake
     unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == ref_bytes
-                 and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists()))
+                 and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists())
+                 and (ext_path.read_bytes() == ext if ext is not None and ext_path.is_file() else ext is None and not ext_path.exists()))
     _atomic(ref_path, ref_bytes)
     if ots is not None:
         _atomic(ots_path, ots)
     elif ots_path.exists():
         ots_path.unlink()
+    if ext is not None:
+        _atomic(ext_path, ext)
+    elif ext_path.exists():
+        ext_path.unlink()
     _atomic(cfg_path, json.dumps(wanted, indent=1).encode() + b"\n")
     if unchanged:
         return "unchanged", "Patent search was already set up and is up to date."

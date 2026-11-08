@@ -533,7 +533,8 @@ def _ref_entries(reference: Dict[str, Any], field: str) -> List[Dict[str, Any]]:
     """Entries may be plain hashes or objects {value, valid_from, valid_to, retired}. Times are ISO-8601 UTC
     ('YYYY-MM-DDTHH:MM:SSZ'), compared lexicographically against the statement's started_utc."""
     out: List[Dict[str, Any]] = []
-    for e in reference.get(field, []) or []:
+    extra = list(reference.get(INDEX_ADDED_KEY) or []) if field == "index_manifest_sha256" else []
+    for e in list(reference.get(field, []) or []) + extra:
         if isinstance(e, str):
             out.append({"value": e.lower(), "valid_from": None, "valid_to": None, "retired": False})
         elif isinstance(e, dict) and isinstance(e.get("value"), str):
@@ -2256,6 +2257,128 @@ SEARCH_TIME_LABEL = "the search's time"
 
 REFERENCE_SCHEMA = "inferroute.enclave-reference/1"
 
+# ── Index entries added under a DELEGATED key (8 Nov 2026) ──────────────────────────────────────────────────────
+#
+# Henry: refresh the US/EP/WO index weekly, without a trip to the offline publication key each time. So the reference
+# HE signs may name, in `index_delegates`, keys allowed to add ONE kind of entry, index_manifest_sha256, and nothing
+# else: never an image, a machine shape, an encoder or a policy, so what happens to a user's text still rests on his
+# key alone. Their additions travel in a separate file, `<reference>.index-extension.json`, because the signature
+# covers every field of the reference: a new field there would break every client already installed. The extension
+# is bound to the exact reference it extends (base_sig = that reference's sig), so a re-signed reference voids it.
+#
+# In memory only: the loaded extension rides on the reference dict under INDEX_EXTENSION_KEY; once the base signature
+# PASSES under the publication key, check_reference_signature validates it and puts the accepted entries under
+# INDEX_ADDED_KEY, which _ref_entries reads for the index field. Both keys are excluded from the signed body, and the
+# signed fields themselves are never changed, so checking the same reference twice gives the same answer.
+INDEX_EXTENSION_SCHEMA = "inferroute.reference-index-extension/1"
+INDEX_EXTENSION_SUFFIX = ".index-extension.json"
+class _MemoryOnlyKey:
+    """A dict key no JSON document can produce (JSON object keys are always strings), so neither a reference file
+    nor a record bundle can plant delegated additions: they exist only as this module's own output (review 8 Nov:
+    a planted string key was honoured on the pre-seal path, where identity is judged before the signature)."""
+    __slots__ = ("name",)
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def __repr__(self) -> str:
+        return f"<{self.name}>"
+
+
+INDEX_EXTENSION_KEY = _MemoryOnlyKey("index extension")
+INDEX_ADDED_KEY = _MemoryOnlyKey("index entries added under a delegated key")
+INDEX_EXTENSION_MAX_ENTRIES = 1000     # weekly for ~19 years; closed entries may be pruned, never live ones
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def load_reference(path: str) -> Dict[str, Any]:
+    """The reference at `path`, with the delegated index extension beside it (`path` + INDEX_EXTENSION_SUFFIX)
+    attached for check_reference_signature to judge. A missing extension is the ordinary case; an unreadable one
+    is attached as such, so the check says it was ignored rather than silently using less."""
+    ref = json.load(open(path))
+    ext_path = path + INDEX_EXTENSION_SUFFIX
+    if isinstance(ref, dict) and os.path.isfile(ext_path):
+        try:
+            ref[INDEX_EXTENSION_KEY] = json.load(open(ext_path))
+        except Exception as exc:                            # noqa: BLE001
+            ref[INDEX_EXTENSION_KEY] = {"_unreadable": type(exc).__name__}
+    return ref
+
+
+def _apply_index_extension(c: "Checks", reference: Dict[str, Any]) -> None:
+    """Judge the attached extension (the base signature has already passed). Accepted entries go to
+    INDEX_ADDED_KEY; anything wrong ignores the WHOLE extension with a SKIP row: an extension can only add, so
+    ignoring it can only make a machine fail identity, never pass one it should not."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    reference.pop(INDEX_ADDED_KEY, None)
+    ext = reference.get(INDEX_EXTENSION_KEY)
+    if ext is None:
+        return
+    name = "index additions (delegated key)"
+
+    def ignore(why: str) -> None:
+        c.add(None, name, f"the index extension beside this reference was IGNORED: {why}")
+
+    if not isinstance(ext, dict) or ext.get("_unreadable"):
+        return ignore("it could not be read as JSON")
+    if ext.get("schema") != INDEX_EXTENSION_SCHEMA:
+        return ignore(f"it is not a {INDEX_EXTENSION_SCHEMA} document")
+    if str(ext.get("base_sig") or "") != str(reference.get("sig") or "") or not reference.get("sig"):
+        return ignore("it extends a different reference (its base_sig is not this reference's signature)")
+    key = str(ext.get("key") or "").lower()
+    # Every delegation of this key, as windows. A delegation retired WITH a retired_at keeps what it added before
+    # then (records made under it stay verifiable); one retired without a time keeps nothing.
+    windows = []
+    for d in reference.get("index_delegates") or []:
+        if not (isinstance(d, dict) and str(d.get("key") or "").lower() == key
+                and d.get("scope", "index_manifest_sha256") == "index_manifest_sha256"):
+            continue
+        d_from = _parse_time(d.get("valid_from"))
+        d_to = _parse_time(d.get("valid_to")) if d.get("valid_to") else None
+        if d.get("retired"):
+            r_at = _parse_time(d.get("retired_at")) if d.get("retired_at") else None
+            if r_at is None:
+                continue
+            d_to = r_at if d_to is None else min(d_to, r_at)
+        if d_from is not None and (d_to is None or d_to > d_from):
+            windows.append((d_from, d_to))
+    if not _HEX64.fullmatch(key) or not windows:
+        return ignore("its key is not one the signed reference names (and has not retired) in index_delegates")
+    body = {k: v for k, v in ext.items() if k != "sig"}
+    try:
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(key)).verify(bytes.fromhex(str(ext.get("sig") or "")), canonical(body))
+    except Exception:                                       # noqa: BLE001
+        return ignore(f"its signature does not verify under the delegated key {key[:16]}…")
+    entries = ext.get("entries")
+    if not isinstance(entries, list) or not entries or len(entries) > INDEX_EXTENSION_MAX_ENTRIES:
+        return ignore(f"it must carry 1 to {INDEX_EXTENSION_MAX_ENTRIES} entries")
+    base_values = {e["value"] for e in _ref_entries({"index_manifest_sha256": reference.get("index_manifest_sha256")},
+                                                     "index_manifest_sha256")}
+    accepted: List[Dict[str, Any]] = []
+    for e in entries:
+        if not isinstance(e, dict) or set(e) - {"value", "valid_from", "valid_to"}:
+            return ignore("an entry carries fields other than value, valid_from and valid_to")
+        v = str(e.get("value") or "")
+        f, t = _parse_time(e.get("valid_from")), (_parse_time(e.get("valid_to")) if e.get("valid_to") else None)
+        if not _HEX64.fullmatch(v):
+            return ignore("an entry's value is not a lowercase sha256")
+        if f is None or (e.get("valid_to") and t is None) or (t is not None and t <= f):
+            return ignore(f"entry {v[:16]}… has no usable validity window")
+        inside = [(w_from, w_to) for w_from, w_to in windows
+                  if f >= w_from and (w_to is None or (f < w_to and (t is None or t <= w_to)))]
+        if not inside:
+            return ignore(f"entry {v[:16]}… reaches outside every window the reference delegates to this key")
+        if v in base_values:
+            continue                                        # already named by the publication key itself
+        # An open entry under a delegation that ends, ends with it: the delegate cannot outlast its own mandate.
+        w_to = inside[0][1]
+        to = e.get("valid_to") or (w_to.strftime("%Y-%m-%dT%H:%M:%SZ") if w_to is not None else None)
+        accepted.append({"value": v, "valid_from": e["valid_from"], "valid_to": to})
+    reference[INDEX_ADDED_KEY] = accepted
+    c.add(True, name, f"{len(accepted)} index entr{'y' if len(accepted) == 1 else 'ies'} added under the delegated key "
+          f"{key[:16]}…, which the signed reference names as allowed to add index entries ONLY (no image, machine "
+          "shape, encoder or policy)")
+
 
 def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Optional[str]) -> None:
     """The reference file may be signed (Ed25519 over its canonical JSON minus `sig`) by InferRoute's
@@ -2263,6 +2386,9 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
     and pass it with --reference-key: later reference updates are then accepted without re-establishing
     trust. Trust-on-first-use, anchored in the firm's own file."""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    # Delegated index additions exist only as the OUTPUT of this check on an authenticated reference. Whatever a file
+    # or an earlier caller left under that key is discarded first, on every path (no key, unsigned, failed, passed).
+    reference.pop(INDEX_ADDED_KEY, None)
     # WHAT KIND OF DOCUMENT IS THIS. A signature says "InferRoute wrote this", never "InferRoute meant it
     # as a reference". The moment that key signs anything else — a release note, a benchmark result — a
     # document carrying the right field names could stand in for a reference unless the kind is checked
@@ -2289,7 +2415,7 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
     if not sig:
         c.add(False, "reference signature", "a --reference-key was given but this reference is unsigned")
         return
-    body = {k: v for k, v in reference.items() if k != "sig"}
+    body = {k: v for k, v in reference.items() if isinstance(k, str) and k != "sig"}
     try:
         Ed25519PublicKey.from_public_bytes(bytes.fromhex(key_hex)).verify(bytes.fromhex(str(sig)), canonical(body))
         # An auditor on 25 Sep read this program and found what the row did not say: the key you pass is
@@ -2306,7 +2432,10 @@ def check_reference_signature(c: Checks, reference: Dict[str, Any], key_hex: Opt
                  if self_named else
                  "(whether it was recorded at first use is yours to attest, not this program's)"))
     except Exception:                                       # noqa: BLE001
+        reference.pop(INDEX_ADDED_KEY, None)
         c.add(False, "reference signature", "does NOT verify under the given publication key")
+        return
+    _apply_index_extension(c, reference)
 
 
 def check_completeness(c: Checks, searches: List[Dict[str, Any]], unanswered: Optional[List[Dict[str, Any]]] = None) -> None:
@@ -4006,6 +4135,13 @@ def verify_offer(offer: Dict[str, Any], *, pins: Optional[Dict[str, str]] = None
     Returns Checks; `Checks.failed` empty means no performed check failed; SKIP is not verification. The
     caller must treat any failure as "do not seal" — a sealed query cannot be recalled.
     """
+    # Identity is judged below BEFORE the reference's authentication row is written (at the end). So the delegated
+    # index additions, which exist only for an authenticated reference, are settled first, silently; the row
+    # reporting them comes with the authentication row at the end, from the same function.
+    if isinstance(reference, dict) and reference_key:
+        check_reference_signature(Checks(), reference, reference_key)
+    elif isinstance(reference, dict):
+        reference.pop(INDEX_ADDED_KEY, None)
     c = Checks()
     rd: Dict[str, Any] = {}
     rd_bytes = b""
@@ -4556,7 +4692,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     reference = None
     if a.reference:
         try:
-            reference = json.load(open(a.reference))
+            reference = load_reference(a.reference)
             if not isinstance(reference, dict):
                 raise ValueError("not an object")
         except Exception as exc:                            # noqa: BLE001

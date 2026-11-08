@@ -613,6 +613,9 @@ button.danger:disabled { opacity: .45; cursor: not-allowed; }
 .search-status.open .status-dot { background: var(--accent); }
 .search-status.trouble { border-color: var(--warn-soft); background: var(--warn-soft); }
 .search-status.trouble .status-dot { background: var(--warn); }
+.search-status.starting .status-dot { background: var(--accent); animation: ir-pulse 1.6s ease-in-out infinite; }
+@keyframes ir-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .search-status.starting .status-dot { animation: none; } }
 .search-status .status-aside { margin-left: auto; padding-left: 14px; text-align: right; align-self: center;
   max-width: 230px; }
 @media (max-width: 620px) {

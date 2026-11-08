@@ -25,6 +25,8 @@ import secrets
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 import time
 from collections import deque
 from pathlib import Path
@@ -98,6 +100,72 @@ SEARCH_PROBE_TTL = 30.0           # seconds a probe result stands for, so refres
 TM_CONNECT_BUDGET_S = 90.0         # a trademark download whose server never answers is reported, not waited on
 _search_probe: Dict[str, Any] = {"at": 0.0, "state": "unreachable"}
 _search_probe_lock = threading.Lock()
+
+
+# The machine is started on request (0.9.129): search.json names a wake service, the home page offers a button, and the
+# request goes out with the user's InferRoute key (the service checks it, and keeps nothing). Availability only, like
+# the probe above: what the service says decides nothing about trust; the machine is verified when a search runs.
+WAKE_STATUS_TTL = 20.0
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):    # urllib would carry x-api-key to wherever a redirect points (even http)
+        return None
+
+
+_NO_REDIRECT = urllib.request.build_opener(_NoRedirectHandler)
+_wake: Dict[str, Any] = {"at": 0.0, "status": None, "requested_at": 0.0}
+_wake_lock = threading.Lock()
+
+
+def _wake_status(wake: str) -> Dict[str, Any]:
+    """{"state": "off"|"starting"|"ready"|"unknown", "ready_by"?: ISO} from the wake service, cached briefly."""
+    import time as _t
+    with _wake_lock:
+        if _wake["status"] is not None and _t.monotonic() - _wake["at"] < WAKE_STATUS_TTL:
+            return dict(_wake["status"])
+    st: Dict[str, Any] = {"state": "unknown"}
+    try:
+        with _NO_REDIRECT.open(wake.rstrip("/") + "/status", timeout=5) as fh:
+            d = json.loads(fh.read(4096))
+        if isinstance(d, dict) and d.get("state") in ("off", "starting", "ready", "unknown"):
+            st = {"state": d["state"]}
+            rb = d.get("ready_by")
+            if isinstance(rb, str) and re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\dZ", rb):
+                st["ready_by"] = rb.replace(" ", "T")
+            if d.get("declined") in ("budget", "daily", "credit"):
+                st["declined"] = d["declined"]
+    except Exception:                                       # noqa: BLE001
+        pass
+    with _wake_lock:
+        _wake.update(at=_t.monotonic(), status=dict(st))
+    return st
+
+
+def _wake_request(wake: str) -> Dict[str, Any]:
+    """Ask the wake service to start the machine. {"ok": True, ...status} or {"ok": False, "reason": words}."""
+    import time as _t
+    from . import config as _config
+    key = (_config.load().api_key or "").strip()
+    if not key:
+        return {"ok": False, "reason": "Anteriora has no InferRoute key on this computer yet, so it cannot ask for the "
+                                       "search machine. Start a session once to add your key."}
+    req = urllib.request.Request(wake.rstrip("/") + "/wake", data=b"", method="POST", headers={"x-api-key": key})
+    try:
+        with _NO_REDIRECT.open(req, timeout=15) as fh:
+            d = json.loads(fh.read(4096))
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return {"ok": False, "reason": "InferRoute did not accept the key saved on this computer, so the search "
+                                           "machine was not started. Write to support@inferroute.ai."}
+        return {"ok": False, "reason": "The request to start the search machine did not go through. Try again in a "
+                                       "minute; if it keeps failing, write to support@inferroute.ai."}
+    except Exception:                                       # noqa: BLE001
+        return {"ok": False, "reason": "The request to start the search machine could not be sent (no connection?). "
+                                       "Try again in a minute."}
+    with _wake_lock:
+        _wake.update(requested_at=_t.time(), at=0.0, status=None)
+    return {"ok": True, "state": d.get("state") if isinstance(d, dict) else "unknown"}
 
 
 def _search_window(now: Optional[dt.datetime] = None, avail: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -1611,7 +1679,30 @@ class Home:
             state = await asyncio.to_thread(_search_probe_state, enclave)
             out["reachable"] = state == "up"
             out["found"] = state != "unknown-host"
+            wake = str(cfg.get("wake") or "")
+            if wake and not out["reachable"] and out.get("mode") == "always":
+                import time as _t
+                out["startable"] = True
+                out["remote"] = await asyncio.to_thread(_wake_status, wake)
+                req_at = _wake.get("requested_at") or 0.0
+                if req_at and _t.time() - req_at < 40 * 60:
+                    out["requested_at"] = dt.datetime.fromtimestamp(req_at, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             return out
+
+        @app.post("/api/search-start")
+        async def search_start():
+            """Ask for the search machine to be started. Sends the saved InferRoute key to the wake service named
+            in search.json (which the client accepts only on InferRoute's own hosts), and nothing else."""
+            import asyncio
+            from . import pi_attested
+            try:
+                cfg = json.loads(pi_attested.search_config_path().read_text())
+            except (OSError, ValueError):
+                cfg = {}
+            wake = str(cfg.get("wake") or "")
+            if not wake:
+                return {"ok": False, "reason": "This search machine cannot be started from here."}
+            return await asyncio.to_thread(_wake_request, wake)
 
         @app.post("/api/sharing/share")
         async def share(request: Request):

@@ -608,15 +608,26 @@
   async function searchOfflineNow() {
     try {
       const d = await api("/api/search-status");
-      return Boolean(d.configured && !d.reachable);
-    } catch (_) { return false; }
+      return d.configured && !d.reachable ? d : null;
+    } catch (_) { return null; }
   }
 
   async function startSession(matterId, onChange, kind) {
     // A prior-art session with the search machine offline: say so first, and let the person choose (0.9.124 test:
     // it started as usual and the outage surfaced as failed searches). A name check never uses it.
-    if (kind && kind !== "name" && await searchOfflineNow()
-        && !(await confirmBox("Patent search is offline right now",
+    const off = kind && kind !== "name" ? await searchOfflineNow() : null;
+    if (off && off.startable) {
+      // Started on request (0.9.129): opening a patent session asks for it, unless it is already starting or the
+      // service has declined. The session opens straight away; the assistant works on the disclosure meanwhile.
+      const rem = off.remote || {};
+      const already = rem.state === "starting" || rem.state === "ready" || off.requested_at || rem.declined;
+      if (!already) {
+        let r = {};
+        try { r = await api("/api/search-start", {}); } catch (e) { r = { ok: false, reason: e.message }; }
+        toast(r.ok ? "Patent search is starting: usually ready in 15 to 20 minutes. The assistant can work on the disclosure meanwhile."
+                   : r.reason, r.ok ? "info" : "error");
+      }
+    } else if (off && !(await confirmBox("Patent search is offline right now",
           "You can still open a session and work on the disclosure with the assistant. It can't search until patent "
           + "search is back, and nothing is sent to the search machine while it is offline.", "Open the session anyway"))) return;
     try {
@@ -707,14 +718,14 @@
     const h = Math.floor(mins / 60), m = mins % 60;
     return m ? `in ${h} h ${m} min` : `in ${h} h`;
   }
-  function searchStatusBar(d) {
+  function searchStatusBar(d, onStart) {
     const STILL_WORKS = "Name checks and readings still work.";
     // The window in Paris, and the same instant where the reader is — shown only when they differ.
     const parisOpen = hourAt(d.opens_at, d.tz), parisClose = hourAt(d.closes_at, d.tz);
     const hereOpen = hourAt(d.opens_at), hereClose = hourAt(d.closes_at);
     const elsewhere = hereOpen !== parisOpen;
     const timetable = `every day ${String(d.from_hour).padStart(2, "0")}:00–${String(d.to_hour).padStart(2, "0")}:00 Paris time`;
-    let dot = "closed", head = "", sub = "";
+    let dot = "closed", head = "", sub = "", action = "";
     if (!d.configured) {
       head = "Patent search is not set up on this computer";
       sub = "Nothing is sent to a search machine until it is. You can still work on a disclosure.";
@@ -727,6 +738,41 @@
         dot = "open";
         head = "Patent search is available";
         sub = "";
+      } else if (d.startable) {
+        // STARTED ON REQUEST (0.9.129). The machine runs only when someone asks, and takes 15 to 20 minutes to be
+        // ready (about 14 min measured from creation, plus up to 2 min before the controller sees the request), so the
+        // page offers the request here, where a person sees it before they need a search, and says plainly that they
+        // can keep working. What the wake service says is availability only, like the dot.
+        const r = d.remote || {};
+        const askedMs = d.requested_at ? Date.now() - new Date(d.requested_at).getTime() : null;
+        const readyBy = r.ready_by || (d.requested_at ? new Date(new Date(d.requested_at).getTime() + 20 * 60000).toISOString() : "");
+        const late = readyBy && Date.now() > new Date(readyBy).getTime() + 5 * 60000;
+        if (r.declined) {
+          // The service declined (its spend limits, or the end of its credit): a Try again would be declined too.
+          dot = "trouble";
+          head = "Patent search can't be started right now";
+          sub = `The service's limit for starting it has been reached. Write to support@inferroute.ai if you need it today. ${STILL_WORKS}`;
+        } else if (r.state === "ready") {
+          // Running, says the service, yet this computer cannot reach it: a network in between, most often.
+          dot = "trouble";
+          head = "Patent search is running, but this computer can't reach it";
+          sub = `A firewall or network filter may be blocking it. Write to support@inferroute.ai. ${STILL_WORKS}`;
+        } else if ((r.state === "starting" && !late) || (askedMs !== null && askedMs < 4 * 60000)) {
+          dot = "starting";
+          head = "Patent search is starting";
+          sub = (readyBy ? `Usually ready by ${hourAt(readyBy)}, 15 to 20 minutes after it was asked for. ` : "Usually ready 15 to 20 minutes after it was asked for. ")
+            + `You can keep working meanwhile: this line changes when it is ready. ${STILL_WORKS}`;
+        } else if (askedMs !== null || late) {
+          dot = "trouble";
+          head = "Patent search has not started";
+          sub = `It was asked for${d.requested_at ? ` at ${hourAt(d.requested_at)}` : ""} and is not ready. Try again, or write to support@inferroute.ai. ${STILL_WORKS}`;
+          action = "Try again";
+        } else {
+          dot = "closed";
+          head = "Patent search is switched off for now";
+          sub = `It starts when you ask, and is usually ready 15 to 20 minutes later. Start it now and keep working on your matters meanwhile. ${STILL_WORKS}`;
+          action = "Start patent search";
+        }
       } else {
         // OFFLINE, SAID AS AN OUTAGE (0.9.124 test: "cannot be found… it needs looking at" read as breakage,
         // with no times and nobody to ask). Not found and not answering are the same news to the reader: no
@@ -760,19 +806,44 @@
     // Availability is not verification, and a green line could be read as "checked and safe". The machine
     // is verified against the signed reference when a search actually runs, not by this page.
     if (d.reachable) bar.append(el("span", "sub status-aside", "Availability only — the machine is checked when a search runs."));
+    if (action && onStart) {
+      const note = el("div", "sub");
+      const b = button(action, "", async () => {
+        b.disabled = true;
+        clear(note);
+        let r = {};
+        try { r = await api("/api/search-start", {}); } catch (e) { r = { ok: false, reason: e.message }; }
+        if (!r.ok) { b.disabled = false; note.append(r.reason || "The request did not go through. Try again in a minute."); return; }
+        onStart();
+      });
+      bar.append(el("div", "status-aside", b, note));
+    }
     return bar;
   }
   async function mountSearchStatus(host) {
     const slot = el("div", "");
     host.append(slot);
+    // Every minute as before; every 20 seconds while the machine is starting, so the line turns green soon after.
+    let fast = false;
     const paint = async () => {
-      let d;
-      try { d = await api("/api/search-status"); } catch (_) { return; }
-      clear(slot);
-      slot.append(searchStatusBar(d));
+      let starting = fast;
+      try {
+        const d = await api("/api/search-status");
+        clear(slot);
+        slot.append(searchStatusBar(d, paint));
+        starting = Boolean(d.startable && !d.reachable && ((d.remote || {}).state === "starting" || d.requested_at));
+      } catch (_) {
+        // keep the last line; the next poll is still scheduled below (one failure must not freeze it)
+      } finally {
+        if (starting !== fast && watching.has("search-status")) {
+          clearInterval(watching.get("search-status"));
+          watching.delete("search-status");
+        }
+        fast = starting;
+        if (!watching.has("search-status")) watching.set("search-status", setInterval(paint, fast ? 20000 : 60000));
+      }
     };
     await paint();
-    if (!watching.has("search-status")) watching.set("search-status", setInterval(paint, 60000));
   }
 
   // ONE definition of a matter card.

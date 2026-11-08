@@ -7,7 +7,7 @@
 // machine that was up. A confident timetable is worse than none, because nobody questions a timetable.
 import fs from "fs";
 const src = fs.readFileSync("inferroute_cli/probant_web/home.js", "utf8");
-const a = src.indexOf("  function searchStatusBar(d) {");
+const a = src.indexOf("  function searchStatusBar(d, onStart) {");
 const b = src.indexOf("\n  }\n", src.indexOf("return bar;", a)) + 4;
 if (a < 0 || b < 4) { console.error("HARNESS: searchStatusBar moved"); process.exit(2); }
 
@@ -16,10 +16,12 @@ const el = (tag, cls, ...ch) => { const n = { tag, cls, children: [], textConten
   append(...c) { this.children.push(...c); } };
   for (const c of ch) { if (typeof c === "string") { n.textContent += c; texts.push(c); } else if (c) n.children.push(c); }
   return n; };
-const bar = new Function("el", "hourAt", "untilText", `${src.slice(a, b)}\n return searchStatusBar;`)(
-  el, (iso, tz) => (iso ? "13:00" : ""), () => "in 2 h");
+const buttons = [];
+const button = (label) => { buttons.push(label); return { label }; };
+const bar = new Function("el", "hourAt", "untilText", "button", "clear", "api", `${src.slice(a, b)}\n return searchStatusBar;`)(
+  el, (iso, tz) => (iso ? "13:00" : ""), () => "in 2 h", button, () => {}, async () => ({}));
 
-const say = (d) => { texts.length = 0; bar(d); return texts.join(" | "); };
+const say = (d, onStart) => { texts.length = 0; buttons.length = 0; bar(d, onStart); return texts.join(" | "); };
 let bad = 0; const fail = (m) => { console.error("FAIL: " + m); bad++; };
 const MENTIONS_HOURS = /Paris|every day|\d\d:00|opens|closed until|outside its usual hours|normally runs/i;
 
@@ -56,6 +58,39 @@ if (!/closed/i.test(t)) fail("scheduled+closed must still say closed: " + t);
 // Not configured at all is untouched by the mode.
 t = say({ configured: false, mode: "always" });
 if (!/not set up on this computer/.test(t)) fail("unconfigured must keep its own message: " + t);
+
+// STARTED ON REQUEST (0.9.129): a machine with a wake service offers a start button when it is off, says it is
+// starting (with the usual time) once asked, and says plainly when a request did not start it.
+const go = () => {};
+const base = { configured: true, mode: "always", reachable: false, found: true, open_now: true, startable: true };
+t = say({ ...base, remote: { state: "off" } }, go);
+if (!/switched off for now/.test(t) || !/15 to 20 minutes/.test(t) || !/keep working/.test(t)) fail("off+startable: " + t);
+if (buttons.join() !== "Start patent search") fail("off+startable must offer the start button: " + buttons.join());
+if (/offline right now|support@/.test(t)) fail("an off machine that can be started is not an outage: " + t);
+t = say({ ...base, remote: { state: "off" } });
+if (buttons.length) fail("no button without a handler: " + buttons.join());
+const soon = new Date(Date.now() + 10 * 60000).toISOString(), past = new Date(Date.now() - 30 * 60000).toISOString();
+t = say({ ...base, remote: { state: "starting", ready_by: soon } }, go);
+if (!/is starting/.test(t) || !/ready by 13:00/.test(t) || buttons.length) fail("starting: " + t + " / " + buttons.join());
+// "starting" long past its time is not left saying "starting" forever
+t = say({ ...base, remote: { state: "starting", ready_by: past } }, go);
+if (!/has not started/.test(t) || buttons.join() !== "Try again") fail("starting, long late: " + t);
+// running per the service but unreachable from here: a network problem, said as one, with no button
+t = say({ ...base, remote: { state: "ready" } }, go);
+if (!/can't reach it/.test(t) || !/support@inferroute\.ai/.test(t) || buttons.length) fail("ready+unreachable: " + t);
+// declined by the service's limits: no Try again (it would be declined too)
+for (const req of [undefined, new Date(Date.now() - 60000).toISOString()]) {
+  t = say({ ...base, remote: { state: "off", declined: "budget" }, requested_at: req }, go);
+  if (!/can't be started right now/.test(t) || buttons.length) fail("declined: " + t + " / " + buttons.join());
+}
+t = say({ ...base, remote: { state: "unknown" }, requested_at: new Date(Date.now() - 60000).toISOString() }, go);
+if (!/is starting/.test(t) || buttons.length) fail("just asked: " + t);
+t = say({ ...base, remote: { state: "off" }, requested_at: new Date(Date.now() - 10 * 60000).toISOString() }, go);
+if (!/has not started/.test(t) || !/support@inferroute\.ai/.test(t) || buttons.join() !== "Try again") fail("asked, still off: " + t);
+for (const st of ["off", "starting", "unknown"]) {
+  t = say({ ...base, remote: { state: st } }, go);
+  if (/verified|safe|secure|private/i.test(t)) fail("availability only, never a trust word: " + t);
+}
 
 if (bad) process.exit(1);
 console.log("availability: always-on never mentions hours; scheduled keeps its timetable; faults stay distinct");

@@ -193,6 +193,9 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     hours = published_hours(where)
     if hours:
         wanted["availability"] = hours
+    wake = published_wake(where)
+    if wake:
+        wanted["wake"] = wake
     unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == ref_bytes
                  and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists()))
     _atomic(ref_path, ref_bytes)
@@ -207,6 +210,31 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     # switched off (0.9.124: "Patent search is set up" was printed for a machine whose name did not resolve).
     return "configured", ("Patent search settings are in place: InferRoute's signed reference was checked on this "
                           "computer. The search machine itself is checked before each search, before any text is sent.")
+
+
+# Where a client may ask for the search machine to be started. The request carries the user's InferRoute key (the wake
+# service checks it with api.inferroute.ai), and search.json is routing information that is NOT signed, so the address
+# is accepted only on an exact host InferRoute runs, listed here (not "anything under inferroute.ai": a forgotten
+# subdomain pointing at a third party would receive keys). Anything else is dropped and the client offers no start
+# button. The request itself never follows a redirect (probant_home._NO_REDIRECT).
+WAKE_HOSTS = ("ir-search-wake-851040540464.europe-west4.run.app",)
+
+
+def published_wake(where: Dict[str, Any]) -> Optional[str]:
+    """https://host of the wake service, when search.json names an acceptable one; None otherwise."""
+    from urllib.parse import urlsplit
+    v = where.get("wake") if isinstance(where, dict) else None
+    if not isinstance(v, str):
+        return None
+    try:
+        s = urlsplit(v)
+        host, port = (s.hostname or "").lower(), s.port
+    except ValueError:                                      # e.g. a port that is not a number: no button, setup goes on
+        return None
+    if (s.scheme != "https" or s.username or s.password or port or s.path not in ("", "/") or s.query or s.fragment
+            or host not in WAKE_HOSTS):
+        return None
+    return f"https://{host}"
 
 
 def published_hours(where: Dict[str, Any]) -> Optional[Dict[str, Any]]:

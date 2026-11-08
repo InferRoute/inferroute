@@ -267,3 +267,22 @@ def test_a_tdx_location_with_no_current_tdx_image_in_the_reference_is_refused(si
     with pytest.raises(SS.SetupError, match="no Intel TDX search image"):
         SS.setup(now=NOW)
     assert not (tmp / "ir/confidential/search.json").exists()
+
+
+@pytest.mark.parametrize("published,kept", [
+    ("https://ir-search-wake-851040540464.europe-west4.run.app", "https://ir-search-wake-851040540464.europe-west4.run.app"),
+    ("https://wake.inferroute.ai/", None),            # only the listed hosts, not any subdomain
+    ("https://x.inferroute.ai:abc", None),            # malformed: dropped, and setup still completes
+    ("https://attacker.example", None),                 # the saved key would go there: dropped, no start button
+    ("http://wake.inferroute.ai", None),
+    (None, None),
+])
+def test_a_wake_service_reaches_the_configuration_only_on_inferroute_hosts(site, published, kept):
+    """0.9.129: the search machine starts on request; the client asks the wake service search.json names."""
+    files, key, pub, tmp = site
+    where = {"enclave": "http://203.0.113.9:8000"}
+    if published is not None:
+        where["wake"] = published
+    files["/probant/search.json"] = json.dumps(where).encode()
+    SS.setup(force=True, now=NOW)
+    assert cfg(tmp).get("wake") == kept

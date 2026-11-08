@@ -277,7 +277,7 @@ function searchOffline(v: SearchVerdict): boolean {
 }
 // What the model is told when that happens: one plain line, so it stops and tells the person instead of
 // reading "connection-level failure" in the verifier's words and trying four more searches (0.9.124 test).
-const SEARCH_OFFLINE_ERROR = "Patent search is offline right now, so this search was not sent to the search machine. Do not search again: tell the user that patent search is offline right now and that they can try again later. Do not offer search steps or point to retry options: the page shows none while search is offline.";
+const SEARCH_OFFLINE_ERROR = "Patent search is offline right now, so this search was not sent to the search machine. Do not search again now: tell the user that patent search is not available yet. The search machine runs only when someone asks for it, and is usually ready 15 to 20 minutes after it is asked for; it may already have been asked for when this session opened, and the search line on the Anteriora home page shows whether it is starting. Work on the disclosure with the user meanwhile, and search once they say it is ready.";
 
 // ── the Asian list ──
 //

@@ -93,6 +93,9 @@ def test_no_route_beyond_what_the_page_needs(home):
                      "/api/sharing/contact/preview", "/api/sharing/contact/remove",
                      # whether the scheduled search machine is up (24 Sep)
                      "/api/search-status",
+                     # asking for the search machine to be started (0.9.129): it sends the saved key to the wake
+                     # service named in search.json, accepted only on InferRoute's own hosts
+                     "/api/search-start",
                      # the InferRoute key: whether one is held, and taking one from the page (3 Oct), so a
                      # computer without one is asked FIRST instead of failing at the first session
                      "/api/key"}
@@ -1146,8 +1149,11 @@ def test_the_home_page_says_an_offline_search_machine_is_offline_calmly():
 def test_a_patent_session_asks_before_starting_while_search_is_offline():
     """The Home page asks before a prior-art session starts with search offline, and only for a patent matter."""
     src = (Path(__file__).resolve().parent.parent / "inferroute_cli" / "probant_web" / "home.js").read_text()
-    fn = src[src.index("  async function startSession(matterId, onChange, kind) {"):src.index("    try {", src.index("  async function startSession("))]
-    assert 'kind !== "name" && await searchOfflineNow()' in fn and "Patent search is offline right now" in fn
+    fn = src[src.index("  async function startSession(matterId, onChange, kind) {"):src.index('await api("/api/sessions", { id: matterId })', src.index("  async function startSession("))]
+    assert 'kind && kind !== "name" ? await searchOfflineNow() : null' in fn and "Patent search is offline right now" in fn
+    # 0.9.129: a machine that starts on request is asked for (unless already starting), and the session opens at once
+    assert 'if (off && off.startable)' in fn and 'api("/api/search-start", {})' in fn
+    assert '} else if (off && !(await confirmBox("Patent search is offline right now"' in fn
     assert 'startSession(m.id, open, m.kind || "invention")' in src
     assert 'startSession(m.id, refresh, isName ? "name" : "invention")' in src
 
@@ -1222,3 +1228,72 @@ def test_a_slow_trademark_download_that_has_connected_is_waited_for(home, monkey
     monkeypatch.setattr("inferroute_cli.probant_home.TM_CONNECT_BUDGET_S", 0.5)
     r = c.post("/api/tm-index/install", json={})
     assert r.status_code == 200 and r.json() == {"ok": True}, r.text
+
+
+# ── started on request (0.9.129) ─────────────────────────────────────────────────────────────────────────────────
+
+def test_a_wake_address_is_accepted_only_on_inferroute_hosts():
+    from inferroute_cli.probant_search_setup import published_wake
+    ok = "https://ir-search-wake-851040540464.europe-west4.run.app"
+    assert published_wake({"wake": ok}) == ok and published_wake({"wake": ok + "/"}) == ok
+    for bad in ("https://wake.inferroute.ai",                                      # not listed: a subdomain is not enough
+                "https://x.inferroute.ai:abc",                                     # a malformed port must not raise
+                "http://ir-search-wake-851040540464.europe-west4.run.app",       # the key would travel in clear
+                "https://evil-851040540464.europe-west4.run.app",                  # someone else's Cloud Run
+                "https://inferroute.ai.evil.example", "https://evilinferroute.ai",
+                ok + "/wake", ok + "?x=1", "https://u:p@wake.inferroute.ai", ok + ":8443", None, 5, ""):
+        assert published_wake({"wake": bad}) is None, bad
+
+
+def test_the_start_request_carries_the_saved_key_to_the_wake_service_only(monkeypatch, tmp_path):
+    from inferroute_cli import probant_home as H, config
+    seen = {}
+
+    class R:
+        def __init__(self, body): self.body = body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, n=-1): return self.body
+
+    def fake_open(req, timeout=0):
+        seen["url"], seen["key"], seen["method"] = req.full_url, req.get_header("X-api-key"), req.get_method()
+        return R(b'{"accepted": true, "state": "off"}')
+
+    monkeypatch.setattr(config, "load", lambda: config.Credentials(api_key="ir-test-key", api_url="https://api.inferroute.ai"))
+    monkeypatch.setattr(H._NO_REDIRECT, "open", fake_open)
+    out = H._wake_request("https://wake.inferroute.ai")
+    assert out["ok"] and seen == {"url": "https://wake.inferroute.ai/wake", "key": "ir-test-key", "method": "POST"}
+    assert H._NO_REDIRECT.open is not None
+    assert H._wake["requested_at"] > 0
+    monkeypatch.setattr(config, "load", lambda: config.Credentials(api_key="", api_url="https://api.inferroute.ai"))
+    seen.clear()
+    out = H._wake_request("https://wake.inferroute.ai")
+    assert not out["ok"] and "no InferRoute key" in out["reason"] and seen == {}
+
+
+def test_the_wake_status_is_reduced_to_what_the_page_shows(monkeypatch):
+    from inferroute_cli import probant_home as H
+
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self, n=-1):
+            return b'{"state": "starting", "ready_by": "2026-11-08 10:15:00Z", "until": "x", "anything": "else"}'
+
+    monkeypatch.setattr(H._NO_REDIRECT, "open", lambda req, timeout=0: R())
+    H._wake.update(at=0.0, status=None)
+    assert H._wake_status("https://wake.inferroute.ai") == {"state": "starting", "ready_by": "2026-11-08T10:15:00Z"}
+    H._wake.update(at=0.0, status=None)
+    monkeypatch.setattr(H._NO_REDIRECT, "open", lambda req, timeout=0: (_ for _ in ()).throw(OSError("down")))
+    assert H._wake_status("https://wake.inferroute.ai") == {"state": "unknown"}
+
+
+def test_the_key_never_follows_a_redirect():
+    """Review of 0.9.129 (H2): urllib follows a 302 on POST and copies x-api-key to the new host, even over http."""
+    import io
+    import urllib.error
+    from inferroute_cli import probant_home as H
+    h = H._NoRedirectHandler()
+    assert h.redirect_request(None, io.BytesIO(), 302, "Found", {}, "http://evil.example/") is None
+    # and the opener the wake calls use carries that handler
+    assert any(isinstance(x, H._NoRedirectHandler) for x in H._NO_REDIRECT.handlers)

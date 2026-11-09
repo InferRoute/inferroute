@@ -1138,7 +1138,7 @@
       const searches = (rep && rep.searches) || [];
       if (searches.length) {
         p.append(el("h2", "section", "Every search the assistant ran"));
-        p.append(el("p", "sub", "Straight from the search on this computer, in the order they were run; each list is closest first. If a name was searched again with the same classes, the latest search is shown."));
+        p.append(el("p", "sub", "Straight from the search on this computer, in the order they were run; each list is closest first, with the filings of one name (again, or in another register) grouped under it. If a name was searched again with the same classes, the latest search is shown."));
         for (const sr of searches) {
           const cls = (sr.classes || []).length ? `classes ${sr.classes.join(", ")}` : "all classes";
           const n = (sr.hits || []).length;
@@ -1148,8 +1148,13 @@
           // Closest first, with the founder's classes raised but not first: past the shown marks there can be more
           // in their classes, so with more marks the count is of those shown.
           const yours = (sr.classes || []).length ? ` · ${inYours} ${sr.more ? "of these " : ""}in your classes` : "";
+          // Since grouping a hit is a name and "more" counts names; "filings" counts every filing under them, each a
+          // registered mark, so "6 close marks" never stands for 53. An entry without "filings" predates grouping.
+          const grouped = typeof sr.filings === "number";
+          const unit = grouped ? ["close name", "close names"] : ["close mark", "close marks"];
+          const filed = grouped && sr.filings > total ? ` (${sr.filings} filings)` : "";
           const what = !n ? "no close registered word marks found in this data"
-            : sr.more ? `${n} shown of ${total} close marks${yours}` : `${plural(n, "close mark", "close marks")}${yours}`;
+            : sr.more ? `${n} shown of ${total} ${unit[1]}${filed}${yours}` : `${plural(n, ...unit)}${filed}${yours}`;
           const box = el("details", "search-log",
             el("summary", "", el("b", "", `“${sr.name}”`), ` · ${cls} · ${what} · ${localTime(sr.at)}`));
           for (const h of sr.hits || []) {
@@ -1373,7 +1378,7 @@
         for (const x of tm) {
           list.append(el("li", "doc past", el("span", "rank", String(x.n)),
             el("div", "", el("span", "key", x.name), el("span", "year", localTime(x.at)),
-              el("div", "dtitle", `${plural(x.marks, "similar mark", "similar marks")}${x.classes.length ? ` · classes ${x.classes.join(", ")}` : ""}`)),
+              el("div", "dtitle", `${typeof x.filings === "number" ? plural(x.marks, "similar name", "similar names") + (x.filings > x.marks ? ` (${x.filings} filings)` : "") : plural(x.marks, "similar mark", "similar marks")}${x.classes.length ? ` · classes ${x.classes.join(", ")}` : ""}`)),
             el("span", "")));
         }
         p.append(list);

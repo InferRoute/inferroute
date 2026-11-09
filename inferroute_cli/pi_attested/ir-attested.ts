@@ -1156,8 +1156,10 @@ export default function (pi: ExtensionAPI) {
 	// Registered only for a name matter. The search runs on the host against the local trademark index; the
 	// host route is behind this session's key, and nothing about the name goes to a register or a website.
 	if (process.env.IR_TM_SEARCH === "1") {
+		// ── trademark search tool ── (tests/tm_search_tool_sim.ts runs this block: what the assistant is shown)
 		type TmHit = { register: string; number: string; text: string; status: string; classes: string[];
-			filed: string; reasons: string[]; overlapping_classes: string[] };
+			filed: string; reasons: string[]; overlapping_classes: string[];
+			also?: { register: string; number: string; text: string; status: string; classes: string[] }[] };
 		// Every mark a trademark search in this session returned to the assistant, by "US 12345678": what the
 		// report may cite (see the report check below).
 		const tmReturned = new Map<string, { status: string; classes: string[] }>();
@@ -1179,29 +1181,42 @@ export default function (pi: ExtensionAPI) {
 				});
 				const result = await response.json() as { error?: string; name?: string; classes?: string[];
 					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number;
-					searched?: string[]; not_searched?: string[] };
+					searched?: string[]; not_searched?: string[]; filings?: number };
 				if (!response.ok || !result.hits) throw new Error(result.error ?? "The trademark search did not answer.");
-				for (const h of result.hits) tmReturned.set(`${h.register} ${h.number}`, { status: h.status, classes: h.classes });
+				// A name's other filings are returned to the assistant too (under "also"), so the report may cite them.
+				for (const h of result.hits) for (const f of [h, ...(h.also ?? [])])
+					tmReturned.set(`${f.register} ${f.number}`, { status: f.status, classes: f.classes });
 				const head = `Searched ${result.sources} (${(result.marks_searched ?? 0).toLocaleString("en")} live word marks, ` +
 					`data as of ${result.data_date}) for "${result.name}"` +
 					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer." +
 					(result.not_searched?.length ? `\nNot searched: ${result.not_searched.join("; ")}.` : "");
 				const lines = result.hits.map((h) => `- ${h.text.length > 120 ? `${h.text.slice(0, 119)}…` : h.text} ` +
 					`(${h.register} ${h.number}, ${h.status}, classes ${h.classes.join(", ") || "none recorded"}` +
-					`${h.overlapping_classes.length ? `; overlaps ${h.overlapping_classes.join(", ")}` : ""}): ${h.reasons.join("; ")}`);
+					`${h.overlapping_classes.length ? `; overlaps ${h.overlapping_classes.join(", ")}` : ""}): ${h.reasons.join("; ")}` +
+					// The same name filed again (again, or in another register) is one hit with its other filings here;
+					// without this line the assistant was told to read "also" and never shown it.
+					(h.also?.length ? `\n  also filed as: ${h.also.slice(0, 6).map((a) => `${a.register} ${a.number} (${a.status}, classes ${a.classes.join(", ") || "none recorded"})`).join("; ")}` +
+						(h.also.length > 6 ? `; and ${h.also.length - 6} more` : "") : ""));
 				const text = [head, ...(lines.length ? lines : ["No close registered word marks found in this data."]),
-					...(result.more ? [`(${result.more} more, less close)`] : [])].join("\n");
+					...(result.more ? [`(${result.more} more ${result.more === 1 ? "name" : "names"}, less close)`] : []),
+					...(typeof result.filings === "number" && result.filings > result.hits.length + (result.more ?? 0)
+						? [`(${result.filings} filings under these names in all)`] : [])].join("\n");
 				return { content: [{ type: "text", text }],
-					details: { name: result.name, hits: result.hits.length, more: result.more ?? 0 } };
+					details: { name: result.name, hits: result.hits.length, more: result.more ?? 0,
+						...(typeof result.filings === "number" ? { filings: result.filings } : {}) } };
 			},
 			renderResult(result, _options, theme) {
-				const d = result.details as { name?: string; hits?: number; more?: number } | undefined;
+				const d = result.details as { name?: string; hits?: number; more?: number; filings?: number } | undefined;
 				const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
-				box.addChild(new Text(theme.bold("Trademark search") + `  “${d?.name ?? ""}” · ${d?.hits ?? 0} close mark(s)` +
-					(d?.more ? ` (+${d.more})` : "") + " · on this computer", 0, 0));
+				// Names, then the filings under them (all of them, the "more" names' too), in one unit each.
+				const names = (d?.hits ?? 0) + (d?.more ?? 0);
+				box.addChild(new Text(theme.bold("Trademark search") + `  “${d?.name ?? ""}” · ${d?.hits ?? 0} close name(s)` +
+					(d?.more ? ` (+${d.more})` : "") + (typeof d?.filings === "number" && d.filings > names ? ` (${d.filings} filings)` : "") +
+					" · on this computer", 0, 0));
 				return box;
 			},
 		});
+		// ── end trademark search tool ──
 
 		// ── report reminder ──
 		// Measured 19 Oct on a Mac (0.9.119, sealed model): seven searches, then "Now writing the report to

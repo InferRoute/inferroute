@@ -62,7 +62,8 @@ def test_marks_in_the_classes_asked_about_rank_higher_but_not_above_the_same_spe
     # Antériora (same spelling, class 45) above the merely close marks in the founder's classes; Anteriora Labs
     # (the whole name inside it, class 42) above it.
     assert order.index("5") < order.index("8") < min(order.index("3"), order.index("4"))
-    assert order.index("3") < order.index("9")               # ANTERIOR: in class 42 above the same mark in 35
+    # ANTERIOR in class 35 is the same name as ANTERIOR in 42: one entry, led by the one in the founder's class.
+    assert "9" not in order and [a["number"] for a in r["hits"][order.index("3")]["also"]] == ["9"]
 
 
 def test_the_same_search_returns_the_same_list(index):
@@ -300,3 +301,22 @@ def test_the_banded_distance_agrees_with_the_full_one():
         b = "".join(rnd.choice("abcd") for _ in range(rnd.randint(0, 9)))
         cap = rnd.randint(0, 10)
         assert min(T.distance(a, b, cap), cap + 1) == min(full(a, b), cap + 1)
+
+
+def test_the_same_name_filed_again_is_one_entry_that_keeps_every_filing():
+    # FESTO four times across US, FR and EU took four of the places a founder reads and pushed a different, closer
+    # conflict past them. One entry per name, where its closest copy sat; every copy stays listed under "also",
+    # and a copy in the founder's classes marks the entry as in their classes even when the closest copy is not.
+    def hit(reg, num, text, overlap=()):
+        return {"register": reg, "number": num, "text": text, "status": "registered", "classes": ["7"],
+                "filed": "", "reasons": ["same spelling"], "score": 1.0,
+                "class_overlap": 1 if overlap else 0, "overlapping_classes": list(overlap)}
+    got = T.group_same_name([hit("US", "1", "FESTO"), hit("FR", "2", "Fésto"), hit("US", "3", "FESTOOL"),
+                             hit("EU", "4", "festo", ["7"])])
+    assert [h["number"] for h in got] == ["1", "3"]
+    assert [(a["register"], a["number"]) for a in got[0]["also"]] == [("FR", "2"), ("EU", "4")]
+    assert got[0]["overlapping_classes"] == ["7"] and got[0]["class_overlap"] == 1
+    assert "also" not in got[1]
+    lines = T.report_lines({"name": "Festo", "classes": [], "data_date": "d", "sources": "", "marks_searched": 4,
+                            "hits": got, "more": 0})
+    assert any(line.startswith("    also filed as: FR 2 (registered, classes 7); EU 4") for line in lines)

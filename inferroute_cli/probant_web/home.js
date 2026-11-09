@@ -1403,6 +1403,21 @@
   function renderHelp() {
     const p = page();
     clear(p);
+    // What a name check searches comes only from the index this release pins (/api/tm-index, tm_search.coverage),
+    // the same lists the report and the assistant use. No list is typed here: one would contradict the report under
+    // another pin. Until the answer arrives, or if it fails, the page points to the report instead.
+    const dl = el("li", "", "The search runs on this computer, in a copy of the registers downloaded once. A name is never sent to a trademark register, a search engine or a website. The assistant that reads your notes and writes the report runs on the checked sealed machine.");
+    const covered = el("li", "", "The list of registers searched is in each report's coverage section.");
+    const nameCheckHelp = el("ul", "", dl, covered,
+      el("li", "", "The report lists registered marks that resemble each name and why, and questions to take to a trademark professional. It never says whether you can use or register a name: that is a legal judgement."));
+    api("/api/tm-index").then((st) => {
+      // download_mb is the pinned file's size (tm_install.INDEX["xz_bytes"], which the download is checked against).
+      if (st.download_mb) dl.textContent = dl.textContent.replace("downloaded once.", `downloaded once (about ${st.download_mb} MB).`);
+      if ((st.searched || []).length && (st.not_searched || []).length) {
+        covered.textContent = `Searched: ${st.searched.join("; ")}. The data dates are shown on the matter page.`;
+        covered.after(el("li", "", `Not searched: ${st.not_searched.join(", ")}.`));
+      }
+    }).catch(() => { /* keep the pointer to the report's coverage section */ });
     const sec = (title, ...nodes) => el("section", "help-section", el("h2", "", title), ...nodes);
     const para = (t) => el("p", "", t);
     const list = (...items) => el("ul", "", ...items.map((t) => el("li", "", t)));
@@ -1412,7 +1427,7 @@
       sec("What you can do",
         list("Prior-art survey: describe an invention and the assistant searches about 30.4 million US, European and WIPO patent publications (titles and abstracts, to late October 2026) for the closest earlier ones.",
           "Read a document or a repository: point it at a text file, a folder, a git link or a GitHub repository. It lists each distinct invention it finds and drafts a matter for each, for you to review.",
-          "Name check: list the names you are considering for a product. It searches the US and French trademark registers on this computer and reports the registered marks that resemble each name, and why.")),
+          "Name check: list the names you are considering for a product. It searches the trademark registers listed under Name check below, on this computer, and reports the registered marks that resemble each name, and why.")),
       sec("1. Create a matter",
         para("A matter is one thing you research: an invention, or the names for a product. It keeps its notes, its sessions and its records in a folder on this computer."),
         list("For an invention: describe it in plain technical terms. Its date bound limits searches to documents published before it; leave today's date until you know your filing date.",
@@ -1427,11 +1442,7 @@
         list("Ask for a prior-art survey, or for something more specific: one feature on its own, documents like one it found, or more results.",
           "Before its first patent search the assistant shows you the exact text it wants to send. Nothing is searched until you allow it.",
           "Mark documents as relevant, not relevant or known. Marks save as you click; the assistant reads them to steer its next searches but cannot change them.")),
-      sec("4. Name check",
-        list("The search runs on this computer, in a copy of the registers downloaded once (about 250 MB). A name is never sent to a trademark register, a search engine or a website. The assistant that reads your notes and writes the report runs on the checked sealed machine.",
-          "Searched: the US register (USPTO, including international registrations designating the US) and the French register (INPI, French national filings). The data dates are shown on the matter page.",
-          "Not searched: EU trade marks (EUIPO), international registrations designating France or the EU (WIPO Madrid), other countries, company and trading names, domain names, unregistered use, logo-only marks.",
-          "The report lists registered marks that resemble each name and why, and questions to take to a trademark professional. It never says whether you can use or register a name: that is a legal judgement.")),
+      sec("4. Name check", nameCheckHelp),
       sec("5. Read a document or a repository",
         list("Choose a folder, a git link or a GitHub repository (connect GitHub to choose a private one). You choose which parts it reads; test code can be left out.",
           "It lists every distinct invention it finds, then writes one draft matter per invention. A large repository can take 30 to 45 minutes.",

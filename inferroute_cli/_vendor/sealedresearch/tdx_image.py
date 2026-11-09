@@ -148,6 +148,22 @@ PIN_UNIT_FORBIDDEN = ("ProtectKernelModules", "ProtectHome", "InaccessiblePaths"
                       "ReadOnlyPaths", "ReadWritePaths")
 # The only directories of the root the pin may leave unwalked (another filesystem; each empty in the image).
 PIN_OTHER_FILESYSTEMS = frozenset({"/proc", "/sys", "/dev", "/run", "/tmp", "/var/tmp", "/ram", "/efi", "/boot"})
+# Images released before v16 are checked, on rows "D4. pin unit properties" and "D7. the warm parent parses data, not
+# code", by exactly the rules the v15-era checker (dcb384a) applied, so a record made on a signed v14/v15 image keeps
+# its level. Every other name -- v16, later, unknown or absent -- gets the v16 rules (fail closed). The v15 pin rules
+# are KNOWN to pass a pin that could not see the whole root (ProtectKernelModules hid /usr/lib/modules: 174 MB
+# unpinned, shared/qa/2026-11-09/v16-diag); the record verifier therefore never prints the pin clause for these images.
+V15_RULES_IMAGES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15")
+V15_RULES_PREFIX = "v15 rules: "
+# The v15-era pin unit: the whole sandbox set (ProtectKernelModules and ProtectHome included), no forbidden key.
+V15_PIN_UNIT_REQUIRED = {**SANDBOX_REQUIRED, **PIN_UNIT_REQUIRED}
+
+
+def rules_for(rep: "ImageReport") -> str:
+    """Which rule set rows D4 pin and D7 parses-data apply: "v15" only when the checked command line names exactly one
+    image and it is v14 or v15; "v16" otherwise (v16, later, unknown, absent, or two names: the strict rules)."""
+    names = [t.split("=", 1)[1] for t in str(rep.values.get("cmdline") or "").split() if t.startswith("inferroute.image=")]
+    return "v15" if len(names) == 1 and names[0] in V15_RULES_IMAGES else "v16"
 # One reply slot and one engine budget, in the units' Environment= (both numbers in seconds; the engine's budget
 # must equal the front's and lie below the slot).
 ENV_SLOT, ENV_BUDGET = "IR_REPLY_SLOT_SECONDS", "IR_ENGINE_BUDGET_SECONDS"
@@ -1251,12 +1267,16 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
     for unit, row in (("ir-search.service", "D4. search unit properties"), ("ir-fetch.service", "D4. fetch unit properties"),
                       ("ir-engine.service", "D4. engine unit properties"), ("ir-pin.service", "D4. pin unit properties")):
         required, deps = UNITS_EXPECTED[unit]
+        v15_pin = unit == "ir-pin.service" and rules_for(rep) == "v15"     # a v14/v15 image: the v15-era pin rules
+        if v15_pin:
+            required = V15_PIN_UNIT_REQUIRED
+        prefix = V15_RULES_PREFIX if v15_pin else ""
         u, unit_path, dropins = effective_unit(tree, unit)
         if unit_path is None:
-            rep.add(False, row, f"{unit} missing from every unit directory")
+            rep.add(False, row, f"{prefix}{unit} missing from every unit directory")
             continue
         problems = _unit_problems(u, required, deps, forbidden=ENGINE_UNIT_FORBIDDEN if unit == "ir-engine.service"
-                                  else PIN_UNIT_FORBIDDEN if unit == "ir-pin.service" else ())
+                                  else PIN_UNIT_FORBIDDEN if unit == "ir-pin.service" and not v15_pin else ())
         if not unit_path.startswith(os.path.join(tree, "etc/systemd/system")):
             problems.append(f"loaded from {os.path.relpath(unit_path, tree)}, not /etc/systemd/system")
         if dropins:
@@ -1276,11 +1296,11 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
         if unit in ("ir-search.service", "ir-engine.service"):
             problems += env_problems
         if unit == "ir-pin.service":
-            problems += _pin_program_problems(tree)
+            problems += _pin_program_problems(tree, v15=v15_pin)
         if unit == "ir-fetch.service":
             problems += _ram_unit_problems(tree)
-        rep.add(not problems, row,
-                f"{unit}: User={required.get('User', 'root')}, "
+        rep.add(not problems, row, prefix +
+                (f"{unit}: User={required.get('User', 'root')}, "
                 + ("CAP_IPC_LOCK and CAP_DAC_READ_SEARCH only" if unit == "ir-pin.service" else "no capability")
                 + ", no new privilege, read-only system, no device, W^X with "
                 f"noexec scratch and memfd_create refused, @system-service, stdout and stderr to null, no core dumps, -I interpreter"
@@ -1295,7 +1315,7 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
                 + ("; /ram mounted by ir-ram.service (root, CAP_SYS_ADMIN only, the host's mount namespace, before the fetch, "
                    "poweroff on failure): a tmpfs ir-fetch:ir-index mode 0750 noexec,nosuid,nodev, refused if already mounted"
                    if unit == "ir-fetch.service" else "")
-                + (f", ordered after {', '.join(deps)}" if deps else "") if not problems else "; ".join(problems))
+                + (f", ordered after {', '.join(deps)}" if deps else "") if not problems else "; ".join(problems)))
     problems = []
     for unit in ("ir-quote.service", "ir-quote.socket"):
         required, deps = UNITS_EXPECTED[unit]
@@ -1316,18 +1336,10 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
     check_dropins(rep, tree, src)
 
 
-def _pin_program_problems(tree: str) -> List[str]:
-    """What ir_pin.py is written to do, read off its AST (row D4 pin): walk the root on one st_dev, keep regular
-    non-empty files, mlockall(MCL_CURRENT), refuse when VmLck is short of the total, and notify READY only after."""
-    p = os.path.join(tree, APP_DIR, "ir_pin.py")
-    if not os.path.isfile(p):
-        return ["ir_pin.py missing"]
-    text = _text(p)
-    mod = _ast_parse(text)
-    out = []
-    rf = _src(text, mod, "regular_files")
-    if rf.count("st_dev == dev") < 2 or "os.walk(root, onerror=_refuse_unreadable)" not in rf:   # prune AND file filter
-        out.append("ir_pin.regular_files does not walk the root on one st_dev (both the directories it descends and the files it keeps)")
+def _pin_v16_problems(tree: str, text: str, mod: ast.Module, rf: str) -> List[str]:
+    """The v16 additions to row D4 pin (db2142c): the pin sees the whole root -- another filesystem is skipped only at
+    a listed, empty mountpoint, and an unreadable directory is refused."""
+    out: List[str] = []
     # v16: another filesystem is skipped only when listed; anything else, or an unreadable directory, is refused
     if "elif p not in OTHER_FILESYSTEMS:" not in rf or "raise SystemExit" not in rf:
         out.append("ir_pin.regular_files does not refuse a directory on another filesystem outside OTHER_FILESYSTEMS")
@@ -1353,6 +1365,26 @@ def _pin_program_problems(tree: str) -> List[str]:
         full = os.path.join(tree, d.lstrip("/"))
         if os.path.isdir(full) and not os.path.islink(full) and os.listdir(full):
             out.append(f"{d} is not empty in the image tree, yet the pin skips it")
+    return out
+
+
+def _pin_program_problems(tree: str, v15: bool = False) -> List[str]:
+    """What ir_pin.py is written to do, read off its AST (row D4 pin): walk the root on one st_dev, keep regular
+    non-empty files, mlockall(MCL_CURRENT), refuse when VmLck is short of the total, and notify READY only after.
+    v15=True: exactly the v15-era checks (dcb384a), without v16's refusal of an unlisted filesystem boundary, of an
+    unreadable directory, and of a non-empty skipped mountpoint."""
+    p = os.path.join(tree, APP_DIR, "ir_pin.py")
+    if not os.path.isfile(p):
+        return ["ir_pin.py missing"]
+    text = _text(p)
+    mod = _ast_parse(text)
+    out = []
+    rf = _src(text, mod, "regular_files")
+    walk = "os.walk(root)" if v15 else "os.walk(root, onerror=_refuse_unreadable)"
+    if rf.count("st_dev == dev") < 2 or walk not in rf:   # prune AND file filter
+        out.append("ir_pin.regular_files does not walk the root on one st_dev (both the directories it descends and the files it keeps)")
+    if not v15:
+        out += _pin_v16_problems(tree, text, mod, rf)
     if "S_ISREG(st.st_mode)" not in rf or "st.st_size > 0" not in rf:
         out.append("ir_pin.regular_files does not keep regular non-empty files only")
     la_fn = _function(mod, "lock_all")
@@ -2448,6 +2480,27 @@ def check_memory_seal(rep: ImageReport, tree: str, paths: Dict[str, str], ltext:
     check_data_not_code(rep, tree)
 
 
+def _encoder_allowlist_problems(text: str, mod: ast.Module, cm: str) -> List[str]:
+    """The v16 addition to row D7 parses-data (00de8be): the encoder directory is an exact allowlist."""
+    pr: List[str] = []
+    # v16: the encoder directory is an exact allowlist (files pinned by sha256, weights pinned by structure).
+    ef = next((n.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+               and any(isinstance(x, ast.Name) and x.id == "ENCODER_FILES" for x in n.targets)), None)
+    pins = {k.value: v.value for k, v in zip(ef.keys, ef.values) if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)} if ef is not None else {}
+    if not ({"modules.json", "config.json", "tokenizer.json", "tokenizer_config.json", "config_sentence_transformers.json"} <= set(pins)
+            and all(isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in pins.values())):
+        pr.append("ENCODER_FILES does not pin the encoder's configuration files by sha256")
+    msha = next((n.value.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+                 and any(isinstance(x, ast.Name) and x.id == "ENCODER_TENSOR_MANIFEST_SHA256" for x in n.targets)), None)
+    if not (isinstance(msha, str) and re.fullmatch(r"[0-9a-f]{64}", msha)):
+        pr.append("ENCODER_TENSOR_MANIFEST_SHA256 is not a pinned sha256")
+    cmf = _function(mod, "check_model_dir")
+    calls = {_call_name(n) for n in ast.walk(cmf) if isinstance(n, ast.Call)} if cmf else set()
+    if not {"safetensors_manifest", "sha256", "islink"} <= calls or "found != want" not in cm or "followlinks=False" not in cm:
+        pr.append("check_model_dir does not refuse anything but the pinned set (exact file set, sha256 per file, weights structure, no links)")
+    return pr
+
+
 def check_data_not_code(rep: ImageReport, tree: str) -> None:
     """D7 (round 5): the files the warm parent reads from the index provider cannot be code to the readers:
     SentenceTransformer(..., trust_remote_code=False) explicitly; TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 set before torch is
@@ -2483,21 +2536,9 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
     cm = _src(text, mod, "check_model_dir")
     if "safetensors" not in cm or "modules.json" not in cm or "ALLOWED_MODULE_PREFIX" not in cm:
         pr.append("check_model_dir does not require safetensors weights and sentence_transformers modules")
-    # v16: the encoder directory is an exact allowlist (files pinned by sha256, weights pinned by structure).
-    ef = next((n.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
-               and any(isinstance(x, ast.Name) and x.id == "ENCODER_FILES" for x in n.targets)), None)
-    pins = {k.value: v.value for k, v in zip(ef.keys, ef.values) if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)} if ef is not None else {}
-    if not ({"modules.json", "config.json", "tokenizer.json", "tokenizer_config.json", "config_sentence_transformers.json"} <= set(pins)
-            and all(isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in pins.values())):
-        pr.append("ENCODER_FILES does not pin the encoder's configuration files by sha256")
-    msha = next((n.value.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
-                 and any(isinstance(x, ast.Name) and x.id == "ENCODER_TENSOR_MANIFEST_SHA256" for x in n.targets)), None)
-    if not (isinstance(msha, str) and re.fullmatch(r"[0-9a-f]{64}", msha)):
-        pr.append("ENCODER_TENSOR_MANIFEST_SHA256 is not a pinned sha256")
-    cmf = _function(mod, "check_model_dir")
-    calls = {_call_name(n) for n in ast.walk(cmf) if isinstance(n, ast.Call)} if cmf else set()
-    if not {"safetensors_manifest", "sha256", "islink"} <= calls or "found != want" not in cm or "followlinks=False" not in cm:
-        pr.append("check_model_dir does not refuse anything but the pinned set (exact file set, sha256 per file, weights structure, no links)")
+    v15 = rules_for(rep) == "v15"            # a v14/v15 image: the v15-era rules (no encoder allowlist)
+    if not v15:
+        pr += _encoder_allowlist_problems(text, mod, cm)
     # preload opens exactly PRELOAD_PATHS, through faiss.read_index / SentenceTransformer / lgb.Booster, and nothing else.
     pp = next((n.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
                and any(isinstance(x, ast.Name) and x.id == "PRELOAD_PATHS" for x in n.targets)), None)
@@ -2523,6 +2564,14 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
             pr.append(f"preload does not open exactly PRELOAD_PATHS through read_index/SentenceTransformer/Booster: {readers}")
         if others:
             pr.append(f"preload reads through other calls: {others}")
+    if v15:
+        rep.add(not pr, "D7. the warm parent parses data, not code", V15_RULES_PREFIX + (
+                "engine_preload: preload opens exactly PRELOAD_PATHS (index, model, stage1, stage2) through faiss.read_index, "
+                "SentenceTransformer and lgb.Booster and nothing else; TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 before torch; SentenceTransformer(trust_remote_code=False) after "
+                "check_model_dir (safetensors only, no .bin/.pt/.pth/.pkl/.pickle/.ckpt/.py/.so, modules.json entries all "
+                "sentence_transformers.*); faiss.read_index and lgb.Booster(model_file) parse typed structures, never code"
+                if not pr else "; ".join(pr)))
+        return
     rep.add(not pr, "D7. the warm parent parses data, not code",
             "engine_preload: preload opens exactly PRELOAD_PATHS (index, model, stage1, stage2) through faiss.read_index, "
             "SentenceTransformer and lgb.Booster and nothing else; TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 before torch; SentenceTransformer(trust_remote_code=False) after "

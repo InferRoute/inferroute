@@ -1108,7 +1108,11 @@ TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
 # wording of two blockers (TDX_V15_*) rests on the signed release image's boot test and an adversarial wording review
 # (8 Nov: the first draft overclaimed and was rewritten).
 # v16 (9 Nov 2026) = v15's command line and clauses; its root pin row is stricter (an image whose pin cannot see the
-# whole root fails that row, and the pin clause is then not printed).
+# whole root fails that row, and the pin clause is then not printed). v14/v15 images are checked on that row by the
+# v15-era rules, under which a pin that could NOT see the whole root passed (ProtectKernelModules hid /usr/lib/modules,
+# 174 MB unpinned while the pin's own check passed: InferRoute's 9 Nov v16 diagnostic boot), so the pin clause is
+# printed only when facts["pin_sees_root"] holds: a TDX_PIN_SEES_ROOT_IMAGES image whose pin row PASSED under the
+# v16 rules. The row itself still counts for the level.
 TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16")
 TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME,) + TDX_IDLE_POLL_IMAGES
 TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
@@ -1136,6 +1140,11 @@ TDX_V14_HEAD_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
      "their names and versions are those of a hash-pinned requirements file; the wheel hashes are not re-checked; and "
      "the package directory holds no interpreter start-up hook"),
 )
+# Printed only when facts["pin_sees_root"] (CLAUSE_FACTS below), whatever rows passed.
+TDX_PIN_CLAUSE = ("its published pin step is written to read and lock every regular non-empty file of the root filesystem "
+                  "in memory before the engine starts, and to refuse if it meets a directory it cannot read or another "
+                  "filesystem it was not told about, or if the locked total falls short; whether reads then reached the "
+                  "disk is a first-boot measurement, not part of this record; directory lookups are not locked")
 TDX_V14_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("D7. the warm parent imports no closed module", "D7. one engine process per request"),
      "the search engine's long-lived process imports no unpublished code, statically or dynamically, among the "
@@ -1173,11 +1182,7 @@ TDX_V14_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
      "after that"),
     (("D7. offer served from immutable bytes",),
      "the attestation offer is written once when the service starts and served as those bytes"),
-    (("D4. pin unit properties", "D4. engine unit properties"),
-     "its published pin step is written to read and lock every regular non-empty file of the root filesystem in memory "
-     "before the engine starts, and to refuse if it meets a directory it cannot read or another filesystem it was not "
-     "told about, or if the locked total falls short; whether reads then reached the disk is "
-     "a first-boot measurement, not part of this record; directory lookups are not locked"),
+    (("D4. pin unit properties", "D4. engine unit properties"), TDX_PIN_CLAUSE),
     (("D7. no writable kernel object",),
      "no object the kernel would keep for the engine — a queue, a shared segment, a device that maps as memory, a "
      "scratch file — is writable to it, apart from per-process entries that end with it"),
@@ -1281,6 +1286,27 @@ TDX_V16_RANKER_SEES = ("the ranking modules are published (open_rank) and the im
 
 
 TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16",)
+# The images whose pin row the checker judges by the v16 rules (the pin sees the whole root). The checker marks a row
+# judged by the v15-era rules with TDX_V15_RULES_PREFIX; such a row never licenses the pin clause.
+TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16",)
+TDX_V15_RULES_PREFIX = "v15 rules: "
+_D4_PIN = "D4. pin unit properties"
+# A clause that needs a fact as well as its rows: printed only when every row PASSED and the fact is true.
+CLAUSE_FACTS: Dict[str, str] = {TDX_PIN_CLAUSE: "pin_sees_root"}
+
+
+def _pin_sees_root(name: Optional[str], details: Dict[str, str]) -> bool:
+    """True only when THIS image check judged the pin row by the v16 rules and it PASSED: a v16 image, the row PASSED,
+    and its detail is not marked as judged by the v15-era rules."""
+    return (name in TDX_PIN_SEES_ROOT_IMAGES and _D4_PIN in details
+            and not details[_D4_PIN].startswith(TDX_V15_RULES_PREFIX))
+
+
+def _licensed(rows: Tuple[str, ...], words: str, passed: Any, facts: Optional[Dict[str, Any]]) -> bool:
+    return all(r in passed for r in rows) and all((facts or {}).get(f) for f in
+                                                   ([CLAUSE_FACTS[words]] if words in CLAUSE_FACTS else []))
+
+
 _D1_CLOSED, _D7_PARENT = "D1. closed engine files match their published hashes", "D7. the warm parent imports no closed module"
 _D1_PUBLISHED = "D1. published files equal the source"
 
@@ -1369,7 +1395,7 @@ def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
     return {"image": name, "v14": name in TDX_V14_FAMILY, "idle_poll": name in TDX_IDLE_POLL_IMAGES
             and "idle=poll" in cmdline.split(), "passed": passed, "skipped": skipped,
             "required_not_passed": required_not_passed,
-            "open_engine": _open_engine_rows(name, details),
+            "open_engine": _open_engine_rows(name, details), "pin_sees_root": _pin_sees_root(name, details),
             "slot": num(slot), "budget": num(budget), "survey_slot": num(sslot), "survey_budget": num(sbudget),
             "waiting": str(waiting) if isinstance(waiting, int) else "the configured number of"}
 
@@ -1444,7 +1470,7 @@ def plain_answer_tdx_v14(facts: Optional[Dict[str, Any]]) -> str:
     slot = (facts or {}).get("slot", "the configured number of")
     waiting = (facts or {}).get("waiting", "the configured number of")
     budget = (facts or {}).get("budget", "the configured number of")
-    parts = [words.format(**_numbers(facts)) for rows, words in PLAIN_ANSWER_TDX_V14_PARTS if all(r in passed for r in rows)]
+    parts = [words.format(**_numbers(facts)) for rows, words in PLAIN_ANSWER_TDX_V14_PARTS if _licensed(rows, words, passed, facts)]
     return open_engine_words(" ".join([PLAIN_ANSWER_TDX_V14_HEAD] + parts + [PLAIN_ANSWER_TDX_V14_TAIL]), facts)
 
 
@@ -1456,8 +1482,8 @@ def tdx_image_statement(facts: Optional[Dict[str, Any]]) -> str:
     passed = facts.get("passed", set())
     slot, waiting = facts.get("slot", "the configured number of"), facts.get("waiting", "the configured number of")
     budget = facts.get("budget", "the configured number of")
-    head = [words for rows, words in TDX_V14_HEAD_CLAUSES if all(r in passed for r in rows)]
-    body = [words.format(**_numbers(facts)) for rows, words in TDX_V14_CLAUSES if all(r in passed for r in rows)]
+    head = [words for rows, words in TDX_V14_HEAD_CLAUSES if _licensed(rows, words, passed, facts)]
+    body = [words.format(**_numbers(facts)) for rows, words in TDX_V14_CLAUSES if _licensed(rows, words, passed, facts)]
     numbered = "; ".join(f"({i}) {w}" for i, w in enumerate(body, 1))
     version = (str(facts.get("image") or "").rsplit("-", 1)[-1] or "v14") if facts else "v14"
     return open_engine_words(TDX_INTRO_TEMPLATE.format(version=version) + (" " + "; ".join(head) + "." if head else "")

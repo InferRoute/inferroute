@@ -256,21 +256,30 @@ def similarity(a: str, b: str) -> float:
 # which it holds in its "sources"; every one it does not hold is named as NOT searched, so a register is never
 # left out of a sentence by being absent from the data.
 REGISTERS = [
-    ("USPTO", "the US register (USPTO), including international registrations designating the US"),
-    ("INPI", "the French register (INPI), French national filings"),
+    ("USPTO", "the US register (USPTO), live word marks, including international registrations designating the US"),
+    ("INPI", "the French register (INPI), live word marks, French national filings"),
     ("EUIPO", "EU trade marks (EUIPO)"),
     ("WIPO", "international registrations designating France or the EU (WIPO Madrid)"),
 ]
+# A register held from a copy rather than the register itself is named for what it is when searched, and what the
+# copy lacks is named as not searched. The EU marks come from INPI's open-data copy of the EUIPO register, which
+# misses some EU marks; "EUIPO" alone read as the register itself (wording owned by pi-attested, 9 Nov).
+HELD_AS = {
+    "EUIPO": ("EU trade marks (live word marks, from INPI's open-data copy of the EUIPO register; "
+              "some EU marks are missing from that copy)",
+              ["EU marks with no words in them (figurative only)", "EU marks missing from INPI's copy"]),
+}
 ALWAYS_UNCOVERED = ["registers of other countries", "company and trading names", "domain names",
                     "unregistered use of a name", "marks made only of a logo or picture"]
 
 
 def coverage(sources: str) -> Dict[str, List[str]]:
     """{"searched": [...], "not_searched": [...]} for an index whose meta "sources" is `sources`."""
-    held = [label for key, label in REGISTERS if key in (sources or "")]
-    missing = [label for key, label in REGISTERS if key not in (sources or "")
-]
-    return {"searched": held, "not_searched": missing + ALWAYS_UNCOVERED}
+    held = [key for key, _ in REGISTERS if key in (sources or "")]
+    searched = [HELD_AS[key][0] if key in HELD_AS else label for key, label in REGISTERS if key in held]
+    missing = [label for key, label in REGISTERS if key not in held]
+    lacks = [x for key in held if key in HELD_AS for x in HELD_AS[key][1]]
+    return {"searched": searched, "not_searched": missing + lacks + ALWAYS_UNCOVERED}
 
 
 # ── building the index (our side; the result is the file a computer downloads) ──

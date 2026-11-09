@@ -86,8 +86,12 @@ def test_every_register_not_in_the_data_is_named_as_not_searched():
     assert "EU trade marks (EUIPO)" in us_fr["not_searched"]
     assert any("WIPO Madrid" in x for x in us_fr["not_searched"])
     assert {"company and trading names", "domain names", "unregistered use of a name"} <= set(us_fr["not_searched"])
-    with_eu = T.coverage("USPTO; INPI; EUIPO (European Union)")
-    assert "EU trade marks (EUIPO)" in with_eu["searched"] and "EU trade marks (EUIPO)" not in with_eu["not_searched"]
+    # EU marks held from INPI's copy are named as that copy, never as the EUIPO register itself, and what the copy
+    # lacks is named as not searched.
+    with_eu = T.coverage("USPTO; INPI; EUIPO (EU trade marks, as republished in INPI open data)")
+    assert "EU trade marks (EUIPO)" not in with_eu["searched"] + with_eu["not_searched"]
+    assert any("INPI's open-data copy of the EUIPO register" in x and "missing" in x for x in with_eu["searched"])
+    assert {"EU marks with no words in them (figurative only)", "EU marks missing from INPI's copy"} <= set(with_eu["not_searched"])
     assert T.coverage("")["searched"] == []
 
 

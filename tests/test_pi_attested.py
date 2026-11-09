@@ -818,6 +818,7 @@ def test_the_corpus_is_named_in_words_and_the_identifier_is_never_dropped():
     script = block + """
 const out = {};
 for (const id of ["patent1m-epwo+usall@29595902", "patent1m-usall@12000000", "", "garbage",
+                  "patent1m-epwo+epwo-2610+usall+usall-2610@30398469",
                   "patent1m-zz@100", "patent1m-epwo+usall@0"]) out[id] = [corpusName(id), corpusPhrase(id)];
 console.log(JSON.stringify(out));
 """
@@ -832,6 +833,10 @@ console.log(JSON.stringify(out));
     # The identifier survives in the phrase: it is what a statement commits to.
     assert "patent1m-epwo+usall@29595902" in phrase
     assert got["patent1m-usall@12000000"][0] == "12 million published patents from the United States"
+    # A refresh layer (usall-<digits>, epwo-<digits>) holds the same offices, so the name stays true.
+    rid = "patent1m-epwo+epwo-2610+usall+usall-2610@30398469"
+    assert got[rid][0] == "30.4 million published patents from the United States, Europe and WIPO"
+    assert rid in got[rid][1]
     # Unrecognised shapes get no invented description, and the phrase falls back to the raw identifier.
     for bad in ("garbage", "patent1m-zz@100", "patent1m-epwo+usall@0"):
         assert got[bad][0] == "", f"{bad} was given a name it did not earn"

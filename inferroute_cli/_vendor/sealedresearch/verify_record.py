@@ -1104,9 +1104,13 @@ TDX_PRESEAL = ("before the firewall and seal are installed the program fetches i
 # checker's v14 rows exist for it) gets the clauses below, each printed only when the row that establishes it PASSED.
 # Every clause describes what the image CONTAINS and how its published code is CONFIGURED; none describes a run.
 TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
-# v15 = v14 + idle=poll (8 Nov 2026). It gets every v14 clause; idle=poll is recorded as its own fact, and no sentence
-# says anything about it until the signed release image has been measured the same way and the wording reviewed.
-TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME, "ir-sealed-search-tdx-v15")
+# v15 = v14 + idle=poll (8 Nov 2026). It gets every v14 clause; idle=poll is recorded as its own fact, and the v15
+# wording of two blockers (TDX_V15_*) rests on the signed release image's boot test and an adversarial wording review
+# (8 Nov: the first draft overclaimed and was rewritten).
+# v16 (9 Nov 2026) = v15's command line and clauses; its root pin row is stricter (an image whose pin cannot see the
+# whole root fails that row, and the pin clause is then not printed).
+TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16")
+TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME,) + TDX_IDLE_POLL_IMAGES
 TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
                       "InferRoute publishes (image {version}). Established by the rows that passed:")
 TDX_V14_INTRO = TDX_INTRO_TEMPLATE.format(version="v14")      # v15 names itself (review 8 Nov: it printed "v14")
@@ -1171,7 +1175,8 @@ TDX_V14_CLAUSES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
      "the attestation offer is written once when the service starts and served as those bytes"),
     (("D4. pin unit properties", "D4. engine unit properties"),
      "its published pin step is written to read and lock every regular non-empty file of the root filesystem in memory "
-     "before the engine starts, and to refuse if the locked total falls short; whether reads then reached the disk is "
+     "before the engine starts, and to refuse if it meets a directory it cannot read or another filesystem it was not "
+     "told about, or if the locked total falls short; whether reads then reached the disk is "
      "a first-boot measurement, not part of this record; directory lookups are not locked"),
     (("D7. no writable kernel object",),
      "no object the kernel would keep for the engine — a queue, a shared segment, a device that maps as memory, a "
@@ -1229,6 +1234,119 @@ TDX_V14_FIRST_BOOT = ("the checks InferRoute publishes for a first start of this
                       "this record; ask InferRoute whether it has run them on a machine started from this image, and "
                       "for the results")
 
+# v15 (8 Nov 2026): the same blockers, re-worded where idle=poll changes them, used ONLY when the checked command line
+# carries idle=poll (facts["idle_poll"] and row "B. UKI command line" PASSED). Measured on InferRoute's release boot
+# test of the signed release image (shared/qa/2026-11-08/v15-boot-test: Google's per-minute cpu/utilization 99.1-100.8 %
+# idle and working, against 0.03 % / 1.26 % on v14; the earlier unsigned idle=poll test read 99.8-99.97 %). InferRoute's
+# own measurement; a hostile closed ranker can still signal through physical channels the record does not close.
+TDX_V15_RANKER_SEES = ("the ranking modules' source is not published; inside the per-request child they receive each "
+                       "query in plain text from the published front; as published and configured (not as observed "
+                       "running), their process has no network, no writable storage and a fresh start per request, and "
+                       "their answer is cut to a published shape, padded to one size, held to a fixed interval and sealed "
+                       "to the requesting client; configuration cannot stop code that cannot be read from signalling "
+                       "through the machine's physical behaviour (interrupt bursts, virtio interrupts, memory use, power "
+                       "and frequency, cache and memory-bandwidth contention), and nothing in this record closes those "
+                       "channels; what the modules put in the reply cannot be reviewed")
+_V14_BUSY = "whether the machine is busy or idle inside a reply interval, and a queue-full"
+_V14_SURVEY_BUSY = ("how long the machine is busy inside a survey's interval roughly follows how many sub-searches it ran; "
+                    "that the rest fits is a first-boot measurement")
+assert _V14_BUSY in TDX_V14_METADATA and _V14_SURVEY_BUSY in TDX_V14_METADATA
+TDX_V15_METADATA = TDX_V14_METADATA.replace(_V14_BUSY, "and a queue-full").replace(
+    _V14_SURVEY_BUSY,
+    "as configured (idle=poll, which this image check requires of v15), the guest does not halt its processors when "
+    "idle; in InferRoute's own test of the v15 release image, not part of this record, Google's per-minute "
+    "processor-utilisation figure read about 100 % whether the machine was idle or working; finer signals (interrupt "
+    "bursts as each request's helper starts and ends, virtio interrupts, memory use, power and frequency, cache and "
+    "memory contention) are not covered and may still show how long it worked, or more; that the engine's share fits "
+    "its interval is a first-boot measurement")
+assert "busy or idle inside a reply" not in TDX_V15_METADATA and "idle=poll" in TDX_V15_METADATA
+
+# v16 (9 Nov 2026, design A): the ranking modules are PUBLISHED (open_rank) and the image holds no closed
+# engine file. Used ONLY when the image check established both (tdx_open_engine): the D1 closed row PASSED with "no
+# closed engine file" and the D7 parent row PASSED naming open_rank as the engine. What is still open is said: the
+# amount of work and the parts of the index read depend on the query (the fixed-shape variant is not in this image).
+TDX_V16_RANKER_SEES = ("the ranking modules are published (open_rank) and the image holds no engine "
+                       "file of unpublished source; inside the per-request child they receive each query in plain "
+                       "text from the published front; as published and configured (not as observed running), their "
+                       "process has no network, no writable storage and a fresh start per request, and their answer is "
+                       "cut to a published shape, padded to one size, held to a fixed interval and sealed to the "
+                       "requesting client; how much work they do and which parts of the index they read still depend "
+                       "on the query, and nothing in this record closes what that shows through the machine's physical "
+                       "behaviour (interrupt bursts, virtio interrupts, memory use, power and frequency, cache and "
+                       "memory-bandwidth "
+                       "contention) to someone watching the hardware; what they put in the reply follows from their "
+                       "published source applied to the fetched index and ranking models (InferRoute's private data, "
+                       "pinned by hash, not published), and was not observed; this record does not show that anyone "
+                       "outside InferRoute has read that source")
+
+
+TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16",)
+_D1_CLOSED, _D7_PARENT = "D1. closed engine files match their published hashes", "D7. the warm parent imports no closed module"
+_D1_PUBLISHED = "D1. published files equal the source"
+
+
+def _open_engine_rows(name: Optional[str], details: Dict[str, str]) -> bool:
+    """True only when THIS image check established that the engine is published: a v16 image, the D1 closed row
+    PASSED saying no closed engine file is in the image, and the D7 parent row PASSED naming open_rank as the engine
+    (the checker names it so only for a child that reaches open_rank, no closed module and no dynamic import)."""
+    return (name in TDX_OPEN_ENGINE_IMAGES and _D1_PUBLISHED in details
+            and details.get(_D1_CLOSED, "").startswith("no closed engine file")
+            and "open_rank, published) is imported by tdx_child" in details.get(_D7_PARENT, ""))
+
+
+def tdx_open_engine(facts: Optional[Dict[str, Any]]) -> bool:
+    return bool((facts or {}).get("open_engine"))
+
+
+# Sentences written for a closed ranker, as they read when the image check established a published engine. Each OLD
+# text must occur in this module (asserted below), so an edit to a sentence cannot leave its v16 form silently unused.
+V16_OPEN_ENGINE_WORDS: Tuple[Tuple[str, str], ...] = (
+    ("the files under /opt/ir/app equal the published commit, except that the ranking modules' source is not "
+     "published and those files are matched by hash only",
+     "the files under /opt/ir/app equal the published commit, the ranking modules included, and no engine file of "
+     "unpublished source is there"),
+    ("imports no unpublished code, statically or dynamically, among the published files under /opt/ir/app: the "
+     "ranking modules are loaded only",
+     "imports no ranking module, statically or dynamically, among the published files under /opt/ir/app: the "
+     "ranking modules are loaded only"),
+    ("before any closed code runs", "before any ranking code runs"),
+    ("idle=poll, which this image check requires of v15", "idle=poll, which this image check requires of this image"),
+    ("InferRoute reports that, on its own test,", "InferRoute reports that, on its own test of an earlier image (v15, not this one),"),
+    ("reaches no unpublished module by import", "reaches no ranking module by import"),
+    ("the closed code's answer is cut to a published shape", "the ranking code's answer is cut to a published shape"),
+    ("what the ranking modules open inside the child is not checked",
+     "what the ranking modules open inside the child is not checked by this record (their source is published and "
+     "can be read for it)"),
+    ("its ranking part is secret (its exact version is pinned, but you cannot read it); and",
+     "its ranking part is published too (anyone can read its source; the index and the ranking models it works "
+     "with are InferRoute's own data, pinned to an exact version but not published, so what it ranks first does not "
+     "follow from the source alone); and"),
+    ("As published, the secret ranking part is loaded only", "As published, the ranking part is loaded only"),
+    ("never loads the secret part at all.", "never loads the ranking part at all."),
+    ("what they showed; (b) whether your own expert may inspect the secret ranking part; (c) for a record whose "
+     "program someone outside InferRoute has rebuilt. None of these changes this record; (b) and (c) are changes your "
+     "provider could make for future searches",
+     "what they showed; (b) for a record whose program someone outside InferRoute has rebuilt from the published "
+     "source (the ranking code is published now, so reading it needs no agreement; whether the build reproduces is "
+     "InferRoute's own claim, untested outside). None of these changes this record; (b) is a change your provider "
+     "could make for future searches"),
+    ("ask for a record whose program someone outside InferRoute has rebuilt and confirmed, and ask whether your "
+     "own expert can inspect the secret ranking part (this verifier cannot show either; your provider would have to, "
+     "and the other gaps stay open)",
+     "ask for a record whose program someone outside InferRoute has rebuilt and confirmed (the source, ranking code "
+     "included, is published; whether it rebuilds to this image is InferRoute's own claim, and this verifier cannot "
+     "show that anyone has tried; your provider would have to, and the other gaps stay open)"),
+)
+
+
+def open_engine_words(text: str, facts: Optional[Dict[str, Any]]) -> str:
+    """The text as it reads for this image: unchanged unless the image check established a published engine."""
+    if not tdx_open_engine(facts):
+        return text
+    for old, new in V16_OPEN_ENGINE_WORDS:
+        text = text.replace(old, new)
+    return text
+
 
 def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
     """What the posture checker established for THIS image: its version, read off the checked command line, and the
@@ -1240,6 +1358,7 @@ def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
     m = re.search(r"inferroute\.image=(ir-sealed-search-tdx-v\d+)", cmdline)
     name = m.group(1) if m else None
     passed = {n for s, n, _d in getattr(image_report, "rows", []) if s == "PASS"}
+    details = {n: str(d) for s, n, d in getattr(image_report, "rows", []) if s == "PASS"}
     skipped = {n for s, n, _d in getattr(image_report, "rows", []) if s == "SKIP"}
     rnp = getattr(image_report, "required_not_passed", None)
     required_not_passed = set(rnp()) if callable(rnp) else set()
@@ -1247,9 +1366,10 @@ def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
     slot, waiting, budget = values.get("reply_slot_seconds"), values.get("max_waiting"), values.get("engine_budget_seconds")
     sslot, sbudget = values.get("survey_slot_seconds"), values.get("survey_budget_seconds")
     num = lambda v: f"{float(v):g}" if isinstance(v, (int, float)) else "the configured number of"   # noqa: E731
-    return {"image": name, "v14": name in TDX_V14_FAMILY, "idle_poll": name == "ir-sealed-search-tdx-v15"
+    return {"image": name, "v14": name in TDX_V14_FAMILY, "idle_poll": name in TDX_IDLE_POLL_IMAGES
             and "idle=poll" in cmdline.split(), "passed": passed, "skipped": skipped,
             "required_not_passed": required_not_passed,
+            "open_engine": _open_engine_rows(name, details),
             "slot": num(slot), "budget": num(budget), "survey_slot": num(sslot), "survey_budget": num(sbudget),
             "waiting": str(waiting) if isinstance(waiting, int) else "the configured number of"}
 
@@ -1273,8 +1393,8 @@ def format_blocker(text: str, facts: Optional[Dict[str, Any]]) -> str:
     """A gap that names the image's own numbers ({slot}, {budget}, {waiting}, {survey_slot}, {survey_budget}) formatted from the checker's facts; any
     other text returned as is (no other gap carries braces)."""
     if not any("{" + k + "}" in text for k in _NUMBERS):
-        return text
-    return text.format(**_numbers(facts))
+        return open_engine_words(text, facts)
+    return open_engine_words(text.format(**_numbers(facts)), facts)
 
 
 def tdx_image_is_v14(facts: Optional[Dict[str, Any]]) -> bool:
@@ -1325,7 +1445,7 @@ def plain_answer_tdx_v14(facts: Optional[Dict[str, Any]]) -> str:
     waiting = (facts or {}).get("waiting", "the configured number of")
     budget = (facts or {}).get("budget", "the configured number of")
     parts = [words.format(**_numbers(facts)) for rows, words in PLAIN_ANSWER_TDX_V14_PARTS if all(r in passed for r in rows)]
-    return " ".join([PLAIN_ANSWER_TDX_V14_HEAD] + parts + [PLAIN_ANSWER_TDX_V14_TAIL])
+    return open_engine_words(" ".join([PLAIN_ANSWER_TDX_V14_HEAD] + parts + [PLAIN_ANSWER_TDX_V14_TAIL]), facts)
 
 
 def tdx_image_statement(facts: Optional[Dict[str, Any]]) -> str:
@@ -1340,8 +1460,8 @@ def tdx_image_statement(facts: Optional[Dict[str, Any]]) -> str:
     body = [words.format(**_numbers(facts)) for rows, words in TDX_V14_CLAUSES if all(r in passed for r in rows)]
     numbered = "; ".join(f"({i}) {w}" for i, w in enumerate(body, 1))
     version = (str(facts.get("image") or "").rsplit("-", 1)[-1] or "v14") if facts else "v14"
-    return (TDX_INTRO_TEMPLATE.format(version=version) + (" " + "; ".join(head) + "." if head else "")
-            + (" As configured: " + numbered + "." if body else "") + " " + TDX_V14_TAIL)
+    return open_engine_words(TDX_INTRO_TEMPLATE.format(version=version) + (" " + "; ".join(head) + "." if head else "")
+                             + (" As configured: " + numbered + "." if body else "") + " " + TDX_V14_TAIL, facts)
 
 PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
     (TDX_RANKER_CLOSED,
@@ -1369,6 +1489,33 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "part, which decides what goes into the reply sent back to you, within a published shape that the open part "
      "trims it to; its exact version is pinned, but you cannot read it, so what it does inside that reply cannot be "
      "checked"),
+    (TDX_V15_RANKER_SEES,
+     "your search is decrypted by the published part of the program and handed in plain text to the secret ranking "
+     "part; the program as published keeps that part's own channels shut — no network, nowhere to save, a fresh "
+     "start each time, and a reply trimmed, padded and timed the same way, sealed to you — but that describes the "
+     "program's settings, not a watched run; and because nobody outside can read the secret part, nothing here rules "
+     "out it signalling through the machine's physical activity (power use, memory use, small bursts of work) to "
+     "someone watching the hardware, such as Google; which results it puts in your reply cannot be checked"),
+    (TDX_V16_RANKER_SEES,
+     "your search is decrypted inside the machine and handed, in plain text, to ranking code InferRoute publishes, "
+     "which anyone can read (what it ranks with — the index and the ranking models — is InferRoute's private data, "
+     "not published); the program as "
+     "published keeps the ranking step's own channels shut — no network, nowhere to save, a fresh start each time, "
+     "and a reply trimmed, padded and timed the same way, sealed to you — but that describes the program's settings, "
+     "not a watched run; how much work the ranking does and which parts of the index it reads still depend on your "
+     "search, so someone watching the hardware closely, such as Google, may learn something about it from the "
+     "machine's physical activity (power use, memory use, small bursts of work); this record does not close that"),
+    (TDX_V15_METADATA,
+     "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how often "
+     "and from where you searched, and roughly how large what you sent was (your app rounds it up to a size class, so "
+     "a long disclosure is visibly larger; this record does not check that rounding); as published, every accepted "
+     "reply is the same size and is held back until a fixed interval has passed since the machine took it up, after "
+     "any requests ahead of it — a longer one for a request that says it is a survey than for any other, so they can "
+     "tell those from the rest by the timing, though not what they were about (whether a reply ever takes longer is a "
+     "first-start check, not part of this record); InferRoute reports that, on its own test, Google's minute-by-minute "
+     "processor figure looked the same whether the machine was working or not; this record does not check that, and "
+     "Google or anyone watching the hardware more finely may still tell roughly how long it worked; and a request "
+     "turned away at once (unreadable, or arriving while the queue is full) can be seen to have been turned away"),
     (TDX_V14_METADATA,
      "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how often "
      "and from where you searched, and roughly how large what you sent was (your app rounds it up to a size class, so "
@@ -1757,6 +1904,7 @@ def report_plain(reach: int, blockers: Optional[List[str]] = None,
         ask = next((a for trigger, a in PLAIN_ASKS if any(trigger in r for r in raw)), None)
         if ask and TDX_IMAGE_INCOMPLETE in raw and tdx_root_tree_is_the_only_gap(image_facts):
             ask = TDX_ROOT_TREE_ASK                      # nothing is missing; the generic "supply it" would mislead
+        ask = open_engine_words(ask, image_facts) if ask else ask
         print()
         # NOT "assume it was disclosed": that instructs a legal posture the evidence does not support,
         # and the downside (panic filing, abandonment) is real. State the uncertainty; let counsel weigh it.
@@ -1924,8 +2072,12 @@ def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
             # trusted base, and the first-boot measurements this record does not hold.
             # TDX_V14_METADATA carries {slot}/{budget}: it stays the exact template here (plain_blockers matches it
             # exactly) and is formatted where it is printed (format_blocker).
-            return 1, [TDX_V14_RANKER_SEES, TDX_PARTIES, TDX_KEYS_RETENTION, TDX_V14_TRUSTED_BASE, TDX_V14_TRUST_BOUNDARY,
-                       TDX_V14_METADATA, TDX_OWN_KEY, TDX_V14_FIRST_BOOT, TDX_LEVEL1_NOT_ESTABLISHED]
+            v15 = bool(image_facts.get("idle_poll")) and "B. UKI command line" in (image_facts.get("passed") or set())
+            ranker = (TDX_V16_RANKER_SEES if tdx_open_engine(image_facts) else TDX_V15_RANKER_SEES if v15
+                      else TDX_V14_RANKER_SEES)
+            return 1, [ranker, TDX_PARTIES, TDX_KEYS_RETENTION,
+                       TDX_V14_TRUSTED_BASE, TDX_V14_TRUST_BOUNDARY, TDX_V15_METADATA if v15 else TDX_V14_METADATA,
+                       TDX_OWN_KEY, TDX_V14_FIRST_BOOT, TDX_LEVEL1_NOT_ESTABLISHED]
         # v13+: the engine loads after the seal and runs unprivileged (the image check pins v13), so neither the
         # pre-seal window nor full privileges is a gap any more.
         return 1, [TDX_RANKER_CLOSED, TDX_PARTIES, TDX_KEYS_RETENTION, TDX_TRUSTED_BASE, TDX_METADATA, TDX_OWN_KEY,

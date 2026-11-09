@@ -516,6 +516,19 @@ def test_corpus_name_names_only_an_identifier_made_of_us_ep_wo_parts():
         "", "", "30.4 million published patents from the United States, Europe and WIPO", ""]
 
 
+def test_corpus_name_names_refresh_layers_and_nothing_wider():
+    # A refresh adds "usall-<digits>" (US only) and "epwo-<digits>" (EP and WO only) layers: same offices, so named.
+    # The served asia-bearing identifier, a non-digit suffix, and any other office stay unnamed.
+    assert _corpus_name("patent1m-epwo+epwo-2610+usall+usall-2610@30398469", "patent1m-usall+usall-2611@17958233",
+                        "patent1m-epwo-2611@401095",
+                        "patent1m-asia-2611+epwo+epwo-2610+usall+usall-2610@88844190", "patent1m-usall-x@5",
+                        "patent1m-usall-2611a@5", "patent1m-krall-2611+usall@5", "patent1m-usall-@5") == [
+        "30.4 million published patents from the United States, Europe and WIPO",
+        "18 million published patents from the United States",
+        "401,095 published patents from Europe and WIPO",
+        "", "", "", "", ""]
+
+
 def test_the_assistant_is_told_the_identifier_count_is_not_the_rankings_pool(ext):
     for name in ("with_hits", "empty", "not_requested", "index_2612"):
         assert COUNT_NOTE in ext[name]["model"], name

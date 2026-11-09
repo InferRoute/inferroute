@@ -47,15 +47,18 @@ CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet"
                     "accept_memory=eager", "systemd.import_credentials=no")
 # v13 is RETIRED: this checker accepts v14 only; a v13 image fails row B by name and reaches no level-1 sentence. The
 # verifier keeps v13's wording for reports a v13-era checker produced, never for an image this one checked.
-IMAGE_NAME = "ir-sealed-search-tdx-v15"          # the current release
+IMAGE_NAME = "ir-sealed-search-tdx-v16"          # the current release
 # v15 (8 Nov 2026) adds idle=poll: the guest never halts, which removes the halt exits that show the hypervisor when a
 # vCPU is idle (measured: Google's per-minute cpu/utilization of a v14 box reads idle 0.03 % vs searching 1.26 %; with
 # idle=poll a flat 99.8-99.97 %, shared/qa/2026-11-08/idle-poll-test). NOT removed: per-request bursts of
 # interprocessor interrupts (TLB shootdowns from the engine child's fork/exit), virtio interrupts, power and frequency,
 # cache and memory-bandwidth contention. v14 stays accepted exactly as before, so records made on
 # signed v14 images keep their level; each version must carry exactly its own required tokens.
-IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15")
-CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",)}
+# v16 (9 Nov 2026) keeps v15's command line (idle=poll); what changed is inside the root (front exception fix, encoder
+# allowlist, a root pin that sees the whole root, reproducible build). The rows decide; the name only selects the tokens.
+IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16")
+CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",),
+                             "ir-sealed-search-tdx-v16": ("idle=poll",)}
 CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"),
                     re.compile(r"inferroute\.image=(?:" + "|".join(re.escape(n) for n in IMAGE_NAMES) + r")"))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.
@@ -129,7 +132,10 @@ ENGINE_UNIT_REQUIRED = {**{k: v for k, v in SANDBOX_REQUIRED.items() if k != "Pr
 ENGINE_UNIT_FORBIDDEN = ("FailureAction", "OnFailure", "RuntimeDirectory", "StateDirectory", "CacheDirectory",
                          "LogsDirectory", "ConfigurationDirectory", "PrivateTmp", "ReadWritePaths", "BindPaths")
 # The root pin (v14 round 3): root with CAP_IPC_LOCK (mlockall) and CAP_DAC_READ_SEARCH (read every file), notify.
-PIN_UNIT_REQUIRED = {**SANDBOX_REQUIRED, "NoExecPaths": "/tmp /var/tmp /dev/shm /run",
+# v16: the pin must SEE the whole root, so no key that hides a path from it (ProtectKernelModules hid /usr/lib/modules,
+# measured on the 8 Nov diagnostic boot: 174 MB unpinned while the pin's own check passed).
+PIN_UNIT_REQUIRED = {**{k: v for k, v in SANDBOX_REQUIRED.items() if k not in ("ProtectKernelModules", "ProtectHome")},
+                     "NoExecPaths": "/tmp /var/tmp /dev/shm /run",
                      "CapabilityBoundingSet": "CAP_IPC_LOCK CAP_DAC_READ_SEARCH",
                      "AmbientCapabilities": "CAP_IPC_LOCK CAP_DAC_READ_SEARCH", "LimitMEMLOCK": "infinity",
                      "Type": "notify", "NotifyAccess": "main", "ExecStart": "/usr/bin/python3 -I /opt/ir/app/ir_pin.py",
@@ -137,6 +143,11 @@ PIN_UNIT_REQUIRED = {**SANDBOX_REQUIRED, "NoExecPaths": "/tmp /var/tmp /dev/shm 
                      # one descriptor per root file (mmap keeps a dup); the read-and-lock took ~86 s on pd-balanced
                      "LimitNOFILE": "1048576", "TimeoutStartSec": "20min",
                      "FailureAction": "poweroff-force"}
+PIN_UNIT_FORBIDDEN = ("ProtectKernelModules", "ProtectHome", "InaccessiblePaths", "TemporaryFileSystem", "BindPaths",
+                      "BindReadOnlyPaths", "RootDirectory", "RootImage", "MountImages", "ExtensionImages", "PrivateMounts",
+                      "ReadOnlyPaths", "ReadWritePaths")
+# The only directories of the root the pin may leave unwalked (another filesystem; each empty in the image).
+PIN_OTHER_FILESYSTEMS = frozenset({"/proc", "/sys", "/dev", "/run", "/tmp", "/var/tmp", "/ram", "/efi", "/boot"})
 # One reply slot and one engine budget, in the units' Environment= (both numbers in seconds; the engine's budget
 # must equal the front's and lie below the slot).
 ENV_SLOT, ENV_BUDGET = "IR_REPLY_SLOT_SECONDS", "IR_ENGINE_BUDGET_SECONDS"
@@ -208,12 +219,20 @@ ACCOUNTS_REQUIRED = ("ir-fetch", "ir-search", "ir-engine")
 ACCOUNT_UIDS = {"ir-fetch": 850, "ir-search": 851, "ir-engine": 853}
 GROUP_GIDS = {"ir-quote": 852, "ir-index": 854}
 GROUP_MEMBERS = {"ir-quote": {"ir-fetch", "ir-search"}, "ir-index": {"ir-search", "ir-engine"}}
-# The files whose source is not published (the ranking engine), as paths under /opt/ir/app. They run in the engine
-# process only; the front's import graph (row D7) must not reach them, and row D1 checks them by published hash.
+# The files whose source was not published (the ranking engine, v14 and v15), as paths under /opt/ir/app. They ran in
+# the engine process only; the front's import graph (row D7) must not reach them, and row D1 checks them by published
+# hash. v16 (design A) stages NONE of them: the engine is sealedresearch.open_rank, published, and what stays private
+# is data under the index root. Which files a release treats as closed is read from its source's CLOSED_PINS_SRC
+# (v15: these 7; v16: none), so one checker verifies both; with no pins, row D1 refuses any of these paths in the
+# image and any staged file importing one of CLOSED_FILE_MODULES (closed_residue).
 CLOSED_FILES = ("enclave/azure/m2_ranker.py", "enclave/azure/m2_searcher.py", "sealedresearch/rank_pipeline.py",
                 "sealedresearch/survey_legs.py", "sealedresearch/survey_run.py", "sealedresearch/passages.py",
                 "sealedresearch/patent_ann.py")
 CLOSED_PINS_SRC = "enclave/gcp-tdx/closed-files.sha256"       # "<sha256>  <path under /opt/ir/app>" per closed file
+CLOSED_FILE_MODULES = tuple(f[:-3].replace("/", ".") for f in CLOSED_FILES)
+# v16: the published engine. The child must reach it (or, v15, the closed modules); the warm parent and the front
+# must not reach it, exactly as they must not reach the closed modules.
+ENGINE_OPEN = ("sealedresearch.open_rank",)
 # What confine.seal_memory must refuse before the closed import (x86_64 numbers), checked against the source's own
 # table AND the assembled BPF program: every one of these as a jeq target, plus mmap's argument rule.
 MEMORY_SEAL_REQUIRED = {"shmget": 29, "shmat": 30, "shmctl": 31, "shmdt": 67, "semget": 64, "semop": 65, "semctl": 66,
@@ -229,12 +248,13 @@ MEMORY_SEAL_REQUIRED = {"shmget": 29, "shmat": 30, "shmctl": 31, "shmdt": 67, "s
 CLOSED_MODULES = ("enclave.azure.m2_ranker", "enclave.azure.m2_searcher", "enclave.azure", "m2_entry", "torch", "faiss",
                   "sentence_transformers", "lightgbm", "numpy", "bm25s", "duckdb", "pyarrow", "sealedresearch.rank_pipeline",
                   "sealedresearch.survey_legs", "sealedresearch.survey_run", "sealedresearch.passages",
-                  "sealedresearch.patent_ann", "tdx_engine", "tdx_fetch")
+                  "sealedresearch.patent_ann", "tdx_engine", "tdx_fetch") + ENGINE_OPEN
 # The closed modules PROPER (the Azure entry, the ranking code, the child's entry): what the engine's warm parent may
 # not reach by import either. The libraries in CLOSED_MODULES are the parent's to hold (engine_preload), not the front's.
 CLOSED_PROPER = ("enclave.azure.m2_ranker", "enclave.azure.m2_searcher", "enclave.azure", "m2_entry", "sealedresearch.rank_pipeline",
                  "sealedresearch.survey_legs", "sealedresearch.survey_run", "sealedresearch.passages", "sealedresearch.patent_ann",
                  "tdx_child")
+ENGINE_PROPER = CLOSED_PROPER + ENGINE_OPEN       # what the warm parent may not reach, and what the child must
 ENGINE_ENTRY = "tdx_engine.py"
 FRONT_ENTRY = "tdx_entry.py"
 FETCH_ENTRY = "tdx_fetch.py"                      # runs while egress is open: its import graph is checked like the front's
@@ -695,6 +715,42 @@ def _linked_dirs(root: str, rel: str, allow_inside: bool = False) -> List[str]:
     return sorted(out)
 
 
+def _parse_pins(pins_text: bytes) -> Dict[str, str]:
+    pins: Dict[str, str] = {}
+    for line in pins_text.decode("utf-8", "replace").splitlines():
+        if line.strip() and not line.startswith("#"):
+            digest, _, path = line.strip().partition("  ")
+            pins[path.strip()] = digest.strip().lower()
+    return pins
+
+
+def closed_residue(app: str) -> List[str]:
+    """v16: what of the closed engine is left in a staged /opt/ir/app (the image's, or the build's before mkosi): any
+    of CLOSED_FILES by path (source or bytecode), and any .py there that imports one of CLOSED_FILE_MODULES (every
+    import statement, functions included, relative imports resolved). Empty = none. Used by row D1 and by
+    pin_closed_files.py --check, which refuses the build."""
+    out: List[str] = []
+    for f in CLOSED_FILES:
+        base = f[:-3]
+        cands = [f, base + ".pyc"] + [os.path.join(os.path.dirname(f), "__pycache__", os.path.basename(base) + x)
+                                      for x in (".cpython-312.pyc", ".pyc")]     # base.pyc: Python imports a sourceless .pyc
+        out += [f"{c} is in the image" for c in cands if os.path.lexists(os.path.join(app, c))]
+    for dp, _dn, fs in os.walk(app):
+        for name in fs:
+            if not name.endswith(".py"):
+                continue
+            path = os.path.join(dp, name)
+            try:
+                names = _local_imports(path, app)
+            except Exception as exc:                          # noqa: BLE001 — unparseable is itself a finding
+                out.append(f"{os.path.relpath(path, app)} not parseable ({type(exc).__name__})")
+                continue
+            hit = sorted({n for n in names for m in CLOSED_FILE_MODULES if n == m or n.startswith(m + ".")})
+            if hit:
+                out.append(f"{os.path.relpath(path, app)} imports {', '.join(hit)}")
+    return out
+
+
 def check_sources(rep: ImageReport, tree: str, src: Optional[Source], stated_commit: Optional[str] = None) -> None:
     """D1: every file under /opt/ir/app is the published source at the image's commit, and nothing else is there.
     `stated_commit` is an auditor-supplied commit for an image that carries no commit file (v11 and earlier): the
@@ -730,11 +786,14 @@ def check_sources(rep: ImageReport, tree: str, src: Optional[Source], stated_com
         rep.add(None, "D1. closed engine files match their published hashes", "no --source supplied; files only hashed")
         return
     m = src.staging_map()
+    pins_text = src.read(CLOSED_PINS_SRC)
+    pins = _parse_pins(pins_text) if pins_text is not None else {}
+    closed_here = CLOSED_FILES if pins else ()           # v15: the 7 pinned files; v16: the source pins none
     present = [f for f in _walk_files(tree, APP_DIR) if not f.endswith(".pyc")]
     diff, missing, extra = [], [], [f for f in present if f not in m]
     # The PUBLISHED files: everything staged but the closed engine. An outsider holds these sources and can run this
     # row; a closed file missing from their tree is reported under the next row, by hash, not here.
-    published = {dst: s for dst, s in m.items() if dst not in CLOSED_FILES}
+    published = {dst: s for dst, s in m.items() if dst not in closed_here}
     for dst, s in sorted(published.items()):
         want = src.read(s)
         p = os.path.join(tree, APP_DIR, dst)
@@ -753,15 +812,17 @@ def check_sources(rep: ImageReport, tree: str, src: Optional[Source], stated_com
             + (f"; IRREGULAR entries (not regular files; not opened): {irregular}" if irregular else ""))
     # The CLOSED files, by the hashes InferRoute publishes (CLOSED_PINS_SRC): their content is not checkable here,
     # their identity is. A closed file the image holds that the pins do not name, or vice versa, fails.
-    pins_text = src.read(CLOSED_PINS_SRC)
     if pins_text is None:
         rep.add(False, "D1. closed engine files match their published hashes", f"{CLOSED_PINS_SRC} missing from the source")
         return
-    pins: Dict[str, str] = {}
-    for line in pins_text.decode("utf-8", "replace").splitlines():
-        if line.strip() and not line.startswith("#"):
-            digest, _, path = line.strip().partition("  ")
-            pins[path.strip()] = digest.strip().lower()
+    if not pins:
+        # v16 (design A): the source pins no closed file, so none may be in the image, by path or by import.
+        residue = closed_residue(os.path.join(tree, APP_DIR))
+        rep.add(not residue, "D1. closed engine files match their published hashes",
+                f"no closed engine file: {CLOSED_PINS_SRC} pins none; none of the {len(CLOSED_FILES)} files closed through "
+                f"v15 is under /opt/ir/app, and no file there imports one (the engine is sealedresearch.open_rank, "
+                "published, checked by the row above)" if not residue else "; ".join(residue))
+        return
     problems = []
     for dst in CLOSED_FILES:
         p = os.path.join(tree, APP_DIR, dst)
@@ -1194,7 +1255,8 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
         if unit_path is None:
             rep.add(False, row, f"{unit} missing from every unit directory")
             continue
-        problems = _unit_problems(u, required, deps, forbidden=ENGINE_UNIT_FORBIDDEN if unit == "ir-engine.service" else ())
+        problems = _unit_problems(u, required, deps, forbidden=ENGINE_UNIT_FORBIDDEN if unit == "ir-engine.service"
+                                  else PIN_UNIT_FORBIDDEN if unit == "ir-pin.service" else ())
         if not unit_path.startswith(os.path.join(tree, "etc/systemd/system")):
             problems.append(f"loaded from {os.path.relpath(unit_path, tree)}, not /etc/systemd/system")
         if dropins:
@@ -1264,8 +1326,33 @@ def _pin_program_problems(tree: str) -> List[str]:
     mod = _ast_parse(text)
     out = []
     rf = _src(text, mod, "regular_files")
-    if rf.count("st_dev == dev") < 2 or "os.walk(root)" not in rf:          # the directory prune AND the file filter
+    if rf.count("st_dev == dev") < 2 or "os.walk(root, onerror=_refuse_unreadable)" not in rf:   # prune AND file filter
         out.append("ir_pin.regular_files does not walk the root on one st_dev (both the directories it descends and the files it keeps)")
+    # v16: another filesystem is skipped only when listed; anything else, or an unreadable directory, is refused
+    if "elif p not in OTHER_FILESYSTEMS:" not in rf or "raise SystemExit" not in rf:
+        out.append("ir_pin.regular_files does not refuse a directory on another filesystem outside OTHER_FILESYSTEMS")
+    if "except OSError" in rf:
+        out.append("ir_pin.regular_files swallows OSError (an unreadable path would be skipped in silence)")
+    ref = _function(mod, "_refuse_unreadable")
+    body = [st for st in (ref.body if ref else []) if not (isinstance(st, ast.Expr) and isinstance(st.value, ast.Constant))]
+    if not body or not isinstance(body[-1], ast.Raise) or any(isinstance(st, ast.Return) for st in body) \
+            or any(isinstance(st, ast.If) and not ("FileNotFoundError" in (ast.get_source_segment(text, st.test) or "")) for st in body):
+        out.append("ir_pin._refuse_unreadable missing or does not raise (only a vanished path may return early)")
+    other = None
+    for node in mod.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "OTHER_FILESYSTEMS" for t in node.targets):
+            try:
+                v = node.value
+                if isinstance(v, ast.Call) and _call_name(v) == "frozenset" and len(v.args) == 1:
+                    other = frozenset(ast.literal_eval(v.args[0]))
+            except ValueError:
+                other = None
+    if other != PIN_OTHER_FILESYSTEMS:
+        out.append(f"ir_pin.OTHER_FILESYSTEMS = {sorted(other) if other else other} (want {sorted(PIN_OTHER_FILESYSTEMS)})")
+    for d in PIN_OTHER_FILESYSTEMS:                 # each skipped mountpoint must be empty in the image
+        full = os.path.join(tree, d.lstrip("/"))
+        if os.path.isdir(full) and not os.path.islink(full) and os.listdir(full):
+            out.append(f"{d} is not empty in the image tree, yet the pin skips it")
     if "S_ISREG(st.st_mode)" not in rf or "st.st_size > 0" not in rf:
         out.append("ir_pin.regular_files does not keep regular non-empty files only")
     la_fn = _function(mod, "lock_all")
@@ -2396,6 +2483,21 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
     cm = _src(text, mod, "check_model_dir")
     if "safetensors" not in cm or "modules.json" not in cm or "ALLOWED_MODULE_PREFIX" not in cm:
         pr.append("check_model_dir does not require safetensors weights and sentence_transformers modules")
+    # v16: the encoder directory is an exact allowlist (files pinned by sha256, weights pinned by structure).
+    ef = next((n.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
+               and any(isinstance(x, ast.Name) and x.id == "ENCODER_FILES" for x in n.targets)), None)
+    pins = {k.value: v.value for k, v in zip(ef.keys, ef.values) if isinstance(k, ast.Constant) and isinstance(v, ast.Constant)} if ef is not None else {}
+    if not ({"modules.json", "config.json", "tokenizer.json", "tokenizer_config.json", "config_sentence_transformers.json"} <= set(pins)
+            and all(isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in pins.values())):
+        pr.append("ENCODER_FILES does not pin the encoder's configuration files by sha256")
+    msha = next((n.value.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+                 and any(isinstance(x, ast.Name) and x.id == "ENCODER_TENSOR_MANIFEST_SHA256" for x in n.targets)), None)
+    if not (isinstance(msha, str) and re.fullmatch(r"[0-9a-f]{64}", msha)):
+        pr.append("ENCODER_TENSOR_MANIFEST_SHA256 is not a pinned sha256")
+    cmf = _function(mod, "check_model_dir")
+    calls = {_call_name(n) for n in ast.walk(cmf) if isinstance(n, ast.Call)} if cmf else set()
+    if not {"safetensors_manifest", "sha256", "islink"} <= calls or "found != want" not in cm or "followlinks=False" not in cm:
+        pr.append("check_model_dir does not refuse anything but the pinned set (exact file set, sha256 per file, weights structure, no links)")
     # preload opens exactly PRELOAD_PATHS, through faiss.read_index / SentenceTransformer / lgb.Booster, and nothing else.
     pp = next((n.value for n in mod.body if isinstance(n, ast.Assign) and isinstance(n.value, ast.Dict)
                and any(isinstance(x, ast.Name) and x.id == "PRELOAD_PATHS" for x in n.targets)), None)
@@ -2424,8 +2526,8 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
     rep.add(not pr, "D7. the warm parent parses data, not code",
             "engine_preload: preload opens exactly PRELOAD_PATHS (index, model, stage1, stage2) through faiss.read_index, "
             "SentenceTransformer and lgb.Booster and nothing else; TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 before torch; SentenceTransformer(trust_remote_code=False) after "
-            "check_model_dir (safetensors only, no .bin/.pt/.pth/.pkl/.pickle/.ckpt/.py/.so, modules.json entries all "
-            "sentence_transformers.*); faiss.read_index and lgb.Booster(model_file) parse typed structures, never code"
+            "check_model_dir (exactly the files ENCODER_FILES pins by sha256 plus model.safetensors of the pinned tensor structure, "
+            "no link, no other file; no .bin/.pt/.pth/.pkl/.pickle/.ckpt/.py/.so; modules.json entries all sentence_transformers.*); faiss.read_index and lgb.Booster(model_file) parse typed structures, never code"
             if not pr else "; ".join(pr))
 
 
@@ -2434,8 +2536,9 @@ def check_parent_closure(rep: ImageReport, tree: str, paths: Dict[str, str], lte
     engine_preload and everything they import, every import statement, functions included); the closed modules are
     imported by the child only, by name, after the fork and the marker; the front runs a probe search."""
     pr = []
-    files, closed = front_closure(tree, ENGINE_ENTRY, CLOSED_PROPER)
-    bad_files = [f for f in files if f in CLOSED_FILES or f in ("m2_entry.py", "tdx_child.py")]
+    files, closed = front_closure(tree, ENGINE_ENTRY, ENGINE_PROPER)
+    bad_files = [f for f in files if f in CLOSED_FILES or f in ("m2_entry.py", "tdx_child.py")
+                 or f.startswith("sealedresearch/open_rank/")]
     rep.values["engine_parent_files"] = files
     if not files:
         pr.append("tdx_engine.py missing")
@@ -2446,12 +2549,20 @@ def check_parent_closure(rep: ImageReport, tree: str, paths: Dict[str, str], lte
     if "sealedresearch/engine_preload.py" not in files:
         pr.append("the warm parent does not use the published warm (engine_preload)")
     child = os.path.join(tree, APP_DIR, "tdx_child.py")
+    open_engine = False
     if not os.path.isfile(child):
         pr.append("tdx_child.py missing")
     else:
-        cfiles, cclosed = front_closure(tree, "tdx_child.py", CLOSED_PROPER)
+        cfiles, cclosed = front_closure(tree, "tdx_child.py", ENGINE_PROPER)
         if not cclosed:
-            pr.append("tdx_child.py imports no closed module: the child would answer with nothing")
+            pr.append("tdx_child.py imports no engine module (closed, or v16's sealedresearch.open_rank): the child would answer with nothing")
+        # "the engine is open_rank" only for a child that reaches open_rank and NO closed module besides tdx_child itself
+        # (a mixed child is described as importing the closed modules; D1 also refuses it in a v16 image)
+        reached = [c.split(" -> ", 1)[1] for c in cclosed if " -> " in c]
+        # a dynamic import site in the child's closure ("dynamic: ...") loads what the static closure cannot see
+        open_engine = (not any(c.startswith("dynamic:") for c in cclosed)
+                       and any(n == "sealedresearch.open_rank" or n.startswith("sealedresearch.open_rank.") for n in reached)
+                       and not any(n == m or n.startswith(m + ".") for n in reached for m in CLOSED_PROPER if m != "tdx_child"))
         ctext = _text(child)
         if "preloaded=preloaded" not in ctext or "def build(" not in ctext:
             pr.append("tdx_child.build does not build the engine over the parent's preloaded objects")
@@ -2478,9 +2589,11 @@ def check_parent_closure(rep: ImageReport, tree: str, paths: Dict[str, str], lte
             pr.append(f"{other} passes a child_module")
     if etext.count("child_module=") != 1 or etext.count('CHILD_MODULE = "tdx_child"') != 1:
         pr.append("tdx_engine must pass child_module exactly once, from the one literal CHILD_MODULE")
+    engine_words = ("the engine (sealedresearch.open_rank, published) is imported by tdx_child" if not pr and open_engine
+                    else "the closed modules are imported by tdx_child")
     rep.add(not pr, "D7. the warm parent imports no closed module",
             f"{len(files)} files reachable by import from {ENGINE_ENTRY} (every import statement, functions included), none closed: "
-            + ", ".join(files) + "; the closed modules are imported by tdx_child, in the child, by name, after the request and the "
+            + ", ".join(files) + f"; {engine_words}, in the child, by name, after the request and the "
             "marker; the engine is built over the parent's preloaded objects (faiss index, encoder, boosters)" if not pr else "; ".join(pr))
 
 

@@ -641,7 +641,9 @@ function corpusName(id: string): string {
 	const m = /^[a-z0-9]+-([a-z0-9+-]+)@(\d+)$/i.exec(String(id || "").trim());
 	if (!m) return "";
 	const parts = m[1].toLowerCase().split("+");
-	if (!parts.every((t) => ["usall", "epwo", "us", "ep", "wo"].includes(t))) return "";
+	// A refresh layer is "usall-<digits>" (US only) or "epwo-<digits>" (EP and WO only), by construction of the refresh
+	// pipeline (sealed-research build_refresh.py): it adds rows of the same offices, so the name stays true.
+	if (!parts.every((t) => ["usall", "epwo", "us", "ep", "wo"].includes(t) || /^(usall|epwo)-\d+$/.test(t))) return "";
 	const where: string[] = [];
 	const scope = m[1].toLowerCase();
 	if (scope.includes("us")) where.push("the United States");

@@ -1156,7 +1156,10 @@
             const yours = (h.overlapping_classes || []).length ? ` · in your classes ${h.overlapping_classes.join(", ")}` : "";
             box.append(el("div", "search-hit",
               el("div", "", el("b", "", h.text), ` — ${h.register} ${h.number}, ${h.status}, classes ${(h.classes || []).join(", ") || "none recorded"}${yours}`),
-              el("div", "sub", (h.reasons || []).join("; "))));
+              el("div", "sub", (h.reasons || []).join("; ")),
+              // The same name filed again (another register or another filing) is listed here, not as its own row.
+              ...((h.also || []).length ? [el("div", "sub", "Also filed as: " + h.also.map((a) =>
+                `${a.register} ${a.number} (${a.status}, classes ${(a.classes || []).join(", ") || "none recorded"})`).join("; "))] : [])));
           }
           if (sr.more) box.append(el("p", "sub", `…and ${sr.more} more, less close.`));
           p.append(box);

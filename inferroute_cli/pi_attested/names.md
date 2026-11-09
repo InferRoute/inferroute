@@ -26,7 +26,9 @@ product does, which names), ask one short question rather than guessing.
 3. Read the results. Each list is already ordered, closest first, with marks in the founder's
    classes raised (a mark with the same spelling in another class can still come first), so
    the marks that matter most are normally the first ones listed;
-   start from the top rather than weighing every mark. For each mark that matters, say
+   start from the top rather than weighing every mark. A name filed more than once (in
+   another register, or again) is one entry, with its other filings under "also": count it
+   as one mark, and name its other registers when they matter. For each mark that matters, say
    what it is, its register, number, status and classes, and WHY it resembles the name,
    using the reasons the tool gives (same spelling, sounds alike, spelled closely,
    contains the name, shares a word, a word spelled closely, a word that starts the same).

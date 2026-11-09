@@ -412,6 +412,7 @@ class Index:
         # spelled exactly like the later one sat past the 40th place in decided French oppositions; class lists
         # in the register are often narrower than the goods an opposition turns on.
         hits.sort(key=lambda h: (-(h["score"] + CLASS_BONUS * h["class_overlap"]), h["text"].lower()))
+        hits = group_same_name(hits)
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 **coverage(self.meta.get("sources", "")),
@@ -593,6 +594,43 @@ class Index:
                 "class_overlap": 1 if overlap else 0, "overlapping_classes": overlap}
 
 
+def group_same_name(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One entry per name: a mark whose name is written exactly like a closer one (the same letters and digits,
+    ignoring case, accents and punctuation) is listed under that one's "also" instead of taking a place of its own.
+    The same name is often filed several times and in several registers (FESTO four times across US, FR and EU);
+    each copy took one of the places a founder and the assistant read, and pushed a different, closer conflict
+    past them. Measured on decided French oppositions (our half): the earlier mark was in the first ten for 24.8%
+    of them listed one copy per row and 33.3% with copies grouped. Order is unchanged: an entry sits where its
+    closest copy sat. Its "overlapping_classes" covers every copy, so a copy in the founder's classes is never
+    hidden behind one outside them."""
+    out: List[Dict[str, Any]] = []
+    at: Dict[str, int] = {}
+    for h in hits:
+        name = compact(h["text"])
+        if name not in at:
+            at[name] = len(out)
+            out.append(h)
+            continue
+        first = out[at[name]]
+        first.setdefault("also", []).append(
+            {k: h[k] for k in ("register", "number", "text", "status", "classes", "filed", "overlapping_classes")})
+        if h["overlapping_classes"]:
+            merged = sorted(set(first["overlapping_classes"]) | set(h["overlapping_classes"]), key=int)
+            first["overlapping_classes"], first["class_overlap"] = merged, 1
+    return out
+
+
+def _also_line(h: Dict[str, Any], most: int = 6) -> str:
+    """'also EU 017558479 (registered, classes 9, 42); US 87…' for the copies grouped under an entry."""
+    also = h.get("also") or []
+    if not also:
+        return ""
+    parts = [f"{a['register']} {a['number']} ({a['status']}, classes {', '.join(a['classes']) or 'none recorded'})"
+             for a in also[:most]]
+    more = f"; and {len(also) - most} more" if len(also) > most else ""
+    return "    also filed as: " + "; ".join(parts) + more
+
+
 def report_lines(result: Dict[str, Any]) -> List[str]:
     """The plain-text result: what was searched first, then each mark and why it resembles the name."""
     cov = coverage(result.get("sources", ""))
@@ -614,6 +652,8 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
         text = h["text"] if len(h["text"]) <= 90 else h["text"][:87] + "…"
         out.append(f"{text}  ({h['register']} {h['number']}, {h['status']}, classes {cls}){flag}")
         out.append(f"    {'; '.join(h['reasons'])}")
+        if h.get("also"):
+            out.append(_also_line(h))
     if result["more"]:
         out.append(f"\n…and {result['more']} more, less close.")
     return out

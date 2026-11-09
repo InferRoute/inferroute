@@ -85,7 +85,7 @@ The founder is not a lawyer. Write for them, in this order:
 4. `## What you can do next`, these three lines:
    - Confirm the classes above, or tell me which to add, and I will search again.
    - Take the questions below to a trademark professional, and mention the registers that
-     were not searched (EU trade marks among them).
+     were not searched (copy them from the search result's "not_searched" list).
    - Check another name: add it to your notes or type it here.
 5. `## Questions for a trademark professional`: three to six specific questions this search
    raises (for example, whether a registered mark in the same class with one letter

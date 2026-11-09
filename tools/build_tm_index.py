@@ -21,6 +21,7 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--uspto"); ap.add_argument("--uspto-date")
     ap.add_argument("--inpi")
+    ap.add_argument("--inpi-eu", help="folder of INPI open-data EU_YYYYMM.parquet files (see tools/tm_inpi_eu.py)")
     a = ap.parse_args()
     parts, sources, dates = [], [], []
     if a.uspto:
@@ -44,8 +45,19 @@ def main():
         parts.append(tm_inpi.rows(state))
         sources.append("INPI (France)")
         dates.append(f"FR {tm_inpi.data_date(Path(a.inpi))}")
+    if a.inpi_eu:
+        import tm_inpi_eu
+        state = tm_inpi_eu.current(Path(a.inpi_eu))
+        counts = tm_inpi_eu.statuses(state)
+        print("EU statuses:", counts)
+        unknown = [s for s in counts if s and s not in tm_inpi_eu.LIVE and s not in tm_inpi_eu.DEAD]
+        if unknown:
+            sys.exit(f"EU statuses not classified as live or dead: {unknown}. Classify them in tools/tm_inpi_eu.py.")
+        parts.append(tm_inpi_eu.rows(state))
+        sources.append("EUIPO (EU trade marks, as republished in INPI open data)")
+        dates.append(f"EU {tm_inpi_eu.data_date(state)}")
     if not parts:
-        ap.error("give --uspto and/or --inpi")
+        ap.error("give --uspto, --inpi and/or --inpi-eu")
     info = T.build(itertools.chain(*parts), Path(a.out), ", ".join(dates), [f"{s}, live word marks" for s in sources])
     print(info)
 

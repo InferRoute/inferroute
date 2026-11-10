@@ -50,7 +50,7 @@ EPOCH = 1759449600                                  # 2025-10-03T00:00:00Z — o
 
 # Fetched for the BUILD machine (x86_64), by sha256. apk.static does the installing; alpine-keys carries
 # the per-architecture signing keys the installed packages are verified against.
-APK_STATIC = ("apk-tools-static-3.0.8-r0.apk", "c8e2c88c13ba12a12269b79a3543e1190ff8c0ab0beb32b58cadfd5881c619e3")
+APK_STATIC = ("apk-tools-static-3.0.9-r0.apk", "0a1a0682375f66a83b7b903f6e4638ccfe312547d50d336b5f2be9fc391281be")
 ALPINE_KEYS = ("alpine-keys-2.6-r0.apk", "dd211936d544f4050924ce8aec078d24e7b1b036ae70b30bd07867349587c708")
 
 # 2026-10-21: 6.18.57-r0 -> 6.18.58-r0 (the mirror no longer serves 6.18.57; verified by apk.static against alpine-keys 2.6 in the build below).

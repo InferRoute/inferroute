@@ -206,7 +206,7 @@ _CFG_KEEP = ("models.json", "settings.json", "bin", "sessions", "tmp", "attested
 
 
 def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
-               quiet: bool = False) -> Path:
+               quiet: bool = False, context_window: int = 0) -> Path:
     """A stable ir-owned Pi config dir, scrubbed on every launch to exactly the known-good entries. Keeps
     `bin/` (Pi's helper binaries) so offline launches still have them; sessions are a REAL dir here (not a
     symlink out), so Pi can write them under the filesystem confinement; nothing of the user's is mirrored."""
@@ -219,7 +219,8 @@ def config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: 
             (shutil.rmtree if entry.is_dir() and not entry.is_symlink() else (lambda p: p.unlink()))(entry)
         elif entry.name == "sessions" and entry.is_symlink():
             entry.unlink()                    # a prior symlink-out; replace with a real dir below
-    doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None)
+    doc = agents.pi_models_json(base_url, api_key, alias, upstream_name, headers, existing=None,
+                                context_window=context_window)
     (d / "models.json").write_text(json.dumps(doc, indent=1))
     # `quiet`: a Probant session hides Pi's developer start-up header (key bindings, "! bash", resource
     # paths) and the model's thinking; the user has been shown what matters on the card, and reads the answer.
@@ -395,12 +396,14 @@ def matter_titles(records_dir, keys=None) -> dict:
 
 
 def env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-             headers: dict | None = None, search_endpoint: str | None = None, general: bool = False) -> list[str]:
+             headers: dict | None = None, search_endpoint: str | None = None, general: bool = False,
+             context_window: int = 0) -> list[str]:
     """`search_endpoint`: the loopback address of a running local search verifier; adds `prior_art_search`.
     `general`: a plain `ir pi` launch, not a Probant matter — Pi's ordinary file tools and a general system
     prompt, with none of the matter or search machinery. Only `anteriora open` gets the prior-art assistant."""
     check_passthrough(passthrough, general=general)
-    cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")))
+    cfg = config_dir(base_url, api_key, alias, upstream_name, headers, quiet=bool(env.get("IR_PROBANT_SURFACE")),
+                     context_window=context_window)
     # Document readings have no search tools. New readings get a host-bound draft
     # capability and read-only file tools; legacy proposal/cluster flows keep their tools.
     intake = str(env.get("IR_INTAKE_DIR") or "")

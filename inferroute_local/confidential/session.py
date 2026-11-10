@@ -101,6 +101,12 @@ class ConfidentialSession:
         self.session_id = session_id
         self.model_short = model_short
         self.upstream_model = upstream_model
+        # The lane's stated context window (prompt + reply), 0 when the carrier does not state one. Set by the
+        # launcher from /confidential/v2/lanes. Used only to NAME an overflow, never to refuse a request.
+        self.context_length = 0
+        self._last_prompt_tokens = 0          # prompt size of the last ANSWERED request, from its usage
+        self._last_prompt_bytes = 0           # and its plaintext size, to notice a compaction since
+        self._sending_bytes = 0
         self.fleet_id = fleet_id
         self.transport = transport
         self.http = http
@@ -492,6 +498,27 @@ class ConfidentialSession:
 
     # ───────────────────────── the request path ─────────────────────────
 
+    def overflow_estimate(self, oai: dict) -> str:
+        """Our own sentence when a 400 is, by THIS DEVICE's numbers, a conversation past the model's window.
+
+        2026-11-10: an `ir pi` session on GLM-5.1 (202,752-token window) answered at 169,964 prompt tokens with
+        32,768 reserved for the reply — 20 tokens to spare — and every later turn got "the provider answered
+        400 (the request was rejected as malformed)". Nothing was malformed. The upstream body cannot tell us
+        (the relay withholds it, by design), so this decides from what we measured ourselves: the last
+        answered prompt plus the reply this request reserves exceeds the window, and the conversation has
+        not shrunk since (a compaction would have). Otherwise it stays silent and the generic text stands."""
+        ctx = int(self.context_length or 0)
+        if not ctx or not self._last_prompt_tokens:
+            return ""
+        reserve = int(oai.get("max_tokens") or oai.get("max_completion_tokens") or 0)
+        if self._last_prompt_tokens + reserve <= ctx * 0.97:
+            return ""
+        if self._last_prompt_bytes and self._sending_bytes < 0.9 * self._last_prompt_bytes:
+            return ""                     # it shrank since: an overflow is no longer the likely reading
+        return (f"this conversation is longer than {self.model_short} accepts (about "
+                f"{self._last_prompt_tokens:,} tokens of history plus {reserve:,} reserved for the reply, "
+                f"against a limit of {ctx:,}) — run /compact or start a new session")
+
     async def _send_sealed(self, oai: dict, streaming: bool):
         """Seal `oai` to the pinned, verified key and hand it to the carrier. Returns ("ok", pinned, sealed, raw)
         or ("error", status, message).
@@ -517,6 +544,7 @@ class ConfidentialSession:
             # the interleaving verify_record asks them to do and nothing could answer.
             self._credit(pinned.instance_id)
             c["plaintext_bytes_sealed_here"] += sealed.plaintext_size
+            self._sending_bytes = sealed.plaintext_size
             c["ciphertext_bytes_sent"] += len(sealed.blob)
             self._restate_claim()          # the strong claim is earned here, by a request actually sealed
             # Persist the count BEFORE the text leaves: it used to reach disk only after a complete reply, so a
@@ -596,6 +624,10 @@ class ConfidentialSession:
                 # admitted only through a strict pattern, so no upstream text can ride along. The body is still
                 # never passed on.
                 return ("error", status, support_message(support_code, support_req), OPERATOR_FAULT)
+            if status == 400 and attempt == 1 and "nonce" not in detail.lower():
+                over = self.overflow_estimate(oai)
+                if over:
+                    return ("error", 400, over, CLIENT_FAULT)
             said = upstream_public(status) + ("" if readable else " — body unreadable")
             # A nonce rejected TWICE is worth naming, and naming it costs nothing: that this was a nonce
             # is OUR OWN control flow — we dropped the pool and resent a moment ago — not a sentence
@@ -846,6 +878,8 @@ class ConfidentialSession:
 
     def _account(self, usage: dict, latency_ms: int = 0) -> None:
         c = self.receipt.counters
+        self._last_prompt_tokens = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
+        self._last_prompt_bytes = self._sending_bytes
         for k in ("input_tokens", "output_tokens", "cache_read_input_tokens"):
             c[k] += int(usage.get(k) or 0)
         if self.price:

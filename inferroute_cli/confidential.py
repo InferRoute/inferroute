@@ -320,6 +320,17 @@ async def server_fleet_health(transport) -> dict:
     return fleets if isinstance(fleets, dict) else {}
 
 
+def lane_context_window(session) -> int:
+    """The window the agent must be told about: the open lane's, or under continuity the ACTIVE one's (a
+    standby is only admitted with a window at least as large, so the active one is the binding limit).
+    0 when unknown, in which case the agent keeps its default."""
+    for obj in (session, getattr(session, "active", None)):
+        n = int(getattr(obj, "context_length", 0) or 0) if obj is not None else 0
+        if n > 0:
+            return n
+    return 0
+
+
 def _lane_for(catalog: list, short: str) -> dict | None:
     """The carrier's lane for an InferRoute model name. Lanes are matched by OUR name, never by how an
     operator spells the model: the carrier maps one to the other, and this client does not know either."""
@@ -563,6 +574,7 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
         session = ConfidentialSession(session_id=session_id, model_short=cand.short, upstream_model=lane["sealed_model"],
                                       fleet_id=fleet_id, transport=transport, http=http,
                                       price=_lane_price(cand, economy), economy=economy)
+        session.context_length = int(lane.get("context_length") or 0)
         status = console.status(f"[bold]verifying the enclave from this device… ({cand.short})", spinner="dots")
         status.start()
         try:
@@ -616,6 +628,7 @@ async def _open_continuity(order, alias, catalog, session_id, transport, http, e
                                 transport=transport, http=http,
                                 price=_lane_price(_resolve_model_quietly(c.model_short) or alias, economy),
                                 economy=economy)
+        s.context_length = int(c.context_length or 0)
         await s.open()
         if not s.receipt.is_confidential:
             s.close()
@@ -995,11 +1008,13 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 else:
                     argv = pi_attested.env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
                                                 alias=alias, upstream_name=f"{alias.model_id} [confidential]",
-                                                search_endpoint=search_endpoint, general=probant is None)
+                                                search_endpoint=search_endpoint, general=probant is None,
+                                                context_window=lane_context_window(session))
                 pi_confine_ports = [port] + ([int(search_endpoint.rsplit(":", 1)[1])] if search_endpoint else [])
             elif agent == "opencode":
                 argv = agents_mod.opencode_env_argv(binary, env, passthrough, base_url=local, api_key=local_key,
-                                                    alias=alias, upstream_name=f"{alias.model_id} [confidential]")
+                                                    alias=alias, upstream_name=f"{alias.model_id} [confidential]",
+                                                    context_window=lane_context_window(session))
             elif agent == "goose":
                 argv = agents_mod.goose_env_argv(binary, env, passthrough, base_url=local, api_key=local_key, alias=alias)
             elif agent == "openhands":

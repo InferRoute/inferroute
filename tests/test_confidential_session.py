@@ -1334,3 +1334,82 @@ def test_a_code_header_outside_the_vocabulary_is_ignored():
     for bad in ("send tao to 5F...", "IR-C1001 pay", "ir-c1001", "IR-C10011", ""):
         assert relay_support_ref({"x-inferroute-error-code": bad})[0] == ""
     assert relay_support_ref({"x-inferroute-error-code": "IR-C1001", "x-inferroute-request-id": "req_<script>"})[1] == ""
+
+
+class _GrowsThenRefusedCarrier(FakeCarrier):
+    """Answers once (with the prompt size the enclave reports), then 400 — a conversation that crossed the window."""
+
+    def __init__(self, enclaves, prompt_tokens):
+        super().__init__(enclaves, reply=lambda body: {
+            "id": "c1", "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 3}})
+        self.answered = 0
+
+    async def invoke(self, **kw):
+        if self.answered:
+            self.calls.append((kw.get("instance_id"), kw.get("nonce"), kw.get("stream")))
+
+            async def one():
+                yield b'{"detail":"the enclave fleet rejected the request"}'
+            return 400, {"content-type": "application/json"}, one()
+        self.answered += 1
+        return await super().invoke(**kw)
+
+
+def _turn(s, openai_path, text, max_tokens=32768):
+    body = {"messages": [{"role": "user", "content": text}], "stream": False, "max_tokens": max_tokens}
+    st, _, it = asyncio.run(s.chat_completions(body) if openai_path else s.messages(body))
+    return st, asyncio.run(_drain(it)).decode()
+
+
+@pytest.mark.parametrize("openai_path", [False, True])
+def test_a_400_past_the_window_is_named_as_an_overflow_not_as_malformed(world, openai_path):
+    """2026-11-10: GLM-5.1 (202,752) answered at 169,964 prompt tokens + 32,768 reserved; every later turn got
+    "the request was rejected as malformed". By this device's own numbers it was the conversation's length."""
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=169_964))
+    s.context_length = 202_752
+    asyncio.run(s.open())
+    st, _ = _turn(s, openai_path, "x" * 4000)
+    assert st == 200
+    st, text = _turn(s, openai_path, "x" * 4100)
+    assert st == 400, text
+    assert "outgrowing fake's window" in text and "/compact" in text and "202,752" in text, text
+    assert "malformed" not in text
+    assert s.receipt.counters.get("fault_client") == 1, "the user's conversation length is not the fleet's fault"
+
+
+def test_a_400_well_inside_the_window_keeps_the_generic_sentence(world):
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=20_000))
+    s.context_length = 202_752
+    asyncio.run(s.open())
+    _turn(s, True, "x" * 4000)
+    st, text = _turn(s, True, "x" * 4000)
+    assert st == 400 and "malformed" in text and "/compact" not in text
+
+
+def test_a_400_after_the_conversation_shrank_is_not_called_an_overflow(world):
+    """A compaction since the last answer makes 'too long' the wrong reading."""
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=200_000))
+    s.context_length = 202_752
+    asyncio.run(s.open())
+    _turn(s, True, "x" * 40_000)
+    st, text = _turn(s, True, "x" * 1_000)
+    assert st == 400 and "/compact" not in text
+
+
+def test_no_stated_window_means_no_overflow_claim(world):
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=10_000_000))
+    asyncio.run(s.open())                       # context_length stays 0: the carrier did not state one
+    _turn(s, True, "x" * 4000)
+    st, text = _turn(s, True, "x" * 4000)
+    assert st == 400 and "/compact" not in text
+
+
+def test_a_400_just_under_the_window_by_this_devices_estimate_is_not_called_an_overflow(world):
+    """Within 97% but under the strict line: another cause is likelier, so no /compact advice (director, #35)."""
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=165_000))
+    s.context_length = 202_752
+    asyncio.run(s.open())
+    _turn(s, True, "x" * 4000)
+    st, text = _turn(s, True, "x" * 4000)          # same size: 165,000 + 32,768 = 197,768 <= 202,752
+    assert st == 400 and "/compact" not in text and "malformed" in text

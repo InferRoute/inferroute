@@ -1113,7 +1113,7 @@ TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
 # 174 MB unpinned while the pin's own check passed: InferRoute's 9 Nov v16 diagnostic boot), so the pin clause is
 # printed only when facts["pin_sees_root"] holds: a TDX_PIN_SEES_ROOT_IMAGES image whose pin row PASSED under the
 # v16 rules. The row itself still counts for the level.
-TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16")
+TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
 TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME,) + TDX_IDLE_POLL_IMAGES
 TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
                       "InferRoute publishes (image {version}). Established by the rows that passed:")
@@ -1284,11 +1284,43 @@ TDX_V16_RANKER_SEES = ("the ranking modules are published (open_rank) and the im
                        "pinned by hash, not published), and was not observed; this record does not show that anyone "
                        "outside InferRoute has read that source")
 
+# v17 (10 Nov 2026): the published engine pads each stage to a fixed amount of work per request (open_rank/shape.py).
+# Used ONLY when the image check PASSED "D7. the engine does a fixed amount of work per request" on a v17 image whose
+# engine is also established as published (tdx_open_engine). What stays open is said: which rows and pages are read,
+# per-item sizes, overflow above the budgets, and the survey's leg count (the client's own choice).
+TDX_V17_RANKER_SEES = ("the ranking modules are published (open_rank) and the image holds no engine file of unpublished "
+                       "source; inside the per-request child they receive each query in plain text from the published "
+                       "front; as published and configured (not as observed running), their process has no network, no "
+                       "writable storage and a fresh start per request, their answer is cut to a published shape, padded "
+                       "to one size, held to a fixed interval and sealed to the requesting client, and most stages of "
+                       "their work are padded to a fixed count of work units per search, whatever the query (the vectors "
+                       "exactly reranked after the index scan, the stage-1 rows, graph edges up to a published budget, "
+                       "citing documents' vectors gathered up to a published budget, every model evaluation, the claim "
+                       "reads and the text reads); the two budgets are in the published source, the other counts are set "
+                       "by the index's hash-pinned parameters, which are not published; this record's check confirms only "
+                       "that the published switch is on and the two budgets are fixed in code, and that each stage uses it "
+                       "rests on the published source and InferRoute's own tests; the request's own settings still change "
+                       "the work: the number of results asked for, any marks, whether the Asian list is asked for, and a "
+                       "survey's number of legs; still not fixed: encoding the query (its work grows with the query's "
+                       "length, up to 256 tokens), the index scan that finds the candidates (it reads the 512 nearest "
+                       "lists, whose lengths depend on the query), which rows and pages of the index a search reads, the "
+                       "size of each item read (neighbour lists, claim and abstract lengths, the words matched), and the "
+                       "work above a budget, which stays visible; the counts are fixed, the time is not: how long a search "
+                       "works still varies with what was searched, and it is the fixed reply interval, not this padding, "
+                       "that is meant to hide that duration from the network; nothing in this record closes what all this "
+                       "shows through the machine's physical behaviour (timing, memory and cache access patterns, power and "
+                       "frequency, interrupts) to someone watching the hardware; what they put in the reply follows from "
+                       "their published source applied to the fetched index and ranking models (InferRoute's private data, "
+                       "pinned by hash, not published), and was not observed; this record does not show that anyone "
+                       "outside InferRoute has read that source")
 
-TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16",)
+
+TDX_FIXED_SHAPE_IMAGES = ("ir-sealed-search-tdx-v17",)
+_FIXED_SHAPE = "D7b. the engine's fixed-shape switch is on and its budgets are fixed in code"
+TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
 # The images whose pin row the checker judges by the v16 rules (the pin sees the whole root). The checker marks a row
 # judged by the v15-era rules with TDX_V15_RULES_PREFIX; such a row never licenses the pin clause.
-TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16",)
+TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
 TDX_V15_RULES_PREFIX = "v15 rules: "
 _D4_PIN = "D4. pin unit properties"
 # A clause that needs a fact as well as its rows: printed only when every row PASSED and the fact is true.
@@ -1396,6 +1428,7 @@ def tdx_image_facts(image_report: Any) -> Optional[Dict[str, Any]]:
             and "idle=poll" in cmdline.split(), "passed": passed, "skipped": skipped,
             "required_not_passed": required_not_passed,
             "open_engine": _open_engine_rows(name, details), "pin_sees_root": _pin_sees_root(name, details),
+            "fixed_shape": name in TDX_FIXED_SHAPE_IMAGES and _FIXED_SHAPE in details and _open_engine_rows(name, details),
             "slot": num(slot), "budget": num(budget), "survey_slot": num(sslot), "survey_budget": num(sbudget),
             "waiting": str(waiting) if isinstance(waiting, int) else "the configured number of"}
 
@@ -1531,6 +1564,18 @@ PLAIN_BLOCKER_WORDS: Tuple[Tuple[str, str], ...] = (
      "not a watched run; how much work the ranking does and which parts of the index it reads still depend on your "
      "search, so someone watching the hardware closely, such as Google, may learn something about it from the "
      "machine's physical activity (power use, memory use, small bursts of work); this record does not close that"),
+    (TDX_V17_RANKER_SEES,
+     "your search is decrypted inside the machine and handed, in plain text, to ranking code InferRoute publishes, "
+     "which anyone can read (what it ranks with — the index and the ranking models — is InferRoute's private data, "
+     "not published); the program as published keeps the ranking step's own channels shut — no network, nowhere to "
+     "save, a fresh start each time, and a reply trimmed, padded and timed the same way, sealed to you — and pads most "
+     "of a search's steps to the same number of steps whatever you searched for — but not all: the first lookup in the "
+     "index, reading your text, the size of what each step reads, and any work past a fixed limit still depend on your "
+     "search, so a search can still take more or less time depending on what you searched for (the reply itself is "
+     "held to a fixed time); asking for more results, marks, the Asian list or more survey parts also does more work; "
+     "that describes the program as published, not a watched run, and someone watching the hardware very closely, such "
+     "as Google, may learn something about your search from the machine's timing, memory and cache activity and power "
+     "use; this record does not close that"),
     (TDX_V15_METADATA,
      "those who carry the traffic (InferRoute's relay, Google, your network provider) can still see when, how often "
      "and from where you searched, and roughly how large what you sent was (your app rounds it up to a size class, so "
@@ -2099,7 +2144,8 @@ def tdx_confidentiality_reach(*, record_ok: bool, authenticated: bool,
             # TDX_V14_METADATA carries {slot}/{budget}: it stays the exact template here (plain_blockers matches it
             # exactly) and is formatted where it is printed (format_blocker).
             v15 = bool(image_facts.get("idle_poll")) and "B. UKI command line" in (image_facts.get("passed") or set())
-            ranker = (TDX_V16_RANKER_SEES if tdx_open_engine(image_facts) else TDX_V15_RANKER_SEES if v15
+            ranker = (TDX_V17_RANKER_SEES if (image_facts or {}).get("fixed_shape") else
+                      TDX_V16_RANKER_SEES if tdx_open_engine(image_facts) else TDX_V15_RANKER_SEES if v15
                       else TDX_V14_RANKER_SEES)
             return 1, [ranker, TDX_PARTIES, TDX_KEYS_RETENTION,
                        TDX_V14_TRUSTED_BASE, TDX_V14_TRUST_BOUNDARY, TDX_V15_METADATA if v15 else TDX_V14_METADATA,

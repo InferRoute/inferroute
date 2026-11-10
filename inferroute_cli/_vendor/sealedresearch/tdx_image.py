@@ -36,7 +36,7 @@ import struct
 import subprocess
 import sys
 import tempfile
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 # ──────────────────────────────────────────── what the closed box must look like ────────────────────────────────────
 
@@ -47,7 +47,7 @@ CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet"
                     "accept_memory=eager", "systemd.import_credentials=no")
 # v13 is RETIRED: this checker accepts v14 only; a v13 image fails row B by name and reaches no level-1 sentence. The
 # verifier keeps v13's wording for reports a v13-era checker produced, never for an image this one checked.
-IMAGE_NAME = "ir-sealed-search-tdx-v16"          # the current release
+IMAGE_NAME = "ir-sealed-search-tdx-v17"          # the current release
 # v15 (8 Nov 2026) adds idle=poll: the guest never halts, which removes the halt exits that show the hypervisor when a
 # vCPU is idle (measured: Google's per-minute cpu/utilization of a v14 box reads idle 0.03 % vs searching 1.26 %; with
 # idle=poll a flat 99.8-99.97 %, shared/qa/2026-11-08/idle-poll-test). NOT removed: per-request bursts of
@@ -56,9 +56,11 @@ IMAGE_NAME = "ir-sealed-search-tdx-v16"          # the current release
 # signed v14 images keep their level; each version must carry exactly its own required tokens.
 # v16 (9 Nov 2026) keeps v15's command line (idle=poll); what changed is inside the root (front exception fix, encoder
 # allowlist, a root pin that sees the whole root, reproducible build). The rows decide; the name only selects the tokens.
-IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16")
+# v17 (10 Nov 2026) keeps v16's command line; inside the root the engine does a fixed amount of work per request
+# (open_rank/shape.py), checked by row "D7. the engine does a fixed amount of work per request".
+IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
 CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",),
-                             "ir-sealed-search-tdx-v16": ("idle=poll",)}
+                             "ir-sealed-search-tdx-v16": ("idle=poll",), "ir-sealed-search-tdx-v17": ("idle=poll",)}
 CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"),
                     re.compile(r"inferroute\.image=(?:" + "|".join(re.escape(n) for n in IMAGE_NAMES) + r")"))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.
@@ -2476,6 +2478,7 @@ def check_memory_seal(rep: ImageReport, tree: str, paths: Dict[str, str], ltext:
             "parent from any OTHER process, not a helper the parent forked: that the parent forks none rests on its import "
             "closure, the next row)" if not pr else "; ".join(pr))
     check_parent_closure(rep, tree, paths, ltext, lmod, etext)
+    check_fixed_shape(rep, tree)
     check_kernel_objects(rep, tree)
     check_data_not_code(rep, tree)
 
@@ -2564,6 +2567,56 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
             pr.append(f"preload does not open exactly PRELOAD_PATHS through read_index/SentenceTransformer/Booster: {readers}")
         if others:
             pr.append(f"preload reads through other calls: {others}")
+        # v17: preload may also BUILD the two fixed-shape evaluators, each from one of the Boosters it just read and
+        # from nothing else (arrays, no file of their own); sealedresearch/oblivious_gbdt.py imports numpy only.
+        ob = [n for n in ast.walk(pre) if isinstance(n, ast.Call) and _call_name(n) == "ObliviousGBDT"]
+        if ob:
+            boosters_of: Dict[str, str] = {}
+            for n in ast.walk(pre):
+                if isinstance(n, ast.Assign):
+                    tg = n.targets[0]
+                    names = [tg] if isinstance(tg, ast.Name) else list(tg.elts) if isinstance(tg, ast.Tuple) else []
+                    vals = [n.value] if isinstance(tg, ast.Name) else list(n.value.elts) if isinstance(n.value, ast.Tuple) else []
+                    for t, v in zip(names, vals):
+                        if isinstance(t, ast.Name) and isinstance(v, ast.Call) and _call_name(v) == "Booster":
+                            sub = [a.slice.value for a in list(v.args) + [k.value for k in v.keywords]
+                                   if isinstance(a, ast.Subscript) and isinstance(a.value, ast.Name) and a.value.id == "paths"
+                                   and isinstance(a.slice, ast.Constant)]
+                            if len(sub) == 1:
+                                boosters_of[t.id] = sub[0]
+            built = sorted(boosters_of.get(c.args[0].id, "?") if (len(c.args) == 1 and not c.keywords and isinstance(c.args[0], ast.Name))
+                           else "?" for c in ob)
+            if built != ["stage1", "stage2"]:
+                pr.append(f"preload builds ObliviousGBDT other than once from each Booster it read: {built}")
+            og = os.path.join(tree, APP_DIR, "sealedresearch/oblivious_gbdt.py")
+            if not os.path.isfile(og):
+                pr.append("sealedresearch/oblivious_gbdt.py missing")
+            else:
+                top = sorted({n.split(".")[0] for n in _local_imports(og, os.path.join(tree, APP_DIR))} - {"__future__", "typing", "numpy"})
+                if top:
+                    pr.append(f"sealedresearch/oblivious_gbdt.py imports more than numpy: {top}")
+                pr += [f"oblivious_gbdt: dynamic: {x}" for x in dynamic_import_sites(og, os.path.join(tree, APP_DIR))]
+        # ... and nowhere else in the warm parent: no other ObliviousGBDT call in engine_preload.py, and no other file the
+        # parent reaches by import names ObliviousGBDT or imports sealedresearch.oblivious_gbdt (pi-attested review)
+        pre_ids = {id(n) for n in ast.walk(pre)}
+        stray = [n.lineno for n in ast.walk(mod) if isinstance(n, ast.Call) and _call_name(n) == "ObliviousGBDT" and id(n) not in pre_ids]
+        stray_imp = [n.lineno for n in ast.walk(mod) if isinstance(n, (ast.Import, ast.ImportFrom)) and id(n) not in pre_ids
+                     and "oblivious_gbdt" in ast.dump(n)]
+        if stray or stray_imp:
+            pr.append(f"engine_preload.py builds or imports ObliviousGBDT outside preload (lines {sorted(stray + stray_imp)})")
+        app = os.path.join(tree, APP_DIR)
+        pfiles, _ = front_closure(tree, ENGINE_ENTRY, ENGINE_PROPER)
+        for f in pfiles:
+            if f in ("sealedresearch/engine_preload.py", "sealedresearch/oblivious_gbdt.py"):
+                continue
+            fp = os.path.join(app, f)
+            names = _local_imports(fp, app)
+            if any(n == "sealedresearch.oblivious_gbdt" or n.startswith("sealedresearch.oblivious_gbdt.") for n in names) \
+                    or any(isinstance(n, ast.Call) and _call_name(n) == "ObliviousGBDT" for n in ast.walk(_parse(fp))):
+                pr.append(f"{f} (in the warm parent) imports or builds ObliviousGBDT")
+    ob_words = ("; from the two Boosters preload builds the fixed-shape evaluators (ObliviousGBDT, sealedresearch/oblivious_gbdt.py, "
+                "numpy only): arrays, no file of their own" if pre is not None and any(
+                    isinstance(n, ast.Call) and _call_name(n) == "ObliviousGBDT" for n in ast.walk(pre)) else "")
     if v15:
         rep.add(not pr, "D7. the warm parent parses data, not code", V15_RULES_PREFIX + (
                 "engine_preload: preload opens exactly PRELOAD_PATHS (index, model, stage1, stage2) through faiss.read_index, "
@@ -2577,7 +2630,80 @@ def check_data_not_code(rep: ImageReport, tree: str) -> None:
             "SentenceTransformer and lgb.Booster and nothing else; TORCH_FORCE_WEIGHTS_ONLY_LOAD=1 before torch; SentenceTransformer(trust_remote_code=False) after "
             "check_model_dir (exactly the files ENCODER_FILES pins by sha256 plus model.safetensors of the pinned tensor structure, "
             "no link, no other file; no .bin/.pt/.pth/.pkl/.pickle/.ckpt/.py/.so; modules.json entries all sentence_transformers.*); faiss.read_index and lgb.Booster(model_file) parse typed structures, never code"
-            if not pr else "; ".join(pr))
+            + ob_words if not pr else "; ".join(pr))
+
+
+FIXED_SHAPE_ROW = "D7b. the engine's fixed-shape switch is on and its budgets are fixed in code"
+SHAPE_USERS = ("sealedresearch/open_rank/ann.py", "sealedresearch/open_rank/ranker.py",
+               "sealedresearch/open_rank/searcher.py", "sealedresearch/open_rank/survey_run.py")
+SHAPE_FILE = "sealedresearch/open_rank/shape.py"
+SHAPE_BUDGETS = ("PPR_EDGE_BUDGET", "CITER_GATHER_BUDGET")
+
+
+def check_fixed_shape(rep: ImageReport, tree: str) -> None:
+    """v17: the published engine pads each stage to a fixed amount of work (open_rank/shape.py). Not a required row:
+    an image without it (v16) is not failed for it, and the record names the fixed shape only when it PASSED.
+    Read off the code: ENABLED is the literal True at module level and nothing reassigns it; each budget is an integer
+    literal; shape.py reads no file and no environment, and has no dynamic import site; the engine modules import it."""
+    app = os.path.join(tree, APP_DIR)
+    p = os.path.join(app, SHAPE_FILE)
+    if not os.path.isfile(p):
+        rep.add(None, FIXED_SHAPE_ROW, f"{SHAPE_FILE} not in the image (no fixed-shape engine)")
+        return
+    text = _text(p)
+    mod = _ast_parse(text)
+    pr: List[str] = []
+    consts: Dict[str, Any] = {}
+    for n in mod.body:
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Constant):
+            consts[n.targets[0].id] = n.value.value
+    if consts.get("ENABLED") is not True:
+        pr.append("shape.ENABLED is not the literal True at module level")
+    for b in SHAPE_BUDGETS:
+        if not (isinstance(consts.get(b), int) and not isinstance(consts.get(b), bool) and consts[b] > 0):
+            pr.append(f"shape.{b} is not a positive integer literal")
+    names = {_call_name(n) for n in ast.walk(mod) if isinstance(n, ast.Call)}
+    if names & {"open", "getenv", "load", "loads"} or "environ" in text:
+        pr.append("shape.py reads a file or the environment")
+    pr += [f"shape.py: dynamic: {x}" for x in dynamic_import_sites(p, app)]
+    def _imports_shape(m: ast.Module) -> Set[str]:
+        """The names a module binds to the shape module, read off its import statements (AST, not text)."""
+        out: Set[str] = set()
+        for n in ast.walk(m):
+            if isinstance(n, ast.ImportFrom) and any(a.name == "shape" for a in n.names) and (
+                    n.module in ("sealedresearch.open_rank", None) or (n.level and n.module is None)):
+                out |= {a.asname or a.name for a in n.names if a.name == "shape"}
+        return out
+    users = 0
+    for dp, _dn, fs in os.walk(app):
+        for name in fs:
+            if not name.endswith(".py"):
+                continue
+            f = os.path.join(dp, name)
+            rel = os.path.relpath(f, app)
+            m = _ast_parse(_text(f))
+            aliases = _imports_shape(m) | ({"shape"} if rel != SHAPE_FILE else set())
+            for n in ast.walk(m):
+                tgts = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, (ast.AugAssign, ast.AnnAssign)) else []
+                for tg in tgts:
+                    if isinstance(tg, ast.Attribute) and tg.attr == "ENABLED":
+                        pr.append(f"{rel} assigns .ENABLED")
+                    if isinstance(tg, ast.Name) and tg.id in _imports_shape(m):
+                        pr.append(f"{rel} rebinds its shape module name {tg.id}")
+                if isinstance(n, ast.Call) and _call_name(n) in ("setattr", "delattr", "vars") and n.args and \
+                        isinstance(n.args[0], ast.Name) and n.args[0].id in aliases:
+                    pr.append(f"{rel} calls {_call_name(n)} on the shape module")
+            if rel in SHAPE_USERS and _imports_shape(m):
+                users += 1
+    missing = [u for u in SHAPE_USERS if not os.path.isfile(os.path.join(app, u))]
+    if users < len(SHAPE_USERS) or missing:
+        pr.append(f"{users} of the {len(SHAPE_USERS)} engine modules import shape (ANN, ranker, searcher, survey)")
+    rep.values["fixed_shape_budgets"] = {b: consts.get(b) for b in SHAPE_BUDGETS}
+    rep.add(not pr, FIXED_SHAPE_ROW,
+            f"{SHAPE_FILE}: ENABLED = True (published code, not a data file; nothing reassigns it), "
+            f"PPR_EDGE_BUDGET = {consts.get('PPR_EDGE_BUDGET')}, CITER_GATHER_BUDGET = {consts.get('CITER_GATHER_BUDGET')}; "
+            f"read off the code, not observed running; all {users} engine modules (ANN, ranker, searcher, survey) import it; that "
+            f"each stage pads is in the published source, not checked by this row" if not pr else "; ".join(pr))
 
 
 def check_parent_closure(rep: ImageReport, tree: str, paths: Dict[str, str], ltext: str, lmod: ast.Module, etext: str) -> None:

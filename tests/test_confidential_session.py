@@ -1373,7 +1373,7 @@ def test_a_400_past_the_window_is_named_as_an_overflow_not_as_malformed(world, o
     assert st == 200
     st, text = _turn(s, openai_path, "x" * 4100)
     assert st == 400, text
-    assert "longer than fake accepts" in text and "/compact" in text and "202,752" in text, text
+    assert "outgrowing fake's window" in text and "/compact" in text and "202,752" in text, text
     assert "malformed" not in text
     assert s.receipt.counters.get("fault_client") == 1, "the user's conversation length is not the fleet's fault"
 
@@ -1403,3 +1403,13 @@ def test_no_stated_window_means_no_overflow_claim(world):
     _turn(s, True, "x" * 4000)
     st, text = _turn(s, True, "x" * 4000)
     assert st == 400 and "/compact" not in text
+
+
+def test_a_400_just_under_the_window_by_this_devices_estimate_is_not_called_an_overflow(world):
+    """Within 97% but under the strict line: another cause is likelier, so no /compact advice (director, #35)."""
+    s = _session(_GrowsThenRefusedCarrier(world["enclaves"], prompt_tokens=165_000))
+    s.context_length = 202_752
+    asyncio.run(s.open())
+    _turn(s, True, "x" * 4000)
+    st, text = _turn(s, True, "x" * 4000)          # same size: 165,000 + 32,768 = 197,768 <= 202,752
+    assert st == 400 and "/compact" not in text and "malformed" in text

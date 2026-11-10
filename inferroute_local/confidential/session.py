@@ -511,13 +511,20 @@ class ConfidentialSession:
         if not ctx or not self._last_prompt_tokens:
             return ""
         reserve = int(oai.get("max_tokens") or oai.get("max_completion_tokens") or 0)
-        if self._last_prompt_tokens + reserve <= ctx * 0.97:
-            return ""
         if self._last_prompt_bytes and self._sending_bytes < 0.9 * self._last_prompt_bytes:
             return ""                     # it shrank since: an overflow is no longer the likely reading
-        return (f"this conversation is longer than {self.model_short} accepts (about "
-                f"{self._last_prompt_tokens:,} tokens of history plus {reserve:,} reserved for the reply, "
-                f"against a limit of {ctx:,}) — run /compact or start a new session")
+        # THIS request's prompt, estimated from the last answered one by the ratio of their sealed sizes —
+        # our own measurement of tokens per byte for this very conversation, not a guessed constant. Then
+        # the strict question the server asks: prompt + reserve > window. A loose "near the limit" test would
+        # tell someone to /compact for a 400 that has another cause — a false remedy (director review, #35).
+        est = self._last_prompt_tokens
+        if self._last_prompt_bytes:
+            est = int(est * self._sending_bytes / self._last_prompt_bytes)
+        if est + reserve <= ctx:
+            return ""
+        return (f"this looks like the conversation outgrowing {self.model_short}'s window (about {est:,} "
+                f"tokens of history plus {reserve:,} reserved for the reply, against a limit of {ctx:,}) — "
+                "run /compact or start a new session")
 
     async def _send_sealed(self, oai: dict, streaming: bool):
         """Seal `oai` to the pinned, verified key and hand it to the carrier. Returns ("ok", pinned, sealed, raw)

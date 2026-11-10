@@ -1005,7 +1005,9 @@ def launch_agent_plain(agent: str, model_id: str, creds: Credentials, extra_args
     headers["x-inferroute-session"] = session_id
     kw = dict(base_url=creds.api_url, api_key=creds.api_key, alias=alias, upstream_name=alias.model_id, headers=headers,
               # the smallest window across this model and its server-side fallbacks, so the agent compacts before
-              # ANY model the server may switch to refuses the conversation (0 → the agent keeps its default)
+              # ANY model the server may switch to refuses the conversation (0 → the agent keeps its default).
+              # One synchronous GET per launch, 4 s timeout, no cache — deliberately: it is only slow when the
+              # server is unreachable, and then this launch was going to fail anyway.
               context_window=agents_mod.served_context_window(creds.api_url, creds.api_key, alias.short))
     if agent == "pi":
         argv = agents_mod.pi_env_argv(binary, env, list(extra_args), run_id=session_id, **kw)

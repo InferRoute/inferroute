@@ -320,3 +320,14 @@ def test_the_same_name_filed_again_is_one_entry_that_keeps_every_filing():
     lines = T.report_lines({"name": "Festo", "classes": [], "data_date": "d", "sources": "", "marks_searched": 4,
                             "hits": got, "more": 0})
     assert any(line.startswith("    also filed as: FR 2 (registered, classes 7); EU 4") for line in lines)
+
+
+def test_a_search_that_fills_the_word_cache_is_scored_like_any_other(index, monkeypatch):
+    # The rarity cache was trimmed before it was read, so the search that crossed its limit scored every word as
+    # 1.0: about one search in 45 on a long-running host, and SUPERBIOTIX fell from 1st to 25th on one (9 Nov).
+    def scores(ix):
+        return [(h["number"], round(h["score"], 6)) for h in ix.search("Quench Anteriora Labs", ["42"])["hits"]]
+    fresh = scores(T.Index(index.path))
+    monkeypatch.setattr(T, "RARITY_CACHE_WORDS", 0)          # every search now crosses the limit
+    full = T.Index(index.path)
+    assert scores(full) == fresh and scores(full) == fresh

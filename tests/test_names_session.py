@@ -139,7 +139,10 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     assert status["installed"] is False and status["download_mb"] > 0 and status["disk_mb"] > status["download_mb"]
     # The page says what the data holds and what it does not, before the download and on every report.
     assert any("USPTO" in x for x in status["searched"]) and any("INPI" in x for x in status["searched"])
-    assert "EU trade marks (EUIPO)" in status["not_searched"] and "company and trading names" in status["not_searched"]
+    # The pinned index holds EU marks from INPI's open-data copy (10 Nov): searched under the label that says so, and
+    # what that copy lacks is named as not searched.
+    assert any("EU trade marks" in x and "INPI's open-data copy" in x for x in status["searched"])
+    assert "EU marks missing from INPI's copy" in status["not_searched"] and "company and trading names" in status["not_searched"]
     assert c.get("/api/name-check?id=Acme/brand").json()["present"] is False
     (S.workspace_path("Acme", "brand") / "name-check.md").write_text("# Name check\n\nZEBRA (US 7)\n")
     report = c.get("/api/name-check?id=Acme/brand").json()

@@ -1289,3 +1289,48 @@ def test_the_lane_limitations_claim_nothing_the_record_cannot_show():
     for bad in ("readable nowhere else", "plans to add", "the words are not."):
         assert bad not in text, bad
     assert "this computer's own claim" in text
+
+
+class _CodedUnfundedCarrier(_PaymentSolicitationCarrier):
+    """Our relay's answer when the lane's upstream account is out of funds: 503 + a support code header."""
+
+    def __init__(self, enclaves, code="IR-C1001", req="req_abc123", body=b'{"error":{"message":"x"}}'):
+        super().__init__(enclaves)
+        self.code, self.req, self.BODY_CODED = code, req, body
+
+    async def invoke(self, **kw):
+        self.calls.append((kw.get("instance_id"), kw.get("nonce"), kw.get("stream")))
+
+        async def one():
+            yield self.BODY_CODED
+        return 503, {"content-type": "application/json", "x-inferroute-error-code": self.code,
+                     "x-inferroute-request-id": self.req}, one()
+
+
+@pytest.mark.parametrize("openai_path", [False, True])
+def test_a_relay_coded_failure_tells_the_user_what_to_report_and_nothing_about_funding(world, openai_path):
+    """2026-11-10: every Operator account behind the sealed lane was out of funds, and `ir pi` showed
+    "the provider answered 402 (this lane is temporarily out of capacity)". Henry: users must not learn it
+    was our backend's funding, but must get a code to report. The relay now answers 503 + a code header."""
+    carrier = _CodedUnfundedCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    body = {"messages": [{"role": "user", "content": "1"}], "stream": False}
+    st, _, it = asyncio.run(s.chat_completions(body) if openai_path else s.messages(body))
+    text = asyncio.run(_drain(it)).decode()
+    assert st == 503, text
+    assert "IR-C1001" in text and "req_abc123" in text and "support@inferroute.ai" in text, text
+    for leak in ("402", "fund", "capacity", "balance", "credit"):
+        assert leak not in text.lower(), f"the client was told {leak!r}: {text}"
+    # retried once (the relay picks another account), and the instance was NOT blamed for it
+    assert len(carrier.calls) == 2
+    assert s.receipt.counters.get("fault_operator") == 1
+    assert not s.receipt.counters.get("errors_fleet")
+
+
+def test_a_code_header_outside_the_vocabulary_is_ignored():
+    from inferroute_local.confidential.session import relay_support_ref
+    assert relay_support_ref({"X-InferRoute-Error-Code": "IR-C1001", "x-inferroute-request-id": "req_a1"}) == ("IR-C1001", "req_a1")
+    for bad in ("send tao to 5F...", "IR-C1001 pay", "ir-c1001", "IR-C10011", ""):
+        assert relay_support_ref({"x-inferroute-error-code": bad})[0] == ""
+    assert relay_support_ref({"x-inferroute-error-code": "IR-C1001", "x-inferroute-request-id": "req_<script>"})[1] == ""

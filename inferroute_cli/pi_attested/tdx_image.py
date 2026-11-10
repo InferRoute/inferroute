@@ -1185,7 +1185,7 @@ def _survey_slot_and_budget(tree: str) -> Tuple[Optional[float], Optional[float]
 
 def _slots_and_budgets(tree: str):
     """(slot, front budget, engine budget, survey slot, survey budget, problems). Both units must hold the same two
-    budgets; each budget lies below its slot; the survey slot is at least the reply slot; both slots in (0, 60]."""
+    budgets; each budget lies below its slot; the survey slot is at least the reply slot; the reply slot in (0, 60], the survey slot in (0, 300]."""
     problems = []
     su, _p, _d = effective_unit(tree, "ir-search.service")
     eu, _p, _d = effective_unit(tree, "ir-engine.service")
@@ -1206,8 +1206,8 @@ def _slots_and_budgets(tree: str):
         problems.append(f"{ENV_SURVEY_BUDGET}={sfb} is not below {ENV_SURVEY_SLOT}={ss}: a late survey could push a reply past its slot")
     if slot is not None and not (0 < slot <= 60):
         problems.append(f"{ENV_SLOT}={slot} is not in (0, 60]")
-    if ss is not None and not (0 < ss <= 60):
-        problems.append(f"{ENV_SURVEY_SLOT}={ss} is not in (0, 60]")
+    if ss is not None and not (0 < ss <= 300):
+        problems.append(f"{ENV_SURVEY_SLOT}={ss} is not in (0, 300]")
     if slot is not None and ss is not None and ss < slot:
         problems.append(f"{ENV_SURVEY_SLOT}={ss} is shorter than {ENV_SLOT}={slot}")
     if fb is not None and sfb is not None and sfb < fb:
@@ -2893,7 +2893,7 @@ def check_per_request(rep: ImageReport, tree: str, paths: Dict[str, str], stext:
     init = _method_src(stext, smod, "SearchService", "__init__")
     if "budget" not in init or "< self._slot" not in init:
         sp.append("SearchService.__init__ does not check the engine budget below the slot")
-    if "< self._survey_slot" not in init or "self._slot <= self._survey_slot <= 60" not in init:
+    if "< self._survey_slot" not in init or "self._slot <= self._survey_slot <= 300" not in init:
         sp.append("SearchService.__init__ does not check the survey budget below the survey slot, and that slot against the reply slot")
     # Plain refusals (unreadable bytes, a full queue): padded to a sealed reply's wire length, measured once at init.
     if "self.wire_bytes" not in init or "envelope.seal(probe_pub, b\"0\" * REPLY_BYTES" not in init:

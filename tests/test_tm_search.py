@@ -347,3 +347,13 @@ def test_a_search_counts_names_and_filings_each_in_one_unit(tmp_path):
     logged = __import__("json").loads((tmp_path / T.SEARCH_LOG).read_text())
     assert logged["filings"] == 4 and logged["more"] == 1
     assert "…and 1 more name, less close." in "\n".join(T.report_lines(r))
+
+
+def test_the_candidate_caps_grow_with_the_index_and_only_above_us_fr(index):
+    # Sized on US+FR (5,741,201 marks); with EU marks (7,467,187) the same caps left STILNOX ("Tinox") and ELIANCE
+    # ("Hôtelliance") unscored. Unchanged at or below the size they were set on, so a US+FR search is the same search.
+    assert index._cap(T.MAX_CANDIDATES) == T.MAX_CANDIDATES
+    index.meta["marks"] = str(T.CAPS_SIZED_ON)
+    assert index._cap(T.NEIGHBOURS) == T.NEIGHBOURS
+    index.meta["marks"] = "7467187"
+    assert index._cap(T.MAX_CANDIDATES) == 15607 and index._cap(T.MAX_CANDIDATES * T.POOL) == 124860

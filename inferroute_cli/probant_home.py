@@ -469,7 +469,10 @@ def session_detail(client: str, matter: str, sid: str) -> Optional[Dict[str, Any
     if rec.get("mode") == "names":
         extra["trademark_searches"] = [
             {"n": n, "at": e.get("at"), "name": str(e.get("name") or ""), "classes": list(e.get("classes") or []),
-             "marks": len(e.get("hits") or []) + int(e.get("more") or 0)}
+             # Names since grouping (each with its filings under it); "filings" counts those, and is absent on a
+             # search logged before grouping, where each hit was one filing.
+             "marks": len(e.get("hits") or []) + int(e.get("more") or 0),
+             **({"filings": int(e["filings"])} if isinstance(e.get("filings"), int) else {})}
             for n, e in enumerate(_name_session_searches(rdir, sid, rec), 1)]
     return {"id": sid, "matter": f"{client}/{matter}", **summary,
             "model": {"verified": bool(model.get("verified")), "checks": model.get("checks"), "name": model.get("model")},

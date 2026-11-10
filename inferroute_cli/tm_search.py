@@ -422,10 +422,13 @@ class Index:
         # in the register are often narrower than the goods an opposition turns on.
         hits.sort(key=lambda h: (-(h["score"] + CLASS_BONUS * h["class_overlap"]), h["text"].lower()))
         hits = group_same_name(hits)
+        # Counts in one unit each: hits and "more" are names; "filings" is every filing under them, the shown and the
+        # rest, since each filing is a registered mark of its own (53 filings of 6 names for an invented word).
+        filings = sum(1 + len(h.get("also", [])) for h in hits)
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 **coverage(self.meta.get("sources", "")),
-                "hits": hits[:limit], "more": max(0, len(hits) - limit)}
+                "hits": hits[:limit], "more": max(0, len(hits) - limit), "filings": filings}
 
     def _keys(self, keys: Iterable[str]) -> List[Tuple[str, array.array]]:
         """(key, ids) for every key of `keys` that exists, in IN (...) lookups of 900."""
@@ -668,7 +671,7 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
         if h.get("also"):
             out.append(_also_line(h))
     if result["more"]:
-        out.append(f"\n…and {result['more']} more, less close.")
+        out.append(f"\n…and {result['more']} more {'name' if result['more'] == 1 else 'names'}, less close.")
     return out
 
 
@@ -698,6 +701,8 @@ def log_search(log_dir: Path, result: Dict[str, Any], session_id: Optional[str] 
     entry = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              **({"session_id": session_id} if session_id else {}),
              **{k: result.get(k) for k in ("name", "classes", "data_date", "sources", "marks_searched")},
+             # Names and filings, so a page can count both; an entry without it predates grouping (one filing a hit).
+             **({"filings": result["filings"]} if "filings" in result else {}),
              "hits": result.get("hits", [])[:LOGGED_HITS],
              "more": result.get("more", 0) + max(0, len(result.get("hits", [])) - LOGGED_HITS)}
     log_dir.mkdir(parents=True, exist_ok=True)

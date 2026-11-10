@@ -139,7 +139,10 @@ def test_the_home_page_creates_a_name_matter_and_reports_the_index(home):
     assert status["installed"] is False and status["download_mb"] > 0 and status["disk_mb"] > status["download_mb"]
     # The page says what the data holds and what it does not, before the download and on every report.
     assert any("USPTO" in x for x in status["searched"]) and any("INPI" in x for x in status["searched"])
-    assert "EU trade marks (EUIPO)" in status["not_searched"] and "company and trading names" in status["not_searched"]
+    # The pinned index holds EU marks from INPI's open-data copy (10 Nov): searched under the label that says so, and
+    # what that copy lacks is named as not searched.
+    assert any("EU trade marks" in x and "INPI's open-data copy" in x for x in status["searched"])
+    assert "EU marks missing from INPI's copy" in status["not_searched"] and "company and trading names" in status["not_searched"]
     assert c.get("/api/name-check?id=Acme/brand").json()["present"] is False
     (S.workspace_path("Acme", "brand") / "name-check.md").write_text("# Name check\n\nZEBRA (US 7)\n")
     report = c.get("/api/name-check?id=Acme/brand").json()
@@ -223,3 +226,21 @@ def test_a_report_that_cites_marks_no_search_returned_is_refused_before_it_is_wr
     assert "never from memory" in names and "Never tell the founder that a draft was wrong" in names
     app = (root / "inferroute_cli" / "probant_web" / "app.js").read_text()
     assert '"Checked the report against the searches"' in app
+
+
+def test_the_search_tool_shows_a_name_s_other_filings_and_lets_the_report_cite_them():
+    """Since grouping a name filed more than once is one hit with its other filings under "also". The text the
+    assistant reads is built in ir-attested.ts and showed only the hits, so names.md asked it to read filings it was
+    never shown, and the report check would have refused one cited. tests/tm_search_tool_sim.ts runs the real tool
+    and report-check blocks against a stubbed search: the also line (six, then a tail), names and filings counted in
+    one unit each, and every also-filing citable while an unreturned number is still refused."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "tm_search_tool_sim.ts")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "every filing citable" in r.stdout

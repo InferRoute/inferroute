@@ -16,13 +16,14 @@ from pathlib import Path
 from typing import Callable, Optional
 
 INDEX = {
-    "url": "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-20261016.sqlite.xz",
-    "xz_sha256": "a81612a22bd16ad1ef6c4b04b9f8a302da84fbe139bd3c9b3f2a5b8409c27845",
-    "xz_bytes": 249_760_808,
-    "sha256": "d37b71fc64b974c97c47bddf834ac07ee50fcffbdff3ff76c314a1d4af5c5dca",
-    "bytes": 804_175_872,
-    "data": "US marks to 2026-09-30, French marks to 2026-10-16",
-    "sources": "USPTO (United States); INPI (France)",
+    "url": "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.1",
+    "parts": ["https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.1", "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.2"],
+    "xz_sha256": "c9b6aa9b0cf68fa6bb8e29bbeca97215966816fbd65dfbc7eefd3639bee1c4a5",
+    "xz_bytes": 318_567_116,
+    "sha256": "3b5bc1647c133597a73df67e857a811a82c9188c0e2f6edf0d856ffc35925ae7",
+    "bytes": 1_028_304_896,
+    "data": "US marks to 2026-09-30, French marks to 2026-10-16, EU marks to 2026-11-01",
+    "sources": "USPTO (United States); INPI (France); EUIPO (EU trade marks, from INPI's open-data copy)",
 }
 CHUNK = 1 << 20
 
@@ -70,22 +71,27 @@ def install(target: Path, url: Optional[str] = None, progress: Optional[Callable
         say(f"downloading the trademark index ({INDEX['xz_bytes'] / 1e6:.0f} MB; {INDEX['data']})")
         h = hashlib.sha256()
         got = 0
-        # A named agent: Cloudflare refuses Python's default one ("Python-urllib/…") with a 403.
-        request = urllib.request.Request(url or INDEX["url"], headers={"User-Agent": "anteriora-client (inferroute)"})
-        with urllib.request.urlopen(request, timeout=60) as r, part.open("wb") as out:
-            if on_connect:
-                on_connect()     # the server answered: from here a slow download is progress, not a dead line
-            while True:
-                block = r.read(CHUNK)
-                if not block:
-                    break
-                out.write(block)
-                h.update(block)
-                got += len(block)
-                if got > INDEX["xz_bytes"]:
-                    raise InstallError("the download is larger than the index this release names; stopped")
-                if got % (25 * CHUNK) < CHUNK:
-                    say(f"  {got / 1e6:.0f} / {INDEX['xz_bytes'] / 1e6:.0f} MB")
+        # The file may be served in parts (R2 takes at most 300 MiB per upload from our side): they are fetched in
+        # order into one file, and the size and both hashes are checked on the whole, exactly as for one part.
+        urls = [url] if url else list(INDEX.get("parts") or [INDEX["url"]])
+        with part.open("wb") as out:
+            for i, u in enumerate(urls):
+                # A named agent: Cloudflare refuses Python's default one ("Python-urllib/…") with a 403.
+                request = urllib.request.Request(u, headers={"User-Agent": "anteriora-client (inferroute)"})
+                with urllib.request.urlopen(request, timeout=60) as r:
+                    if on_connect and i == 0:
+                        on_connect()     # the server answered: from here a slow download is progress, not a dead line
+                    while True:
+                        block = r.read(CHUNK)
+                        if not block:
+                            break
+                        out.write(block)
+                        h.update(block)
+                        got += len(block)
+                        if got > INDEX["xz_bytes"]:
+                            raise InstallError("the download is larger than the index this release names; stopped")
+                        if got % (25 * CHUNK) < CHUNK:
+                            say(f"  {got / 1e6:.0f} / {INDEX['xz_bytes'] / 1e6:.0f} MB")
         if h.hexdigest() != INDEX["xz_sha256"]:
             raise InstallError("the downloaded file is not the one this release names; nothing was installed")
         say("unpacking")

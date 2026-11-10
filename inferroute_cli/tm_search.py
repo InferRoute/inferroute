@@ -41,6 +41,11 @@ MAX_CANDIDATES = 12000      # scored in full; ties are broken by id so a search 
 NEIGHBOURS = 4000          # marks found word by word (_word_neighbours), scored on top of those
 CLASS_BONUS = 0.15          # added to the score of a mark in the founder's classes (see search())
 POOL = 8                    # how many times that many are gathered before the length-aware shortlist
+# The caps above were sized on the US+FR index (5,741,201 marks). A larger index holds more candidates at every vote,
+# so the same caps pushed FR targets out of the candidate set once EU marks were added (STILNOX for "Tinox", ELIANCE
+# for "Hôtelliance": scored on US+FR, never scored on US+FR+EU). They grow with the index's mark count; on an index no
+# larger than US+FR nothing changes.
+CAPS_SIZED_ON = 5_741_201
 
 _DIGITS = {"0": "zero", "1": "one", "2": "two", "3": "three", "4": "four", "5": "five", "6": "six",
            "7": "seven", "8": "eight", "9": "nine"}
@@ -398,12 +403,12 @@ class Index:
         need = 0.3 * sum(weights) if weights else 1.0
         cand = [i for i, v in votes.items() if v >= need]
         cand.sort(key=lambda i: (-votes[i], i))
-        cand = self._shortlist(cand[:MAX_CANDIDATES * POOL], votes, sum(weights), len(grams(key)))
+        cand = self._shortlist(cand[:self._cap(MAX_CANDIDATES * POOL)], votes, sum(weights), len(grams(key)))
         # Marks found word by word are scored on their own quota, best first, so a long name's many fragment
         # candidates cannot crowd them out (ERAM for "Etam on the beach" was one of 12,000 at the same vote).
         near = self._word_neighbours(flat, ws)
         seen = set(cand)
-        cand += [i for i in sorted(near, key=lambda i: (-near[i], i)) if i not in seen][:NEIGHBOURS]
+        cand += [i for i in sorted(near, key=lambda i: (-near[i], i)) if i not in seen][:self._cap(NEIGHBOURS)]
         wanted = {str(int(c)) for c in classes if str(c).strip().isdigit()}
         rows = []
         for chunk in range(0, len(cand), 900):
@@ -422,10 +427,13 @@ class Index:
         # in the register are often narrower than the goods an opposition turns on.
         hits.sort(key=lambda h: (-(h["score"] + CLASS_BONUS * h["class_overlap"]), h["text"].lower()))
         hits = group_same_name(hits)
+        # Counts in one unit each: hits and "more" are names; "filings" is every filing under them, the shown and the
+        # rest, since each filing is a registered mark of its own (53 filings of 6 names for an invented word).
+        filings = sum(1 + len(h.get("also", [])) for h in hits)
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
                 **coverage(self.meta.get("sources", "")),
-                "hits": hits[:limit], "more": max(0, len(hits) - limit)}
+                "hits": hits[:limit], "more": max(0, len(hits) - limit), "filings": filings}
 
     def _keys(self, keys: Iterable[str]) -> List[Tuple[str, array.array]]:
         """(key, ids) for every key of `keys` that exists, in IN (...) lookups of 900."""
@@ -517,12 +525,16 @@ class Index:
             cache.clear()
         return out
 
+    def _cap(self, n: int) -> int:
+        """A candidate cap for this index: n on an index of up to CAPS_SIZED_ON marks, in proportion above it."""
+        return int(n * max(1.0, int(self.meta.get("marks", 0) or 0) / CAPS_SIZED_ON))
+
     def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
         """The candidates scored in full: those sharing the most of the name's sound fragments RELATIVE TO THEIR
         OWN LENGTH. Raw shared weight favours long marks, which share more fragments with anything; ranked that
         way, PICASSO (for "Picaro") and CARREFOUR (for "Karfour") sat past the 14,000th candidate and were never
         scored. A mark found by its whole spelling or a whole word (100 / 40 votes) is always kept."""
-        if len(ids) <= MAX_CANDIDATES:
+        if len(ids) <= self._cap(MAX_CANDIDATES):
             return ids
         per_gram = weight / max(1, n_grams)
         size: Dict[int, int] = {}
@@ -533,7 +545,7 @@ class Index:
         def dice(i: int) -> float:
             return 2 * votes[i] / (weight + per_gram * size.get(i, n_grams))
         kept = sorted(ids, key=lambda i: (-(votes[i] >= 40), -dice(i), i))
-        return kept[:MAX_CANDIDATES]
+        return kept[:self._cap(MAX_CANDIDATES)]
 
     @staticmethod
     def _score(row, flat: str, key: str, ws: List[str], wanted: set,
@@ -668,7 +680,7 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
         if h.get("also"):
             out.append(_also_line(h))
     if result["more"]:
-        out.append(f"\n…and {result['more']} more, less close.")
+        out.append(f"\n…and {result['more']} more {'name' if result['more'] == 1 else 'names'}, less close.")
     return out
 
 
@@ -698,6 +710,8 @@ def log_search(log_dir: Path, result: Dict[str, Any], session_id: Optional[str] 
     entry = {"at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
              **({"session_id": session_id} if session_id else {}),
              **{k: result.get(k) for k in ("name", "classes", "data_date", "sources", "marks_searched")},
+             # Names and filings, so a page can count both; an entry without it predates grouping (one filing a hit).
+             **({"filings": result["filings"]} if "filings" in result else {}),
              "hits": result.get("hits", [])[:LOGGED_HITS],
              "more": result.get("more", 0) + max(0, len(result.get("hits", [])) - LOGGED_HITS)}
     log_dir.mkdir(parents=True, exist_ok=True)

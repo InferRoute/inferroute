@@ -331,3 +331,29 @@ def test_a_search_that_fills_the_word_cache_is_scored_like_any_other(index, monk
     monkeypatch.setattr(T, "RARITY_CACHE_WORDS", 0)          # every search now crosses the limit
     full = T.Index(index.path)
     assert scores(full) == fresh and scores(full) == fresh
+
+
+def test_a_search_counts_names_and_filings_each_in_one_unit(tmp_path):
+    # Grouped, a hit is a name and "more" counts names; "filings" counts every filing under all of them, shown or
+    # not, so a page can say "2 close names (4 filings)" instead of calling 4 registered marks 2.
+    ix = _index_of(tmp_path, [("US", "1", "FESTO", "registered", ["7"], ""),
+                              ("FR", "2", "Festo", "registered", ["7"], ""),
+                              ("US", "3", "FESTO", "registered", ["9"], ""),
+                              ("US", "4", "FESTOOL", "registered", ["7"], "")])
+    r = ix.search("Festo", ["7"], limit=1)
+    assert len(r["hits"]) == 1 and r["more"] == 1 and r["filings"] == 4
+    assert r["hits"][0]["text"].upper() == "FESTO" and len(r["hits"][0]["also"]) == 2
+    T.log_search(tmp_path, r)
+    logged = __import__("json").loads((tmp_path / T.SEARCH_LOG).read_text())
+    assert logged["filings"] == 4 and logged["more"] == 1
+    assert "…and 1 more name, less close." in "\n".join(T.report_lines(r))
+
+
+def test_the_candidate_caps_grow_with_the_index_and_only_above_us_fr(index):
+    # Sized on US+FR (5,741,201 marks); with EU marks (7,467,187) the same caps left STILNOX ("Tinox") and ELIANCE
+    # ("Hôtelliance") unscored. Unchanged at or below the size they were set on, so a US+FR search is the same search.
+    assert index._cap(T.MAX_CANDIDATES) == T.MAX_CANDIDATES
+    index.meta["marks"] = str(T.CAPS_SIZED_ON)
+    assert index._cap(T.NEIGHBOURS) == T.NEIGHBOURS
+    index.meta["marks"] = "7467187"
+    assert index._cap(T.MAX_CANDIDATES) == 15607 and index._cap(T.MAX_CANDIDATES * T.POOL) == 124860

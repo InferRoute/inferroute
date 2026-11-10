@@ -148,7 +148,10 @@ def test_a_name_session_counts_its_own_trademark_searches_and_names(home):
          # written before searches carried a session id: placed by the session's start and end
          {"at": "2026-10-23T16:10:00Z", "name": "Lumora", "classes": ["21"], "hits": [hit], "more": 3},
          *({"at": "2026-10-23T16:1%d:00Z" % i, "session_id": NAME_SID, "name": n, "classes": ["11"], "hits": [], "more": 0}
-           for i, n in enumerate(["Lumora", "Tidevell", "Tidevell", "Lumora", "Tide vell", "Lumora", "Tidevell"], 1)),
+           for i, n in enumerate(["Lumora", "Tidevell", "Tidevell", "Lumora", "Tide vell", "Lumora"], 1)),
+         # since grouping: one hit and five more are six names, with 53 filings under them
+         {"at": "2026-10-23T16:17:00Z", "session_id": NAME_SID, "name": "Tidevell", "classes": ["11"], "hits": [hit],
+          "more": 5, "filings": 53},
          {"at": "2026-10-23T17:05:00Z", "session_id": OTHER_SID, "name": "Aquelia", "classes": [], "hits": [], "more": 0})
     rows = {r["id"]: r for r in c.get("/api/matter", params={"id": "Acme/names"}).json()["sessions"]}
     assert rows[NAME_SID]["kind"] == "names" and rows[NAME_SID]["tm_searches"] == 8 and rows[NAME_SID]["names"] == 3
@@ -156,6 +159,8 @@ def test_a_name_session_counts_its_own_trademark_searches_and_names(home):
     detail = c.get("/api/session", params={"id": "Acme/names", "sid": NAME_SID}).json()
     tm = detail["trademark_searches"]
     assert len(tm) == 8 and tm[0]["name"] == "Lumora" and tm[0]["marks"] == 4 and tm[0]["n"] == 1
+    # a search logged before grouping counted filings as marks and has no "filings"; a grouped one counts both
+    assert "filings" not in tm[0] and tm[7]["marks"] == 6 and tm[7]["filings"] == 53
     js = (STATIC / "home.js").read_text()
     assert '"trademark search", "trademark searches"' in js and "No trademark search ran in this session." in js
 
@@ -243,7 +248,8 @@ def _name_matter(c, rdir_sid=NAME_SID):
     rdir = S.records_dir("Acme", "bottle")
     _host_record(rdir, rdir_sid, ended_at="2026-10-23T16:30:00Z", exit_code=0, turns=2, ended_by="person")
     _log(rdir, *({"at": "2026-10-23T16:1%d:00Z" % i, "session_id": rdir_sid, "name": n, "classes": ["21"],
-                  "hits": [{"text": n.upper(), "register": "USPTO", "number": str(i), "status": "registered"}], "more": 2}
+                  "hits": [{"text": n.upper(), "register": "USPTO", "number": str(i), "status": "registered"}], "more": 2,
+                  **({"filings": 7} if i == 0 else {})}
                  for i, n in enumerate(["Lumora", "Tidevell"] * 4)),
          {"at": "2026-10-23T18:00:00Z", "session_id": OTHER_SID, "name": "Elsewhere", "classes": [], "hits": []})
     return ws
@@ -263,6 +269,8 @@ def test_a_name_check_record_is_titled_and_worded_for_a_name_check(home):
         assert wrong not in html, wrong
     assert "8 trademark searches for 2 names" in html and "three US marks spell LUMORA" in html
     assert "no outside machine signed" in html and "free to use" in html
+    # names, then filings in brackets; a search logged before grouping has only its filings
+    assert "<th>Similar names (filings)</th>" in html and "<td>3 (7)</td>" in html and "<td>(3)</td>" in html
     rows = json.loads((folder / "trademark-searches.json").read_text())
     assert len(rows) == 8 and {r["session_id"] for r in rows} == {NAME_SID}
     assert (folder / f"report-{S.NAME_CHECK}").read_text().startswith("# Name check")

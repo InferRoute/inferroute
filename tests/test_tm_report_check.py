@@ -1,5 +1,6 @@
 """tools/tm_report_check.py: a report's cited marks are checked against what the searches returned."""
 import importlib.util
+import json
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("tm_report_check", Path(__file__).parent.parent / "tools" / "tm_report_check.py")
@@ -40,3 +41,30 @@ def test_part_of_a_mark_s_classes_written_as_the_whole_is_flagged_unless_worded_
                "GRINDEX — US 72137309, registered, classes 7, 9, 11, 21, 35."):
         got = C.check(ok, hits)
         assert not got["classes_partial"] and not got["classes_wrong"], ok
+
+
+def test_an_eu_number_is_checked_however_it_is_written_and_eu_27_is_not_a_citation():
+    # With EU marks searched, an EU number in a report went unchecked: invented or with a wrong status, it passed.
+    # The index holds EU numbers without EUIPO's leading zeros, so 000275933 and 275933 are the same mark.
+    hits = {("EU", "275933"): {"status": "registered", "classes": ["9"]}}
+    got = C.check("FESTO — EUTM 000275933, registered, class 9. FESTA — EU 275933, pending. "
+                  "FESTI — EUIPO 018999999, registered. The EU 27 member states.", hits)
+    assert got["cited"] == 3 and got["not_returned"] == ["EU 18999999"] and got["status_wrong"] == ["EU 275933"]
+
+
+def test_a_filing_grouped_under_a_name_is_a_returned_mark(tmp_path):
+    # Since grouping, a name's other filings come back under "also"; citing one is citing what the search returned.
+    log = tmp_path / "trademark-searches.jsonl"
+    log.write_text(json.dumps({"hits": [{"register": "US", "number": "86332176", "status": "registered", "classes": ["9"],
+                                         "also": [{"register": "EU", "number": "275933", "status": "pending",
+                                                   "classes": ["7"]}]}]}) + "\n")
+    got = C.check("QUENCH — EU 000275933, pending, class 7. QUENCH — US 86332176, registered.", C.logged_hits(log))
+    assert got["cited"] == 2 and not got["not_returned"] and not got["status_wrong"] and not got["classes_wrong"]
+
+
+def test_after_a_token_that_only_names_the_eu_register_a_short_number_is_still_checked():
+    # A citation neither checked nor refused is how an invented number gets through: "EUTM 4321" is checked.
+    hits = {("EU", "4321"): {"status": "registered", "classes": ["9"]}}
+    got = C.check("A — EUTM 000004321, registered. B — EUIPO 4321, pending. C — EU trade mark 4322. D — EUTM 000004320. "
+                  "The EU 27.", hits)
+    assert got["cited"] == 4 and got["not_returned"] == ["EU 4322", "EU 4320"] and got["status_wrong"] == ["EU 4321"]

@@ -82,7 +82,9 @@ The founder is not a lawyer. Write for them, in this order:
    different, spelled closely, has your whole name inside it, is part of your name, shares a word,
    a word spelled closely, a word that starts the same
    (copy the tool's own words for these two: they point in opposite directions); plus "in your classes"
-   or "outside your classes". Then how many other close marks each search found. Do not
+   or "outside your classes". Then how many other close names each search found, and how many filings
+   they cover. A name's other filings (again, or in another register) are listed under it as "also";
+   count them as filings, not as separate names. Do not
    copy the other results: the matter page lists every search in full.
 4. `## What you can do next`, these three lines:
    - Confirm the classes above, or tell me which to add, and I will search again.

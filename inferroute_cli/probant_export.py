@@ -967,17 +967,21 @@ def build_name_bundle(client: str, matter: str, rec: dict) -> Dict[str, Any]:
         mine = per_session.get(s["session_id"]) or []
         A(f"<tr><th>Trademark searches</th><td>{len(mine) or 'none'}</td></tr></table>")
         if mine:
-            A("<table><tr><th>#</th><th>When</th><th>Name</th><th>Classes</th><th>Similar marks found</th><th>Closest marks</th></tr>")
+            A("<table><tr><th>#</th><th>When</th><th>Name</th><th>Classes</th><th>Similar names (filings)</th><th>Closest marks</th></tr>")
             for n, e in enumerate(mine, 1):
                 hits = e.get("hits") or []
                 found = len(hits) + int(e.get("more") or 0)
+                # One unit each: names, then every filing under them. A search logged before grouping has no
+                # "filings"; each of its hits was one filing, so the number goes in the filings place.
+                found = f"{found} ({e['filings']})" if isinstance(e.get("filings"), int) else f"({found})"
                 top = "<br>".join(f"{_e(h.get('text'))} <span class=note>({_e(h.get('register'))} {_e(h.get('number'))}, "
                                   f"{_e(h.get('status'))})</span>" for h in hits[:5])
                 A(f"<tr><td>{n}</td><td>{_e(e.get('at'))}</td><td>{_e(e.get('name'))}</td>"
                   f"<td>{_e(', '.join(str(c) for c in (e.get('classes') or [])) or 'all')}</td><td>{found}</td><td>{top}</td></tr>")
             A("</table>")
-    A("<p class=note>Every search with every mark it returned (up to 40 per search) is in "
-      "<code>trademark-searches.json</code> in this folder.</p>")
+    A("<p class=note>A name filed more than once (again, or in another register) is counted once, with every filing "
+      "listed under it; the number in brackets counts the filings. Every search with every name it returned (up to 40 "
+      "per search, each with its filings) is in <code>trademark-searches.json</code> in this folder.</p>")
 
     A("<h2>What this record can and cannot show</h2>")
     A("<p class=note><b>What it shows</b>: what this computer recorded — the names searched, when, in which classes, and "

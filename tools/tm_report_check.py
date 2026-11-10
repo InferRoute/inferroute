@@ -24,8 +24,18 @@ FORBIDDEN = [r"\bis available\b", r"\bare available\b", r"\bfree to use\b", r"\b
              r"\bunlikely to be confused\b", r"\bno conflict\b", r"\bgo ahead\b"]
 SECTIONS = ["At a glance", "What you can do next", "Questions for a trademark professional"]
 # "US 86332176", "USPTO 79150570", "FR 4774453", "INPI 4774453", "US No. 1", "FR n° 1": the register's name or code.
-CITE = re.compile(r"\b(US|USPTO|FR|INPI)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})\b", re.I)
-REGISTER = {"us": "US", "uspto": "US", "fr": "FR", "inpi": "FR"}
+# EU marks are cited as EU, EUIPO, EUTM or "EU trade mark"; the index holds their numbers without EUIPO's leading
+# zeros (EU 275933 is EUIPO's 000275933), so an EU number is compared without them. A bare register word needs five
+# digits or more ("EU 27" is not a citation); after a token that can only name the EU register any number is one, so
+# an invented "EUTM 4321" is refused rather than let through.
+CITE = re.compile(r"\b(?:(US|USPTO|FR|INPI|EU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})"
+                  r"|(EUIPO|EUTM|EU\s+trade\s?mark)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9}))\b", re.I)
+REGISTER = {"us": "US", "uspto": "US", "fr": "FR", "inpi": "FR", "eu": "EU", "euipo": "EU", "eutm": "EU",
+            "eutrademark": "EU"}
+
+
+def key_of(register: str, number: str) -> tuple:
+    return (register, number.lstrip("0") or "0") if register == "EU" else (register, number)
 STATUS = re.compile(r"\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b", re.I)
 CLASSES = re.compile(r"\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|/|and|&)\s*)?)+)", re.I)
 # Words that say a class list is only part of the mark's: "overlaps your classes 7, 21", "in your class 9",
@@ -40,8 +50,10 @@ def logged_hits(log: Path) -> Dict[tuple, Dict[str, Any]]:
             entry = json.loads(line)
         except ValueError:
             continue
+        # a name's other filings (grouped under it as "also") were returned too, and may be cited
         for h in entry.get("hits", []):
-            out[(h["register"], str(h["number"]))] = h
+            for f in [h, *(h.get("also") or [])]:
+                out[key_of(f["register"], str(f["number"]))] = f
     return out
 
 
@@ -49,7 +61,7 @@ def check(report: str, hits: Dict[tuple, Dict[str, Any]]) -> Dict[str, Any]:
     cited: List[Dict[str, Any]] = []
     found = list(CITE.finditer(report))
     for i, m in enumerate(found):
-        key = (REGISTER[m.group(1).lower()], m.group(2))
+        key = key_of(REGISTER[re.sub(r"\s+", "", (m.group(1) or m.group(3)).lower())], m.group(2) or m.group(4))
         # What is written right after this number, up to the next cited number: "(US 1, US 2) … in class 21"
         # says class 21 of the marks named after them, not of US 2.
         end = found[i + 1].start() if i + 1 < len(found) else len(report)

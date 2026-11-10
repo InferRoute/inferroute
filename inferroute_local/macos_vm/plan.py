@@ -181,6 +181,7 @@ def build_plan(
     surface_browser_only: bool = False,
     host_env: Mapping[str, str] | None = None,
     documents: Mapping[str, str] | None = None,
+    context_window: int = 0,
 ) -> LaunchPlan:
     """Build a guest-only Pi plan for one confined model/search session.
 
@@ -232,6 +233,10 @@ def build_plan(
 
     config_hash = pi_attested.config_hash(alias_for_hash, tools)
     model_base = f"http://127.0.0.1:{MODEL_PORT}"
+    # The lane's real window, capped at the old default — the same rule as every other Pi launch
+    # (agents.agent_limits). Not part of config_hash, which pins model, provider and tools only.
+    from inferroute_cli.agents import agent_limits
+    _ctx, _out = agent_limits(context_window)
     model_config = {
         "providers": {
             "inferroute": {
@@ -256,8 +261,8 @@ def build_plan(
                             "cacheRead": 0,
                             "cacheWrite": 0,
                         },
-                        "contextWindow": 262144,
-                        "maxTokens": 32768,
+                        "contextWindow": _ctx - _out,
+                        "maxTokens": _out,
                     }
                 ],
             }

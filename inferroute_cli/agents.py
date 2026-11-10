@@ -208,8 +208,12 @@ def agent_limits(context_window: int = 0) -> tuple[int, int]:
 
     Until 2026-11-10 every model was declared at 262,144. GLM-5.1's real window is 202,752, so Pi, believing
     it had ~60K tokens left, never compacted, and the conversation went past the model: every turn then
-    failed with a 400. The output reserve is clamped so a small window cannot be swallowed by it."""
-    ctx = int(context_window or 0) or DEFAULT_CONTEXT_WINDOW
+    failed with a 400. The output reserve is clamped so a small window cannot be swallowed by it.
+
+    CAPPED at the old default (Henry, 2026-11-11): a known window only ever LOWERS what an agent is told.
+    A 1M-token lane would otherwise let a session grow four times longer — and costlier — than it does
+    today, which is a product change, not a bug fix."""
+    ctx = min(int(context_window or 0) or DEFAULT_CONTEXT_WINDOW, DEFAULT_CONTEXT_WINDOW)
     return ctx, min(DEFAULT_MAX_OUTPUT, max(1024, ctx // 4))
 
 
@@ -239,6 +243,24 @@ def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, heade
     providers["inferroute"] = prov
     doc["providers"] = providers
     return doc
+
+
+def served_context_window(api_url: str, api_key: str, short: str, timeout: float = 4.0) -> int:
+    """The window the server guarantees for `short` on the regular lane: GET /v1/models `context_window`,
+    which is the smallest across the model and every fallback it may be served by. 0 when the server does
+    not say (an older server, an error, a timeout) — the caller then keeps the default. Never raises: a
+    failed lookup must not stop a launch."""
+    try:
+        import httpx
+        r = httpx.get(f"{api_url.rstrip('/')}/v1/models", headers={"x-api-key": api_key}, timeout=timeout)
+        if r.status_code != 200:
+            return 0
+        for m in (r.json() or {}).get("data") or []:
+            if m.get("id") == short or short in (m.get("aliases") or []):
+                return max(0, int(m.get("context_window") or 0))
+    except Exception:
+        return 0
+    return 0
 
 
 def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
@@ -294,8 +316,8 @@ def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, header
 
 
 def pi_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-                headers: dict | None = None, run_id: str | None = None) -> list[str]:
-    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers, run_id)
+                headers: dict | None = None, run_id: str | None = None, context_window: int = 0) -> list[str]:
+    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers, run_id, context_window=context_window)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env.setdefault("PI_TELEMETRY", "0")
     return [binary, "--provider", "inferroute", "--model", alias.short, *passthrough]

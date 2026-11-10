@@ -999,7 +999,8 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                                       mode=probant.get("mode", "matter"),
                                       create_drafts=bool(probant.get("draft_client")),
                                       surface_browser_only=web, host_env=labels,
-                                      documents={} if probant.get("mode") in ("intake", "names") else pi_attested.matter_titles(env.get("IR_MATTER_RECORD_DIR")))
+                                      documents={} if probant.get("mode") in ("intake", "names") else pi_attested.matter_titles(env.get("IR_MATTER_RECORD_DIR")),
+                                      context_window=lane_context_window(session))
                     request = plan.request
                     if not search_endpoint: request["env"].pop("IR_SEARCH_ENDPOINT", None)
                     mac_backend.configure(request, model_url=local, model_key=local_key,

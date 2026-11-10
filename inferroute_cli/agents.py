@@ -199,9 +199,33 @@ def _price(alias) -> dict:
         return {}
 
 
+DEFAULT_CONTEXT_WINDOW = 262144
+DEFAULT_MAX_OUTPUT = 32768
+
+
+def agent_limits(context_window: int = 0) -> tuple[int, int]:
+    """(context, max output) to declare to an agent. The lane's real window when known.
+
+    Until 2026-11-10 every model was declared at 262,144. GLM-5.1's real window is 202,752, so Pi, believing
+    it had ~60K tokens left, never compacted, and the conversation went past the model: every turn then
+    failed with a 400. The output reserve is clamped so a small window cannot be swallowed by it.
+
+    CAPPED at the old default (Henry, 2026-11-11): a known window only ever LOWERS what an agent is told.
+    A 1M-token lane would otherwise let a session grow four times longer — and costlier — than it does
+    today, which is a product change, not a bug fix."""
+    ctx = min(int(context_window or 0) or DEFAULT_CONTEXT_WINDOW, DEFAULT_CONTEXT_WINDOW)
+    return ctx, min(DEFAULT_MAX_OUTPUT, max(1024, ctx // 4))
+
+
 def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
-                   existing: dict | None = None) -> dict:
-    """A models.json declaring the `inferroute` provider, merged over the user's own file."""
+                   existing: dict | None = None, context_window: int = 0) -> dict:
+    """A models.json declaring the `inferroute` provider, merged over the user's own file.
+
+    `contextWindow` is declared as the window MINUS the reply reserve. Pi compacts when the prompt nears
+    `contextWindow - reserveTokens` (its own reserve, 16K by default), but it also asks for `maxTokens` of
+    reply on every request, and the server refuses prompt + max_tokens > window. Declaring the full window
+    would let Pi run up to 16K tokens past what the server accepts before compacting."""
+    ctx, out = agent_limits(context_window)
     doc = dict(existing or {})
     providers = dict(doc.get("providers") or {})
     pr = _price(alias)
@@ -212,7 +236,7 @@ def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, heade
         "models": [{"id": alias.short, "name": upstream_name, "reasoning": True, "input": ["text", "image"],
                     "cost": {"input": pr.get("input", 0), "output": pr.get("output", 0),
                              "cacheRead": pr.get("cached", 0), "cacheWrite": pr.get("input", 0)},
-                    "contextWindow": 262144, "maxTokens": 32768}],
+                    "contextWindow": ctx - out, "maxTokens": out}],
     }
     if headers:
         prov["headers"] = headers
@@ -221,8 +245,26 @@ def pi_models_json(base_url: str, api_key: str, alias, upstream_name: str, heade
     return doc
 
 
+def served_context_window(api_url: str, api_key: str, short: str, timeout: float = 4.0) -> int:
+    """The window the server guarantees for `short` on the regular lane: GET /v1/models `context_window`,
+    which is the smallest across the model and every fallback it may be served by. 0 when the server does
+    not say (an older server, an error, a timeout) — the caller then keeps the default. Never raises: a
+    failed lookup must not stop a launch."""
+    try:
+        import httpx
+        r = httpx.get(f"{api_url.rstrip('/')}/v1/models", headers={"x-api-key": api_key}, timeout=timeout)
+        if r.status_code != 200:
+            return 0
+        for m in (r.json() or {}).get("data") or []:
+            if m.get("id") == short or short in (m.get("aliases") or []):
+                return max(0, int(m.get("context_window") or 0))
+    except Exception:
+        return 0
+    return 0
+
+
 def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
-                  run_id: str | None = None) -> Path:
+                  run_id: str | None = None, context_window: int = 0) -> Path:
     """The PI_CODING_AGENT_DIR for an `ir pi` launch: a PER-RUN ir-owned dir
     (~/.inferroute/pi-agent/runs/<run_id>) holding symlinks to the user's ~/.pi/agent entries
     (settings, auth, extensions, skills, themes, prompts, sessions — all theirs, untouched) plus a
@@ -266,15 +308,16 @@ def pi_config_dir(base_url: str, api_key: str, alias, upstream_name: str, header
             except OSError:
                 pass
     mj = run / "models.json"
-    mj.write_text(json.dumps(pi_models_json(base_url, api_key, alias, upstream_name, headers, existing), indent=1))
+    mj.write_text(json.dumps(pi_models_json(base_url, api_key, alias, upstream_name, headers, existing,
+                                            context_window=context_window), indent=1))
     mj.chmod(0o600)
     (run / "sessions").mkdir(exist_ok=True)
     return run
 
 
 def pi_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-                headers: dict | None = None, run_id: str | None = None) -> list[str]:
-    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers, run_id)
+                headers: dict | None = None, run_id: str | None = None, context_window: int = 0) -> list[str]:
+    cfg = pi_config_dir(base_url, api_key, alias, upstream_name, headers, run_id, context_window=context_window)
     env["PI_CODING_AGENT_DIR"] = str(cfg)
     env.setdefault("PI_TELEMETRY", "0")
     return [binary, "--provider", "inferroute", "--model", alias.short, *passthrough]
@@ -283,7 +326,9 @@ def pi_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str
 # ───────────────────────── OpenCode ─────────────────────────
 
 def opencode_config(base_url: str, api_key: str, alias, upstream_name: str, headers: dict | None = None,
-                    confidential: bool = True) -> dict:
+                    confidential: bool = True, context_window: int = 0) -> dict:
+    # OpenCode compacts against `context - output` itself, so it is given the real window as-is.
+    ctx, out = agent_limits(context_window)
     options: dict = {"baseURL": base_url.rstrip("/") + "/v1", "apiKey": api_key}
     pr = _price(alias)
     if headers:
@@ -291,7 +336,7 @@ def opencode_config(base_url: str, api_key: str, alias, upstream_name: str, head
     cfg: dict = {
         "$schema": "https://opencode.ai/config.json",
         "provider": {"inferroute": {"npm": "@ai-sdk/openai-compatible", "name": "InferRoute", "options": options,
-                                    "models": {alias.short: {"name": upstream_name, "limit": {"context": 262144, "output": 32768},
+                                    "models": {alias.short: {"name": upstream_name, "limit": {"context": ctx, "output": out},
                                                              "cost": {"input": pr.get("input", 0), "output": pr.get("output", 0),
                                                                       "cache_read": pr.get("cached", 0), "cache_write": pr.get("input", 0)}}}}},
         "model": f"inferroute/{alias.short}",
@@ -303,8 +348,9 @@ def opencode_config(base_url: str, api_key: str, alias, upstream_name: str, head
 
 
 def opencode_env_argv(binary: str, env: dict, passthrough: list[str], *, base_url: str, api_key: str, alias, upstream_name: str,
-                      headers: dict | None = None, confidential: bool = True) -> list[str]:
-    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(opencode_config(base_url, api_key, alias, upstream_name, headers, confidential))
+                      headers: dict | None = None, confidential: bool = True, context_window: int = 0) -> list[str]:
+    env["OPENCODE_CONFIG_CONTENT"] = json.dumps(opencode_config(base_url, api_key, alias, upstream_name, headers, confidential,
+                                                                context_window=context_window))
     return [binary, *passthrough]
 
 

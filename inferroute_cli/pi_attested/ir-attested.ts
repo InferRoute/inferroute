@@ -1231,15 +1231,22 @@ export default function (pi: ExtensionAPI) {
 		// session actually returned BEFORE it is written: a cited number no search returned, or a status or class
 		// that differs from the search, refuses the write, and the refusal tells the assistant what to correct and
 		// not to narrate it. The founder sees one report, written once it agrees with the searches.
-		const TM_CITE = /\b(US|USPTO|FR|INPI)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})\b/gi;
-		const TM_REGISTER: Record<string, string> = { us: "US", uspto: "US", fr: "FR", inpi: "FR" };
+		// EU marks are cited as EU, EUIPO, EUTM or "EU trade mark"; the index holds their numbers without EUIPO's
+		// leading zeros (EU 275933 is EUIPO's 000275933), so an EU number is compared without them. A bare register
+		// word needs five digits or more, so "EU 27 member states" is not a citation; after a token that can only
+		// name the EU register any number is one, so an invented "EUTM 4321" is refused rather than let through.
+		const TM_CITE = /\b(?:(US|USPTO|FR|INPI|EU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})|(EUIPO|EUTM|EU\s+trade\s?mark)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9}))\b/gi;
+		const TM_REGISTER: Record<string, string> = { us: "US", uspto: "US", fr: "FR", inpi: "FR", eu: "EU", euipo: "EU",
+			eutm: "EU", eutrademark: "EU" };
+		const tmKey = (register: string, number: string) =>
+			`${register} ${register === "EU" ? number.replace(/^0+(?=\d)/, "") : number}`;
 		const TM_STATUS = /\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b/i;
 		const TM_CLASSES = /\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|\/|and|&)\s*)?)+)/i;
 		function tmReportProblems(report: string, returned: Map<string, { status: string; classes: string[] }>): string[] {
 			const found = [...report.matchAll(TM_CITE)];
 			const out: string[] = [];
 			found.forEach((m, i) => {
-				const key = `${TM_REGISTER[m[1].toLowerCase()]} ${m[2]}`;
+				const key = tmKey(TM_REGISTER[(m[1] ?? m[3]).toLowerCase().replace(/\s+/g, "")], m[2] ?? m[4]);
 				const hit = returned.get(key);
 				if (!hit) { out.push(`${key}: no search in this session returned this number`); return; }
 				const at = (m.index ?? 0) + m[0].length;

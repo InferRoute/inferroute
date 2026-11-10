@@ -50,5 +50,21 @@ if (await call("edit", { path: "name-check.md", edits: [{ oldText: "x", newText:
   fail("an edit citing a returned mark was refused");
 if (await call("write", { path: "notes.md", content: "US 12345678" })) fail("only the report is checked");
 
+// 4. EU marks: cited as EU, EUIPO or EUTM, with or without EUIPO's leading zeros. A real one is status-checked, an
+//    invented one refused, and "EU 27" in prose is not a citation.
+returned.set("EU 275933", { status: "registered", classes: ["9"] });
+if (await call("write", { path: "name-check.md", content: "- FESTO (EUTM 000275933, registered, class 9)\n- FESTO (EU 275933). The EU 27.\n" }))
+  fail("a faithful EU citation was refused");
+const eu = await call("write", { path: "name-check.md", content: "- FESTO (EU 275933, pending)\n- FESTI (EUIPO 018999999, registered)\n" });
+if (!eu) fail("a wrong EU status and an invented EU number were written");
+else for (const want of ["EU 275933: the search gives its status as registered", "EU 18999999: no search in this session returned"])
+  if (!eu.reason.includes(want)) fail(`refusal does not name: ${want}`);
+
+// 5. After a token that only names the EU register, a short number is checked too: an invented one is refused.
+for (const cite of ["EUTM 000004321", "EUTM 4321", "EU trade mark 4321"]) {
+  const r5 = await call("write", { path: "name-check.md", content: `- FESTO (${cite}, registered)\n` });
+  if (!r5 || !r5.reason.includes("EU 4321: no search in this session returned")) fail(`an invented ${cite} was not refused`);
+}
+
 if (bad) process.exit(1);
 console.log("report check: a faithful report is written; an unreturned number, a wrong status or class is refused, quietly");

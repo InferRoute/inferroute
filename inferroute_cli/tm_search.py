@@ -509,9 +509,13 @@ class Index:
                                        ["w:" + w for w in part]))
             for w in part:
                 cache[w] = math.log(total / max(1, got.get("w:" + w, 1))) / math.log(total)
-        if len(cache) > 200_000:
+        # Read before the cache is trimmed: trimmed first, every word of the search that crossed the limit came back as
+        # 1.0 (as rare as a word can be), and about one search in 45 on a long-running host was scored that way.
+        # SUPERBIOTIX for "Super Biotiques" fell from 1st to 25th on such a search (9 Nov).
+        out = {w: cache.get(w, 1.0) for w in ws}
+        if len(cache) > RARITY_CACHE_WORDS:
             cache.clear()
-        return {w: cache.get(w, 1.0) for w in ws}
+        return out
 
     def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
         """The candidates scored in full: those sharing the most of the name's sound fragments RELATIVE TO THEIR
@@ -668,6 +672,7 @@ def report_lines(result: Dict[str, Any]) -> List[str]:
     return out
 
 
+RARITY_CACHE_WORDS = 200_000   # words whose rarity an Index remembers between searches (_rarity); about 45 searches' worth
 SEARCH_LOG = "trademark-searches.jsonl"
 LOGGED_HITS = 40
 # What the assistant reads back from one search. It needs the closest few to write a report that names at most three

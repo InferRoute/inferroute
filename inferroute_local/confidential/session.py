@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -538,6 +539,15 @@ class ConfidentialSession:
             # instance before the user is told anything. The failing instance is dropped from the pool
             # first, so the retry cannot land on the same machine that just failed — a retry to the same
             # place is a delay, not a recovery.
+            support_code, support_req = relay_support_ref(headers)
+            # OUR side, not the machine's: the relay coded this failure (e.g. a lane it cannot fund right
+            # now). Retry once, because the relay picks a different upstream account for the next request,
+            # but do NOT blame or drop this instance — it did nothing wrong.
+            if attempt == 1 and support_code and status in _RETRY_ON_OTHER_INSTANCE:
+                self.receipt.note("upstream-retry", f"the relay answered {status} with code {support_code}; "
+                                  "retried once")
+                c["upstream_retries"] = c.get("upstream_retries", 0) + 1
+                continue
             if attempt == 1 and status in _RETRY_ON_OTHER_INSTANCE:
                 record_failure(pinned.instance_id)
                 async with self._lock:
@@ -581,6 +591,11 @@ class ConfidentialSession:
             # and a cut-off upstream is a different experience from a refusal (pinned since 2026-09-12).
             # A READABLE body never reaches them. Both dialects return through here, so one site covers
             # the Anthropic and the OpenAI-native paths alike.
+            if support_code:
+                # The code and request id are OUR controlled vocabulary, read from headers our relay sets and
+                # admitted only through a strict pattern, so no upstream text can ride along. The body is still
+                # never passed on.
+                return ("error", status, support_message(support_code, support_req), OPERATOR_FAULT)
             said = upstream_public(status) + ("" if readable else " — body unreadable")
             # A nonce rejected TWICE is worth naming, and naming it costs nothing: that this was a nonce
             # is OUR OWN control flow — we dropped the pool and resent a moment ago — not a sentence
@@ -904,6 +919,7 @@ FLEET_FAULT = "fleet"            # no eligible instance, capacity, the fleet's o
 INSTANCE_FAULT = "instance"      # this machine: 5xx, dropped stream, unopenable reply
 UPSTREAM_UNKNOWN = "upstream"    # the fleet answered with something we do not recognise — still its answer
 ACCOUNT_FAULT = "account"        # 402/401/403 — true of every fleet at once, evidence about none
+OPERATOR_FAULT = "operator"      # InferRoute's own side (relay-coded, e.g. an unfunded lane) — not the fleet's
 CLIENT_FAULT = "client"          # 400, a seal failure — ours
 TRANSPORT_FAULT = "transport"    # the relay is unreachable; every fleet is equally unreachable
 ROUTE_FAULT = "route"            # 404 — configuration, not health
@@ -966,6 +982,29 @@ UPSTREAM_PUBLIC = {
     503: "the provider is temporarily unavailable",
     504: "the provider timed out",
 }
+
+
+# A failure our relay has CODED, so a user can report it and we can find it. Codes are a fixed vocabulary
+# documented in cc-proxy-prod (handlers/confidential.py, RELAY_ERROR_CODES). The message is deliberately
+# generic: what failed is on our side, and how (e.g. which upstream account ran dry) is not the user's business.
+_SUPPORT_CODE = re.compile(r"^IR-[A-Z][0-9]{4}$")
+_SUPPORT_REQ = re.compile(r"^req_[A-Za-z0-9]{1,48}$")
+SUPPORT_CONTACT = "support@inferroute.ai"
+
+
+def relay_support_ref(headers: dict | None) -> tuple[str, str]:
+    """(code, request_id) from our relay's headers; empty strings unless each matches its strict pattern."""
+    h = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    code = h.get("x-inferroute-error-code", "").strip()
+    req = h.get("x-inferroute-request-id", "").strip()
+    return (code if _SUPPORT_CODE.match(code) else "",
+            req if _SUPPORT_REQ.match(req) else "")
+
+
+def support_message(code: str, request_id: str = "") -> str:
+    ref = f"code {code}" + (f", request {request_id}" if request_id else "")
+    return ("this model is temporarily unavailable on our side — please try again in a few minutes or pick "
+            f"another model; if it keeps happening, report {ref} to {SUPPORT_CONTACT}")
 
 
 def upstream_public(status: int) -> str:

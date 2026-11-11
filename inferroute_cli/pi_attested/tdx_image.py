@@ -166,6 +166,20 @@ def rules_for(rep: "ImageReport") -> str:
     image and it is v14 or v15; "v16" otherwise (v16, later, unknown, absent, or two names: the strict rules)."""
     names = [t.split("=", 1)[1] for t in str(rep.values.get("cmdline") or "").split() if t.startswith("inferroute.image=")]
     return "v15" if len(names) == 1 and names[0] in V15_RULES_IMAGES else "v16"
+# v18 (machine review F4): under memory pressure the kernel's OOM killer must take the ENGINE (no FailureAction: its
+# death is a signed engine_error at the slot) and never the front, the pin or the RAM helper, whose failure powers
+# the box off at a moment a request chose. A killed per-request child must not stop the engine unit either.
+OOM_REQUIRED = {"ir-search.service": {"OOMScoreAdjust": "-1000"}, "ir-pin.service": {"OOMScoreAdjust": "-1000"},
+                "ir-fetch.service": {"OOMScoreAdjust": "-1000"},
+                "ir-engine.service": {"OOMScoreAdjust": "1000", "OOMPolicy": "continue"}}
+PRE_OOM_IMAGES = IMAGE_NAMES          # v14..v17 shipped without these keys; every later, unknown or absent name needs them
+
+
+def oom_rules(rep: "ImageReport") -> bool:
+    names = [t.split("=", 1)[1] for t in str(rep.values.get("cmdline") or "").split() if t.startswith("inferroute.image=")]
+    return not (len(names) == 1 and names[0] in PRE_OOM_IMAGES)
+
+
 # One reply slot and one engine budget, in the units' Environment= (both numbers in seconds; the engine's budget
 # must equal the front's and lie below the slot).
 ENV_SLOT, ENV_BUDGET = "IR_REPLY_SLOT_SECONDS", "IR_ENGINE_BUDGET_SECONDS"
@@ -1273,6 +1287,8 @@ def check_unit(rep: ImageReport, tree: str, src: Optional[Source]) -> None:
         if v15_pin:
             required = V15_PIN_UNIT_REQUIRED
         prefix = V15_RULES_PREFIX if v15_pin else ""
+        if oom_rules(rep):
+            required = {**required, **OOM_REQUIRED[unit]}
         u, unit_path, dropins = effective_unit(tree, unit)
         if unit_path is None:
             rep.add(False, row, f"{prefix}{unit} missing from every unit directory")

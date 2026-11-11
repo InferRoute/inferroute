@@ -630,7 +630,10 @@ class ConfidentialSession:
                 # The code and request id are OUR controlled vocabulary, read from headers our relay sets and
                 # admitted only through a strict pattern, so no upstream text can ride along. The body is still
                 # never passed on.
-                return ("error", status, support_message(support_code, support_req), OPERATOR_FAULT)
+                # Answered with SUPPORT_STATUS, not the relay's own 503: agents retry by status and by the
+                # words in the error, so a 503 "server_error" made pi resend a request that cannot succeed
+                # until we act, four times a turn and again for every compaction (Henry's screen, 11 Nov).
+                return ("error", SUPPORT_STATUS, support_message(support_code, support_req), OPERATOR_FAULT)
             if status == 400 and attempt == 1 and "nonce" not in detail.lower():
                 over = self.overflow_estimate(oai)
                 if over:
@@ -664,7 +667,7 @@ class ConfidentialSession:
         if out[0] == "error":
             _err(c, "send_failed", out[3])
             self.last_fault = out[3]
-            return self._error(streaming, out[1], out[2])
+            return self._error(streaming, out[1], out[2], kind=_error_kind(out[3], openai=False))
         _, pinned, sealed, raw = out
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream(raw, sealed, t0)
@@ -694,7 +697,7 @@ class ConfidentialSession:
         if out[0] == "error":
             _err(c, "send_failed", out[3])
             self.last_fault = out[3]
-            return self._error(streaming, out[1], out[2], openai=True)
+            return self._error(streaming, out[1], out[2], openai=True, kind=_error_kind(out[3], openai=True))
         _, pinned, sealed, raw = out
         if streaming:
             return 200, {"content-type": "text/event-stream"}, self._open_stream_native(raw, sealed, t0)
@@ -901,8 +904,12 @@ class ConfidentialSession:
             "instance_id": self.pinned.instance_id if self.pinned else "",
             "usage": {**usage, "latency_ms": int(latency_ms)}, "self_reported": True}))
 
-    def _error(self, streaming: bool, status: int, message: str, openai: bool = False) -> tuple[int, dict, AsyncIterator[bytes]]:
-        body = translate.openai_error(message) if openai else translate.error_body(message)
+    def _error(self, streaming: bool, status: int, message: str, openai: bool = False,
+               kind: str = "") -> tuple[int, dict, AsyncIterator[bytes]]:
+        if openai:
+            body = translate.openai_error(message, kind) if kind else translate.openai_error(message)
+        else:
+            body = translate.error_body(message, kind) if kind else translate.error_body(message)
 
         async def _gen():
             if openai:
@@ -1040,6 +1047,21 @@ def relay_support_ref(headers: dict | None) -> tuple[str, str]:
     req = h.get("x-inferroute-request-id", "").strip()
     return (code if _SUPPORT_CODE.match(code) else "",
             req if _SUPPORT_REQ.match(req) else "")
+
+
+# A relay-coded failure is SETTLED: it stays failed until InferRoute acts (an account is topped up), so an
+# agent's automatic retry only repeats the same error. Agents decide to retry from the status and from the
+# words of the error: pi 0.84.1 retries anything whose text contains 429/500/502/503/504/524 or
+# "server error" (pi-ai utils/retry.js), and the OpenAI/Anthropic SDKs retry 408/409/429/5xx. 424 (Failed
+# Dependency) is none of those and says what happened: a dependency of this request failed. The error type
+# must avoid "server_error" for the same reason. Nothing here names funding.
+SUPPORT_STATUS = 424
+_SUPPORT_KIND = {True: "unavailable_error", False: "api_error"}
+
+
+def _error_kind(fault: str, openai: bool) -> str:
+    """The error `type` for a failure of this fault class; "" keeps the dialect's default."""
+    return _SUPPORT_KIND[openai] if fault == OPERATOR_FAULT else ""
 
 
 def support_message(code: str, request_id: str = "") -> str:

@@ -4,6 +4,7 @@ streaming shapes, exactly as the gateway sends them), refreshes nonces, switches
 instances, and refuses rather than degrades."""
 import asyncio
 import json
+import re
 
 import pytest
 
@@ -1318,7 +1319,7 @@ def test_a_relay_coded_failure_tells_the_user_what_to_report_and_nothing_about_f
     body = {"messages": [{"role": "user", "content": "1"}], "stream": False}
     st, _, it = asyncio.run(s.chat_completions(body) if openai_path else s.messages(body))
     text = asyncio.run(_drain(it)).decode()
-    assert st == 503, text
+    assert st == 424, text
     assert "IR-C1001" in text and "req_abc123" in text and "support@inferroute.ai" in text, text
     for leak in ("402", "fund", "capacity", "balance", "credit"):
         assert leak not in text.lower(), f"the client was told {leak!r}: {text}"
@@ -1413,3 +1414,50 @@ def test_a_400_just_under_the_window_by_this_devices_estimate_is_not_called_an_o
     _turn(s, True, "x" * 4000)
     st, text = _turn(s, True, "x" * 4000)          # same size: 165,000 + 32,768 = 197,768 <= 202,752
     assert st == 400 and "/compact" not in text and "malformed" in text
+
+
+# pi 0.84.1, @earendil-works/pi-ai dist/utils/retry.js: the two patterns isRetryableAssistantError applies to
+# the error text pi builds as "<status> data: <body>". Copied, not imported: pi is a Node package.
+_PI_NON_RETRYABLE = re.compile("|".join([
+    "GoUsageLimitError", "FreeUsageLimitError", "Monthly usage limit reached", "available balance",
+    "insufficient_quota", "out of budget", "quota exceeded", "billing"]), re.I)
+_PI_RETRYABLE = re.compile("|".join([
+    "overloaded", "rate.?limit", "too many requests", "429", "500", "502", "503", "504", "524",
+    "service.?unavailable", "server.?error", "internal.?error", "provider.?returned.?error", "network.?error",
+    "connection.?error", "connection.?refused", "connection.?lost", "other side closed", "fetch failed",
+    "getaddrinfo", "ENOTFOUND", "EAI_AGAIN", "upstream.?connect", "reset before headers", "socket hang up",
+    "socket connection was closed", "timed? out", "timeout", "terminated", "websocket.?closed",
+    "websocket.?error", "ended without", "stream ended before message_stop",
+    "stream ended before a terminal response event", "http2 request did not get a response", "retry delay",
+    "you can retry your request", "try your request again", "please retry your request",
+    "ResourceExhausted"]), re.I)
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("openai_path", [False, True])
+def test_a_relay_coded_failure_is_shown_once_not_retried_by_the_agent(world, openai_path, streaming):
+    """2026-11-11, Henry's screen: with the Operator accounts unfunded, pi showed the IR-C1001 error four
+    times per turn and four more for every auto-compaction, because it retries any error whose text says
+    503 or server_error. The failure stays until we act, so retrying only repeats it: the user should see
+    it once. Asserted against pi's own retry rule and the SDKs' retry statuses."""
+    carrier = _CodedUnfundedCarrier(world["enclaves"])
+    s = _session(carrier)
+    asyncio.run(s.open())
+    body = {"messages": [{"role": "user", "content": "1"}], "stream": streaming}
+    st, _, it = asyncio.run(s.chat_completions(body) if openai_path else s.messages(body))
+    text = asyncio.run(_drain(it)).decode()
+    assert st not in (408, 409, 429) and st < 500, st          # OpenAI/Anthropic SDK retry statuses
+    pi_sees = f"{st} data: {text}"
+    assert not _PI_RETRYABLE.search(pi_sees), f"pi would retry: {_PI_RETRYABLE.search(pi_sees)!r} in {pi_sees}"
+    assert not _PI_NON_RETRYABLE.search(pi_sees), "stops retries by naming billing, which users must not see"
+    assert "IR-C1001" in text and "support@inferroute.ai" in text, text
+
+
+def test_an_uncoded_upstream_failure_keeps_its_status(world):
+    """Only relay-CODED failures are settled. A bare upstream 503 may clear on its own, so it keeps its
+    status and stays retryable."""
+    carrier = _CodedUnfundedCarrier(world["enclaves"], code="")
+    s = _session(carrier)
+    asyncio.run(s.open())
+    st, _, it = asyncio.run(s.chat_completions({"messages": [{"role": "user", "content": "1"}], "stream": False}))
+    assert st == 503, asyncio.run(_drain(it))

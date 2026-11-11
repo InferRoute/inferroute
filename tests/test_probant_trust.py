@@ -299,3 +299,31 @@ def test_no_panel_or_session_end_makes_an_absolute_claim_about_this_computer():
     for name in ("app.js", "home.js"):
         js = (web / name).read_text()
         assert "plaintext that left this computer" not in js and "Nothing can leave this computer" not in js
+
+
+def _tdx(**kw):
+    s = _search(**kw)
+    s["enclave"] = {**s["enclave"], "tee": "intel-tdx"}
+    return s
+
+
+def test_the_tdx_search_machine_is_named_as_what_it_is_not_the_retired_azure_lane():
+    # 0.9.135 described the live Intel TDX / Google Cloud machine as "AMD SEV-SNP on Microsoft Azure".
+    t = _text(T.build(_receipt(), _tdx(reference={"ok": True}), ADDRESS))
+    assert "Intel TDX on Google Cloud" in t and "Intel's and Google's own keys" in t
+    assert "SEV-SNP" not in t and "Azure" not in t
+    assert "Not InferRoute, not Google, can read it" in t
+    assert T.TDX_CAVEAT in t
+
+
+def test_the_outside_check_is_said_to_be_requested_not_done():
+    t = _text(T.build(_receipt(), _tdx(reference={"ok": True}), ADDRESS)).lower()
+    assert "no one outside inferroute has completed it yet" in t
+    assert "no one outside inferroute has rebuilt it yet" in t
+    for claim in ("independently confirmed", "independently verified", "has been audited", "audit confirmed"):
+        assert claim not in t
+
+
+def test_an_azure_offer_keeps_the_azure_wording():
+    t = _text(T.build(_receipt(), _search(reference={"ok": True}), ADDRESS))
+    assert "SEV-SNP on Microsoft Azure" in t and "Intel TDX on Google Cloud" not in t

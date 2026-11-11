@@ -206,6 +206,18 @@ def search_is_inferroutes(search: Optional[dict]) -> bool:
     return authentic and matched
 
 
+# What the TDX search lane may say about outside verification. ONE place, because the day someone outside
+# InferRoute rebuilds the image this sentence changes, and two copies would disagree with each other.
+TDX_OUTSIDE_CHECK = ("An independent check is under way: InferRoute has asked outside security researchers to "
+                     "rebuild the image and check the live machine. No one outside InferRoute has completed it yet.")
+TDX_CAVEAT = "All of this holds unless Intel's chip or Google's firmware were compromised."
+
+
+def search_is_tdx(search: Optional[dict]) -> bool:
+    """The verifier reports which hardware answered; only a checked Intel TDX offer carries tee=intel-tdx."""
+    return bool(search) and (search.get("enclave") or {}).get("tee") == "intel-tdx"
+
+
 def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matter") -> Dict[str, Any]:
     if search is None and mode == "names":
         return {"key": "search", "state": INFO, "title": "Trademark search",
@@ -258,18 +270,36 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
     points = [f"Genuine sealed hardware, {identity}."]
     if date_bound:
         points.append(f"Only documents published before {date_bound}; the assistant can't change that.")
-    more = ["Genuine sealed hardware (AMD SEV-SNP on Microsoft Azure), confirmed with AMD's and Microsoft's own keys.",
-            ("Its deployment fingerprint matches InferRoute's signed reference. This is not an independent "
-             "rebuild of the software that ran."
-             if ref.get("ok") else
-             "Its deployment fingerprint matches this computer's configuration. InferRoute's signed "
-             "reference has not been verified here."),
-            "Your search text is encrypted here and only that machine can open it; each answer comes back "
-            "encrypted to this computer alone.",
-            # The strong half of the retention answer, and it is ENFORCED rather than promised: those
-            # three denials are in the container policy that the signed HOST_DATA is the hash of.
-            "Hardware and fingerprint checks do not independently establish whether the software "
-            "retains or discloses plaintext."]
+    if search_is_tdx(search):
+        # THE LIVE LANE since 1 Nov 2026: InferRoute's own boot image on Intel TDX at Google Cloud. Said as
+        # established only what the checks above establish; the outside check is REQUESTED, not done, and the
+        # page says so until someone outside InferRoute has rebuilt the image (REBUILD.md "Status").
+        more = ["Genuine sealed hardware (Intel TDX on Google Cloud), confirmed with Intel's and Google's own "
+                "keys, with debugging switched off.",
+                ("Its boot image matches InferRoute's signed reference. That image is built from source "
+                 "InferRoute publishes, and anyone can rebuild it and compare (inferroute.ai/build/REBUILD.md)."
+                 if ref.get("ok") else
+                 "Its boot image matches this computer's configuration. InferRoute's signed reference has not "
+                 "been verified here."),
+                "Your search text is encrypted here and only that machine can open it; each answer comes back "
+                "encrypted to this computer alone. Not InferRoute, not Google, can read it on the way or inside.",
+                "The machine's software is written to keep no copy of your text; you can read that in the "
+                "published source.",
+                TDX_OUTSIDE_CHECK,
+                TDX_CAVEAT]
+    else:
+        more = ["Genuine sealed hardware (AMD SEV-SNP on Microsoft Azure), confirmed with AMD's and Microsoft's own keys.",
+                ("Its deployment fingerprint matches InferRoute's signed reference. This is not an independent "
+                 "rebuild of the software that ran."
+                 if ref.get("ok") else
+                 "Its deployment fingerprint matches this computer's configuration. InferRoute's signed "
+                 "reference has not been verified here."),
+                "Your search text is encrypted here and only that machine can open it; each answer comes back "
+                "encrypted to this computer alone.",
+                # The strong half of the retention answer, and it is ENFORCED rather than promised: those
+                # three denials are in the container policy that the signed HOST_DATA is the hash of.
+                "Hardware and fingerprint checks do not independently establish whether the software "
+                "retains or discloses plaintext."]
     if date_bound:
         more.append(f"Only documents published before {date_bound} are returned. The limit is kept on this "
                     "computer, out of the assistant's reach.")
@@ -369,14 +399,23 @@ EXPLAINER = ("Sealed hardware keeps its memory encrypted from the cloud host. Th
              "these checks do not prove what it does with it.")
 
 
-def limits(search_state: str, search_is_ours: bool = False, surface: str = "terminal") -> List[str]:
+def limits(search_state: str, search_is_ours: bool = False, surface: str = "terminal",
+           search_tdx: bool = False) -> List[str]:
     out = ["These checks establish hardware and key bindings, not end-to-end confidentiality. "
            "They do not prove that software inside a machine cannot retain or disclose plaintext. "
            "Cloud platform components inside that boundary remain part of the trust set.",
            "The AI check measures firmware, start-up and the operating system, not the model-serving "
            "software the machine loads after it starts.",
            "The network carries encrypted text, but timing and message sizes remain visible."]
-    if search_state in (OK, WARN):
+    if search_state in (OK, WARN) and search_tdx:
+        out.append("The search machine's boot image "
+                   + ("matches InferRoute's signed reference" if search_is_ours else
+                      "matches this computer's configuration")
+                   + " and is built from published source; no one outside InferRoute has rebuilt it yet "
+                     "(an independent check is under way).")
+        out.append("Timing is not padded: how long a search takes can vary with what it searches for.")
+        out.append("A search finds related documents. It doesn't prove novelty, or that nothing else exists.")
+    elif search_state in (OK, WARN):
         out.append("The search deployment fingerprint "
                    + ("matches InferRoute's signed reference" if search_is_ours else
                       "matches this computer's configuration")
@@ -426,7 +465,7 @@ def build(receipt: Any, search: Optional[dict], confinement: str, *, matter: str
                             "nothing is sent to it.")
     return {"schema": "inferroute.probant-trust/1", "verdict": verdict, "headline": headline, "explainer": EXPLAINER,
             "items": items, "control_note": CONTROL_NOTE,
-            "limits": limits(states["search"], search_is_inferroutes(search), surface), "mode": mode, "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}
+            "limits": limits(states["search"], search_is_inferroutes(search), surface, search_tdx=search_is_tdx(search)), "mode": mode, "surface": surface, "matter": matter, "date_bound": date_bound, "checked_at": _now()}
 
 
 # ───────────────────────── terminal ─────────────────────────

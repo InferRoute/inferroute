@@ -349,7 +349,7 @@ wheels = [
 
 [[package]]
 name = "inferroute"
-version = "0.9.136"
+version = "0.9.137"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

@@ -301,3 +301,32 @@ def test_the_delegated_index_extension_is_kept_beside_the_reference_byte_for_byt
     del files["/reference/current.json.index-extension.json"]
     SS.setup(force=True, now=NOW)
     assert not p.exists()
+
+
+def _signed_at(key, published_at):
+    pub = key.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()
+    body = {"schema": "inferroute.enclave-reference/1", "published_at": published_at,
+            "policy_sha256": [{"value": SHA, "valid_from": "2026-01-01T00:00:00Z", "valid_to": None}],
+            "publication_key": pub}
+    return {**body, "sig": key.sign(R.canonical(body)).hex()}
+
+
+def test_an_older_validly_signed_reference_is_refused_and_the_newer_one_stays(site):
+    files, key, pub, tmp = site
+    files["/reference/current.json"] = json.dumps(_signed_at(key, "2026-10-03T00:00:00Z")).encode()
+    SS.setup(now=NOW)
+    held = (tmp / "ir/confidential/reference.json").read_bytes()
+    files["/reference/current.json"] = json.dumps(_signed_at(key, "2026-10-02T00:00:00Z")).encode()
+    with pytest.raises(SS.SetupError, match="older than the one"):
+        SS.setup(now=NOW)
+    assert (tmp / "ir/confidential/reference.json").read_bytes() == held
+
+
+def test_a_newer_reference_replaces_the_held_one(site):
+    files, key, pub, tmp = site
+    files["/reference/current.json"] = json.dumps(_signed_at(key, "2026-10-02T00:00:00Z")).encode()
+    SS.setup(now=NOW)
+    newer = json.dumps(_signed_at(key, "2026-10-03T00:00:00Z")).encode()
+    files["/reference/current.json"] = newer
+    SS.setup(now=NOW)
+    assert (tmp / "ir/confidential/reference.json").read_bytes() == newer

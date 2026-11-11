@@ -150,6 +150,21 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     if not ok:
         raise SetupError("the published reference is not signed by InferRoute's publication key, so it was not used "
                          f"({why}). Nothing was changed.")
+    # NO ROLLBACK. An older reference is still validly signed, and it may still accept images a newer one retired.
+    # Whoever serves the site (InferRoute included) could hand it back, so a reference older than the one already
+    # kept here, which verifies under the same key, is refused and the kept one stays in force.
+    _held_path = conf_dir / "reference.json"
+    if _held_path.is_file():
+        try:
+            _held = json.loads(_held_path.read_bytes())
+        except ValueError:
+            _held = None
+        if isinstance(_held, dict) and ref_mod.verify(_held, key)[0]:
+            _held_at, _new_at = str(_held.get("published_at") or ""), str(ref.get("published_at") or "")
+            if _held_at and (not _new_at or _new_at < _held_at):
+                raise SetupError(f"the site served a reference published {_new_at or '(no date)'}, older than the one "
+                                 f"this computer already holds ({_held_at}). An older reference can still accept "
+                                 "machines a newer one retired, so it was not used; the newer one stays in force.")
     at = now or dt.datetime.now(dt.timezone.utc)
     where = _json(f"{SITE}/probant/search.json")
     enclave = fixed_endpoint(where.get("enclave"))

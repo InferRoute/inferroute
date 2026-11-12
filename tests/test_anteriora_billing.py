@@ -395,7 +395,7 @@ def test_a_matter_session_carries_its_permit_to_the_launch(home, service, monkey
 
 # ───────────────────── the permit goes with the sealed session ─────────────────────
 
-def test_the_relay_sends_the_permit_header_and_usage_field_only_when_there_is_one():
+def test_the_relay_sends_the_permit_header_on_invoke_only_when_there_is_one_and_never_with_usage():
     import asyncio
     import httpx
     from inferroute_local.confidential.transport import make_transport
@@ -414,7 +414,8 @@ def test_the_relay_sends_the_permit_header_and_usage_field_only_when_there_is_on
 
     asyncio.run(run("p-1"))
     usage, invoke = seen
-    assert usage.headers["x-inferroute-permit"] == "p-1" and json.loads(usage.content)["permit"] == "p-1"
+    # Relay-entitlement contract: the permit is logged on invoke rows only, so usage carries it nowhere.
+    assert "x-inferroute-permit" not in usage.headers and "permit" not in json.loads(usage.content)
     assert invoke.headers["x-inferroute-permit"] == "p-1"
     seen.clear()
     asyncio.run(run(""))

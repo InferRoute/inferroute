@@ -58,8 +58,17 @@ from typing import AsyncIterator
 
 import httpx
 
+from . import billing_refusal
+from .billing_refusal import BillingRefusal  # noqa: F401 — re-exported: callers catch it from here
+
 INVOKE_PATH = "/v1/chat/completions"
 UA = "inferroute-confidential/1"
+
+# The relay routes that check the session's Anteriora permit (relay-entitlement contract). The permit header goes
+# with these and nothing else. "instances" is the v1 listing, kept for a relay that still serves it; this client
+# does not call it today.
+PERMIT_HEADER = "x-inferroute-permit"
+GATED_ROUTES = frozenset({"candidates", "nonces", "invoke", "instances"})
 
 # The attestation scheme and sealing wire format this client can verify and speak. Named by protocol,
 # never by operator: a new operator that speaks these needs no client change, only a relay adapter.
@@ -153,8 +162,9 @@ def invoke_headers(names: dict, *, fleet_id: str, instance_id: str, nonce: str, 
 class Transport:
     name = "?"
     relay_sees = "ciphertext only"
-    # The Anteriora unit permit covering this session, if any: sent with every relay request and every usage
-    # report so the gateway can tell the session is paid for in units. Empty: nothing is sent (as before).
+    # The Anteriora unit permit covering this session, if any. Sent ONLY on the relay's gated routes (see
+    # GATED_ROUTES), never on builds, fleet health, lanes or usage, and never in a usage payload: the relay logs it on
+    # invoke rows only. Empty: nothing is sent (as before).
     permit = ""
 
     def __init__(self, http: httpx.AsyncClient):
@@ -263,29 +273,42 @@ class InferRouteRelay(Transport):
         self.session_id = session_id
         self.permit = permit
 
-    def _auth(self) -> dict:
+    def _auth(self, route: str = "") -> dict:
+        """`route`: the relay route this request goes to. The permit goes with the gated ones only."""
         h = {"Authorization": f"Bearer {self.api_key}", "User-Agent": UA}
         if self.session_id:
             h["x-inferroute-session"] = self.session_id
-        if self.permit:
-            h["x-inferroute-permit"] = self.permit
+        if self.permit and route in GATED_ROUTES:
+            h[PERMIT_HEADER] = self.permit
         return h
 
     async def builds(self) -> list:
         """Builds InferRoute has recorded since this client was released (additions only)."""
         try:
-            r = await self.http.get(f"{self.base}/confidential/builds", headers=self._auth(), timeout=15)
+            r = await self.http.get(f"{self.base}/confidential/builds", headers=self._auth("builds"), timeout=15)
             return r.json().get("builds", []) if r.status_code == 200 else []
         except Exception:
             return []
 
     async def _v2(self, method: str, path: str, *, json_body: dict | None = None, timeout: float = 30) -> dict:
-        r = await self.http.request(method, f"{self.base}/confidential/v2/{path}", headers=self._auth(),
-                                    json=json_body, timeout=timeout)
-        if r.status_code == 404 and path == "lanes":
-            raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
-        r.raise_for_status()
-        return r.json()
+        """One v2 call. A billing refusal is raised as BillingRefusal, with its code, the relay's message and its
+        Retry-After intact (raise_for_status used to discard all three). A 429 or 503 refusal is waited out ONCE
+        (Retry-After, capped) and asked again; a second refusal, or any 402, is raised as it is."""
+        for attempt in (1, 2):
+            r = await self.http.request(method, f"{self.base}/confidential/v2/{path}", headers=self._auth(path),
+                                        json=json_body, timeout=timeout)
+            if r.status_code == 404 and path == "lanes":
+                raise RelayUnavailable("this InferRoute server does not offer the confidential lane yet")
+            if r.status_code >= 400:
+                refusal = billing_refusal.parse(r.status_code, r.headers, r.content[:4096], route=path)
+                if refusal is not None:
+                    if attempt == 1 and refusal.retryable:
+                        await billing_refusal.sleep(billing_refusal.wait_for(refusal.retry_after))
+                        continue
+                    raise refusal
+            r.raise_for_status()
+            return r.json()
+        raise AssertionError("unreachable")
 
     async def models(self) -> list[dict]:
         lanes = (await self._v2("GET", "lanes")).get("lanes", [])
@@ -313,20 +336,21 @@ class InferRouteRelay(Transport):
         Not yet served: absent or erroring, callers fall back to local history. Short timeout because a
         hint that delays a launch is worse than no hint.
         """
-        r = await self.http.get(f"{self.base}/confidential/fleet-health", headers=self._auth(), timeout=5)
+        r = await self.http.get(f"{self.base}/confidential/fleet-health", headers=self._auth("fleet-health"), timeout=5)
         r.raise_for_status()
         return r.json()
 
     async def invoke(self, *, fleet_id, instance_id, nonce, stream, blob, path=INVOKE_PATH):
-        h = {**self._auth(), **invoke_headers(NEUTRAL_HEADERS, fleet_id=fleet_id, instance_id=instance_id,
-                                              nonce=nonce, stream=stream, path=path)}
+        h = {**self._auth("invoke"), **invoke_headers(NEUTRAL_HEADERS, fleet_id=fleet_id, instance_id=instance_id,
+                                                      nonce=nonce, stream=stream, path=path)}
         return await self._send(f"{self.base}/confidential/v2/invoke", h, blob)
 
     async def report_usage(self, payload: dict) -> None:
+        # No permit here, in the header or the payload: the relay logs the permit on invoke rows only.
         try:
-            if self.permit:
-                payload = {**payload, "permit": self.permit}
-            await self.http.post(f"{self.base}/confidential/usage", headers=self._auth(), json=payload, timeout=10)
+            payload = {k: v for k, v in payload.items() if k != "permit"}
+            await self.http.post(f"{self.base}/confidential/usage", headers=self._auth("usage"), json=payload,
+                                 timeout=10)
         except Exception:
             pass
 

@@ -514,6 +514,11 @@
     const paint = (l) => {
       clear(box);
       if (!l) return;
+      paintState(l);
+      // This start took one more unit, the last one's searches being used up (anteriora_billing): said as it is.
+      if (l.notice) box.append(el("div", "launch-notice", l.notice));
+    };
+    const paintState = (l) => {
       if (l.state === "starting") {
         box.className = "launch starting";
         box.append(el("div", "", el("span", "dot"), el("b", "", " Starting a session… "),

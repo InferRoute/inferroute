@@ -493,6 +493,7 @@ button.link { border: 0; background: none; color: var(--action-text); padding: 0
 .launch { margin: 10px 0; padding: 12px 14px; border-radius: var(--radius); background: var(--user); display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .launch.ready { background: var(--accent-soft); } .launch.failed { background: var(--bad-soft); color: var(--bad); }
 .launch .dot { display: inline-block; vertical-align: middle; }
+.launch .launch-notice { flex-basis: 100%; color: var(--ink); }
 .running-row { display: flex; gap: 10px; align-items: center; margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius); background: var(--accent-soft); }
 .checks { display: flex; flex-direction: column; gap: 4px; font-size: 14px; margin: 4px 0 8px; }
 .conversation { display: flex; flex-direction: column; gap: 12px; }

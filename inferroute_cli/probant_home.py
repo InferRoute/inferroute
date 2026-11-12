@@ -533,7 +533,8 @@ class Launches:
         # else: say so, rather than let "checking the sealed machines" run for a minute longer than it says.
         setup = it["state"] == "starting" and any(SETUP_MARK in ln for ln in list(it["tail"]))
         failed = it["state"] == "failed"
-        return {"id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
+        tail = list(it.get("tail") or [])
+        return {"notice": unit_notice_in(tail), "id": it["id"], "matter": it["matter"], "state": it["state"], "url": it["url"],
                 "started_at": int(it["started"]), "elapsed": int(time.time() - it["started"]), "message": it["message"],
                 "phase": "setup" if setup else "",
                 "detail": it.get("detail", "") if failed else "",
@@ -831,6 +832,17 @@ def session_stop_wait() -> float:
     return probant_web.VM_END_GRACE + 15 if macos_vm.required_for("pi", {}) else 10
 
 
+def unit_notice_in(tail: List[str]) -> str:
+    """The launcher's line saying this start takes one more unit because the last one's searches are used up
+    (anteriora_billing.one_more_unit_words), when it printed one; "" otherwise. Shown on the page as it is."""
+    for ln in tail:
+        m = re.search(r"(This (?:matter|reading)'s searches for its current unit are used up; continuing uses one more "
+                      r"unit\.)", ln)
+        if m:
+            return m.group(1)
+    return ""
+
+
 def failure_message(tail: List[str]) -> str:
     text = " ".join(tail)
     low = text.lower()
@@ -849,6 +861,10 @@ def failure_message(tail: List[str]) -> str:
         return NO_UNITS_WORDS + " Nothing was sent."
     if "maximum number of computers" in low or "devices are all in use" in low:
         return DEVICE_LIMIT_WORDS + " Nothing was sent."
+    m = re.search(r"(This (?:matter|reading)'s searches for its current unit are used up, and the unit could not be "
+                  r"closed just now\. Try again in a few minutes\.)", text)
+    if m:
+        return m.group(1)
     if "nested agent session" in low:
         return "This was started from inside another assistant session. Start Anteriora home from a normal terminal."
     # BEFORE the general "refused" below. On a Mac the agent runs in a virtual machine, and every way that

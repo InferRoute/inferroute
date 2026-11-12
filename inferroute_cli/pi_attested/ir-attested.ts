@@ -1280,10 +1280,13 @@ export default function (pi: ExtensionAPI) {
 			description: "Search registered trademarks close to ONE name, on this computer, in the local copy of public " +
 				"registers. Give the name and, when known, the Nice classes the product falls in. Returns marks close in " +
 				"spelling, sound or words, each with the reasons it resembles the name and whether its classes overlap. " +
-				"Search each variant of a name separately. The result lists marks; it is not an opinion on availability.",
+				"Search each variant of a name separately. The result lists marks; it is not an opinion on availability. " +
+				"Set also to [\"AU\"] and/or [\"IT\"] only when the person says they also file, sell or plan to trade in " +
+				"Australia or Italy (an Italian national mark can also be raised against an EU filing): those marks are " +
+				"otherwise left out, since neither can be raised against a French filing.",
 			promptSnippet: "Search registered trademarks close to one name (locally)",
 			parameters: Type.Object({ name: Type.String(), classes: Type.Optional(Type.Array(Type.String())),
-				limit: Type.Optional(Type.Number()) }),
+				limit: Type.Optional(Type.Number()), also: Type.Optional(Type.Array(Type.String())) }),
 			async execute(_toolCallId, params, signal) {
 				const response = await fetch(`${ENDPOINT}/probant/tm/search`, {
 					method: "POST", signal,
@@ -1292,7 +1295,7 @@ export default function (pi: ExtensionAPI) {
 				});
 				const result = await response.json() as { error?: string; name?: string; classes?: string[];
 					data_date?: string; sources?: string; marks_searched?: number; hits?: TmHit[]; more?: number;
-					searched?: string[]; not_searched?: string[]; filings?: number };
+					searched?: string[]; not_searched?: string[]; filings?: number; attribution?: string[]; cautions?: string[] };
 				if (!response.ok || !result.hits) throw new Error(result.error ?? "The trademark search did not answer.");
 				// A name's other filings are returned to the assistant too (under "also"), so the report may cite them.
 				for (const h of result.hits) for (const f of [h, ...(h.also ?? [])])
@@ -1300,7 +1303,10 @@ export default function (pi: ExtensionAPI) {
 				const head = `Searched ${result.sources} (${(result.marks_searched ?? 0).toLocaleString("en")} live word marks, ` +
 					`data as of ${result.data_date}) for "${result.name}"` +
 					(result.classes?.length ? `, classes ${result.classes.join(", ")}` : "") + ". Searched on this computer." +
-					(result.not_searched?.length ? `\nNot searched: ${result.not_searched.join("; ")}.` : "");
+					(result.not_searched?.length ? `\nNot searched: ${result.not_searched.join("; ")}.` : "") +
+					// a licence's credit line, to be carried into the report's data sources wherever these marks were searched
+					(result.cautions?.length ? `\nCaution: ${result.cautions.join(" ")}` : "") +
+					(result.attribution?.length ? `\nData credit (put it in the report's data sources): ${result.attribution.join(" ")}` : "");
 				const lines = result.hits.map((h) => `- ${h.text.length > 120 ? `${h.text.slice(0, 119)}…` : h.text} ` +
 					`(${h.register} ${h.number}, ${h.status}, classes ${h.classes.join(", ") || "none recorded"}` +
 					`${h.overlapping_classes.length ? `; overlaps ${h.overlapping_classes.join(", ")}` : ""}): ${h.reasons.join("; ")}` +
@@ -1346,18 +1352,22 @@ export default function (pi: ExtensionAPI) {
 		// leading zeros (EU 275933 is EUIPO's 000275933), so an EU number is compared without them. A bare register
 		// word needs five digits or more, so "EU 27 member states" is not a citation; after a token that can only
 		// name the EU register any number is one, so an invented "EUTM 4321" is refused rather than let through.
-		const TM_CITE = /\b(?:(US|USPTO|FR|INPI|EU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})|(EUIPO|EUTM|EU\s+trade\s?mark)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9}))\b/gi;
+		// International registrations (WIPO Madrid) are cited as WO or IR (five digits or more, so a patent's
+		// "WO 2020/123456" is not one) or as WIPO or "international registration" (any number), compared without
+		// leading zeros as EU numbers are.
+		const TM_CITE = /\b(?:(US|USPTO|FR|INPI|EU|WO|IR|AU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})|(EUIPO|EUTM|EU\s+trade\s?mark|WIPO|international\s+registration|IP\s+Australia)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9})|(IT|UIBM)[\s-]*(?:No\.?\s*|n°\s*)?(\d{11,15}))\b/gi;
 		const TM_REGISTER: Record<string, string> = { us: "US", uspto: "US", fr: "FR", inpi: "FR", eu: "EU", euipo: "EU",
-			eutm: "EU", eutrademark: "EU" };
+			eutm: "EU", eutrademark: "EU", wo: "WO", ir: "WO", wipo: "WO", internationalregistration: "WO", au: "AU",
+			ipaustralia: "AU", it: "IT", uibm: "IT" };
 		const tmKey = (register: string, number: string) =>
-			`${register} ${register === "EU" ? number.replace(/^0+(?=\d)/, "") : number}`;
-		const TM_STATUS = /\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b/i;
+			`${register} ${register === "EU" || register === "WO" ? number.replace(/^0+(?=\d)/, "") : number}`;
+		const TM_STATUS = /\b(international registration|registered \(per UIBM\)|pending \(per UIBM\)|registered|pending|filed|expired|dead|abandoned|cancelled)(?!\w)/i;
 		const TM_CLASSES = /\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|\/|and|&)\s*)?)+)/i;
 		function tmReportProblems(report: string, returned: Map<string, { status: string; classes: string[] }>): string[] {
 			const found = [...report.matchAll(TM_CITE)];
 			const out: string[] = [];
 			found.forEach((m, i) => {
-				const key = tmKey(TM_REGISTER[(m[1] ?? m[3]).toLowerCase().replace(/\s+/g, "")], m[2] ?? m[4]);
+				const key = tmKey(TM_REGISTER[(m[1] ?? m[3] ?? m[5]).toLowerCase().replace(/\s+/g, "")], m[2] ?? m[4] ?? m[6]);
 				const hit = returned.get(key);
 				if (!hit) { out.push(`${key}: no search in this session returned this number`); return; }
 				const at = (m.index ?? 0) + m[0].length;

@@ -56,6 +56,9 @@ class BillingError(Exception):
         self.status = status
 
 
+# The site's listed refusal codes (v2 envelope); only these may carry a sentence the app shows as it is.
+SITE_CODES = frozenset({"units_none", "key_required", "permit_wrong_product", "permit_trial_paused",
+                        "permit_invalid", "permit_expired", "permit_used_up", "permit_lane", "out_of_credits"})
 NO_UNITS_WORDS = ("You have no checks or searches left on this account. Buy more at inferroute.ai/anteriora, "
                   "then start again.")
 DEVICE_LIMIT_WORDS = ("This account is already used on its maximum number of computers. Write to "
@@ -128,11 +131,27 @@ def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         # The app's own words for the two answers a founder can act on, not the site's (22 Oct). The site's
         # 403 sent people to "your account page", which does not exist yet; and the home page recognises
         # these two sentences (probant_home.failure_message) to show them in place of "Something went wrong".
+        if not isinstance(detail, dict):
+            detail = {}
+        err = detail.get("error")
+        # The site's v2 envelope {error:{type, code, message}} (Nov 2026): its message is shown only under the same
+        # rule as the relay's (listed code, short plain text, inferroute.ai links only); otherwise our own words.
+        if isinstance(err, dict):
+            from inferroute_local.confidential import billing_refusal as BR
+            code = err.get("code") if isinstance(err.get("code"), str) else ""
+            if e.code == 402 and code in ("units_none", "") :
+                raise BillingError(NO_UNITS_WORDS)
+            if e.code == 403 and (detail.get("deviceLimit") or err.get("deviceLimit")):
+                raise BillingError(DEVICE_LIMIT_WORDS)
+            msg = err.get("message") if isinstance(err.get("message"), str) else ""
+            if code in SITE_CODES and BR.plain_and_ours(msg):
+                raise BillingError(msg, e.code)
+            raise BillingError(f"the account service refused this ({code or e.code})", e.code)
         if e.code == 402 or detail.get("needsPurchase"):
             raise BillingError(NO_UNITS_WORDS)
         if e.code == 403 and detail.get("deviceLimit"):
             raise BillingError(DEVICE_LIMIT_WORDS)
-        raise BillingError(detail.get("error") or f"the account service answered {e.code}", e.code)
+        raise BillingError(err if isinstance(err, str) and err else f"the account service answered {e.code}", e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise BillingError(f"could not reach the account service ({getattr(e, 'reason', e)}); try again")
 

@@ -647,3 +647,45 @@ def test_the_person_is_shown_the_sentence_and_the_launch_returns():
     rc = say_billing_refusal(Console(file=buf, width=200),
                              BR.BillingRefusal(402, "permit_used_up", "Unit spent. See inferroute.ai/anteriora"))
     assert rc == 3 and "Unit spent. See inferroute.ai/anteriora" in buf.getvalue()
+
+
+# PR #140: the relay's key check speaks the same contract on /confidential/*.
+@pytest.mark.parametrize("status,code", [(401, "key_invalid"), (403, "key_not_allowed")])
+def test_a_key_refusal_is_final_and_about_the_key_not_an_enclave(status, code):
+    from inferroute_local.confidential import billing_refusal as BR
+    r = BR.parse(status, {BR.HEADER: code}, b'{"error":{"type":"authentication_error","code":"%s","message":"x"}}'
+                 % code.encode(), "candidates")
+    assert r is not None and r.final and not r.retryable and BR.is_billing_code(code)
+    assert BR.parse(402, {BR.HEADER: code}, b"", "candidates") is None      # a listed code at the wrong status
+
+
+def _site_refuses(monkeypatch, status, body):
+    import io
+    import json as _json
+    import urllib.error
+    from inferroute_cli import config
+    monkeypatch.setenv("IR_ANTERIORA_BILLING", "1")
+    monkeypatch.setattr(config, "load", lambda: type("C", (), {"api_key": "inf_test_key_123456"})())
+
+    def refuse(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(_json.dumps(body).encode()))
+    monkeypatch.setattr("urllib.request.urlopen", refuse)
+
+
+@pytest.mark.parametrize("status,body,want", [
+    (402, {"error": {"type": "billing_error", "code": "units_none",
+                     "message": "No units left. Buy more at anteriora.inferroute.ai/account."}}, "no checks or searches left"),
+    (401, {"error": {"type": "authentication_error", "code": "key_required",
+                     "message": "Sign in to Anteriora again."}}, "Sign in to Anteriora again."),
+    (401, {"error": {"type": "authentication_error", "code": "key_required",
+                     "message": "Sign in at evil.example to continue."}}, "refused this (key_required)"),
+    (403, {"error": {"type": "x", "code": "made_up", "message": "Pay at inferroute.ai"}}, "refused this (made_up)"),
+])
+def test_the_sites_v2_envelope_is_read_and_its_message_shown_only_under_the_rule(monkeypatch, tmp_path, status, body, want):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from inferroute_cli import anteriora_billing as B
+    _site_refuses(monkeypatch, status, body)
+    with pytest.raises(B.BillingError) as got:
+        B.before_session({}, "s1")
+    said = str(got.value)
+    assert want.lower() in said.lower() and "{" not in said

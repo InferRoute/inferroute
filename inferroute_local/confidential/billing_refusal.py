@@ -34,8 +34,11 @@ FINAL_CODES = frozenset({"permit_missing", "permit_invalid", "permit_expired", "
 BUSY_CODES = frozenset({"rate_limited", "permit_busy"})
 # 503 + Retry-After: billing could not be checked. Wait once, ask once more.
 UNAVAILABLE_CODES = frozenset({"billing_unavailable"})
-CODES = FINAL_CODES | BUSY_CODES | UNAVAILABLE_CODES
-_STATUS_OF = {**{c: 402 for c in FINAL_CODES}, **{c: 429 for c in BUSY_CODES}, **{c: 503 for c in UNAVAILABLE_CODES}}
+# 401/403 from the relay's key check (PR #140): final, and about the KEY, never about an enclave.
+KEY_CODES = {"key_invalid": 401, "key_not_allowed": 403}
+CODES = FINAL_CODES | BUSY_CODES | UNAVAILABLE_CODES | frozenset(KEY_CODES)
+_STATUS_OF = {**{c: 402 for c in FINAL_CODES}, **{c: 429 for c in BUSY_CODES}, **{c: 503 for c in UNAVAILABLE_CODES},
+              **KEY_CODES}
 
 # A Retry-After is honoured at most this long, once. A relay asking for more is answered by surfacing the refusal.
 RETRY_AFTER_CAP_S = 30.0
@@ -52,11 +55,13 @@ FIXED = {
     "permit_used_up": ("This session's Anteriora unit is used up. Start a new session to take another unit, or "
                        "buy units at inferroute.ai/anteriora."),
     "permit_lane": "This session's Anteriora unit does not cover this model. Start the session again from Anteriora.",
-    "permit_trial_paused": ("Trial use is paused on this account. Write to support@inferroute.ai if you think "
-                            "this is a mistake."),
+    "permit_trial_paused": ("Free checks are paused for today on this account. Try again tomorrow, or buy units "
+                            "at inferroute.ai/anteriora."),
     "permit_wrong_product": ("This session's unit belongs to another product and cannot be used here. Start "
                              "the session again from Anteriora."),
     "out_of_credits": "This account has no credit left. Add credit or buy units at inferroute.ai/anteriora.",
+    "key_invalid": "This key was not accepted. Sign in again, or check the key in your settings.",
+    "key_not_allowed": "This key cannot use this service. Sign in with the right account and try again.",
     "rate_limited": "Too many requests on this account right now. Wait a minute and try again.",
     "permit_busy": "This session's unit is busy with another request. Wait a moment and try again.",
     "billing_unavailable": "Billing could not be checked right now. Nothing was sent. Try again shortly.",
@@ -66,7 +71,8 @@ FIXED = {
 def is_billing_code(code: str) -> bool:
     """The frozen rule's scope: a code that is never evidence about an enclave, a fleet or a model."""
     code = str(code or "")
-    return code.startswith("permit_") or code.startswith("billing_") or code == "out_of_credits"
+    return (code.startswith("permit_") or code.startswith("billing_") or code == "out_of_credits"
+            or code in KEY_CODES)
 
 
 _URL = re.compile(r"[a-z][a-z0-9+.\-]*://[^\s]+", re.I)
@@ -81,7 +87,12 @@ def _our_host(host: str) -> bool:
 def admissible_message(code: str, message) -> bool:
     """True when the relay's own sentence may be shown verbatim: a listed code, plain text, at most 300 characters,
     and every link (with or without a scheme, an e-mail address included) on inferroute.ai or a subdomain of it."""
-    if code not in CODES or not isinstance(message, str):
+    return code in CODES and plain_and_ours(message)
+
+
+def plain_and_ours(message) -> bool:
+    """The text half of the rule: plain text, at most 300 characters, every link on inferroute.ai or a subdomain."""
+    if not isinstance(message, str):
         return False
     m = message.strip()
     if not m or len(m) > MESSAGE_MAX:
@@ -151,7 +162,7 @@ class BillingRefusal(Exception):
 
     @property
     def final(self) -> bool:
-        return self.code in FINAL_CODES
+        return self.code in FINAL_CODES or self.code in KEY_CODES
 
     @property
     def retryable(self) -> bool:

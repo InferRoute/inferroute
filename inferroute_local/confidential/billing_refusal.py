@@ -217,3 +217,93 @@ def parse(status: int, headers, body, route: str = "") -> BillingRefusal | None:
         return None
     msg = err.get("message") if isinstance(err.get("message"), str) else ""
     return BillingRefusal(int(status), code, msg, parse_retry_after(h.get("retry-after")), route, from_header)
+
+
+# ───────────────────────── the search gate (ir-search-gate, Nov 2026) ─────────────────────────
+#
+# The Cloud Run gate in front of the sealed search machine refuses with the same envelope and header, and has three
+# refusals of its own that are NOT billing codes: no key (401 key_required), a body of no valid length (413
+# bad_length), and the machine not answering (503 search_unavailable). They are kept OUT of CODES on purpose:
+# is_billing_code, parse and admissible_message do not know them, so the relay's frozen rule is exactly as it was.
+# Only the search path (inferroute_cli/_searchgate) reads them, through parse_search below.
+SEARCH_CODES = {"key_required": 401, "bad_length": 413, "search_unavailable": 503}
+SEARCH_FIXED = {
+    "key_required": "Patent search needs your Anteriora key. Sign in to Anteriora again, then search.",
+    "bad_length": ("InferRoute's search service did not accept the size of this search, so nothing was searched. "
+                   "If it happens again, write to support@inferroute.ai."),
+    "search_unavailable": ("The search machine is not answering right now; it may be starting. Nothing was "
+                           "searched. Try again in a few minutes."),
+}
+SEARCH_UNLISTED = "InferRoute's search service refused this search ({code}). Nothing was searched."
+
+
+class SearchRefusal(Exception):
+    """The search gate refused a request: an account, permit or service reason, never evidence about the search
+    machine's identity. Deliberately not a BillingRefusal, so no handler of the relay's refusals ever catches it."""
+
+    def __init__(self, status: int, code: str, message: str = "", retry_after: float | None = None,
+                 code_from_header: bool = True):
+        self.status = int(status)
+        self.code = code
+        self.server_message = message if isinstance(message, str) else ""
+        self.retry_after = retry_after
+        self.code_from_header = code_from_header
+        super().__init__(self.sentence)
+
+    @property
+    def listed(self) -> bool:
+        return self.code in CODES or self.code in SEARCH_CODES
+
+    @property
+    def retryable(self) -> bool:
+        """429 and 503 are asked once more after Retry-After; everything else is final."""
+        return self.status in (429, 503)
+
+    @property
+    def final(self) -> bool:
+        return not self.retryable
+
+    @property
+    def sentence(self) -> str:
+        """The gate's own words under the relay's rule (a listed code, short plain text, inferroute.ai links only),
+        our fixed sentence otherwise. An unlisted code never carries the server's text to a person."""
+        if self.listed and self.code_from_header and plain_and_ours(self.server_message):
+            return self.server_message.strip()
+        if self.code in SEARCH_FIXED:
+            return SEARCH_FIXED[self.code]
+        if self.code in FIXED:
+            return FIXED[self.code]
+        return SEARCH_UNLISTED.format(code=re.sub(r"[^a-z0-9_]", "", self.code.lower())[:40] or self.status)
+
+
+def parse_search(status: int, headers, body) -> SearchRefusal | None:
+    """A SearchRefusal when a response from the search gate is one of its refusals; None otherwise (then it is the
+    search machine's own answer, passed through by the gate, and is handled exactly as if it had come direct).
+
+    Listed codes (the relay's, and SEARCH_CODES) must arrive at their contract status. A refusal that carries the
+    gate's x-inferroute-billing-code header with any other code (the site's codes are passed through unchanged) is
+    still the gate's refusal, never the machine's, and is shown in our own words. A 429 or 503 with no code at all
+    (Cloud Run's own front end, before the gate ran) is read as rate_limited / search_unavailable."""
+    status = int(status or 0)
+    h = _headers_lower(headers)
+    code = h.get(HEADER, "").strip()
+    from_header = bool(code)
+    err = _body_error(body)
+    if not code:
+        c = err.get("code")
+        code = c.strip() if isinstance(c, str) else ""
+    msg = err.get("message") if isinstance(err.get("message"), str) else ""
+    retry = parse_retry_after(h.get("retry-after"))
+    if code in CODES:
+        if _STATUS_OF[code] != status:
+            return None
+        return SearchRefusal(status, code, msg, retry, from_header)
+    if code in SEARCH_CODES:
+        if SEARCH_CODES[code] != status:
+            return None
+        return SearchRefusal(status, code, msg, retry, from_header)
+    if from_header and status >= 400:
+        return SearchRefusal(status, code, msg, retry, from_header)
+    if status in (429, 503) and not code:
+        return SearchRefusal(status, "rate_limited" if status == 429 else "search_unavailable", "", retry, False)
+    return None

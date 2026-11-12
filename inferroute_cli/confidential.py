@@ -342,8 +342,11 @@ async def probe_fleet(transport, fleet_id: str) -> int:
     """Instances offering a nonce right now. No attestation, so this is cheap enough to run before
     choosing. A probe that fails returns -1 (unknown) rather than 0 — "we could not ask" must not read
     as "there is nothing there", or one flaky listing would rule out a healthy fleet."""
+    from inferroute_local.confidential.transport import BillingRefusal
     try:
         e2 = await transport.nonces(fleet_id)
+    except BillingRefusal:
+        raise                                            # the account was refused: no fact about this fleet
     except Exception:                                    # noqa: BLE001
         return -1
     return sum(1 for i in (e2.get("instances") or [])
@@ -496,6 +499,16 @@ def _lane_price(alias, economy: bool) -> dict:
     return dict((row.get("economy") if economy else row.get("standard")) or {})
 
 
+def say_billing_refusal(console, e) -> int:
+    """THE ACCOUNT WAS REFUSED by the relay (a BillingRefusal out of _open_session), so no other fleet or model would
+    be accepted either: say so with the relay's own words when they are admissible (billing_refusal.admissible_message)
+    and ours otherwise. Escaped, because the console would otherwise read square brackets as markup. Returns the exit
+    code; the caller RETURNS it rather than exiting, so a Probant caller still settles the session's unit."""
+    from rich.markup import escape
+    console.print(f"[red]{escape(e.sentence)}[/]\n[grey58]Nothing was sent.[/]")
+    return 3
+
+
 async def _open_session(alias, session_id: str, http, console, *, continuity: bool = False, permit: str = ""):
     """`continuity`: open the side lane instead of a single session — several verified sessions, one
     conversation, with a standby warmed in the background so a fleet going bad never reaches the user.
@@ -549,9 +562,12 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
         # two probe rounds across every fleet on the critical path of every launch, and discarding the
         # first one's conclusion.
         if not continuity:
+            from inferroute_local.confidential.transport import BillingRefusal
             try:
                 order = await health_ordered(order, catalog, transport, console,
                                              server_health=await server_fleet_health(transport))
+            except BillingRefusal:
+                raise                                 # a billing refusal is not a failed probe: it stops the launch
             except Exception:                         # noqa: BLE001 — a failed probe must never block a launch
                 pass
     if continuity and os.environ.get("IR_NO_MODEL_FALLBACK") != "1":
@@ -578,8 +594,11 @@ async def _open_session(alias, session_id: str, http, console, *, continuity: bo
         session.context_length = int(lane.get("context_length") or 0)
         status = console.status(f"[bold]verifying the enclave from this device… ({cand.short})", spinner="dots")
         status.start()
+        from inferroute_local.confidential.transport import BillingRefusal
         try:
             receipt = await session.open(progress=lambda s: status.update(f"[bold]{s}"))
+        except BillingRefusal:
+            raise                   # never "try the next model": every model would be refused the same way
         except Exception as e:      # session.open() refuses on expected failures; a bug shows the same way
             from inferroute_local.confidential.session import public_reason
             tried.append(f"{short} ({public_reason(e)})")
@@ -657,8 +676,11 @@ async def _open_continuity(order, alias, catalog, session_id, transport, http, e
                            note=_announce)
     status = console.status("[bold]verifying the enclave from this device…", spinner="dots")
     status.start()
+    from inferroute_local.confidential.transport import BillingRefusal
     try:
         await lane.open()
+    except BillingRefusal:
+        raise                                         # not a lane failure: the single-session path would meet it too
     except Exception:                                 # noqa: BLE001 — fall back to the ordinary path
         return None
     finally:
@@ -840,9 +862,13 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
             # IR_PROBANT_CONTINUITY=0 turns it off again without a code change.
             use_continuity = (probant is not None
                               and os.environ.get("IR_PROBANT_CONTINUITY") != "0")
-            session, receipt = await _open_session(alias, session_id, http, console,
-                                                   continuity=use_continuity,
-                                                   permit=str((probant or {}).get("permit") or ""))
+            from inferroute_local.confidential.transport import BillingRefusal
+            try:
+                session, receipt = await _open_session(alias, session_id, http, console,
+                                                       continuity=use_continuity,
+                                                       permit=str((probant or {}).get("permit") or ""))
+            except BillingRefusal as e:
+                return say_billing_refusal(console, e)
             search_endpoint = None
             if agent == "pi" and receipt.is_confidential and probant is not None:
                 from . import pi_attested

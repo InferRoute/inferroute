@@ -135,7 +135,12 @@ def serve(model: str | None) -> int:
 
     async def _run() -> int:
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0)) as http:
-            session, receipt = await C._open_session(alias, session_id, http, console)
+            from inferroute_local.confidential.transport import BillingRefusal
+            try:
+                session, receipt = await C._open_session(alias, session_id, http, console)
+            except BillingRefusal as e:
+                clear_state()
+                return C.say_billing_refusal(console, e)
             if not receipt.is_confidential:
                 # Never write a state file for a session that did not open: a later `status` would read
                 # it as a running confidential session.

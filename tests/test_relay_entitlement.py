@@ -486,3 +486,164 @@ def test_a_plain_429_without_a_code_still_moves_to_another_instance(world, blame
     assert st == 200 and blamed == [first] and waits == [] and len(carrier.calls) == 2
     assert any(e["kind"] == "upstream-retry" for e in s.receipt.events)
 
+
+# ───────────────────────── continuity, probes and the launcher: stop, never walk ─────────────────────────
+
+from inferroute_local.confidential import availability as av  # noqa: E402
+from inferroute_local.confidential import continuity as CT  # noqa: E402
+
+
+def _cands3():
+    return [CT.Candidate("f-big", "kimi-k3", "m/K3"), CT.Candidate("f-mid", "glm-5.2", "m/G"),
+            CT.Candidate("f-small", "deepseek-v4-flash", "m/D")]
+
+
+class _Beliefs(av.Beliefs):
+    def __init__(self):
+        super().__init__(path=None)
+        self.writes = []
+
+    def observed_verify(self, *a):
+        self.writes.append(("verify",) + a)
+
+    def observed_serve(self, *a):
+        self.writes.append(("serve",) + a)
+
+
+def test_the_lane_stops_on_a_billing_refusal_and_walks_to_no_other_fleet():
+    opened = []
+
+    async def opener(c):
+        opened.append(c.model_short)
+        raise BR.BillingRefusal(402, "permit_missing", "", route="candidates")
+    beliefs = _Beliefs()
+    lane = CT.Continuity(_cands3(), opener, beliefs=beliefs, policy=av.Policy(rank=av.RANK_CAPABILITY))
+    with pytest.raises(BR.BillingRefusal):
+        asyncio.run(lane.open())
+    assert len(opened) == 1, f"walked to other fleets: {opened}"
+    assert beliefs.writes == [], "a billing refusal was written as a failed verification"
+
+
+def test_a_standby_refused_for_billing_records_nothing_and_tries_no_other():
+    opened = []
+
+    class _Active:
+        model_short, fleet_id = "kimi-k3", "f-big"
+
+    async def opener(c):
+        opened.append(c.model_short)
+        raise BR.BillingRefusal(503, "billing_unavailable", "", route="candidates")
+    beliefs = _Beliefs()
+    lane = CT.Continuity(_cands3(), opener, beliefs=beliefs, policy=av.Policy(rank=av.RANK_CAPABILITY))
+    lane.active = _Active()
+    lane.order = ["kimi-k3", "glm-5.2", "deepseek-v4-flash"]
+    asyncio.run(lane._warm())
+    assert opened == ["glm-5.2"] and beliefs.writes == [] and lane.standby is None
+
+
+def test_an_account_refusal_mid_session_is_not_switched_away_from():
+    class _Sess:
+        fleet_id, model_short = "f-big", "kimi-k3"
+        last_fault = ""
+        receipt = None
+
+        async def messages(self, body):
+            self.last_fault = "account"
+
+            async def one():
+                yield b"refused"
+            return 402, {}, one()
+    beliefs = _Beliefs()
+    lane = CT.Continuity(_cands3(), None, beliefs=beliefs, policy=av.Policy(rank=av.RANK_CAPABILITY))
+    lane.active = _Sess()
+
+    async def nope(*a, **k):
+        raise AssertionError("switched on a billing refusal")
+    lane._switch = nope
+    st, _, _ = asyncio.run(lane.messages({}))
+    assert st == 402 and beliefs.writes == []
+
+
+def test_a_probe_refused_for_billing_is_not_fleet_unavailability():
+    class _T:
+        async def nonces(self, fleet_id):
+            raise BR.BillingRefusal(402, "out_of_credits", "", route="nonces")
+    with pytest.raises(BR.BillingRefusal):
+        asyncio.run(av.Prober().probe(_T(), "f-big"))
+    from inferroute_cli.confidential import probe_fleet
+    with pytest.raises(BR.BillingRefusal):
+        asyncio.run(probe_fleet(_T(), "f-big"))
+
+    async def probe(fleet):
+        raise BR.BillingRefusal(402, "out_of_credits", "", route="nonces")
+    with pytest.raises(BR.BillingRefusal):
+        asyncio.run(av.choose([("f-big", "kimi-k3")], av.Policy(rank=av.RANK_CAPABILITY), _Beliefs(), probe))
+
+
+def _launcher_world(monkeypatch, tmp_path, refuse_on):
+    """The real InferRouteRelay over a mock relay offering two lanes; `refuse_on` names the route that answers 402."""
+    import types
+    from inferroute_cli import confidential as C
+    from inferroute_cli import config as cfg
+    monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path))
+    monkeypatch.delenv("IR_OPERATOR_API_KEY", raising=False)
+    monkeypatch.delenv("IR_NO_MODEL_FALLBACK", raising=False)
+    monkeypatch.setattr(cfg, "load", lambda: types.SimpleNamespace(api_url="https://relay.test", api_key="k"))
+    monkeypatch.setattr(C, "_resolve_model_quietly", lambda s: types.SimpleNamespace(short=s))
+    monkeypatch.setattr(C, "_lane_price", lambda a, e: {})
+    monkeypatch.setattr(C, "FALLBACK_MODELS", ("kimi-k3", "glm-5.2"))
+    seen = []
+
+    def handler(request):
+        route = request.url.path.rsplit("/", 1)[-1]
+        seen.append(route)
+        if route == refuse_on:
+            st, h, b = _billing_answer(402, "permit_trial_paused", "Trials are paused.")
+            return httpx.Response(st, headers=h, content=b)
+        if route == "lanes":
+            return httpx.Response(200, json={"lanes": [
+                {"lane": "kimi-k3", "fleet": "f1", "sealed_model": "m/K3"},
+                {"lane": "glm-5.2", "fleet": "f2", "sealed_model": "m/G"}]})
+        if route == "nonces":
+            return httpx.Response(200, json={"nonce_expires_in": 60, "instances": [
+                {"instance_id": "i1", "e2e_pubkey": "k", "nonces": ["n1"]}]})
+        if route == "builds":
+            return httpx.Response(200, json={"builds": []})
+        if route == "fleet-health":
+            return httpx.Response(200, json={"fleets": {}})
+        return httpx.Response(500)
+
+    def run(continuity=False):
+        import io
+        from rich.console import Console
+
+        async def go():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+                return await C._open_session(types.SimpleNamespace(short="kimi-k3"), "s1", http,
+                                             Console(file=io.StringIO()), continuity=continuity, permit="p-1")
+        return asyncio.run(go())
+    return run, seen
+
+
+@pytest.mark.parametrize("refuse_on", ["nonces", "candidates"])
+@pytest.mark.parametrize("continuity", [False, True])
+def test_the_launcher_stops_on_a_billing_refusal_instead_of_trying_another_model(monkeypatch, tmp_path, refuse_on,
+                                                                                continuity):
+    run, seen = _launcher_world(monkeypatch, tmp_path, refuse_on)
+    walked = []
+    monkeypatch.setattr(av.Beliefs, "observed_verify", lambda self, *a: walked.append(a))
+    with pytest.raises(BR.BillingRefusal) as ei:
+        run(continuity=continuity)
+    assert ei.value.sentence == "Trials are paused."
+    assert seen.count(refuse_on) == 1, seen
+    assert walked == []
+
+
+def test_the_person_is_shown_the_sentence_and_the_launch_returns():
+    import io
+    from rich.console import Console
+    from inferroute_cli.confidential import say_billing_refusal
+    buf = io.StringIO()
+    rc = say_billing_refusal(Console(file=buf, width=200),
+                             BR.BillingRefusal(402, "permit_used_up", "Unit spent. See inferroute.ai/anteriora"))
+    assert rc == 3 and "Unit spent. See inferroute.ai/anteriora" in buf.getvalue()

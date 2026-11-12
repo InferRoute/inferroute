@@ -44,6 +44,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Tuple
 
+from .billing_refusal import BillingRefusal
+
 # Half-lives, in seconds. Chosen against the measured incident rather than by feel: one fleet went from
 # 0% to 95% request failure over about nine hours, so a memory of hours (not minutes, not days) is what
 # tracks it. A 10-minute half-life — proposed in the first draft — leaves an effective sample of ~3 at
@@ -476,6 +478,8 @@ async def choose(candidates, policy: Policy, beliefs: Beliefs, probe, *,
         live, depth = -1, 0
         try:
             live, depth = await probe(fleet)
+        except BillingRefusal:
+            raise                                      # the account was refused: stop choosing, judge no fleet
         except Exception:                              # a probe that fails is "could not ask", never "bad"
             live, depth = -1, 0
         probed.append(short)
@@ -626,6 +630,8 @@ class Prober:
         t = now or time.time()
         try:
             e2 = await transport.nonces(fleet_id)
+        except BillingRefusal:
+            raise                                       # the account was refused: no fact about this fleet at all
         except Exception:                               # noqa: BLE001 — could not ask
             return Probe(fleet_id, t)
         rows = e2.get("instances") or []

@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from . import availability as av
+from .billing_refusal import BillingRefusal
 from .session import COUNTS_AGAINST_FLEET, INSTANCE_FAULT, TRANSPORT_FAULT
 
 # Faults another fleet can actually help with. `account` (billing) and `client` (our own bug) are true
@@ -220,6 +221,11 @@ class Continuity:
                 continue
             try:
                 self.active = await self.opener(cand)
+            except BillingRefusal as e:
+                # The ACCOUNT was refused. Every fleet would answer the same, and none of them did anything:
+                # stop here, record nothing against this fleet, walk to no other.
+                self.note("billing-refused", f"{e.route or '?'} {e.status} {e.code}")
+                raise
             except Exception as e:                    # noqa: BLE001 — try the next one; that is the point
                 last = e
                 self.beliefs.observed_verify(cand.fleet_id, 0, 1, time.time())
@@ -272,6 +278,11 @@ class Continuity:
                 continue
             try:
                 s = await self.opener(cand)
+            except BillingRefusal:
+                # Not evidence about this fleet (nothing is recorded), and no other standby would fare better.
+                # Stop warming; the active session meets the same refusal on its next request and says so.
+                self._warm_blocked_until = time.time() + WARM_COOLDOWN_S
+                return
             except Exception:                         # noqa: BLE001 — a standby that will not open is
                 # ...but it IS evidence. `open()` records a refusal and this path did not, so a fleet
                 # that only ever fails as a standby accumulated nothing against it and was retried for

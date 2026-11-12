@@ -97,7 +97,8 @@ def admissible_message(code: str, message) -> bool:
 def plain_and_ours(message) -> bool:
     """The text half of the rule: plain ASCII text, at most 300 characters, and every host-shaped token
     (a dot between word characters: a link, a bare domain, an e-mail address, a dotted quad, a version number alike)
-    exactly inferroute.ai or a subdomain of it. No run of 7 or more digits (a phone number). Strict on purpose: a
+    exactly inferroute.ai or a subdomain of it. No 7 or more digits in a row once spaces, hyphens, dots and brackets
+    are removed (a phone number). Strict on purpose: a
     message this refuses is replaced by our fixed sentence, which costs nothing; a look-alike link shown costs trust."""
     if not isinstance(message, str):
         return False
@@ -108,8 +109,8 @@ def plain_and_ours(message) -> bool:
         return False                       # ASCII printable only: no look-alike letters, fullwidth or ideographic dots
     if any(ch in m for ch in "<>[]{}`\\"):
         return False                       # markup, console markup: not plain text
-    if re.search(r"\d{7,}", m):
-        return False                       # a phone number, an account number
+    if re.search(r"\d{7,}", re.sub(r"[\s\-.()\[\]]", "", m)):
+        return False                       # a phone number, however spaced, dashed, dotted or bracketed
     for tok in m.split():
         tok = tok.strip(".,;:!?()'\"")
         if "://" not in tok and not re.search(r"\w\.\w", tok):
@@ -221,8 +222,9 @@ def _body_error(body) -> dict:
 # keyed by the permit id that was SENT with the refused request (the transport knows it), so the launcher acts on the
 # permit that was refused and on no other (inferroute_cli.anteriora_billing.end_session). The search gate's are
 # recorded by the search verifier process in a file (inferroute_cli._searchgate) and read the same way.
-PERMIT_REFUSAL_CODES = frozenset({"permit_used_up", "permit_invalid", "permit_expired", "permit_lane",
-                                  "permit_wrong_product"})
+# permit_lane (the model is not on Anteriora's lane list) and permit_wrong_product (the key) say nothing against the
+# permit, so they are not recorded: the permit is kept.
+PERMIT_REFUSAL_CODES = frozenset({"permit_used_up", "permit_invalid", "permit_expired"})
 PERMIT_REFUSALS: dict = {}
 
 

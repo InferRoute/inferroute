@@ -46,7 +46,7 @@ PERMIT_DAYS = 30
 ISSUED_HOURS = 6                # the service refunds a permit left unsettled this long; never reuse one past it
 TIMEOUT = 15.0
 BALANCE_TTL = 300.0             # seconds an answer about billing is kept: "once per launch, briefly"
-BALANCE_TIMEOUT = 5.0           # a slow answer must not hold a launch up; no answer means OFF
+BALANCE_TIMEOUT = 2.0           # a slow answer must not hold a launch up: no answer in time = the last known answer
 GONE = (404, 410)               # settle answers meaning "this permit is not yours, or no longer exists"
 
 
@@ -66,14 +66,26 @@ DEVICE_LIMIT_WORDS = ("This account is already used on its maximum number of com
 
 
 # A PERMIT USED UP (Nov 2026). The search gate (and the relay) answer 402 permit_used_up when the permit has no searches
-# left. The matter or reading then keeps it no longer: it is settled as DELIVERED first, and only then dropped, because
-# the site hands an unsettled permit straight back (POST /permit answers reused:true), so a permit dropped unsettled
-# would come back spent at the next start. A used-up permit is NEVER settled as failed: its searches ran. When the
-# settle cannot be made (no network, 5xx), the permit is kept, marked used up, and the next start settles it first.
-# The next start then takes a fresh unit through the ordinary permit call, and says so first (one_more_unit_words).
-USED_UP_KEPT_WORDS = ("{whose} searches for its current unit are used up, and the unit could not be closed just now. "
-                      "Try again in a few minutes.")
-ONE_MORE_UNIT_WORDS = "{whose} searches for its current unit are used up; continuing uses one more unit."
+# or document reads left (a read goes through /search and counts against the permit like a search). The matter or
+# reading then keeps it no longer: it is settled as DELIVERED first, and only then dropped, because the site hands an
+# unsettled permit straight back (POST /permit answers reused:true), so a permit dropped unsettled would come back spent
+# at the next start. A used-up permit is NEVER settled as failed: its searches ran. When the settle cannot be made (no
+# network, 5xx), the permit is kept, marked used up, and the next start settles it first. The next start then takes a
+# fresh unit through the ordinary permit call, and says so first (one_more_unit_words).
+#
+# A DEAD PERMIT (permit_invalid, permit_expired, permit_lane, permit_wrong_product): the service will not honour it
+# again, so it is dropped WITHOUT any settle (never "failed", which would give back a unit the service no longer
+# holds against it), and the next start takes a new unit, saying so. permit_trial_paused and out_of_credits keep the
+# permit: a new unit would not help.
+#
+# Only the permit that was actually SENT with the refused request is acted on: the relay records the refusal against
+# the transport's permit (billing_refusal.note_permit_refusal), the gate's verifier writes the permit id with its code.
+USED_UP_KEPT_WORDS = ("{whose} searches and document reads for its current unit are used up, and the unit could not be "
+                      "closed just now. Try again in a few minutes.")
+ONE_MORE_UNIT_WORDS = ("{whose} searches and document reads for its current unit are used up; continuing uses one "
+                       "more unit.")
+DEAD_UNIT_WORDS = "{whose} current unit can no longer be used; continuing uses one more unit."
+DEAD_CODES = frozenset({"permit_invalid", "permit_expired", "permit_lane", "permit_wrong_product"})
 
 
 def _whose(rec: Dict[str, Any]) -> str:
@@ -81,7 +93,8 @@ def _whose(rec: Dict[str, Any]) -> str:
 
 
 def one_more_unit_words(rec: Dict[str, Any]) -> str:
-    return ONE_MORE_UNIT_WORDS.format(whose=_whose(rec))
+    words = DEAD_UNIT_WORDS if rec.get("renewal") == "dead" else ONE_MORE_UNIT_WORDS
+    return words.format(whose=_whose(rec))
 
 
 def used_up_kept_words(rec: Dict[str, Any]) -> str:
@@ -91,8 +104,40 @@ def used_up_kept_words(rec: Dict[str, Any]) -> str:
 _answer: Optional[tuple] = None          # (monotonic time, on?) — the account service's last word on billing
 
 
+def _cache_path() -> Path:
+    from . import probant as S
+    return S._irhome() / "anteriora-billing.json"
+
+
+def _cached() -> Optional[tuple]:
+    """(wall-clock time, on?) as last written on disk, or None."""
+    try:
+        doc = json.loads(_cache_path().read_text(encoding="utf-8"))
+        return float(doc["at"]), bool(doc["on"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _remember(on: bool) -> None:
+    try:
+        path = _cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(f".{os.getpid()}.tmp")
+        tmp.write_text(json.dumps({"at": time.time(), "on": bool(on)}), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
 def enabled() -> bool:
-    """Whether sessions need a unit permit: what the account service says, cached for BALANCE_TTL."""
+    """Whether sessions need a unit permit: what the account service says.
+
+    It must never stall a start (billing owner, Nov 2026). The answer is kept on disk under the app home with its time
+    and reused for BALANCE_TTL (5 minutes) by every run of the app; past that it is asked again, time-boxed to
+    BALANCE_TIMEOUT (2 s). No answer in time, or an error: the last known answer stands, "off" when there is none.
+    Asked before the session starts rather than beside it: a parallel ask would have to be joined before the permit
+    call anyway, and 2 s is the most it costs."""
     global _answer
     override = os.environ.get("IR_ANTERIORA_BILLING")
     if override in ("0", "1"):
@@ -100,12 +145,52 @@ def enabled() -> bool:
     now = time.monotonic()
     if _answer is not None and now - _answer[0] < BALANCE_TTL:
         return _answer[1]
+    disk = _cached()
+    if disk is not None and 0 <= time.time() - disk[0] < BALANCE_TTL:
+        _answer = (now, disk[1])
+        return disk[1]
     try:
-        on = _get("/api/anteriora/balance").get("billing") == "units"
+        on = _balance_within(BALANCE_TIMEOUT).get("billing") == "units"
     except BillingError:
-        on = False
+        on = disk[1] if disk is not None else False      # the last known answer; never a fresh "on" from silence
+        _answer = (now, on)
+        return on
     _answer = (now, on)
+    _remember(on)
     return on
+
+
+def _balance_within(seconds: float) -> Dict[str, Any]:
+    """GET /api/anteriora/balance, given at most `seconds` in all (name lookup included, which a socket timeout does
+    not bound): asked on a daemon thread, and abandoned when it has not answered in time."""
+    import threading
+    box: Dict[str, Any] = {}
+
+    def ask() -> None:
+        try:
+            box["doc"] = _get("/api/anteriora/balance")
+        except BillingError as e:
+            box["err"] = e
+        except Exception as e:                       # noqa: BLE001
+            box["err"] = BillingError(str(e))
+    t = threading.Thread(target=ask, daemon=True, name="anteriora-balance")
+    t.start()
+    t.join(seconds)
+    if "doc" in box:
+        return box["doc"]
+    raise box.get("err") or BillingError("the account service did not answer in time")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):              # the key never follows a redirect: a 3xx is an error here
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
+def _open(req: urllib.request.Request, timeout: float):
+    return _opener.open(req, timeout=timeout)
 
 
 def _key() -> str:
@@ -126,15 +211,29 @@ def _get(path: str) -> Dict[str, Any]:
         raise BillingError("no key")
     req = urllib.request.Request(_site() + path, method="GET", headers={"authorization": f"Bearer {key}"})
     try:
-        with urllib.request.urlopen(req, timeout=BALANCE_TIMEOUT) as r:
+        with _open(req, BALANCE_TIMEOUT) as r:
             got = json.loads(r.read() or b"{}")
     except (urllib.error.URLError, OSError, ValueError) as e:     # HTTPError is a URLError
         raise BillingError(str(e), getattr(e, "code", 0) or 0)
     return got if isinstance(got, dict) else {}
 
 
+DEFAULT_SITE = "https://inferroute.ai"
+
+
 def _site() -> str:
-    return os.environ.get("IR_SITE_BASE", "https://inferroute.ai").rstrip("/")
+    """IR_SITE_BASE when it is https on inferroute.ai or a subdomain of it (the key goes there); otherwise ignored."""
+    from urllib.parse import urlsplit
+    v = os.environ.get("IR_SITE_BASE", "")
+    try:
+        u = urlsplit(v.strip())
+        host = (u.hostname or "").lower()
+        ok = (u.scheme == "https" and not u.username and not u.password and u.port is None
+              and (host == "inferroute.ai" or host.endswith(".inferroute.ai")) and u.path in ("", "/")
+              and not u.query and not u.fragment)
+    except ValueError:
+        ok = False
+    return f"https://{host}" if ok else DEFAULT_SITE
 
 
 def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,7 +243,7 @@ def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
     req = urllib.request.Request(_site() + path, data=json.dumps(body).encode(), method="POST",
                                  headers={"content-type": "application/json", "authorization": f"Bearer {key}"})
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with _open(req, TIMEOUT) as r:
             return json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         try:
@@ -234,7 +333,6 @@ def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, A
     (with the words to show) when the account has no unit left. Updates `rec` in place; the caller writes it."""
     if not enabled():
         return None
-    clear_used_up_reports()
     p = rec.get("permit")
     if isinstance(p, dict) and p.get("used_up"):
         # Used up at an earlier session, and its settle could not be made then: settle it (delivered) first.
@@ -244,7 +342,7 @@ def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, A
     held = current_permit(rec)
     if held and held.get("account", account) == account:
         return held
-    if rec.get("renewal") == "used_up":
+    if rec.get("renewal") in ("used_up", "dead"):
         print(f"  {one_more_unit_words(rec)}", flush=True)     # the launcher's output; the home page shows it too
     got = _post("/api/anteriora/permit", _request_for(rec, session_id))
     rec.pop("renewal", None)
@@ -314,36 +412,39 @@ def settle_used_up(rec: Dict[str, Any], session_id: str) -> str:
     return "dropped"
 
 
-# Reports of 402 permit_used_up during a session. The relay's (inferroute_local.confidential.billing_refusal) are
-# seen in this process; the search gate's come from the search verifier process, which writes the permit id to a
-# file under confidential/ (pi_attested.used_up_signal_path), out of the assistant's reach.
-def clear_used_up_reports() -> None:
-    from inferroute_local.confidential import billing_refusal as BR
-    BR.USED_UP_SEEN.clear()
-    try:
-        from . import pi_attested
-        pi_attested.clear_used_up_signal()
-    except Exception:                                # noqa: BLE001
-        pass
+def drop_dead(rec: Dict[str, Any]) -> str:
+    """The service refused rec's permit for good (DEAD_CODES): drop it with NO settle, and mark a renewal."""
+    if not isinstance(rec.get("permit"), dict):
+        return "none"
+    rec.pop("permit", None)
+    rec["renewal"] = "dead"
+    return "dropped"
 
 
-def reported_used_up(permit_id: str) -> bool:
-    """Whether the relay or the search gate answered 402 permit_used_up during the session that carried permit_id."""
+def reported_refusal(permit_id: str) -> Optional[str]:
+    """The final permit refusal the relay or the search gate gave THIS permit during the session, or None."""
     from inferroute_local.confidential import billing_refusal as BR
-    if BR.USED_UP_SEEN:
-        return True
+    if not permit_id:
+        return None
+    code = BR.PERMIT_REFUSALS.get(permit_id)
+    if code:
+        return code
     try:
         from . import pi_attested
-        return pi_attested.used_up_signalled(permit_id)
+        return pi_attested.permit_refusal_signalled(permit_id)
     except Exception:                                # noqa: BLE001
-        return False
+        return None
 
 
 def end_session(rec: Dict[str, Any], session_id: str, was_delivered: bool) -> Optional[str]:
-    """after_session, unless the session was told its permit is used up: then settle_used_up (never "failed")."""
+    """after_session, unless the session's own permit was refused for good: used up -> settle_used_up (never
+    "failed"); dead -> drop_dead (no settle at all)."""
     p = rec.get("permit")
-    if isinstance(p, dict) and p.get("id") and reported_used_up(str(p["id"])):
+    code = reported_refusal(str(p["id"])) if isinstance(p, dict) and p.get("id") else None
+    if code == "permit_used_up":
         return settle_used_up(rec, session_id)
+    if code in DEAD_CODES:
+        return drop_dead(rec)
     return after_session(rec, session_id, was_delivered)
 
 
@@ -372,8 +473,8 @@ def load_reading(intake_id: str, cluster: bool = False) -> Dict[str, Any]:
         p = doc.get("permit")
         if isinstance(p, dict):
             rec["permit"] = p
-        if doc.get("renewal") == "used_up":
-            rec["renewal"] = "used_up"
+        if doc.get("renewal") in ("used_up", "dead"):
+            rec["renewal"] = doc["renewal"]
     except (OSError, ValueError, AttributeError):
         pass
     return rec

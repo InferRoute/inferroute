@@ -143,7 +143,7 @@ def _site_answers(monkeypatch, home, status, body):
     def refuse(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(json.dumps(body).encode()))
 
-    monkeypatch.setattr("urllib.request.urlopen", refuse)
+    monkeypatch.setattr("inferroute_cli.anteriora_billing._open", refuse)
 
 
 @pytest.mark.parametrize("status,body,words", [
@@ -213,6 +213,11 @@ def test_the_answer_is_asked_once_and_kept_briefly(monkeypatch):
     assert len(asked) == 1
     B._answer = (B._answer[0] - B.BALANCE_TTL - 1, True)
     B.enabled()
+    assert len(asked) == 1                    # the answer on disk is still under 5 minutes old: not asked again
+    import time as _t
+    B._cache_path().write_text(json.dumps({"at": _t.time() - B.BALANCE_TTL - 1, "on": True}))
+    B._answer = None
+    B.enabled()
     assert len(asked) == 2
 
 
@@ -229,7 +234,7 @@ def test_no_key_means_off_without_asking(home, monkeypatch):
     from inferroute_cli import config
     monkeypatch.delenv("IR_ANTERIORA_BILLING", raising=False)
     monkeypatch.setattr(config, "load", lambda: type("C", (), {"api_key": ""})())
-    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
+    monkeypatch.setattr("inferroute_cli.anteriora_billing._open", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
     assert B.enabled() is False
 
 

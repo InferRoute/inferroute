@@ -27,10 +27,8 @@ def _clean(monkeypatch, tmp_path):
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     monkeypatch.setenv("IR_PROBANT_ROOT", str(tmp_path / "Probant"))
     monkeypatch.setenv("IR_ANTERIORA_BILLING", "1")
-    BR.USED_UP_SEEN.clear()
     PA.clear_used_up_signal()
     yield
-    BR.USED_UP_SEEN.clear()
     PA.clear_used_up_signal()
 
 
@@ -70,9 +68,10 @@ def held(**extra):
                        "first_session": "s0", "account": B._account_tag(), **extra}}
 
 
-def gate_says_used_up():
-    BR.parse(402, {"x-inferroute-billing-code": "permit_used_up"},
-             json.dumps({"error": {"code": "permit_used_up", "message": "This permit has no searches left."}}))
+def gate_says_used_up(permit=PERMIT, code="permit_used_up"):
+    """The relay refused `permit` (the one the transport sent) with a final permit code."""
+    BR.note_permit_refusal(permit, BR.parse(402, {"x-inferroute-billing-code": code},
+                                            json.dumps({"error": {"code": code, "message": "No searches left."}})))
 
 
 # ───────────────────────── settle, then drop ─────────────────────────
@@ -106,7 +105,8 @@ def test_the_next_start_says_one_more_unit_and_takes_a_fresh_permit(site):
     B.end_session(rec, "s1", True)
     events.clear()
     p = B.before_session(rec, "s2")
-    assert events == [("said", "This matter's searches for its current unit are used up; continuing uses one more unit."),
+    assert events == [("said", "This matter's searches and document reads for its current unit are used up; "
+                               "continuing uses one more unit."),
                       ("permit",)]
     assert p["id"] != PERMIT and rec["permit"]["id"] == p["id"] and "renewal" not in rec
     events.clear()
@@ -147,7 +147,7 @@ def test_no_units_left_after_the_drop_shows_the_no_units_sentence(monkeypatch):
         raise urllib.error.HTTPError(req.full_url, 402, "x", {}, io.BytesIO(json.dumps(
             {"error": {"type": "billing_error", "code": "units_none", "message": "none"}}).encode()))
 
-    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("inferroute_cli.anteriora_billing._open", urlopen)
     rec = held(used_up=True)                                             # used up, its settle still to make
     with pytest.raises(B.BillingError) as e:
         B.before_session(rec, "s2")
@@ -178,12 +178,12 @@ def test_the_gate_tells_the_launcher_through_a_file_it_alone_writes(tmp_path):
     g = G.Gate("https://" + G.GATE_HOSTS[0], "k", PERMIT, sleep=lambda s: None, opener=Opener(), used_up_file=str(sig))
     with pytest.raises(G.GateRefused):
         g.call(g.base, "POST", "/search", b"x", 5)
-    assert sig.read_text() == PERMIT
+    assert json.loads(sig.read_text()) == {"permit": PERMIT, "code": "permit_used_up"}
     PA._USED_UP_SIGNAL = sig
-    assert PA.used_up_signalled(PERMIT) and not PA.used_up_signalled("another")
-    assert B.reported_used_up(PERMIT)
-    B.clear_used_up_reports()
-    assert not B.reported_used_up(PERMIT)
+    assert PA.permit_refusal_signalled(PERMIT) == "permit_used_up" and PA.permit_refusal_signalled("another") is None
+    assert B.reported_refusal(PERMIT) == "permit_used_up"
+    PA.clear_used_up_signal()
+    assert B.reported_refusal(PERMIT) is None
 
 
 def test_a_session_on_the_gate_with_a_permit_is_given_a_signal_file_under_confidential(tmp_path, monkeypatch):
@@ -222,7 +222,7 @@ def test_a_matter_whose_permit_ran_out_is_renewed_at_the_next_open(site, monkeyp
     S.main(["new", "Acme", "gadget"])
 
     def session_where_the_gate_says_used_up(args, agent="pi", probant=None):
-        gate_says_used_up()
+        gate_says_used_up(probant["permit"])
         return 0
 
     monkeypatch.setattr("inferroute_cli.confidential.launch", session_where_the_gate_says_used_up)

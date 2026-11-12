@@ -836,8 +836,8 @@ def unit_notice_in(tail: List[str]) -> str:
     """The launcher's line saying this start takes one more unit because the last one's searches are used up
     (anteriora_billing.one_more_unit_words), when it printed one; "" otherwise. Shown on the page as it is."""
     for ln in tail:
-        m = re.search(r"(This (?:matter|reading)'s searches for its current unit are used up; continuing uses one more "
-                      r"unit\.)", ln)
+        m = re.search(r"(This (?:matter|reading)'s (?:searches and document reads for its current unit are used up|"
+                      r"current unit can no longer be used); continuing uses one more unit\.)", ln)
         if m:
             return m.group(1)
     return ""
@@ -861,8 +861,8 @@ def failure_message(tail: List[str]) -> str:
         return NO_UNITS_WORDS + " Nothing was sent."
     if "maximum number of computers" in low or "devices are all in use" in low:
         return DEVICE_LIMIT_WORDS + " Nothing was sent."
-    m = re.search(r"(This (?:matter|reading)'s searches for its current unit are used up, and the unit could not be "
-                  r"closed just now\. Try again in a few minutes\.)", text)
+    m = re.search(r"(This (?:matter|reading)'s searches and document reads for its current unit are used up, and the "
+                  r"unit could not be closed just now\. Try again in a few minutes\.)", text)
     if m:
         return m.group(1)
     if "nested agent session" in low:

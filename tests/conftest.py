@@ -19,3 +19,22 @@ def _no_test_writes_the_real_credentials(monkeypatch, tmp_path):
     from inferroute_cli import config
     monkeypatch.setattr(config, "CREDS_FILE", tmp_path / "_credentials" / "credentials")
     monkeypatch.delenv("INFERROUTE_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_test_reaches_the_account_service(monkeypatch, tmp_path):
+    """anteriora_billing ignores an IR_SITE_BASE that is not https on inferroute.ai, so the port above does not reach
+    it: its default is pointed at the same dead port. And its remembered billing answer lives under each test's own
+    directory, never in the developer's app home."""
+    from inferroute_cli import anteriora_billing
+    monkeypatch.setattr(anteriora_billing, "DEFAULT_SITE", "http://127.0.0.1:9")
+    monkeypatch.setattr(anteriora_billing, "_cache_path", lambda: tmp_path / "_billing" / "anteriora-billing.json")
+
+
+@pytest.fixture(autouse=True)
+def _no_permit_refusal_outlives_its_test():
+    """billing_refusal.PERMIT_REFUSALS is per process, as in the app: each test starts with none."""
+    from inferroute_local.confidential import billing_refusal
+    billing_refusal.PERMIT_REFUSALS.clear()
+    yield
+    billing_refusal.PERMIT_REFUSALS.clear()

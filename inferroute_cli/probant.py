@@ -549,7 +549,8 @@ def tm_index_path(given: str = "") -> Path:
     return Path(given or os.environ.get("IR_TM_INDEX") or (_irhome() / "tm" / "index.sqlite")).expanduser()
 
 
-def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, as_json: bool = False) -> int:
+def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, as_json: bool = False,
+              also: Optional[List[str]] = None) -> int:
     """Similar registered marks, searched locally. Nothing about the name leaves this computer."""
     from . import tm_search as T
     path = tm_index_path(index)
@@ -560,7 +561,7 @@ def cmd_names(name: str, classes: List[str], index: str = "", limit: int = 30, a
     except ValueError as e:
         raise ProbantError(str(e))
     try:
-        result = ix.search(name, classes, limit=max(1, min(limit, 500)))
+        result = ix.search(name, classes, limit=max(1, min(limit, 500)), also=also or [])
     except ValueError as e:
         raise ProbantError(str(e))
     if as_json:
@@ -755,6 +756,10 @@ def main(argv: list[str] | None = None) -> int:
     nm.add_argument("--index", default="", help="the trademark index file (default: the installed one)")
     nm.add_argument("--limit", type=int, default=30)
     nm.add_argument("--json", action="store_true", help="the result as JSON")
+    nm.add_argument("--australia", action="store_true",
+                    help="also search Australian marks (only if you file or trade in Australia; they are left out otherwise)")
+    nm.add_argument("--italy", action="store_true",
+                    help="also search Italian national marks (only if you file or trade in Italy; left out otherwise)")
     pf = sub.add_parser("cluster", help="read a folder of documents and cluster what it contains until it settles")
     pf.add_argument("folder")
     pf.add_argument("--max-docs", type=int, default=0, help="read only the first N documents (a trial run)")
@@ -829,7 +834,7 @@ def main(argv: list[str] | None = None) -> int:
                 return tm_install.main_install(tm_index_path(a.index))
             if not a.name:
                 raise ProbantError("give a name to check, or --install to install the trademark index")
-            return cmd_names(a.name, a.classes, a.index, a.limit, a.json)
+            return cmd_names(a.name, a.classes, a.index, a.limit, a.json, also=(["AU"] if a.australia else []) + (["IT"] if a.italy else []))
         if a.cmd == "intake":
             return cmd_intake(a.document, web=a.web, client=a.client, proposals_only=a.proposals_only,
                               repo=a.repo, ref=a.commit, yes=a.yes, only=a.only)

@@ -22,6 +22,10 @@ def main():
     ap.add_argument("--uspto"); ap.add_argument("--uspto-date")
     ap.add_argument("--inpi")
     ap.add_argument("--inpi-eu", help="folder of INPI open-data EU_YYYYMM.parquet files (see tools/tm_inpi_eu.py)")
+    ap.add_argument("--inpi-wo", help="folder of INPI open-data WO_YYYYMM.parquet files (see tools/tm_inpi_wo.py)")
+    ap.add_argument("--ipau", help="IP RAPID Parquet folder (tm_application/, tm_description/, …; see tools/tm_ipau.py)")
+    ap.add_argument("--uibm", help="folder of UIBM month_YYYY-MM.parquet files (see tools/tm_uibm.py)")
+    ap.add_argument("--today", help="build date YYYY-MM-DD for IR expiry (default: today)")
     a = ap.parse_args()
     parts, sources, dates = [], [], []
     if a.uspto:
@@ -56,8 +60,35 @@ def main():
         parts.append(tm_inpi_eu.rows(state))
         sources.append("EUIPO (EU trade marks, as republished in INPI open data)")
         dates.append(f"EU {tm_inpi_eu.data_date(state)}")
+    if a.inpi_wo:
+        import tm_inpi_wo
+        state = tm_inpi_wo.current(Path(a.inpi_wo))
+        parts.append(tm_inpi_wo.rows(state, a.today))
+        sources.append("WIPO (international registrations designating France or the EU, as republished in INPI open data)")
+        dates.append(f"WO {tm_inpi_wo.data_date(state)}")
+    if a.ipau:
+        import tm_ipau
+        counts = tm_ipau.statuses(Path(a.ipau))
+        print("AU statuses:", counts)
+        unknown = [s for s in counts if s and s not in tm_ipau.LIVE and s not in tm_ipau.DEAD]
+        if unknown:
+            sys.exit(f"AU statuses not classified as live or dead: {unknown}. Classify them in tools/tm_ipau.py.")
+        parts.append(tm_ipau.rows(Path(a.ipau)))
+        sources.append("IP Australia (Australian trade marks, including international registrations designating Australia)")
+        dates.append(f"AU {tm_ipau.data_date(Path(a.ipau))}")
+    if a.uibm:
+        import tm_uibm
+        records = list(tm_uibm.read(Path(a.uibm)))
+        counts = tm_uibm.statuses(records)
+        print("IT statuses:", counts)
+        unknown = [s for s in counts if s not in tm_uibm.LIVE and s not in tm_uibm.DEAD]
+        if unknown:
+            sys.exit(f"IT statuses not classified as live or dead: {unknown}. Classify them in tools/tm_uibm.py.")
+        parts.append(tm_uibm.rows(records, a.today))
+        sources.append(f"UIBM (Italian national trade marks, filed since {tm_uibm.since(a.today)})")
+        dates.append(f"IT {tm_uibm.data_date(records)}")
     if not parts:
-        ap.error("give --uspto, --inpi and/or --inpi-eu")
+        ap.error("give --uspto, --inpi, --inpi-eu, --inpi-wo, --ipau and/or --uibm")
     info = T.build(itertools.chain(*parts), Path(a.out), ", ".join(dates), [f"{s}, live word marks" for s in sources])
     print(info)
 

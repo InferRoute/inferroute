@@ -27,16 +27,21 @@ SECTIONS = ["At a glance", "What you can do next", "Questions for a trademark pr
 # EU marks are cited as EU, EUIPO, EUTM or "EU trade mark"; the index holds their numbers without EUIPO's leading
 # zeros (EU 275933 is EUIPO's 000275933), so an EU number is compared without them. A bare register word needs five
 # digits or more ("EU 27" is not a citation); after a token that can only name the EU register any number is one, so
-# an invented "EUTM 4321" is refused rather than let through.
-CITE = re.compile(r"\b(?:(US|USPTO|FR|INPI|EU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})"
-                  r"|(EUIPO|EUTM|EU\s+trade\s?mark)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9}))\b", re.I)
+# an invented "EUTM 4321" is refused rather than let through. International registrations (WIPO Madrid) are cited
+# as WO or IR (five digits or more, so "WO 2020/123456", a patent, is not one) or as WIPO or "international
+# registration" (any number); their numbers are compared without leading zeros too.
+CITE = re.compile(r"\b(?:(US|USPTO|FR|INPI|EU|WO|IR|AU)[\s-]*(?:No\.?\s*|n°\s*)?(\d{5,9})"
+                  r"|(EUIPO|EUTM|EU\s+trade\s?mark|WIPO|international\s+registration|IP\s+Australia)[\s-]*(?:No\.?\s*|n°\s*)?(\d{1,9})"
+                  r"|(IT|UIBM)[\s-]*(?:No\.?\s*|n°\s*)?(\d{11,15}))\b",
+                  re.I)
 REGISTER = {"us": "US", "uspto": "US", "fr": "FR", "inpi": "FR", "eu": "EU", "euipo": "EU", "eutm": "EU",
-            "eutrademark": "EU"}
+            "eutrademark": "EU", "wo": "WO", "ir": "WO", "wipo": "WO", "internationalregistration": "WO", "au": "AU",
+            "ipaustralia": "AU", "it": "IT", "uibm": "IT"}
 
 
 def key_of(register: str, number: str) -> tuple:
-    return (register, number.lstrip("0") or "0") if register == "EU" else (register, number)
-STATUS = re.compile(r"\b(registered|pending|filed|expired|dead|abandoned|cancelled)\b", re.I)
+    return (register, number.lstrip("0") or "0") if register in ("EU", "WO") else (register, number)
+STATUS = re.compile(r"\b(international registration|registered \(per UIBM\)|pending \(per UIBM\)|registered|pending|filed|expired|dead|abandoned|cancelled)(?!\w)", re.I)
 CLASSES = re.compile(r"\bclass(?:es)?\s+((?:\d{1,2}(?:\s*(?:,|/|and|&)\s*)?)+)", re.I)
 # Words that say a class list is only part of the mark's: "overlaps your classes 7, 21", "in your class 9",
 # "classes incl. 21", "including class 11", "among them 9".
@@ -61,7 +66,8 @@ def check(report: str, hits: Dict[tuple, Dict[str, Any]]) -> Dict[str, Any]:
     cited: List[Dict[str, Any]] = []
     found = list(CITE.finditer(report))
     for i, m in enumerate(found):
-        key = key_of(REGISTER[re.sub(r"\s+", "", (m.group(1) or m.group(3)).lower())], m.group(2) or m.group(4))
+        key = key_of(REGISTER[re.sub(r"\s+", "", (m.group(1) or m.group(3) or m.group(5)).lower())],
+                     m.group(2) or m.group(4) or m.group(6))
         # What is written right after this number, up to the next cited number: "(US 1, US 2) … in class 21"
         # says class 21 of the marks named after them, not of US 2.
         end = found[i + 1].start() if i + 1 < len(found) else len(report)

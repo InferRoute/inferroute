@@ -68,3 +68,25 @@ def test_after_a_token_that_only_names_the_eu_register_a_short_number_is_still_c
     got = C.check("A — EUTM 000004321, registered. B — EUIPO 4321, pending. C — EU trade mark 4322. D — EUTM 000004320. "
                   "The EU 27.", hits)
     assert got["cited"] == 4 and got["not_returned"] == ["EU 4322", "EU 4320"] and got["status_wrong"] == ["EU 4321"]
+
+
+def test_an_international_registration_is_checked_and_a_patent_number_is_not_a_citation():
+    # With IRs searched, an invented "WO 1234567" must not pass, nor "registered" for an IR: INPI's copy cannot show
+    # protection in France or the EU. "WO 2020/123456" is a patent publication, not a mark.
+    hits = {("WO", "855123"): {"status": "international registration", "classes": ["9"]}}
+    got = C.check("FESTO — WO 0855123, international registration, class 9. FESTA — IR 855123, registered. "
+                  "FESTI — WIPO 1999999. FESTU — international registration No. 4321. See WO 2020/123456.", hits)
+    assert got["cited"] == 4
+    assert got["not_returned"] == ["WO 1999999", "WO 4321"] and got["status_wrong"] == ["WO 855123"]
+
+
+def test_an_australian_number_is_checked():
+    hits = {("AU", "1672793"): {"status": "registered", "classes": ["42"]}}
+    got = C.check("TRINITY OPS — AU 1672793, registered, class 42. TRINITY — IP Australia 1672794. The AU market.", hits)
+    assert got["cited"] == 2 and got["not_returned"] == ["AU 1672794"] and not got["status_wrong"]
+
+
+def test_an_italian_number_is_checked_and_a_short_it_number_is_not_a_citation():
+    hits = {("IT", "302024000030610"): {"status": "registered (per UIBM)", "classes": []}}
+    got = C.check("MASIFRAN — IT 302024000030610, registered (per UIBM). MASIFRA — UIBM 302024000030611. IT 2024 budget.", hits)
+    assert got["cited"] == 2 and got["not_returned"] == ["IT 302024000030611"] and not got["status_wrong"]

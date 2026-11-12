@@ -273,17 +273,70 @@ HELD_AS = {
     "EUIPO": ("EU trade marks (live word marks, from INPI's open-data copy of the EUIPO register; "
               "some EU marks are missing from that copy)",
               ["EU marks with no words in them (figurative only)", "EU marks missing from INPI's copy"]),
+    # INPI's copy of the Madrid register gives no status: an IR is held when it names France or the EU and has not
+    # expired, so a designation refused there still shows, and IRs before INPI's copy starts (1996) may be missing.
+    "WIPO": ("international registrations designating France or the EU (WIPO Madrid; unexpired word marks, from "
+             "INPI's open-data copy, which gives no status in France or the EU)",
+             ["international registrations with no words in them (figurative only)",
+              "international registrations missing from INPI's copy (mostly those from before 1996)"]),
 }
+# Registers named only when an index holds them: a French founder is not told "the Australian register was not
+# searched" on every result, because no French or EU filing can be opposed on an Australian mark.
+# Each is (key in "sources", register code in the index, label). Its marks are searched only when asked for
+# (search(also=["AU"])), so they never take a place in the default results.
+OPTIONAL_REGISTERS = [
+    ("IP Australia", "AU", "the Australian register (IP Australia), live word marks, including international "
+                           "registrations designating Australia"),
+    ("UIBM", "IT", "the Italian register (UIBM): Italian national marks recorded as registered or pending, filed "
+                   "since {since}, by their words"),
+]
+# What an optional register's copy lacks, named as not searched when that register is searched.
+OPTIONAL_LACKS = {
+    "IT": ["Italian marks filed before {since} (UIBM's data does not show renewals)",
+           "Italian marks whose words UIBM does not give separately from a picture",
+           "international registrations designating Italy"],
+}
+# What a register's licence requires us to say wherever its marks were searched (wording approved by pi-attested,
+# 11 Nov: credit, licence link, what we changed).
+ATTRIBUTION = {
+    "AU": "Australian trade marks: IP Australia, IP RAPID (data.gov.au), licensed CC BY 4.0 "
+          "(creativecommons.org/licenses/by/4.0); filtered to live word marks.",
+    "IT": "Italian trade marks: UIBM (Ufficio Italiano Brevetti e Marchi) database; filtered to marks recorded as "
+          "registered or pending, filed since {since}, with words.",
+}
+# Said beside the results wherever a register's data cannot show something a reader would assume (pi-attested, 11 Nov).
+CAUTION = {
+    "IT": "UIBM's data does not show later cancellations or surrenders, so a mark shown as registered may no longer "
+          "be in force.",
+}
+
+
+def _since(sources: str, key: str) -> str:
+    """The filing-date cutoff a register's source entry states ("…, filed since 2016-05-12"), or "unknown"."""
+    for s in (sources or "").split("; "):
+        if key in s:
+            m = re.search(r"filed since (\d{4}-\d{2}-\d{2})", s)
+            return m.group(1) if m else "unknown"
+    return "unknown"
+
+
+def _fill(text: str, sources: str, key: str) -> str:
+    return text.replace("{since}", _since(sources, key)) if "{since}" in text else text
 ALWAYS_UNCOVERED = ["registers of other countries", "company and trading names", "domain names",
                     "unregistered use of a name", "marks made only of a logo or picture"]
 
 
-def coverage(sources: str) -> Dict[str, List[str]]:
-    """{"searched": [...], "not_searched": [...]} for an index whose meta "sources" is `sources`."""
+def coverage(sources: str, also: Sequence[str] = ()) -> Dict[str, List[str]]:
+    """{"searched": [...], "not_searched": [...]} for an index whose meta "sources" is `sources`, searched with the
+    optional registers `also` (codes, e.g. ["AU"])."""
     held = [key for key, _ in REGISTERS if key in (sources or "")]
     searched = [HELD_AS[key][0] if key in HELD_AS else label for key, label in REGISTERS if key in held]
-    missing = [label for key, label in REGISTERS if key not in held]
     lacks = [x for key in held if key in HELD_AS for x in HELD_AS[key][1]]
+    optional = [code for key, code, _ in OPTIONAL_REGISTERS if key in (sources or "") and code in also]
+    searched += [_fill(label, sources, key) for key, code, label in OPTIONAL_REGISTERS if code in optional]
+    keys = {code: key for key, code, _ in OPTIONAL_REGISTERS}
+    lacks += [_fill(x, sources, keys[code]) for code in optional for x in OPTIONAL_LACKS.get(code, [])]
+    missing = [label for key, label in REGISTERS if key not in held]
     return {"searched": searched, "not_searched": missing + lacks + ALWAYS_UNCOVERED}
 
 
@@ -303,6 +356,7 @@ def build(rows: Iterable[Tuple[str, str, str, str, Sequence[str], str]], out: Pa
         CREATE TABLE post (key TEXT PRIMARY KEY, ids BLOB) WITHOUT ROWID;
     """)
     postings: Dict[str, array.array] = {}
+    spans: Dict[str, List[int]] = {}       # register -> [first id, last id, count]
     n = 0
     batch = []
     for register, number, text, status, classes, filed in rows:
@@ -311,6 +365,8 @@ def build(rows: Iterable[Tuple[str, str, str, str, Sequence[str], str]], out: Pa
         if not flat:
             continue
         n += 1
+        span = spans.setdefault(register, [n, n, 0])
+        span[1], span[2] = n, span[2] + 1
         batch.append((n, register, number, text, status, ",".join(sorted({c for c in classes if c})), filed))
         if len(batch) >= 50_000:
             db.executemany("INSERT INTO marks VALUES (?,?,?,?,?,?,?)", batch)
@@ -326,7 +382,9 @@ def build(rows: Iterable[Tuple[str, str, str, str, Sequence[str], str]], out: Pa
     db.executemany("INSERT INTO post VALUES (?,?)", ((k, v.tobytes()) for k, v in postings.items()))
     info = {"schema": SCHEMA, "marks": str(n), "data_date": data_date, "sources": "; ".join(sources),
             "built": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "byteorder": __import__("sys").byteorder}
+            "byteorder": __import__("sys").byteorder,
+            # where each register's marks sit, so an optional register is left out before any candidate cap
+            "spans": ";".join(f"{r}:{a}-{b}:{c}" for r, (a, b, c) in sorted(spans.items()))}
     db.executemany("INSERT INTO meta VALUES (?,?)", info.items())
     db.commit()
     db.execute("VACUUM")
@@ -366,8 +424,36 @@ class Index:
                 a.byteswap()
         return a
 
-    def search(self, name: str, classes: Sequence[str] = (), limit: int = 50) -> Dict[str, Any]:
+    def _left_out(self, also: Sequence[str]) -> Tuple[set, List[Tuple[int, int]]]:
+        """The optional registers not asked for, and the id ranges that hold only their marks (an index whose
+        optional marks are not contiguous is filtered on each row instead)."""
+        codes = {code for _, code, _ in OPTIONAL_REGISTERS if code not in also}
+        ranges = []
+        for part in (self.meta.get("spans") or "").split(";"):
+            reg, _, rest = part.partition(":")
+            if reg in codes and rest:
+                ids, _, count = rest.partition(":")
+                first, _, last = ids.partition("-")
+                if int(last) - int(first) + 1 == int(count):
+                    ranges.append((int(first), int(last)))
+        return codes, ranges
+
+    def _count(self, codes: set) -> int:
+        """How many marks the registers `codes` hold, from the build's spans (0 for an index without them)."""
+        n = 0
+        for part in (self.meta.get("spans") or "").split(";"):
+            reg, _, rest = part.partition(":")
+            if reg in codes and rest.count(":") == 1:
+                n += int(rest.rsplit(":", 1)[1])
+        return n
+
+    def search(self, name: str, classes: Sequence[str] = (), limit: int = 50,
+               also: Sequence[str] = ()) -> Dict[str, Any]:
+        """`also`: optional registers to search too (codes of OPTIONAL_REGISTERS, e.g. ["AU"]); without it their
+        marks are not candidates at all."""
         flat, key, ws = compact(name), sound(name), [w for w in words(name) if len(w) >= 2]
+        left_codes, left_ranges = self._left_out(also)
+        outside = (lambda i: not any(a <= i <= b for a, b in left_ranges)) if left_ranges else None
         if not flat:
             raise ValueError("type a name with at least one letter or digit")
         votes: Counter = Counter()
@@ -401,20 +487,21 @@ class Index:
         # The floor grows with the name's length, so a short mark inside a long name never reached it (CIEL in
         # "Ingeciel"); a mark found word by word passes on that vote instead.
         need = 0.3 * sum(weights) if weights else 1.0
-        cand = [i for i, v in votes.items() if v >= need]
+        cand = [i for i, v in votes.items() if v >= need and (outside is None or outside(i))]
         cand.sort(key=lambda i: (-votes[i], i))
         cand = self._shortlist(cand[:self._cap(MAX_CANDIDATES * POOL)], votes, sum(weights), len(grams(key)))
         # Marks found word by word are scored on their own quota, best first, so a long name's many fragment
         # candidates cannot crowd them out (ERAM for "Etam on the beach" was one of 12,000 at the same vote).
         near = self._word_neighbours(flat, ws)
         seen = set(cand)
-        cand += [i for i in sorted(near, key=lambda i: (-near[i], i)) if i not in seen][:self._cap(NEIGHBOURS)]
+        cand += [i for i in sorted(near, key=lambda i: (-near[i], i))
+                 if i not in seen and (outside is None or outside(i))][:self._cap(NEIGHBOURS)]
         wanted = {str(int(c)) for c in classes if str(c).strip().isdigit()}
         rows = []
         for chunk in range(0, len(cand), 900):
             part = cand[chunk:chunk + 900]
             q = f"SELECT id, register, number, text, status, classes, filed FROM marks WHERE id IN ({','.join('?' * len(part))})"
-            rows += self.db.execute(q, part).fetchall()
+            rows += [r for r in self.db.execute(q, part).fetchall() if r[1] not in left_codes]
         rarity = self._rarity({w for r in rows for w in words(r[3]) if len(w) >= 2} | set(ws))
         hits = []
         for row in rows:
@@ -431,8 +518,14 @@ class Index:
         # rest, since each filing is a registered mark of its own (53 filings of 6 names for an invented word).
         filings = sum(1 + len(h.get("also", [])) for h in hits)
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
-                "sources": self.meta.get("sources", ""), "marks_searched": int(self.meta.get("marks", 0)),
-                **coverage(self.meta.get("sources", "")),
+                "sources": "; ".join(s for s in (self.meta.get("sources") or "").split("; ")
+                                     if not any(k in s for k, c, _ in OPTIONAL_REGISTERS if c in left_codes)),
+                "marks_searched": int(self.meta.get("marks", 0)) - self._count(left_codes),
+                **coverage(self.meta.get("sources", ""), [c for c in also if c not in left_codes]),
+                "also": sorted(c for c in also if c not in left_codes),
+                "attribution": [_fill(ATTRIBUTION[c], self.meta.get("sources", ""), k) for k, c, _ in OPTIONAL_REGISTERS
+                                if c in also and c not in left_codes and c in ATTRIBUTION],
+                "cautions": [CAUTION[c] for _, c, _ in OPTIONAL_REGISTERS if c in also and c not in left_codes and c in CAUTION],
                 "hits": hits[:limit], "more": max(0, len(hits) - limit), "filings": filings}
 
     def _keys(self, keys: Iterable[str]) -> List[Tuple[str, array.array]]:
@@ -658,12 +751,13 @@ def _also_line(h: Dict[str, Any], most: int = 6) -> str:
 
 def report_lines(result: Dict[str, Any]) -> List[str]:
     """The plain-text result: what was searched first, then each mark and why it resembles the name."""
-    cov = coverage(result.get("sources", ""))
+    cov = coverage(result.get("sources", ""), result.get("also") or [])
     out = [f"Registered marks close to “{result['name']}”",
            f"Searched: {'; '.join(cov['searched'])} ({result['marks_searched']:,} live word marks), data as of "
            f"{result['data_date']}. Searched on this computer; the name was not sent to any register, search engine or website.",
            f"Not searched: {'; '.join(cov['not_searched'])}.",
-           "This is a list of similar marks, not an opinion on whether you can use or register the name."]
+           "This is a list of similar marks, not an opinion on whether you can use or register the name.",
+           *(result.get("cautions") or []), *(result.get("attribution") or [])]
     if result["classes"]:
         out.append(f"Classes you asked about: {', '.join(result['classes'])}.")
     if not result["hits"]:
@@ -788,7 +882,8 @@ def install_route(app, index_path: Path, log_dir: Optional[Path] = None, session
             raise ValueError("give one name of 1 to 120 characters")
         classes = [str(c) for c in (body.get("classes") or [])][:45]
         limit = max(1, min(int(body.get("limit") or SHOWN_HITS), 100))
-        return limit, state["index"].search(name, classes, limit=max(limit, LOGGED_HITS))
+        also = [str(c).upper() for c in (body.get("also") or []) if str(c).upper() in {c for _, c, _ in OPTIONAL_REGISTERS}]
+        return limit, state["index"].search(name, classes, limit=max(limit, LOGGED_HITS), also=also)
 
     async def tm_search(request):
         raw = await request.body()

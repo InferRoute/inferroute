@@ -357,3 +357,82 @@ def test_the_candidate_caps_grow_with_the_index_and_only_above_us_fr(index):
     assert index._cap(T.NEIGHBOURS) == T.NEIGHBOURS
     index.meta["marks"] = "7467187"
     assert index._cap(T.MAX_CANDIDATES) == 15607 and index._cap(T.MAX_CANDIDATES * T.POOL) == 124860
+
+
+def test_irs_held_from_inpis_copy_are_named_as_that_copy_with_what_it_lacks():
+    # INPI's copy of the Madrid register gives no status, so the searched line must say so, and the IRs it cannot
+    # hold are named as not searched instead of the WIPO line disappearing.
+    got = T.coverage("USPTO; INPI; EUIPO (EU …); WIPO (international registrations designating France or the EU, "
+                     "as republished in INPI open data)")
+    assert not any("WIPO Madrid" in x and "INPI" not in x for x in got["searched"] + got["not_searched"])
+    assert any("INPI's open-data copy" in x and "no status" in x for x in got["searched"])
+    assert any("missing from INPI's copy" in x for x in got["not_searched"])
+    assert any("figurative only" in x and "international" in x for x in got["not_searched"])
+
+
+def test_the_australian_register_is_named_only_when_held():
+    # No French or EU filing can be opposed on an Australian mark, so an index without it does not list it as not
+    # searched; one with it names it as searched.
+    without = T.coverage("USPTO; INPI; EUIPO (EU …)")
+    assert not any("Australia" in x for x in without["searched"] + without["not_searched"])
+    held = T.coverage("USPTO; INPI; IP Australia (Australian trade marks, …)", ["AU"])
+    assert not any("Australia" in x for x in T.coverage("IP Australia (…)")["searched"])   # held, not asked for
+    assert any(x.startswith("the Australian register (IP Australia)") for x in held["searched"])
+
+
+def test_an_optional_register_is_searched_only_when_asked_for(tmp_path):
+    # Australian marks cannot be opposed to a French or EU filing: without also=["AU"] they are not candidates, not
+    # counted and not named; with it they are found and the Australian register is named as searched.
+    out = tmp_path / "au.sqlite"
+    T.build([("FR", "1", "Festina", "registered", ["14"], "2001-01-01"),
+             ("AU", "9", "Festino", "registered", ["14"], "2010-01-01"),
+             ("AU", "8", "Festina", "registered", ["14"], "2010-01-01")], out, "x",
+            ["INPI (France)", "IP Australia (Australian trade marks)"])
+    ix = T.Index(out)
+    plain = ix.search("Festina", ["14"])
+    assert {h["register"] for h in plain["hits"]} | {a["register"] for h in plain["hits"] for a in h.get("also", [])} == {"FR"}
+    assert plain["marks_searched"] == 1 and not any("Australia" in x for x in plain["searched"])
+    au = ix.search("Festina", ["14"], also=["AU"])
+    regs = {h["register"] for h in au["hits"]} | {a["register"] for h in au["hits"] for a in h.get("also", [])}
+    assert regs == {"FR", "AU"} and au["marks_searched"] == 3
+    assert any(x.startswith("the Australian register") for x in au["searched"])
+
+
+def test_an_optional_register_left_out_is_not_named_among_the_sources(tmp_path):
+    out = tmp_path / "au.sqlite"
+    T.build([("FR", "1", "Festina", "registered", ["14"], "")], out, "x", ["INPI (France)", "IP Australia (AU)"])
+    ix = T.Index(out)
+    assert "Australia" not in ix.search("Festina")["sources"]
+    assert "IP Australia" in ix.search("Festina", also=["AU"])["sources"]
+
+
+def test_australian_marks_carry_their_licence_credit_wherever_searched(tmp_path):
+    out = tmp_path / "au.sqlite"
+    T.build([("AU", "9", "Festina", "registered", ["14"], "")], out, "x", ["IP Australia (AU)"])
+    ix = T.Index(out)
+    assert not ix.search("Festina")["attribution"]
+    r = ix.search("Festina", also=["AU"])
+    assert r["attribution"] == [T.ATTRIBUTION["AU"]] and "CC BY 4.0" in r["attribution"][0]
+    assert T.ATTRIBUTION["AU"] in "\n".join(T.report_lines(r))
+
+
+def test_italian_marks_are_opt_in_and_name_what_uibms_data_lacks():
+    off = T.coverage("INPI; UIBM (Italian national trade marks)")
+    assert not any("Ital" in x for x in off["searched"] + off["not_searched"])
+    on = T.coverage("INPI; UIBM (Italian national trade marks, filed since 2016-05-12)", ["IT"])
+    assert on["searched"][-1] == ("the Italian register (UIBM): Italian national marks recorded as registered or "
+                                  "pending, filed since 2016-05-12, by their words")
+    assert "international registrations designating Italy" in on["not_searched"]
+    assert "Italian marks filed before 2016-05-12 (UIBM's data does not show renewals)" in on["not_searched"]
+    assert not any("live" in x for x in on["searched"] if "UIBM" in x)
+
+
+def test_italian_results_carry_the_caution_and_the_dated_credit(tmp_path):
+    out = tmp_path / "it.sqlite"
+    T.build([("IT", "302024000030610", "Masifran", "registered (per UIBM)", [], "2024-01-31")], out, "x",
+            ["UIBM (Italian national trade marks, filed since 2016-05-12)"])
+    r = T.Index(out).search("Masifran", also=["IT"])
+    assert r["hits"][0]["status"] == "registered (per UIBM)"
+    assert r["cautions"] == [T.CAUTION["IT"]] and "filed since 2016-05-12" in r["attribution"][0]
+    lines = "\n".join(T.report_lines(r))
+    assert T.CAUTION["IT"] in lines and r["attribution"][0] in lines

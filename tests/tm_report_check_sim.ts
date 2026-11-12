@@ -66,5 +66,15 @@ for (const cite of ["EUTM 000004321", "EUTM 4321", "EU trade mark 4321"]) {
   if (!r5 || !r5.reason.includes("EU 4321: no search in this session returned")) fail(`an invented ${cite} was not refused`);
 }
 
+// 6. International registrations: WO, IR, WIPO or "international registration", leading zeros dropped; a patent's
+//    "WO 2020/123456" is not a citation.
+returned.set("WO 855123", { status: "international registration", classes: ["9"] });
+if (await call("write", { path: "name-check.md", content: "- FESTO (WO 0855123, international registration, class 9)\n- FESTO (IR 855123). See WO 2020/123456.\n" }))
+  fail("a faithful IR citation was refused");
+const wo = await call("write", { path: "name-check.md", content: "- FESTO (WIPO 855123, registered)\n- FESTI (international registration No. 1999999)\n" });
+if (!wo) fail("a wrong IR status and an invented IR number were written");
+else for (const want of ["WO 855123: the search gives its status as international registration", "WO 1999999: no search in this session returned"])
+  if (!wo.reason.includes(want)) fail(`refusal does not name: ${want}`);
+
 if (bad) process.exit(1);
 console.log("report check: a faithful report is written; an unreturned number, a wrong status or class is refused, quietly");

@@ -413,7 +413,7 @@ def test_australian_marks_carry_their_licence_credit_wherever_searched(tmp_path)
     assert not ix.search("Festina")["attribution"]
     r = ix.search("Festina", also=["AU"])
     assert r["attribution"] == [T.ATTRIBUTION["AU"]] and "CC BY 4.0" in r["attribution"][0]
-    assert r["cautions"] == [T.CAUTION["AU"]] and not ix.search("Festina")["cautions"]
+    assert r["cautions"] == T.CAUTION["AU"] and not ix.search("Festina")["cautions"]
     assert T.ATTRIBUTION["AU"] in "\n".join(T.report_lines(r))
 
 
@@ -434,9 +434,9 @@ def test_italian_results_carry_the_caution_and_the_dated_credit(tmp_path):
             ["UIBM (Italian national trade marks, filed since 2016-05-12)"])
     r = T.Index(out).search("Masifran", also=["IT"])
     assert r["hits"][0]["status"] == "registered (per UIBM)"
-    assert r["cautions"] == [T.CAUTION["IT"]] and "filed since 2016-05-12" in r["attribution"][0]
+    assert r["cautions"] == T.CAUTION["IT"] and "filed since 2016-05-12" in r["attribution"][0]
     lines = "\n".join(T.report_lines(r))
-    assert T.CAUTION["IT"] in lines and r["attribution"][0] in lines
+    assert all(x in lines for x in T.CAUTION["IT"]) and r["attribution"][0] in lines
 
 
 def test_results_with_optional_marks_left_out_are_exactly_those_of_an_index_without_them(tmp_path):
@@ -463,5 +463,5 @@ def test_a_logged_search_keeps_its_optional_registers_caution_and_credit(tmp_pat
     T.log_search(tmp_path / "log", T.Index(out).search("Festina", also=["AU"]))
     T.log_search(tmp_path / "log", T.Index(out).search("Festina"))
     with_au, plain = T.logged_searches(tmp_path / "log")[-2:]
-    assert with_au["also"] == ["AU"] and with_au["cautions"] == [T.CAUTION["AU"]] and with_au["attribution"]
+    assert with_au["also"] == ["AU"] and with_au["cautions"] == T.CAUTION["AU"] and with_au["attribution"]
     assert not {"also", "cautions", "attribution"} & set(plain)

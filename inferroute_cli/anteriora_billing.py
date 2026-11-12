@@ -47,6 +47,7 @@ ISSUED_HOURS = 6                # the service refunds a permit left unsettled th
 TIMEOUT = 15.0
 BALANCE_TTL = 300.0             # seconds an answer about billing is kept: "once per launch, briefly"
 BALANCE_TIMEOUT = 2.0           # a slow answer must not hold a launch up: no answer in time = the last known answer
+BALANCE_FIRST_TIMEOUT = 5.0     # ... except at the very first start, when there is no last known answer
 GONE = (404, 410)               # settle answers meaning "this permit is not yours, or no longer exists"
 
 
@@ -73,10 +74,10 @@ DEVICE_LIMIT_WORDS = ("This account is already used on its maximum number of com
 # network, 5xx), the permit is kept, marked used up, and the next start settles it first. The next start then takes a
 # fresh unit through the ordinary permit call, and says so first (one_more_unit_words).
 #
-# A DEAD PERMIT (permit_invalid, permit_expired, permit_lane, permit_wrong_product): the service will not honour it
-# again, so it is dropped WITHOUT any settle (never "failed", which would give back a unit the service no longer
-# holds against it), and the next start takes a new unit, saying so. permit_trial_paused and out_of_credits keep the
-# permit: a new unit would not help.
+# A DEAD PERMIT (permit_invalid, permit_expired): the service will not honour it again, so it is dropped WITHOUT any
+# settle (never "failed", which would give back a unit the service no longer holds against it), and the next start
+# takes a new unit, saying so. permit_trial_paused, permit_lane, permit_wrong_product and out_of_credits keep the
+# permit: a new unit would not help (the trial, the model, the key or the account is the cause).
 #
 # Only the permit that was actually SENT with the refused request is acted on: the relay records the refusal against
 # the transport's permit (billing_refusal.note_permit_refusal), the gate's verifier writes the permit id with its code.
@@ -85,7 +86,10 @@ USED_UP_KEPT_WORDS = ("{whose} searches and document reads for its current unit 
 ONE_MORE_UNIT_WORDS = ("{whose} searches and document reads for its current unit are used up; continuing uses one "
                        "more unit.")
 DEAD_UNIT_WORDS = "{whose} current unit can no longer be used; continuing uses one more unit."
-DEAD_CODES = frozenset({"permit_invalid", "permit_expired", "permit_lane", "permit_wrong_product"})
+EXPIRED_UNIT_WORDS = "{whose} current unit has expired; continuing uses one more unit."
+# Dead: the site will not honour the permit again. permit_lane (the model is not on Anteriora's lane list: the permit
+# is fine) and permit_wrong_product (a key problem) are NOT: like permit_trial_paused, the permit is kept.
+DEAD_CODES = frozenset({"permit_invalid", "permit_expired"})
 
 
 def _whose(rec: Dict[str, Any]) -> str:
@@ -93,7 +97,7 @@ def _whose(rec: Dict[str, Any]) -> str:
 
 
 def one_more_unit_words(rec: Dict[str, Any]) -> str:
-    words = DEAD_UNIT_WORDS if rec.get("renewal") == "dead" else ONE_MORE_UNIT_WORDS
+    words = {"dead": DEAD_UNIT_WORDS, "expired": EXPIRED_UNIT_WORDS}.get(rec.get("renewal"), ONE_MORE_UNIT_WORDS)
     return words.format(whose=_whose(rec))
 
 
@@ -150,7 +154,8 @@ def enabled() -> bool:
         _answer = (now, disk[1])
         return disk[1]
     try:
-        on = _balance_within(BALANCE_TIMEOUT).get("billing") == "units"
+        # No answer ever kept on this computer (its first start): wait a little longer, once.
+        on = _balance_within(BALANCE_TIMEOUT if disk is not None else BALANCE_FIRST_TIMEOUT).get("billing") == "units"
     except BillingError:
         on = disk[1] if disk is not None else False      # the last known answer; never a fresh "on" from silence
         _answer = (now, on)
@@ -167,15 +172,23 @@ def _balance_within(seconds: float) -> Dict[str, Any]:
     box: Dict[str, Any] = {}
 
     def ask() -> None:
+        global _answer
         try:
-            box["doc"] = _get("/api/anteriora/balance")
+            box["doc"] = doc = _get("/api/anteriora/balance")
+            if t_abandoned.is_set():
+                # Answered after the start went on without it: kept for the next ask, here and in the next run.
+                on = isinstance(doc, dict) and doc.get("billing") == "units"
+                _answer = (time.monotonic(), on)
+                _remember(on)
         except BillingError as e:
             box["err"] = e
         except Exception as e:                       # noqa: BLE001
             box["err"] = BillingError(str(e))
+    t_abandoned = threading.Event()
     t = threading.Thread(target=ask, daemon=True, name="anteriora-balance")
     t.start()
     t.join(seconds)
+    t_abandoned.set()                                # from here a late answer is kept by the thread itself
     if "doc" in box:
         return box["doc"]
     raise box.get("err") or BillingError("the account service did not answer in time")
@@ -218,22 +231,9 @@ def _get(path: str) -> Dict[str, Any]:
     return got if isinstance(got, dict) else {}
 
 
-DEFAULT_SITE = "https://inferroute.ai"
-
-
 def _site() -> str:
-    """IR_SITE_BASE when it is https on inferroute.ai or a subdomain of it (the key goes there); otherwise ignored."""
-    from urllib.parse import urlsplit
-    v = os.environ.get("IR_SITE_BASE", "")
-    try:
-        u = urlsplit(v.strip())
-        host = (u.hostname or "").lower()
-        ok = (u.scheme == "https" and not u.username and not u.password and u.port is None
-              and (host == "inferroute.ai" or host.endswith(".inferroute.ai")) and u.path in ("", "/")
-              and not u.query and not u.fragment)
-    except ValueError:
-        ok = False
-    return f"https://{host}" if ok else DEFAULT_SITE
+    from .site_base import site_base
+    return site_base()
 
 
 def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -324,8 +324,16 @@ def current_permit(rec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         at = dt.datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00"))
     except (KeyError, ValueError):
         return None
-    limit = dt.timedelta(hours=ISSUED_HOURS) if p.get("state") == "issued" else dt.timedelta(days=PERMIT_DAYS)
-    return p if _now() - at < limit else None
+    return p if _now() - at < lifetime(rec) else None
+
+
+def lifetime(rec: Dict[str, Any]) -> dt.timedelta:
+    """How long the SITE honours this record's permit for new sessions: a reading's (a cluster run is a reading)
+    6 hours, a matter's 30 days. An issued permit is refunded by the site after ISSUED_HOURS, so never past that."""
+    p = rec.get("permit") or {}
+    if rec.get("kind") == "reading" or p.get("state") == "issued":
+        return dt.timedelta(hours=ISSUED_HOURS)
+    return dt.timedelta(days=PERMIT_DAYS)
 
 
 def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, Any]]:
@@ -342,9 +350,16 @@ def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, A
     held = current_permit(rec)
     if held and held.get("account", account) == account:
         return held
-    if rec.get("renewal") in ("used_up", "dead"):
-        print(f"  {one_more_unit_words(rec)}", flush=True)     # the launcher's output; the home page shows it too
+    old = rec.get("permit")
+    if (held is None and isinstance(old, dict) and old.get("state") in ("issued", "delivered")
+            and old.get("account", account) == account and not rec.get("renewal")):
+        # Past the site's lifetime for it (lifetime()): renewed HERE, before the session starts, and said so.
+        rec["renewal"] = "expired"
     got = _post("/api/anteriora/permit", _request_for(rec, session_id))
+    # "Continuing uses one more unit" only when it did: the site answers reused:true when it handed back a permit
+    # it already held for this matter or reading, and then no unit was taken.
+    if rec.get("renewal") in ("used_up", "dead", "expired") and got.get("reused") is not True:
+        print(f"  {one_more_unit_words(rec)}", flush=True)     # the launcher's output; the home page shows it too
     rec.pop("renewal", None)
     permit = {"id": str(got["permit"]), "unit": unit_for(rec), "state": "issued",
               "at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "first_session": session_id, "account": account}

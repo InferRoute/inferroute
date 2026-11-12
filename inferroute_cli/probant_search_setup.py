@@ -37,7 +37,9 @@ from . import pi_attested
 # sends the key, which checks it again for itself.
 from ._searchgate.ir_search_gate import GATE_HOSTS, gate_base
 
-SITE = os.environ.get("IR_SITE_BASE", "https://inferroute.ai").rstrip("/")
+# One rule with anteriora_billing (site_base): IR_SITE_BASE only when https on inferroute.ai or a subdomain.
+from .site_base import site_base as _site_base  # noqa: E402
+SITE = _site_base()
 MARK = "ir probant setup-search"
 MAX_BYTES = 1024 * 1024
 TIMEOUT = 8.0

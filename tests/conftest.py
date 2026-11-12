@@ -6,7 +6,11 @@ def _no_test_reaches_the_real_site(monkeypatch):
     """Probant keeps its search configuration current whenever it starts or a matter opens, by fetching three
     small files from the site. A test must never do that by accident: point it at a port nothing listens on
     (a test of the setup itself serves its own files and says so)."""
-    monkeypatch.setenv("IR_SITE_BASE", "http://127.0.0.1:9")
+    # The program honours IR_SITE_BASE only on https InferRoute hosts (site_base); a test points it at a dead port
+    # through the test-only override, in the environment, so a subprocess a test spawns is fenced too.
+    monkeypatch.setenv("IR_TESTING", "1")
+    monkeypatch.setenv("IR_TEST_SITE_BASE", "http://127.0.0.1:9")
+    monkeypatch.delenv("IR_SITE_BASE", raising=False)
     from inferroute_cli import probant_search_setup
     monkeypatch.setattr(probant_search_setup, "SITE", "http://127.0.0.1:9", raising=False)
 
@@ -22,12 +26,9 @@ def _no_test_writes_the_real_credentials(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _no_test_reaches_the_account_service(monkeypatch, tmp_path):
-    """anteriora_billing ignores an IR_SITE_BASE that is not https on inferroute.ai, so the port above does not reach
-    it: its default is pointed at the same dead port. And its remembered billing answer lives under each test's own
-    directory, never in the developer's app home."""
+def _no_test_writes_the_real_billing_answer(monkeypatch, tmp_path):
+    """anteriora_billing keeps its billing answer under the app home: each test keeps its own."""
     from inferroute_cli import anteriora_billing
-    monkeypatch.setattr(anteriora_billing, "DEFAULT_SITE", "http://127.0.0.1:9")
     monkeypatch.setattr(anteriora_billing, "_cache_path", lambda: tmp_path / "_billing" / "anteriora-billing.json")
 
 

@@ -143,12 +143,12 @@ def test_3_a_dead_permit_is_dropped_with_no_settle_and_the_next_start_takes_a_ne
     assert B.end_session(rec, "s1", False) == "dropped"
     assert site == [] and "permit" not in rec and rec["renewal"] == "dead"
     p = B.before_session(rec, "s2")
-    assert site == [("said", "This matter's current unit can no longer be used; continuing uses one more unit."),
-                    ("permit",)]
+    assert site == [("permit",),
+                    ("said", "This matter's current unit can no longer be used; continuing uses one more unit.")]
     assert p["id"] != P1
 
 
-@pytest.mark.parametrize("code", ["permit_trial_paused", "out_of_credits"])
+@pytest.mark.parametrize("code", ["permit_trial_paused", "out_of_credits", "permit_lane", "permit_wrong_product"])
 def test_3_a_paused_trial_or_no_credit_keeps_the_permit(site, code):
     BR.note_permit_refusal(P1, refused(code))
     rec = held(P1)
@@ -438,7 +438,7 @@ def test_11_the_key_never_follows_a_redirect(monkeypatch):
     srv = HTTPServer(("127.0.0.1", 0), _Redirect)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        monkeypatch.setattr(B, "DEFAULT_SITE", f"http://127.0.0.1:{srv.server_port}")
+        monkeypatch.setenv("IR_TEST_SITE_BASE", f"http://127.0.0.1:{srv.server_port}")
         _Redirect.hits.clear()
         with pytest.raises(B.BillingError):
             B._get("/api/anteriora/balance")
@@ -459,5 +459,6 @@ def test_11_the_key_never_follows_a_redirect(monkeypatch):
     ("https://user@inferroute.ai", None),
 ])
 def test_11_only_an_https_inferroute_site_base_is_honoured(monkeypatch, base, used):
+    monkeypatch.delenv("IR_TESTING", raising=False)
     monkeypatch.setenv("IR_SITE_BASE", base)
-    assert B._site() == (used or B.DEFAULT_SITE)
+    assert B._site() == (used or "https://inferroute.ai")

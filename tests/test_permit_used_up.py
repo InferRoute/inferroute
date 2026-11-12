@@ -105,9 +105,9 @@ def test_the_next_start_says_one_more_unit_and_takes_a_fresh_permit(site):
     B.end_session(rec, "s1", True)
     events.clear()
     p = B.before_session(rec, "s2")
-    assert events == [("said", "This matter's searches and document reads for its current unit are used up; "
-                               "continuing uses one more unit."),
-                      ("permit",)]
+    assert events == [("permit",),
+                      ("said", "This matter's searches and document reads for its current unit are used up; "
+                               "continuing uses one more unit.")]
     assert p["id"] != PERMIT and rec["permit"]["id"] == p["id"] and "renewal" not in rec
     events.clear()
     assert B.before_session(rec, "s3")["id"] == p["id"] and events == []   # said once, not at every start
@@ -131,7 +131,8 @@ def test_a_settle_that_fails_keeps_the_permit_and_the_next_start_settles_it_firs
         state["settle"] = "ok"
         events.clear()
         p = B.before_session(rec, "s3")
-        assert [x[:2] for x in events] == [("settle", "delivered"), ("said", B.one_more_unit_words(rec)), ("permit",)]
+        assert [x[:2] for x in events] == [("settle", "delivered"), ("permit",),
+                                           ("said", B.ONE_MORE_UNIT_WORDS.format(whose="This matter's"))]
         assert p["id"] != PERMIT
 
 
@@ -234,7 +235,7 @@ def test_a_matter_whose_permit_ran_out_is_renewed_at_the_next_open(site, monkeyp
     events.clear()
     monkeypatch.setattr("inferroute_cli.confidential.launch", lambda *a, **k: 0)
     assert S.main(["open", "Acme/gadget"]) == 0
-    assert [e[0] for e in events][:2] == ["said", "permit"]
+    assert [e[0] for e in events][:2] == ["permit", "said"]
     rec = S.load_record("Acme", "gadget")
     assert rec["permit"]["id"].endswith("3") and "renewal" not in rec
 

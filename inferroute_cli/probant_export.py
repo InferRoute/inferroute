@@ -340,8 +340,11 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
     `statement`: the search's signed statement. Whether a main ranking ran is read from the scope the REQUEST was
     made with (its `offices`), never from the result (the engine's result schema has no top-level `offices`).
     `index_snapshot`: the answering index's identifier; the dating sentence is about asia-2611 only."""
-    if not isinstance(result, dict) or result.get("asia") is None:
+    if not isinstance(result, dict):
         return ""
+    if result.get("asia") is None:
+        # a root with side lists and no Asian layer: those lists only; an older root: nothing at all
+        return _side_html(result, statement, False)
     a = result["asia"]
     out = []
     stmt = statement if isinstance(statement, dict) else {}
@@ -352,7 +355,7 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
     offices = _codes(a.get("offices")) if labelled else []
     main_not_run = bool(asked) and not any(o in _MAIN_OFFICES for o in asked)
     if main_not_run:
-        out.append(f"<p class=note>{_e(_main_not_run(asked, bool(offices)))}</p>")
+        out.append(f"<p class=note>{_e(_main_not_run(asked, bool(offices) or _side_ran(result)))}</p>")
     if not labelled:
         out.append(f"<p class=warn>{_e(ASIA_UNLABELLED)}</p>")
     else:
@@ -380,6 +383,80 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
     un = _codes(result.get("offices_unindexed"))
     if un:
         out.append(f"<p class=note>{_e(_offices_unindexed(un))}</p>")
+    out.append(_side_html(result, statement, not labelled, main_not_run))
+    return "".join(out)
+
+
+# ── side lists (FR first) ──
+# A root may also carry `side_lists`: name -> one exact, dense-only list of a national office's families with no
+# US/EP/WO member (sealed-research open_rank/side_lists.py; `fr` first). Shown after the Asian list by its rules
+# exactly: own heading, "F1" numbers, no marks, never merged. Only a name with words here is shown; any other, or a
+# block without its labels, is the unlabelled sentence. A result with no `side_lists` says nothing about France.
+FR_HEADING = "Separate list: French patent families"
+FR_SEPARATE = ASIA_SEPARATE
+FR_CLASS = ("It holds French patent families that have no US, EP or WO member, matched on the English title + abstract "
+            "of a French publication. Most were first published between 1970 and 2019.")
+FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked."
+FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched."
+FR_NO_MARKS = ASIA_NO_MARKS
+SIDE_WORDS = {
+    "fr": {"heading": FR_HEADING, "cls": FR_CLASS, "rank": FR_RANK, "not_requested": FR_NOT_REQUESTED,
+           "no_marks": FR_NO_MARKS, "prefix": "F", "members": "French members",
+           "badge": "{n} French publications in this family"},
+}
+
+
+def _side_labelled(name: Any, b: Any) -> bool:
+    return (isinstance(name, str) and name in SIDE_WORDS and isinstance(b, dict) and b.get("kind") == "dense_only"
+            and b.get("exact") is True and b.get("expanded") is False and b.get("reranked") is False
+            and isinstance(b.get("hits"), list))
+
+
+def _side_ran(result: Any) -> bool:
+    sl = result.get("side_lists") if isinstance(result, dict) else None
+    return isinstance(sl, dict) and any(_side_labelled(n, b) and _codes(b.get("offices")) for n, b in sl.items())
+
+
+def _side_html(result: Any, statement: Any = None, unlabelled_said: bool = False, main_not_run: Any = None) -> str:
+    """The side lists of one search result, as HTML after the Asian list; '' when the result carries none."""
+    sl = result.get("side_lists") if isinstance(result, dict) else None
+    if sl is None:
+        return ""
+    if main_not_run is None:
+        stmt = statement if isinstance(statement, dict) else {}
+        asked = _codes(stmt.get("offices"))
+        # mainNotRun is a fact of the Asian root (the main ranking is skipped there); without one, it ran
+        main_not_run = False
+        if asked and result.get("asia") is not None:
+            main_not_run = not any(o in _MAIN_OFFICES for o in asked)
+    out = []
+    lists = sl.items() if isinstance(sl, dict) else []
+    if (not isinstance(sl, dict) or any(not _side_labelled(n, b) for n, b in lists)) and not unlabelled_said:
+        out.append(f"<p class=warn>{_e(ASIA_UNLABELLED)}</p>")
+    for name, b in lists:
+        if not _side_labelled(name, b):
+            continue
+        w = SIDE_WORDS[name]
+        offices, hits = _codes(b.get("offices")), b["hits"]
+        out.append(f"<h4>{_e(w['heading'])}</h4>")
+        if not offices:
+            out.append(f"<p class=note>{_e(w['not_requested'])}</p>")
+        elif not hits:
+            out.append(f"<p class=note>{_e(_asia_empty(offices))}</p>")
+        else:
+            out.append(f"<p class=note>{_e(ASIA_SEPARATE_NO_MAIN if main_not_run else FR_SEPARATE)} {_e(w['cls'])} "
+                       f"{_e(w['rank'])} {_e('Searched for this list: ' + _list_of(offices) + '.')}</p>")
+            out.append(f"<table><tr><th>#</th><th>Publication</th><th>Year</th><th>Title</th><th>{_e(w['members'])}</th></tr>")
+            for i, h in enumerate(hits, 1):
+                h = h if isinstance(h, dict) else {}
+                fm = h.get("family_members") if isinstance(h.get("family_members"), list) else []
+                total = h.get("family_members_total")
+                total = total if isinstance(total, int) and not isinstance(total, bool) else len(fm)
+                fam = w["badge"].format(n=total) if total >= 2 else ""
+                out.append(f"<tr><td>{_e(w['prefix'])}{i}</td><td class=mono>{_e(h.get('key'))}</td>"
+                           f"<td>{_e(h.get('year') or '')}</td><td>{_e(h.get('title') or '')}</td><td>{_e(fam)}</td></tr>")
+            out.append("</table>")
+            out.append(f"<p class=note>{_e(w['no_marks'])}</p>")
     return "".join(out)
 # ── end Asian list ──
 

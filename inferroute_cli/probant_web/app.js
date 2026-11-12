@@ -72,7 +72,8 @@ function matterName(id) {
   function mainNotRunNote(d) {
     const asked = asiaCodes(d && d.mainNotRun);
     if (!asked.length) return null;
-    const ran = Boolean(d.asia && asiaCodes(d.asia.offices).length);
+    const ran = Boolean(d.asia && asiaCodes(d.asia.offices).length)
+      || (Array.isArray(d.side) ? d.side : []).some((s) => s && sideWordsOf(s.name) && asiaCodes(s.offices).length);
     return el("div", "card-note", mainNotRunLine(asked, ran));
   }
   // Its bar is relative to THIS list only: the two lists are ranked by different scores and are never compared.
@@ -120,6 +121,73 @@ function matterName(id) {
     }
     if (unindexed.length) sec.append(el("div", "card-note", officesUnindexedLine(unindexed)));
     return sec;
+  }
+
+  // ── side lists (FR first) ──
+  // The root's other separate lists (`side_lists`, received in `d.side` from ir-attested.ts), each its own section
+  // after the Asian one, by the Asian list's rules exactly: its own heading, "F1" numbers, no marks, never in the
+  // ranking or the counts. Only a list with words here is drawn; any other (or one without its labels) is not shown,
+  // with the unlabelled sentence. An older search carries no `side` and nothing here says anything about France.
+  const FR_HEADING = "Separate list: French patent families";
+  const FR_SEPARATE = ASIA_SEPARATE;
+  const FR_CLASS = "It holds French patent families that have no US, EP or WO member, matched on the English title + abstract of a French publication. Most were first published between 1970 and 2019.";
+  const FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked.";
+  const FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched.";
+  const FR_NO_MARKS = ASIA_NO_MARKS;
+  const SIDE_WORDS = {
+    fr: { heading: FR_HEADING, cls: FR_CLASS, rank: FR_RANK, notRequested: FR_NOT_REQUESTED, noMarks: FR_NO_MARKS,
+          prefix: "F", badge: (n) => `${n} French publications in this family` },
+  };
+  const sideWordsOf = (name) => Object.prototype.hasOwnProperty.call(SIDE_WORDS, String(name)) ? SIDE_WORDS[String(name)] : null;
+  function sideFamilyOf(doc, w) {
+    const f = Array.isArray(doc && doc.family) ? doc.family.map(String) : [];
+    const total = typeof (doc && doc.familyTotal) === "number" ? doc.familyTotal : f.length;
+    if (total < 2) return null;
+    const n = el("span", "year", w.badge(total));
+    n.title = f.join(", ") + (total > f.length ? ` and ${total - f.length} more` : "");
+    return n;
+  }
+  // The sections, in the order the search named them; [] when it carried no side list (an older index).
+  function sideSections(d) {
+    const out = [];
+    if (!d) return out;
+    if (d.sideUnlabelled && !d.asiaUnlabelled) {
+      const sec = el("section", "asia-list side-list");
+      sec.append(el("div", "card-note warn", ASIA_UNLABELLED));
+      out.push(sec);
+    }
+    for (const s of Array.isArray(d.side) ? d.side : []) {
+      const w = sideWordsOf(s && s.name);
+      if (!w) continue;
+      const offices = asiaCodes(s.offices);
+      const docs = Array.isArray(s.docs) ? s.docs : [];
+      const sec = el("section", "asia-list side-list");
+      sec.append(el("h4", "asia-head", w.heading));
+      if (!offices.length) {
+        sec.append(el("div", "card-note", w.notRequested));
+      } else if (!docs.length) {
+        sec.append(el("div", "card-note", asiaEmpty(offices)));
+      } else {
+        const separate = asiaCodes(d.mainNotRun).length ? ASIA_SEPARATE_NO_MAIN : FR_SEPARATE;
+        sec.append(el("div", "card-note", `${separate} ${w.cls} ${w.rank} ${asiaSearched(offices)}`));
+        const list = el("ol", "docs");
+        const [lo, hi] = scoreRange(docs);
+        docs.forEach((doc, idx) => {
+          const title = el("div", "dtitle", String(doc.title || ""));
+          const row = el("li", "doc asia-doc",
+            el("span", "rank", `${w.prefix}${idx + 1}`),
+            asiaBar(doc.score, lo, hi),
+            el("div", "", el("span", "key", String(doc.key || "")), doc.year ? el("span", "year", String(doc.year)) : null,
+              sideFamilyOf(doc, w), title));
+          title.addEventListener("click", () => row.classList.toggle("open"));
+          list.append(row);
+        });
+        sec.append(list);
+        sec.append(el("div", "card-note", w.noMarks));
+      }
+      out.push(sec);
+    }
+    return out;
   }
   // ── end Asian list ──
 
@@ -2053,6 +2121,7 @@ function matterName(id) {
           if (legNotRun) legBody.append(legNotRun);
           const legAsia = asiaSection(leg);
           if (legAsia) legBody.append(legAsia);
+          for (const legSide of sideSections(leg)) legBody.append(legSide);
           e.body.append(block);
           // The outline points at THIS leg, not at the card: being sent to the top of a six-search card is
           // not arriving at search 5.
@@ -2149,6 +2218,7 @@ function matterName(id) {
     if (notRun) body.append(notRun);
     const asia = asiaSection(d);
     if (asia) body.append(asia);
+    for (const side of sideSections(d)) body.append(side);
     if (docs.some((d) => marks.get(String(d.key)) === "relevant")) offerDeeper(card);
     entry.keys = docs.map((doc) => String(doc.key || ""));
     entry.titles = new Map(docs.map((doc) => [String(doc.key || ""), String(doc.title || "")]));

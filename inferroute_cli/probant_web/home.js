@@ -1167,6 +1167,8 @@
                 `${a.register} ${a.number} (${a.status}, classes ${(a.classes || []).join(", ") || "none recorded"})`).join("; "))] : [])));
           }
           if (sr.more) box.append(el("p", "sub", `…and ${sr.more} more, less close.`));
+          // A search that also covered Australian or Italian marks says what that costs and credits the data.
+          for (const note of [...(sr.cautions || []), ...(sr.attribution || [])]) box.append(el("p", "sub", note));
           p.append(box);
         }
       }

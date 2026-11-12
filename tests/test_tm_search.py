@@ -413,6 +413,7 @@ def test_australian_marks_carry_their_licence_credit_wherever_searched(tmp_path)
     assert not ix.search("Festina")["attribution"]
     r = ix.search("Festina", also=["AU"])
     assert r["attribution"] == [T.ATTRIBUTION["AU"]] and "CC BY 4.0" in r["attribution"][0]
+    assert r["cautions"] == [T.CAUTION["AU"]] and not ix.search("Festina")["cautions"]
     assert T.ATTRIBUTION["AU"] in "\n".join(T.report_lines(r))
 
 
@@ -436,3 +437,31 @@ def test_italian_results_carry_the_caution_and_the_dated_credit(tmp_path):
     assert r["cautions"] == [T.CAUTION["IT"]] and "filed since 2016-05-12" in r["attribution"][0]
     lines = "\n".join(T.report_lines(r))
     assert T.CAUTION["IT"] in lines and r["attribution"][0] in lines
+
+
+def test_results_with_optional_marks_left_out_are_exactly_those_of_an_index_without_them(tmp_path):
+    # Rarity weights and caps count only the registers searched, and left-out ids are cut from every posting list,
+    # so holding Australian marks in the file changes nothing for a search that does not ask for them.
+    base = [("FR", str(i), t, "registered", ["9"], "") for i, t in enumerate(
+        ["Festina", "Festino", "Fiesta", "Fest", "Festival Paris", "Le Festin", "Vesta", "Festo", "Festool"])]
+    au = [("AU", str(100 + i), t, "registered", ["9"], "") for i, t in enumerate(
+        ["Festina", "Fest", "Festo Australia", "Festal", "Festivo", "Festina Lotus"] * 3)]
+    a, b = tmp_path / "a.sqlite", tmp_path / "b.sqlite"
+    T.build(base, a, "x", ["INPI (France)"])
+    T.build(base + au, b, "x", ["INPI (France)", "IP Australia (AU)"])
+    ia, ib = T.Index(a), T.Index(b)
+    for name in ("Festina", "Fest", "Festo", "Festival", "Vesta"):
+        ra, rb = ia.search(name, ["9"]), ib.search(name, ["9"])
+        assert rb["hits"] == ra["hits"] and rb["marks_searched"] == ra["marks_searched"], name
+    assert any(h["register"] == "AU" for h in ib.search("Festina", ["9"], also=["AU"])["hits"] +
+               [x for h in ib.search("Festina", ["9"], also=["AU"])["hits"] for x in h.get("also", [])])
+
+
+def test_a_logged_search_keeps_its_optional_registers_caution_and_credit(tmp_path):
+    out = tmp_path / "au.sqlite"
+    T.build([("AU", "9", "Festina", "registered", ["14"], "")], out, "x", ["IP Australia (AU)"])
+    T.log_search(tmp_path / "log", T.Index(out).search("Festina", also=["AU"]))
+    T.log_search(tmp_path / "log", T.Index(out).search("Festina"))
+    with_au, plain = T.logged_searches(tmp_path / "log")[-2:]
+    assert with_au["also"] == ["AU"] and with_au["cautions"] == [T.CAUTION["AU"]] and with_au["attribution"]
+    assert not {"also", "cautions", "attribution"} & set(plain)

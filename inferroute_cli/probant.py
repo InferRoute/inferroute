@@ -468,6 +468,8 @@ def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: 
     try:
         permit = B.before_session(rec, session_id)
     except B.BillingError as e:
+        if rec.get("renewal") or (rec.get("permit") or {}).get("used_up"):
+            _write_record(client, matter, rec)      # a used-up permit settled (or still to settle) at this start
         raise ProbantError(str(e))
     if permit is not None:
         _write_record(client, matter, rec)
@@ -480,7 +482,7 @@ def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: 
     if permit is not None:
         after = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
         fresh = load_record(client, matter)
-        if B.after_session(fresh, session_id, B.delivered(fresh, ws, before, after, started)):
+        if B.end_session(fresh, session_id, B.delivered(fresh, ws, before, after, started)):
             _write_record(client, matter, fresh)
     return rc
 
@@ -541,6 +543,8 @@ def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals
     try:
         permit = B.before_session(reading, session_id)
     except B.BillingError as e:
+        if reading.get("renewal") or (reading.get("permit") or {}).get("used_up"):
+            B.save_reading(reading)
         raise ProbantError(str(e))
     if permit is not None:
         B.save_reading(reading)
@@ -548,7 +552,7 @@ def cmd_intake(path: str, web: bool = False, client: str = "Personal", proposals
     probant["session_id"] = session_id
     rc = confidential_mod.launch([], agent="pi", probant=probant)
     if permit is not None:
-        if B.after_session(reading, session_id, B.reading_delivered(meta["id"])):
+        if B.end_session(reading, session_id, B.reading_delivered(meta["id"])):
             B.save_reading(reading)
     print()
     if rc != 0:
@@ -1352,6 +1356,8 @@ def _cluster_workers(ident: str, src: Path, workers: int, reader: str, thinker: 
     try:
         permit = B.before_session(rec, held_by)
     except B.BillingError as e:
+        if rec.get("renewal") or (rec.get("permit") or {}).get("used_up"):
+            B.save_reading(rec)
         raise ProbantError(str(e))
     if permit is not None:
         B.save_reading(rec)
@@ -1417,6 +1423,8 @@ def _cluster_round(cluster_dir: Path, instruction: str, out: dict, cwd: Path, mo
     try:
         permit = B.before_session(rec, session_id)
     except B.BillingError as e:
+        if rec.get("renewal") or (rec.get("permit") or {}).get("used_up"):
+            B.save_reading(rec)
         raise ProbantError(str(e))
     if permit is not None:
         B.save_reading(rec)
@@ -1432,6 +1440,6 @@ def _cluster_round(cluster_dir: Path, instruction: str, out: dict, cwd: Path, mo
                      or (bool(out.get("IR_CLUSTER_OUT")) and written.is_file()
                          and written.stat().st_mtime >= started))
         fresh = B.load_reading(ident, cluster=True)
-        if B.after_session(fresh, session_id, delivered):
+        if B.end_session(fresh, session_id, delivered):
             B.save_reading(fresh)
     return rc

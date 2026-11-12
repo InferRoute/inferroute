@@ -65,6 +65,29 @@ DEVICE_LIMIT_WORDS = ("This account is already used on its maximum number of com
                       "support@inferroute.ai to move it to this one.")
 
 
+# A PERMIT USED UP (Nov 2026). The search gate (and the relay) answer 402 permit_used_up when the permit has no searches
+# left. The matter or reading then keeps it no longer: it is settled as DELIVERED first, and only then dropped, because
+# the site hands an unsettled permit straight back (POST /permit answers reused:true), so a permit dropped unsettled
+# would come back spent at the next start. A used-up permit is NEVER settled as failed: its searches ran. When the
+# settle cannot be made (no network, 5xx), the permit is kept, marked used up, and the next start settles it first.
+# The next start then takes a fresh unit through the ordinary permit call, and says so first (one_more_unit_words).
+USED_UP_KEPT_WORDS = ("{whose} searches for its current unit are used up, and the unit could not be closed just now. "
+                      "Try again in a few minutes.")
+ONE_MORE_UNIT_WORDS = "{whose} searches for its current unit are used up; continuing uses one more unit."
+
+
+def _whose(rec: Dict[str, Any]) -> str:
+    return "This reading's" if rec.get("kind") == "reading" else "This matter's"
+
+
+def one_more_unit_words(rec: Dict[str, Any]) -> str:
+    return ONE_MORE_UNIT_WORDS.format(whose=_whose(rec))
+
+
+def used_up_kept_words(rec: Dict[str, Any]) -> str:
+    return USED_UP_KEPT_WORDS.format(whose=_whose(rec))
+
+
 _answer: Optional[tuple] = None          # (monotonic time, on?) — the account service's last word on billing
 
 
@@ -211,11 +234,20 @@ def before_session(rec: Dict[str, Any], session_id: str) -> Optional[Dict[str, A
     (with the words to show) when the account has no unit left. Updates `rec` in place; the caller writes it."""
     if not enabled():
         return None
+    clear_used_up_reports()
+    p = rec.get("permit")
+    if isinstance(p, dict) and p.get("used_up"):
+        # Used up at an earlier session, and its settle could not be made then: settle it (delivered) first.
+        if settle_used_up(rec, session_id) == "kept":
+            raise BillingError(used_up_kept_words(rec))
     account = _account_tag()
     held = current_permit(rec)
     if held and held.get("account", account) == account:
         return held
+    if rec.get("renewal") == "used_up":
+        print(f"  {one_more_unit_words(rec)}", flush=True)     # the launcher's output; the home page shows it too
     got = _post("/api/anteriora/permit", _request_for(rec, session_id))
+    rec.pop("renewal", None)
     permit = {"id": str(got["permit"]), "unit": unit_for(rec), "state": "issued",
               "at": _now().strftime("%Y-%m-%dT%H:%M:%SZ"), "first_session": session_id, "account": account}
     rec["permit"] = permit
@@ -242,6 +274,9 @@ def after_session(rec: Dict[str, Any], session_id: str, was_delivered: bool) -> 
     next session asks for a new one instead of reusing a permit the service will not honour. So does an answer
     that the permit was already refunded (the service refunds permits left unsettled for hours)."""
     p = rec.get("permit")
+    if isinstance(p, dict) and p.get("used_up"):
+        # Never "failed": a used-up permit's searches ran. Settle it delivered (or keep it for the next start).
+        return settle_used_up(rec, session_id)
     if not isinstance(p, dict) or p.get("state") != "issued":
         return None
     if p.get("first_session") != session_id and not was_delivered:
@@ -258,6 +293,58 @@ def after_session(rec: Dict[str, Any], session_id: str, was_delivered: bool) -> 
     if p["state"] == "refunded":
         rec.pop("permit", None)                 # the next session asks for a new one
     return p["state"]
+
+
+def settle_used_up(rec: Dict[str, Any], session_id: str) -> str:
+    """The gate or the relay said 402 permit_used_up for rec's permit. Settle it as DELIVERED, then drop it, and mark
+    the record so the next start says it takes one more unit. Returns "dropped", "kept" (the settle could not be made:
+    no answer or a 5xx, or another refusal; the permit stays, marked used up, and the next start settles it first) or
+    "none" (no permit held). Updates `rec` in place; the caller writes it."""
+    p = rec.get("permit")
+    if not isinstance(p, dict) or not p.get("id"):
+        return "none"
+    p["used_up"] = True
+    try:
+        _post("/api/anteriora/settle", {"permit": p["id"], "outcome": "delivered", "sessionId": session_id})
+    except BillingError as e:
+        if e.status not in GONE:                    # not settled, and not "no such permit": keep it, try again later
+            return "kept"
+    rec.pop("permit", None)
+    rec["renewal"] = "used_up"
+    return "dropped"
+
+
+# Reports of 402 permit_used_up during a session. The relay's (inferroute_local.confidential.billing_refusal) are
+# seen in this process; the search gate's come from the search verifier process, which writes the permit id to a
+# file under confidential/ (pi_attested.used_up_signal_path), out of the assistant's reach.
+def clear_used_up_reports() -> None:
+    from inferroute_local.confidential import billing_refusal as BR
+    BR.USED_UP_SEEN.clear()
+    try:
+        from . import pi_attested
+        pi_attested.clear_used_up_signal()
+    except Exception:                                # noqa: BLE001
+        pass
+
+
+def reported_used_up(permit_id: str) -> bool:
+    """Whether the relay or the search gate answered 402 permit_used_up during the session that carried permit_id."""
+    from inferroute_local.confidential import billing_refusal as BR
+    if BR.USED_UP_SEEN:
+        return True
+    try:
+        from . import pi_attested
+        return pi_attested.used_up_signalled(permit_id)
+    except Exception:                                # noqa: BLE001
+        return False
+
+
+def end_session(rec: Dict[str, Any], session_id: str, was_delivered: bool) -> Optional[str]:
+    """after_session, unless the session was told its permit is used up: then settle_used_up (never "failed")."""
+    p = rec.get("permit")
+    if isinstance(p, dict) and p.get("id") and reported_used_up(str(p["id"])):
+        return settle_used_up(rec, session_id)
+    return after_session(rec, session_id, was_delivered)
 
 
 # ───────────────────────── readings ─────────────────────────
@@ -281,9 +368,12 @@ def load_reading(intake_id: str, cluster: bool = False) -> Dict[str, Any]:
     if cluster:
         rec["cluster"] = True
     try:
-        p = json.loads(_reading_path(intake_id, cluster).read_text(encoding="utf-8")).get("permit")
+        doc = json.loads(_reading_path(intake_id, cluster).read_text(encoding="utf-8"))
+        p = doc.get("permit")
         if isinstance(p, dict):
             rec["permit"] = p
+        if doc.get("renewal") == "used_up":
+            rec["renewal"] = "used_up"
     except (OSError, ValueError, AttributeError):
         pass
     return rec
@@ -291,7 +381,7 @@ def load_reading(intake_id: str, cluster: bool = False) -> Dict[str, Any]:
 
 def save_reading(rec: Dict[str, Any]) -> None:
     path = _reading_path(str(rec["intake"]), bool(rec.get("cluster")))
-    if "permit" not in rec:
+    if "permit" not in rec and not rec.get("renewal"):
         try:
             path.unlink()
         except OSError:
@@ -299,7 +389,7 @@ def save_reading(rec: Dict[str, Any]) -> None:
         return
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"permit": rec["permit"]}), encoding="utf-8")
+    tmp.write_text(json.dumps({k: rec[k] for k in ("permit", "renewal") if k in rec}), encoding="utf-8")
     os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 

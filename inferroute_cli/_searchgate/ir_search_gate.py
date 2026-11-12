@@ -115,7 +115,7 @@ class Gate:
     requests at once (ThreadingHTTPServer)."""
 
     def __init__(self, base: str, key: str = "", permit: str = "", *, sleep: Callable[[float], None] = time.sleep,
-                 say: Optional[Callable[[str], None]] = None, opener: Any = None):
+                 say: Optional[Callable[[str], None]] = None, opener: Any = None, used_up_file: str = ""):
         if gate_base(base) != base:
             raise ValueError("not the search gate")
         self.base = base
@@ -125,6 +125,8 @@ class Gate:
         self.say = say or (lambda s: sys.stderr.write(f"ir-search-gate: {s}\n"))
         self.opener = opener or urllib.request.build_opener(_NoRedirect)
         self._tl = threading.local()
+        # Where to tell the launcher the permit is used up (it settles it delivered, then takes a new unit next time).
+        self.used_up_file = str(used_up_file or "")
 
     # ---- per-request state
     def begin(self) -> None:
@@ -170,9 +172,19 @@ class Gate:
                 if attempt == 0 and r.retryable:
                     self.sleep(self._wait(r, path, st))
                     continue
+                if r.code == "permit_used_up":
+                    self._signal_used_up()
                 st.refused = GateRefused(r, path)
                 raise st.refused
         raise AssertionError("unreachable")            # pragma: no cover
+
+    def _signal_used_up(self) -> None:
+        if not (self.used_up_file and self.permit):
+            return
+        try:
+            Path(self.used_up_file).write_text(self.permit, encoding="utf-8")
+        except OSError:
+            pass
 
     def _wait(self, r: Any, path: str, st: Any) -> float:
         slot = r.code == "rate_limited" and path == "/search"
@@ -263,7 +275,7 @@ def read_credentials(stream: Any) -> Dict[str, str]:
         return {}
     if not isinstance(doc, dict) or not doc:
         return {}
-    return {k: str(doc.get(k) or "") for k in ("key", "permit")}
+    return {k: str(doc.get(k) or "") for k in ("key", "permit", "used_up_file")}
 
 
 def enclave_arg(argv: List[str]) -> str:
@@ -281,7 +293,8 @@ def main(argv: Optional[List[str]] = None, stdin: Any = None) -> int:
     base = gate_base(enclave_arg(argv))
     if base:
         creds = read_credentials(sys.stdin if stdin is None else stdin)
-        install(SV.Verifier, Gate(base, creds.get("key", ""), creds.get("permit", "")))
+        install(SV.Verifier, Gate(base, creds.get("key", ""), creds.get("permit", ""),
+                                  used_up_file=creds.get("used_up_file", "")))
     return SV.main(argv)
 
 

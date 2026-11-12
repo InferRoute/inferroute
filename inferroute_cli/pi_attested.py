@@ -592,6 +592,25 @@ def through_gate(cfg: dict, argv: list[str], env: dict, permit: str = "") -> tup
     return argv, env, {"key": config.load().api_key or "", "permit": str(permit or "")}
 
 
+_USED_UP_SIGNAL: Path | None = None
+
+
+def used_up_signalled(permit_id: str) -> bool:
+    """Whether this launch's search verifier wrote that the gate answered 402 permit_used_up for permit_id."""
+    path = _USED_UP_SIGNAL
+    if path is None or not permit_id:
+        return False
+    try:
+        return path.read_text(encoding="utf-8").strip() == permit_id
+    except OSError:
+        return False
+
+
+def clear_used_up_signal() -> None:
+    global _USED_UP_SIGNAL
+    _USED_UP_SIGNAL = None
+
+
 def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None, trusted_vm: bool = False,
                        permit: str = "") -> str | None:
     """Start the verifier and return its loopback address, or None (the session then has no search tool).
@@ -655,6 +674,13 @@ def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None,
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
     argv, venv_env, creds = through_gate(cfg, argv, venv_env, permit)
+    global _USED_UP_SIGNAL
+    _USED_UP_SIGNAL = None
+    if creds is not None and permit:
+        # Where the search verifier says "the gate answered permit_used_up" (anteriora_billing.end_session reads it).
+        # Under confidential/, which the assistant cannot write, so it cannot make the app settle and take a unit.
+        _USED_UP_SIGNAL = rec_dir / f"{sess_id}.used-up"
+        creds["used_up_file"] = str(_USED_UP_SIGNAL)
     try:
         proc = subprocess.Popen(argv, cwd=venv_cwd, env=venv_env, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, text=True, preexec_fn=_die_with_parent,

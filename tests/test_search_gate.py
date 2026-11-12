@@ -420,7 +420,9 @@ def test_a_session_on_the_gate_hands_the_key_and_permit_on_stdin_only(launch_rig
     argv, env = got["argv"], got["kw"]["env"]
     assert argv[1:3] == ["-m", "ir_search_gate"] and "sealedresearch.search_verifier" not in argv
     assert env["PYTHONPATH"].split(os.pathsep)[-1] == str(PA.GATE_DIR)  # appended: shadows nothing
-    assert json.loads(got["stdin"]) == {"key": "ak-secret", "permit": "5b0c8a3e-permit"}
+    sent = json.loads(got["stdin"])
+    assert {k: sent[k] for k in ("key", "permit")} == {"key": "ak-secret", "permit": "5b0c8a3e-permit"}
+    assert set(sent) <= {"key", "permit", "used_up_file"}
     assert "ak-secret" not in " ".join(argv) and "ak-secret" not in json.dumps(env)
     assert "5b0c8a3e-permit" not in " ".join(argv)
 

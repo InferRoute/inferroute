@@ -201,6 +201,10 @@ def _body_error(body) -> dict:
     return {}
 
 
+# Set when a 402 permit_used_up is read in this process; read and cleared by inferroute_cli.anteriora_billing.
+USED_UP_SEEN: set = set()
+
+
 def parse(status: int, headers, body, route: str = "") -> BillingRefusal | None:
     """A BillingRefusal when (status, headers, body) is one of the contract's refusals; None otherwise.
 
@@ -216,6 +220,8 @@ def parse(status: int, headers, body, route: str = "") -> BillingRefusal | None:
     if code not in CODES or _STATUS_OF[code] != int(status or 0):
         return None
     msg = err.get("message") if isinstance(err.get("message"), str) else ""
+    if code == "permit_used_up":
+        USED_UP_SEEN.add(code)          # the launcher settles the permit delivered and drops it (anteriora_billing)
     return BillingRefusal(int(status), code, msg, parse_retry_after(h.get("retry-after")), route, from_header)
 
 

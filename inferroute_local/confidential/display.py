@@ -183,6 +183,15 @@ def render_refusal(r: Receipt, console: Console | None = None) -> None:
     firm keeps; it and the panel must not disagree about whether the session happened."""
     console = console or Console()
     sent = int((r.counters or {}).get("requests") or 0)
+    if r.verdict == "billing_refused":
+        # The ACCOUNT was refused before any machine was checked: never worded as a failed verification.
+        body = Group(Text("This session was not opened: InferRoute refused it for an account reason. Nothing was sent.",
+                          style="bold"), Text(""),
+                     Text(f"Code: {r.refusal or '?'} · no machine was checked, so none failed a check", style=DIM),
+                     Text(""), Text.assemble(("Receipt  ", DIM), (_home(str(r.path)), DIM)))
+        console.print(Panel(body, title="[bold]InferRoute · Confidential session not opened[/]", border_style=AMBER,
+                            box=box.ROUNDED, width=_width(console), padding=(1, 2)))
+        return
     if sent:
         headline = Text(f"This session STOPPED after {sent} request{'s' if sent != 1 else ''}.", style="bold red")
         detail = Text("What was sent was sealed to an enclave this device had verified at the time. When that\n"

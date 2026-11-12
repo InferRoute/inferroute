@@ -107,7 +107,7 @@ class Receipt:
     # Self-reported, like everything else a receipt says about the device that wrote it.
     written_by: str = field(default_factory=lambda: _client_version())
     claim: str = ""
-    verdict: str = "unopened"                           # unopened | confidential | refused | degraded
+    verdict: str = "unopened"                           # unopened | confidential | refused | degraded | billing_refused (account, not machine)
     refusal: str = ""
     schema: str = SCHEMA
     path: str = ""

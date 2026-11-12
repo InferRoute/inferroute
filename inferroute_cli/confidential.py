@@ -505,7 +505,9 @@ def say_billing_refusal(console, e) -> int:
     and ours otherwise. Escaped, because the console would otherwise read square brackets as markup. Returns the exit
     code; the caller RETURNS it rather than exiting, so a Probant caller still settles the session's unit."""
     from rich.markup import escape
-    console.print(f"[red]{escape(e.sentence)}[/]\n[grey58]Nothing was sent.[/]")
+    said = e.sentence
+    tail = "" if "nothing was sent" in said.lower() else "\n[grey58]Nothing was sent.[/]"
+    console.print(f"[red]{escape(said)}[/]{tail}")
     return 3
 
 

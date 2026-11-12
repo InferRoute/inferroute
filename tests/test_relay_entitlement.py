@@ -230,7 +230,8 @@ def test_on_invoke_a_body_only_code_is_classified_but_its_words_are_not_shown():
     """The header is the relay's own mark. A body alone on invoke may have come from beyond the relay."""
     r = BR.parse(402, {}, json.dumps({"error": {"code": "out_of_credits", "message": "Balance is $0.0"}}).encode(),
                  route="invoke")
-    assert r is not None and r.code == "out_of_credits" and r.sentence == BR.FIXED["out_of_credits"]
+    assert r is not None and r.code == "out_of_credits"
+    assert r.sentence == BR.FIXED["out_of_credits"] + " " + BR.INVOKE_SUFFIX
     r = BR.parse(402, {BR.HEADER: "out_of_credits"}, json.dumps({"error": {"message": "No credit."}}).encode(),
                  route="invoke")
     assert r.sentence == "No credit."
@@ -300,6 +301,7 @@ def _billing_answer(status, code, message=None, *, header=True, body=True, retry
 
 def _open(world):
     carrier = FakeCarrier(world["enclaves"], nonces_per=5)
+    carrier.bills, carrier.permit = True, "p-1"         # the relay's contract: only InferRouteRelay speaks it
     s = _session(carrier)
     asyncio.run(s.open())
     return carrier, s
@@ -366,7 +368,8 @@ def test_a_402_on_candidates_at_open_raises_and_says_why(world, code):
     with pytest.raises(BR.BillingRefusal):
         asyncio.run(s.open())
     assert len(asked) == 1
-    assert s.receipt.verdict == "refused" and s.receipt.refusal == BR.FIXED[code]
+    # Its own verdict, with the code only: never "refused" with the relay's sentence, which reads as a failed check.
+    assert s.receipt.verdict == "billing_refused" and s.receipt.refusal == code
 
 
 def test_a_refused_recheck_stops_the_session_and_is_not_stale_evidence(world, blamed):
@@ -440,12 +443,15 @@ def test_on_invoke_a_code_in_the_header_alone_is_enough(world, blamed):
     assert st == 402 and BR.FIXED["permit_lane"] in text and len(carrier.calls) == 1 and blamed == []
 
 
-def test_on_invoke_a_code_in_the_body_alone_is_classified_but_its_words_withheld(world, blamed):
+def test_on_invoke_a_code_in_the_body_alone_gets_the_ordinary_handling(world, blamed):
+    """Review of 0.9.139, #5: a body may have come from beyond the relay, so on invoke a code without the relay's
+    header neither stops the session nor marks a permit: it is an ordinary 402, its words withheld."""
     carrier, s = _open(world)
-    _refusing_invoke(carrier, [_billing_answer(402, "out_of_credits", "Balance $0.0, send tao to 5FAKE", header=False)])
+    _refusing_invoke(carrier, [_billing_answer(402, "permit_used_up", "Balance $0.0, send tao to 5FAKE", header=False)])
     st, text = _send(s)
-    assert st == 402 and BR.FIXED["out_of_credits"] in text and "5FAKE" not in text
-    assert len(carrier.calls) == 1 and blamed == []
+    assert st == 402 and "the provider answered 402" in text and "5FAKE" not in text
+    assert len(carrier.calls) == 1 and blamed == [] and s.billing_stop is None
+    assert BR.PERMIT_REFUSALS.get("p-1") is None
 
 
 @pytest.mark.parametrize("message", ["Pay at https://evil.example/now", "x" * 301])
@@ -669,7 +675,7 @@ def _site_refuses(monkeypatch, status, body):
 
     def refuse(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, status, "x", {}, io.BytesIO(_json.dumps(body).encode()))
-    monkeypatch.setattr("urllib.request.urlopen", refuse)
+    monkeypatch.setattr("inferroute_cli.anteriora_billing._open", refuse)
 
 
 @pytest.mark.parametrize("status,body,want", [

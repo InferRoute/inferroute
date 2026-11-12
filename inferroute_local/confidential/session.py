@@ -164,7 +164,11 @@ class ConfidentialSession:
             # The ACCOUNT was refused, not the fleet: raised so the caller stops, rather than returned as a refused
             # receipt that would read as "this fleet could not be verified" and send it on to the next model.
             self._billing_refused(e)
-            self._refuse(e.sentence)
+            # Its own verdict, holding the code only: the account was refused, no machine was judged, so nothing may
+            # read this receipt as a failed verification (display.render_refusal says so in those words).
+            self.receipt.verdict, self.receipt.refusal = "billing_refused", e.code
+            self._restate_claim()
+            self.receipt.save()
             raise
         except Exception as e:
             return self._refuse(f"could not obtain the enclave fleet's attestation evidence: {public_reason(e)}")
@@ -484,7 +488,10 @@ class ConfidentialSession:
             except Refused:
                 return False                      # _reverify has already written the verdict and reason
             except BillingRefusal:
-                return False                      # recorded by _billing_refused; the evidence is not in question
+                # Recorded by _billing_refused; the evidence is not in question. Only a FINAL refusal (billing_stop)
+                # ends the session: a 429/503 that outlived its one retry is transient, and the next beat asks again.
+                if self.billing_stop is not None:
+                    return False
         return self.receipt.is_confidential
 
     async def _reverify(self) -> None:
@@ -611,7 +618,13 @@ class ConfidentialSession:
             # THE RELAY'S BILLING REFUSAL, read before any retry branch below: those blame and drop the instance
             # (429/503) or retry on a relay code, and a billing refusal is evidence about no machine at all. The code
             # comes from the header first (the drain above keeps 400 bytes for the log), then the body.
-            refusal = _billing.parse(status, headers, body[:4096], route="invoke")
+            # Only on the InferRoute relay (a direct operator does not speak this contract), and on invoke only with
+            # the relay's own header: a code in the body alone may have come from beyond the relay, and gets the
+            # ordinary handling below, never a stop.
+            refusal = (_billing.parse(status, headers, body[:4096], route="invoke")
+                       if getattr(self.transport, "bills", False) else None)
+            if refusal is not None and not refusal.code_from_header:
+                refusal = None
             if refusal is not None:
                 if attempt == 1 and refusal.retryable:
                     self.receipt.note("billing-retry", f"the relay answered {status} {refusal.code}; waited "
@@ -619,6 +632,7 @@ class ConfidentialSession:
                     await _billing.sleep(_billing.wait_for(refusal.retry_after))
                     continue
                 self._billing_refused(refusal)
+                _billing.note_permit_refusal(getattr(self.transport, "permit", ""), refusal)
                 return ("error", refusal.status, refusal.sentence, ACCOUNT_FAULT)
             # SMOOTH RECOVERY: a transient provider failure gets one more go on a DIFFERENT verified
             # instance before the user is told anything. The failing instance is dropped from the pool

@@ -160,6 +160,7 @@ def invoke_headers(names: dict, *, fleet_id: str, instance_id: str, nonce: str, 
 
 
 class Transport:
+    bills = False          # whether this carrier speaks the relay's billing contract (only InferRouteRelay does)
     name = "?"
     relay_sees = "ciphertext only"
     # The Anteriora unit permit covering this session, if any. Sent ONLY on the relay's gated routes (see
@@ -265,6 +266,8 @@ class DirectOperator(Transport):
 
 class InferRouteRelay(Transport):
     name = "InferRoute relay (ciphertext only)"
+    # Only the relay speaks the billing contract. Its refusals are read (billing_refusal); a direct operator's are not.
+    bills = True
 
     def __init__(self, http: httpx.AsyncClient, api_url: str, api_key: str, session_id: str = "", permit: str = ""):
         super().__init__(http)
@@ -305,6 +308,7 @@ class InferRouteRelay(Transport):
                     if attempt == 1 and refusal.retryable:
                         await billing_refusal.sleep(billing_refusal.wait_for(refusal.retry_after))
                         continue
+                    billing_refusal.note_permit_refusal(self.permit, refusal)    # against the permit SENT
                     raise refusal
             r.raise_for_status()
             return r.json()

@@ -48,7 +48,7 @@ MESSAGE_MAX = 300
 # Our words for each code, used whenever the relay's own message is absent or not admissible.
 FIXED = {
     "permit_missing": ("No Anteriora unit came with this session, so it was refused. Start it again from "
-                       "Anteriora; nothing was sent."),
+                       "Anteriora."),
     "permit_invalid": ("This session's Anteriora unit was not accepted. Start the session again to take a new "
                        "unit; if it happens again, write to support@inferroute.ai."),
     "permit_expired": "This session's Anteriora unit has expired. Start the session again to take a new unit.",
@@ -64,8 +64,12 @@ FIXED = {
     "key_not_allowed": "This key cannot use this service. Sign in with the right account and try again.",
     "rate_limited": "Too many requests on this account right now. Wait a minute and try again.",
     "permit_busy": "This session's unit is busy with another request. Wait a moment and try again.",
-    "billing_unavailable": "Billing could not be checked right now. Nothing was sent. Try again shortly.",
+    "billing_unavailable": "Billing could not be checked right now. Try again shortly.",
 }
+# On invoke the request DID reach the relay, so "nothing was sent" would be false: our sentence says this instead.
+# Elsewhere (a refused open) the launcher adds "Nothing was sent." once (confidential.say_billing_refusal).
+INVOKE_SUFFIX = "Your request was not processed."
+UNLISTED_FIXED = "The request was refused for a billing reason."
 
 
 def is_billing_code(code: str) -> bool:
@@ -91,26 +95,37 @@ def admissible_message(code: str, message) -> bool:
 
 
 def plain_and_ours(message) -> bool:
-    """The text half of the rule: plain text, at most 300 characters, every link on inferroute.ai or a subdomain."""
+    """The text half of the rule: plain ASCII text, at most 300 characters, and every host-shaped token
+    (a dot between word characters: a link, a bare domain, an e-mail address, a dotted quad, a version number alike)
+    exactly inferroute.ai or a subdomain of it. No run of 7 or more digits (a phone number). Strict on purpose: a
+    message this refuses is replaced by our fixed sentence, which costs nothing; a look-alike link shown costs trust."""
     if not isinstance(message, str):
         return False
     m = message.strip()
     if not m or len(m) > MESSAGE_MAX:
         return False
-    if any((not ch.isprintable()) for ch in m) or any(ch in m for ch in "<>[]{}`\\"):
-        return False                       # markup, console markup, control characters: not plain text
-    rest = m
-    for u in _URL.findall(m):
-        u = u.rstrip(".,;:!?)'\"")
-        try:
-            parts = urlsplit(u)
-            host = parts.hostname or ""
-        except ValueError:
-            return False
-        if parts.scheme.lower() not in ("http", "https") or not _our_host(host):
-            return False
-        rest = rest.replace(u, " ")
-    for host in _EMAIL_OR_HOST.findall(rest):
+    if any(not (32 <= ord(ch) < 127) for ch in m):
+        return False                       # ASCII printable only: no look-alike letters, fullwidth or ideographic dots
+    if any(ch in m for ch in "<>[]{}`\\"):
+        return False                       # markup, console markup: not plain text
+    if re.search(r"\d{7,}", m):
+        return False                       # a phone number, an account number
+    for tok in m.split():
+        tok = tok.strip(".,;:!?()'\"")
+        if "://" not in tok and not re.search(r"\w\.\w", tok):
+            continue
+        if "://" in tok:
+            try:
+                parts = urlsplit(tok)
+                if parts.scheme.lower() not in ("http", "https") or parts.username or parts.password or parts.port:
+                    return False
+                host = parts.hostname or ""
+            except ValueError:
+                return False
+        else:
+            host = tok.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+            if "@" in host:
+                host = host.rsplit("@", 1)[1]
         if not _our_host(host):
             return False
     return True
@@ -176,7 +191,8 @@ class BillingRefusal(Exception):
         come from beyond the relay, and the header is the relay's own mark (see the module docstring)."""
         if (self.code_from_header or self.route != "invoke") and admissible_message(self.code, self.server_message):
             return self.server_message.strip()
-        return FIXED.get(self.code, "The request was refused for a billing reason. Nothing was sent.")
+        fixed = FIXED.get(self.code, UNLISTED_FIXED)
+        return f"{fixed} {INVOKE_SUFFIX}" if self.route == "invoke" else fixed
 
 
 def _headers_lower(headers) -> dict:
@@ -201,8 +217,20 @@ def _body_error(body) -> dict:
     return {}
 
 
-# Set when a 402 permit_used_up is read in this process; read and cleared by inferroute_cli.anteriora_billing.
-USED_UP_SEEN: set = set()
+# WHICH PERMIT was refused, and how. A final refusal that says the permit itself is spent or dead is recorded here,
+# keyed by the permit id that was SENT with the refused request (the transport knows it), so the launcher acts on the
+# permit that was refused and on no other (inferroute_cli.anteriora_billing.end_session). The search gate's are
+# recorded by the search verifier process in a file (inferroute_cli._searchgate) and read the same way.
+PERMIT_REFUSAL_CODES = frozenset({"permit_used_up", "permit_invalid", "permit_expired", "permit_lane",
+                                  "permit_wrong_product"})
+PERMIT_REFUSALS: dict = {}
+
+
+def note_permit_refusal(permit: str, refusal) -> None:
+    """Record a final permit refusal against the permit that was sent. Anything else is ignored."""
+    code = getattr(refusal, "code", "")
+    if permit and code in PERMIT_REFUSAL_CODES and getattr(refusal, "final", False):
+        PERMIT_REFUSALS[str(permit)] = code
 
 
 def parse(status: int, headers, body, route: str = "") -> BillingRefusal | None:
@@ -220,8 +248,6 @@ def parse(status: int, headers, body, route: str = "") -> BillingRefusal | None:
     if code not in CODES or _STATUS_OF[code] != int(status or 0):
         return None
     msg = err.get("message") if isinstance(err.get("message"), str) else ""
-    if code == "permit_used_up":
-        USED_UP_SEEN.add(code)          # the launcher settles the permit delivered and drops it (anteriora_billing)
     return BillingRefusal(int(status), code, msg, parse_retry_after(h.get("retry-after")), route, from_header)
 
 
@@ -237,10 +263,16 @@ SEARCH_FIXED = {
     "key_required": "Patent search needs your Anteriora key. Sign in to Anteriora again, then search.",
     "bad_length": ("InferRoute's search service did not accept the size of this search, so nothing was searched. "
                    "If it happens again, write to support@inferroute.ai."),
-    "search_unavailable": ("The search machine is not answering right now; it may be starting. Nothing was "
-                           "searched. Try again in a few minutes."),
+    "search_unavailable": ("The search machine is not answering right now; it may be starting. Try again in a "
+                           "few minutes."),
 }
-SEARCH_UNLISTED = "InferRoute's search service refused this search ({code}). Nothing was searched."
+# A 429 or 503 that carries no code came from Cloud Run's own front end, not from the gate's account checks.
+SEARCH_BUSY = "The search service is busy; try again shortly."
+SEARCH_AWAY = "The search service is not answering right now; try again in a few minutes."
+# After the one wait for another search on the machine, the gate's "Yours will start when it finishes" is no
+# longer true of anything this computer will do.
+SEARCH_STILL_RUNNING = "Another search is still running; try again in a few minutes."
+SEARCH_UNLISTED = "InferRoute's search service refused this search ({code})."
 
 
 class SearchRefusal(Exception):
@@ -248,7 +280,8 @@ class SearchRefusal(Exception):
     machine's identity. Deliberately not a BillingRefusal, so no handler of the relay's refusals ever catches it."""
 
     def __init__(self, status: int, code: str, message: str = "", retry_after: float | None = None,
-                 code_from_header: bool = True):
+                 code_from_header: bool = True, fixed: str = ""):
+        self.fixed = fixed                  # our sentence, in place of anything else (code-less, slot exhausted)
         self.status = int(status)
         self.code = code
         self.server_message = message if isinstance(message, str) else ""
@@ -273,6 +306,8 @@ class SearchRefusal(Exception):
     def sentence(self) -> str:
         """The gate's own words under the relay's rule (a listed code, short plain text, inferroute.ai links only),
         our fixed sentence otherwise. An unlisted code never carries the server's text to a person."""
+        if self.fixed:
+            return self.fixed
         if self.listed and self.code_from_header and plain_and_ours(self.server_message):
             return self.server_message.strip()
         if self.code in SEARCH_FIXED:
@@ -311,5 +346,6 @@ def parse_search(status: int, headers, body) -> SearchRefusal | None:
     if from_header and status >= 400:
         return SearchRefusal(status, code, msg, retry, from_header)
     if status in (429, 503) and not code:
-        return SearchRefusal(status, "rate_limited" if status == 429 else "search_unavailable", "", retry, False)
+        return SearchRefusal(status, "rate_limited" if status == 429 else "search_unavailable", "", retry, False,
+                             fixed=SEARCH_BUSY if status == 429 else SEARCH_AWAY)
     return None

@@ -74,12 +74,14 @@ LOCK = {
     "libcrypto3": "3.5.9-r0", "libexpat": "2.10.0-r0", "libffi": "3.5.2-r1", "libgcc": "15.2.0-r5",
     "libncursesw": "6.6_p20260516-r0", "libpanelw": "6.6_p20260516-r0", "libssl3": "3.5.9-r0",
     "libstdc++": "15.2.0-r5", "mpdecimal": "4.0.1-r0", "musl": "1.2.6-r3",
-    "ncurses-terminfo-base": "6.6_p20260516-r0", "nghttp2-libs": "1.70.0-r0", "nodejs": "24.22.1-r1",
+    "ncurses-terminfo-base": "6.6_p20260516-r0", "nghttp2-libs": "1.70.0-r0", "nodejs": "24.22.3-r0",
     "pyc": "3.14.10-r1", "python3": "3.14.10-r1", "python3-pyc": "3.14.10-r1",
     "python3-pycache-pyc0": "3.14.10-r1", "readline": "8.3.3-r1", "simdjson": "4.2.4-r0",
     "simdutf": "9.0.0-r0", "sqlite-libs": "3.53.4-r0", "ssl_client": "1.37.0-r31", "xz-libs": "5.8.4-r0",
     "zlib": "1.4-r0", "zstd-libs": "1.5.7-r2",
 }
+# 2026-11-12: nodejs 24.22.1-r1 -> 24.22.3-r0 (the mirror no longer serves 24.22.1-r1; a v3.24 point release, installed and
+# verified by apk.static against alpine-keys in the build). Taken on purpose for 0.9.138.
 # 2026-11-07: zlib 1.3.2-r1 -> 1.4-r0 is Alpine aports bdf501c8 (2026-11-06 18:22Z), "main/zlib: security upgrade to
 # 1.4", within v3.24; it still provides so:libz.so.1, so python3 and nodejs link it unchanged. The mirror no longer
 # serves 1.3.2-r1. Taken on purpose for 0.9.128; nothing else in the resolved set moved.

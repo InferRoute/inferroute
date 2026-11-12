@@ -312,7 +312,7 @@
     }
     // The hint under the choice speaks about the choice made (21 Oct audit: the trademark hint showed under "An invention").
     const KIND_HINT = { invention: "The assistant searches about 30.4 million US, European and WIPO patent publications, through a sealed machine this computer checks first.",
-      name: "Names are searched on this computer, in a copy of the US, French and EU trademark registers (the EU marks come from INPI's open-data copy, which misses some)." };
+      name: "Names are searched on this computer, in a copy of the US, French and EU trademark registers and of international registrations designating France or the EU (the EU marks and the international registrations come from INPI's open-data copy, which misses some)." };
     const nf = nameFields();
     const nameBox = el("div", "name-fields", ...nf.nodes);
     // The check's own name follows the first name typed, until the person writes one themselves.
@@ -912,7 +912,7 @@
     mountSearchStatus(p);
     p.append(el("div", "card key-card",
       el("h2", "", "Check product names"),
-      el("p", "", "List the names you are considering. Anteriora searches the US, French and EU trademark registers on this computer and reports the registered marks that resemble each name, and why. It never says a name is free: that is a legal judgement."),
+      el("p", "", "List the names you are considering. Anteriora searches the US, French and EU trademark registers and international registrations designating France or the EU on this computer and reports the registered marks that resemble each name, and why. It never says a name is free: that is a legal judgement."),
       el("div", "row", button("Check names", "primary", () => newMatterDialog({ kind: "name" })))));
     // This page is the version the server started with. When a newer one is installed, say so rather than let
     // the difference show up as a button that fails.
@@ -1473,7 +1473,7 @@
       sec("Limits right now",
         list("Patent search reads each document's title and the start of its abstract, not the full text or the claims. Its ranked results cover US, EP and WO publications to late October 2026. Some search machines also return a short, separate list of patent families from a few further offices, shown under the ranking and labelled there with the offices it covers. Offices beyond US, EP and WO are searched only when that label names them; no other office is searched at all.",
           "There are no filters yet for classification, country or applicant.",
-          "The name check covers US, French and EU word marks. The EU marks come from INPI's open-data copy, which misses some, and other countries' registers are not searched.")),
+          "The name check covers US, French and EU word marks and international registrations designating France or the EU. The EU marks and the international registrations come from INPI's open-data copy, which misses some; Australian marks are searched only when you say you also file there, and other countries' registers are not searched.")),
       sec("In the terminal",
         para("Everything here also works in a terminal:"),
         list("anteriora new <matter> --priority-date YYYY-MM-DD",

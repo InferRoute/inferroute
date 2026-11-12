@@ -16,14 +16,19 @@ from pathlib import Path
 from typing import Callable, Optional
 
 INDEX = {
-    "url": "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.1",
-    "parts": ["https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.1", "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-20261101.sqlite.xz.2"],
-    "xz_sha256": "c9b6aa9b0cf68fa6bb8e29bbeca97215966816fbd65dfbc7eefd3639bee1c4a5",
-    "xz_bytes": 318_567_116,
-    "sha256": "3b5bc1647c133597a73df67e857a811a82c9188c0e2f6edf0d856ffc35925ae7",
-    "bytes": 1_028_304_896,
-    "data": "US marks to 2026-09-30, French marks to 2026-10-16, EU marks to 2026-11-01",
-    "sources": "USPTO (United States); INPI (France); EUIPO (EU trade marks, from INPI's open-data copy)",
+    "url": "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-wo-au-20261112.sqlite.xz.1",
+    "parts": ["https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-wo-au-20261112.sqlite.xz.1",
+              "https://pub-8584cfc5a9eb4f7c8f5f12885e9ec5c4.r2.dev/tm/index-us-fr-eu-wo-au-20261112.sqlite.xz.2"],
+    "xz_sha256": "2b9c321d65158b96b5b82ce7ff10a881f11651e2265c9539db66ffaeae547126",
+    "xz_bytes": 384_040_924,
+    "sha256": "1ee90bc6f9c70da794053fdfe7b31d9bfea5c0e74b719082c436d348d67a5de3",
+    "bytes": 1_224_863_744,
+    "data": ("US marks to 2026-09-30, French marks to 2026-10-16, EU marks to 2026-11-01, international "
+             "registrations to 2026-10-22, Australian marks to 2026-11-08"),
+    "sources": ("USPTO (United States); INPI (France); EUIPO (EU trade marks, from INPI's open-data copy); WIPO "
+                "(international registrations designating France or the EU, from INPI's open-data copy); "
+                "Australian trade marks: IP Australia, IP RAPID (data.gov.au), licensed CC BY 4.0 "
+                "(creativecommons.org/licenses/by/4.0); filtered to live word marks."),
 }
 CHUNK = 1 << 20
 

@@ -308,9 +308,12 @@ ATTRIBUTION = {
 # Said beside the results wherever a register's data cannot show something a reader would assume (pi-attested, 11 Nov).
 CAUTION = {
     # measured on release-bench-v1.1 (dev, 12 Nov): with AU on, FR top-10 -0.11 pt, EU -0.41 pt (CIs include 0)
-    "AU": "Searching Australian marks too can push a few French or EU earlier marks below the tenth place.",
-    "IT": "UIBM's data does not show later cancellations or surrenders, so a mark shown as registered may no longer "
-          "be in force.",
+    # re-measured on the 0.9.138 index (dev, 12 Nov): AU on vs off, FR +0.00 pt, EU -0.25 pt (CI -0.75, +0.13)
+    "AU": ["Searching Australian marks too can push a few French or EU earlier marks below the tenth place."],
+    # IT on (12 Nov, dev, pre-fix UIBM data): FR top-10 +0.11 pt, EU -0.41 pt (CIs include 0)
+    "IT": ["UIBM's data does not show later cancellations or surrenders, so a mark shown as registered may no longer "
+           "be in force.",
+           "Searching Italian marks too can push a few French or EU earlier marks below the tenth place."],
 }
 
 
@@ -553,7 +556,7 @@ class Index:
                 "also": sorted(c for c in also if c not in left_codes),
                 "attribution": [_fill(ATTRIBUTION[c], self.meta.get("sources", ""), k) for k, c, _ in OPTIONAL_REGISTERS
                                 if c in also and c not in left_codes and c in ATTRIBUTION],
-                "cautions": [CAUTION[c] for _, c, _ in OPTIONAL_REGISTERS if c in also and c not in left_codes and c in CAUTION],
+                "cautions": [x for _, c, _ in OPTIONAL_REGISTERS if c in also and c not in left_codes for x in CAUTION.get(c, [])],
                 "hits": hits[:limit], "more": max(0, len(hits) - limit), "filings": filings}
 
     def _keys(self, keys: Iterable[str]) -> List[Tuple[str, array.array]]:

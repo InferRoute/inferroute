@@ -75,7 +75,8 @@ details.more{margin-top:12px;color:var(--mute)}details.more summary{cursor:point
     <textarea id="idea" placeholder="Describe your idea in a sentence or two…"></textarea>
     <div class="own"><input type="text" id="own" placeholder="…or check your own name(s), comma-separated"></div>
     <div class="row" id="countries"></div>
-    <div class="note">Not checked: United Kingdom, and national marks in Germany, Spain, Italy and other countries.</div>
+    <div class="note">Searched: US, French, EU and international registrations (EU incomplete)<span id="auNote" hidden> · Australian marks too</span></div>
+    <div class="note" style="margin-top:2px">Not checked: United Kingdom, and national marks in Germany, Spain, Italy and other countries.</div>
     <div class="row">
       <span class="note">Tone</span>
       <select id="tone"><option>any</option><option>serious</option><option>playful</option><option>techy</option></select>
@@ -106,7 +107,7 @@ details.more{margin-top:12px;color:var(--mute)}details.more summary{cursor:point
   </div>
 
   <div class="cta">
-    <div><b>Inventing something?</b> Before you file, Anteriora searches the patents and papers that came before your invention.</div>
+    <div><b>Inventing something?</b> Before you file, Anteriora's app searches the earlier patents that could stand in your way.</div>
     <a class="ctab" href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Get the Anteriora app</a>
   </div>
   <!--rec--><div class="replays" id="replays" style="display:none">Replay a saved run: <select id="runs"><option value="">—</option></select></div><!--/rec-->
@@ -117,7 +118,7 @@ const C = {EU:"EU (incl. France)",US:"United States",AU:"Australia"};
 const on = new Set(["EU","US"]);
 for (const [k,v] of Object.entries(C)) {
   const c = document.createElement("span"); c.className = "chip" + (on.has(k) ? " on" : ""); c.textContent = v;
-  c.onclick = () => { on.has(k) ? on.delete(k) : on.add(k); c.classList.toggle("on"); };
+  c.onclick = () => { on.has(k) ? on.delete(k) : on.add(k); c.classList.toggle("on"); $("auNote").hidden = !on.has("AU"); };
   $("countries").appendChild(c);
 }
 let es = null, t0 = 0, tick = null, cards = {}, unchecked = [], replayOf = null;
@@ -153,7 +154,7 @@ function updateReport(){
 function updateRoute(){
   const a = $("q1").checked, b = $("q2").checked, c = $("q3").checked;
   let h;
-  if (a && b) h = `<b>This may be a patent matter.</b> Before you file anything, Anteriora's app searches the patents and papers that came before your invention.`
+  if (a && b) h = `<b>This may be a patent matter.</b> Before you file anything, Anteriora's app searches the earlier patents that could stand in your way.`
      + (c ? ` Because you have already shown it publicly, speak to an IP adviser soon: in many countries, including in Europe, showing an invention before filing can stop a patent.` : ``)
      + `<br><a class="btn" href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Get the Anteriora app</a>`;
   else h = `<b>Probably not a patent matter: protect the name.</b> A trade mark protects the name; the full report shows what stands in its way.`;

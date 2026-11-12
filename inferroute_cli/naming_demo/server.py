@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import hashlib
+import hmac
 import json
+import os
 import multiprocessing as mp
 import re
 import threading
@@ -78,7 +80,7 @@ def _tm(args):
     return name, r, time.time() - t
 
 
-def judge(result: dict, registers: set) -> dict:
+def judge(result: dict, registers: set, keep: int = 3) -> dict:
     """Light from the search result, counting only marks in the chosen registers with an overlapping class."""
     red, amber = [], []
     for h in result.get("hits", []):
@@ -96,7 +98,7 @@ def judge(result: dict, registers: set) -> dict:
         elif reasons & AMBER and h.get("score", 0) >= 0.80:  # below 0.80 the resemblance is loose (seen 12 Nov)
             amber.append(row)
     light = "red" if red else "amber" if amber else "green"
-    return {"light": light, "conflicts": (red + amber)[:3], "n_conflicts": len(red) + len(amber)}
+    return {"light": light, "conflicts": (red + amber)[:keep], "n_conflicts": len(red) + len(amber)}
 
 
 # ---------------------------------------------------------------- domains (local zone copy only)
@@ -311,6 +313,61 @@ class Run:
         (RUNS / f"{self.id}.json").write_text(json.dumps({"id": self.id, "q": self.q, "events": self.events}))
 
 
+NEXT = {
+    "red": "A mark with the same or very close name is live in a class you need. Using or filing this name risks an "
+           "opposition or an infringement claim; choose another name, or ask an IP adviser before going further.",
+    "amber": "Similar marks exist in your classes. Whether they block you depends on how close the goods and services "
+             "are and how the names compare as a whole; an IP adviser can judge this before you file.",
+    "green": "No close mark was found in the registers and classes searched. That is a good start, not clearance: file "
+             "early, and check the countries marked not checked if you trade there.",
+}
+
+
+class Report(Run):
+    """The paid report on up to 5 shortlisted names: every close mark in the chosen registers, no generation."""
+
+    def go(self):
+        q = self.q
+        names = clean_names(re.split(r"[,\s]+", q.get("names", "")))[:5]
+        countries = [c for c in q.get("countries", "EU,US").split(",") if c in COUNTRIES
+                     and COUNTRIES[c]["registers"] is not None] or ["EU", "US"]
+        registers = {r for c in countries for r in COUNTRIES[c]["registers"]}
+        also = [COUNTRIES[c]["also"] for c in countries if COUNTRIES[c].get("also")]
+        classes = [c for c in re.findall(r"\d+", q.get("classes", "")) if 1 <= int(c) <= 45][:6] or ["9", "42"]
+        from .nice_classes import NICE
+        yield self.emit({"t": "start", "kind": "report", "run": self.id, "names": names, "countries": countries,
+                         "classes": {c: NICE[int(c)] for c in classes},
+                         "data": self.app.data, "unchecked": ["United Kingdom",
+                                                              "national marks in Germany, Spain, Italy and other countries"]})
+        if not names:
+            yield self.emit({"t": "error", "text": "No valid names (4 to 11 letters each)."})
+            return
+        lang_box: dict = {}
+
+        def lang():
+            try:
+                text, u = llm(LANG.format(names=", ".join(names)), 2000)
+                self._add_usage(u)
+                lang_box.update(_json_in(text) or {})
+            except Exception as e:  # noqa: BLE001
+                lang_box["__error__"] = type(e).__name__
+        th = threading.Thread(target=lang)
+        th.start()
+        rows = {}
+        for name, r, _secs in self.app.pool.imap_unordered(_tm, [(n, classes, also) for n in names]):
+            rows[name] = judge(r, registers, keep=25)
+        th.join(timeout=20)
+        for n in names:
+            v = lang_box.get(n) or next((v for k, v in lang_box.items() if k.lower() == n.lower()), None)
+            j = rows[n]
+            yield self.emit({"t": "name_report", "name": n, "com": self.app.domains.taken(n, "com"),
+                             "net": self.app.domains.taken(n, "net"), "tm": j,
+                             "lang": {"ok": None if v is None else bool(v.get("ok")),
+                                      "note": "" if v is None else str(v.get("note", ""))[:160]},
+                             "next": NEXT[j["light"]]})
+        yield self.emit({"t": "final", "kind": "report", "usage": self.usage, "model": MODEL})
+
+
 # ---------------------------------------------------------------- http
 class App:
     def __init__(self, index: str, domains: Path, workers: int):
@@ -322,6 +379,11 @@ class App:
             by = {}
         self.marks = sum(by.values())
         self.marks_default = sum(v for k, v in by.items() if k != "AU")  # AU is opt-in
+        try:
+            meta = dict(con.execute("select k, v from meta").fetchall())
+        except sqlite3.Error:
+            meta = {}
+        self.data = meta.get("data_date", "")
         con.close()
         self.domains = Domains(domains)
         self.pool = mp.get_context("fork").Pool(workers, initializer=_init_worker, initargs=(index,))
@@ -329,6 +391,7 @@ class App:
 
 class H(BaseHTTPRequestHandler):
     app: App = None
+    secret = ""  # when set, POSTs must carry x-anteriora-names-secret (the site's proxy adds it; never the browser)
     record = ""  # the recording token; empty = public build, no saving and no replay routes
 
     def log_message(self, *a):
@@ -353,8 +416,12 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         # The idea and names travel in the POST body, never in the URL, so no access log can hold them.
-        if urllib.parse.urlparse(self.path).path != "/run":
+        path = urllib.parse.urlparse(self.path).path
+        if path not in ("/run", "/report"):
             self.send_error(404)
+            return
+        if self.secret and not hmac.compare_digest(self.headers.get("x-anteriora-names-secret", ""), self.secret):
+            self.send_error(403)
             return
         n = int(self.headers.get("Content-Length") or 0)
         if n <= 0 or n > 4096:
@@ -366,14 +433,14 @@ class H(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or self.client_address[0]
-        if not DAILY.take(q.get("device", "")[:64] or ip, ip):
+        if path == "/run" and not DAILY.take(q.get("device", "")[:64] or ip, ip):
             self._json({"error": "daily"}, 429)
             return
         if not BUDGET.take():
             self._json({"error": "busy"}, 429)
             return
         self._sse_head()
-        run = Run(self.app, q)
+        run = (Report if path == "/report" else Run)(self.app, q)
         try:
             for ev in run.go():
                 self._send(ev)
@@ -381,7 +448,7 @@ class H(BaseHTTPRequestHandler):
             pass
         finally:
             BUDGET.give()
-            if self.record and q.get("rec") == self.record:  # only the recording session's own runs; public build: never
+            if self.record and q.get("rec") == self.record and path == "/run":  # only the recording session's own runs; public build: never
                 run.save()
             try:
                 self._send({"t": "done"})
@@ -493,8 +560,12 @@ def main():
     ap.add_argument("--record", action="store_true",
                     help="save every run for replay (demo recording only; never on the web service)")
     ap.add_argument("--per-hour", type=int, default=60)
+    ap.add_argument("--secret-env", default="", help="env var holding the shared secret the site proxy sends")
     ap.add_argument("--daily", type=int, default=3, help="free runs a day per device (0 = no cap)")
     a = ap.parse_args()
+    H.secret = os.environ.get(a.secret_env, "") if a.secret_env else ""
+    if a.secret_env and not H.secret:
+        raise SystemExit(f"{a.secret_env} is empty")
     H.record = hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:16] if a.record else ""
     BUDGET.per_hour = a.per_hour
     DAILY.limit = a.daily

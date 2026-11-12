@@ -120,16 +120,38 @@ class Domains:
 
 
 # ---------------------------------------------------------------- AI lane
-def llm(prompt: str, max_tokens: int = 4000) -> tuple[str, dict]:
+BACKUP = "kimi-k3"
+_HEDGE = cf.ThreadPoolExecutor(8)
+
+
+def _call(model: str, prompt: str, max_tokens: int, timeout: float) -> tuple[str, dict]:
     from inferroute_cli import config
     c = config.load()
-    # reasoning off: with it on, every model on the lane spends 60-100 s thinking (measured 12 Nov); off, 3.5-8 s
-    body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
-            "reasoning": {"enabled": False}, "chat_template_kwargs": {"thinking": False, "enable_thinking": False}}
+    # Reasoning off: with it on, every model on the lane spends 60-100 s thinking (measured 12 Nov); off, 3.5-8 s.
+    # deepseek honours reasoning.enabled; kimi honours reasoning_effort / chat_template_kwargs.
+    body = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
+            "reasoning": {"enabled": False}, "reasoning_effort": "none",
+            "chat_template_kwargs": {"thinking": False, "enable_thinking": False}}
     req = urllib.request.Request(c.api_url + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + c.api_key, "Content-Type": "application/json"})
-    d = json.load(urllib.request.urlopen(req, timeout=120))
+    d = json.load(urllib.request.urlopen(req, timeout=timeout))
     return d["choices"][0]["message"]["content"], d.get("usage") or {}
+
+
+def llm(prompt: str, max_tokens: int = 4000, hedge_after: float = 7.0, deadline: float = 25.0) -> tuple[str, dict]:
+    """The same prompt to MODEL, and to BACKUP if MODEL has not answered within `hedge_after` s; first answer wins.
+    The lane's latency swings from ~4 s to ~100 s on identical calls (12 Nov), and a run has a 60 s promise."""
+    t0 = time.time()
+    futs = [_HEDGE.submit(_call, MODEL, prompt, max_tokens, deadline)]
+    done, _ = cf.wait(futs, timeout=hedge_after)
+    if not done or futs[0].exception():
+        futs.append(_HEDGE.submit(_call, BACKUP, prompt, max_tokens, max(1.0, deadline - (time.time() - t0))))
+    errors = []
+    for f in cf.as_completed(futs, timeout=max(0.1, deadline - (time.time() - t0))):
+        if f.exception() is None:
+            return f.result()
+        errors.append(f.exception())
+    raise errors[-1] if errors else TimeoutError("no model answered")
 
 
 def _json_in(text: str):
@@ -301,11 +323,12 @@ class Run:
         ranked = sorted(short, key=lambda n: (order[results[n]["light"]], dom[n]["com"] is not False,
                                               results[n].get("lang_ok") is False, short.index(n)))
         top = ranked[:SHOW] if not own else ranked
+        lang_ran = any(results[n].get("lang_ok") is not None for n in short)
         winners = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False
-                   and results[n].get("lang_ok") is not False]
+                   and (results[n].get("lang_ok") is True or not lang_ran)]
         both = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False]
         rest = [n for n in ranked if n not in top]  # checked but not in the ten: shown folded, never silently dropped
-        yield self.emit({"t": "final", "top": top, "rest": rest, "winners": winners, "both": both,
+        yield self.emit({"t": "final", "top": top, "rest": rest, "winners": winners, "both": both, "lang_ran": lang_ran,
                          "usage": self.usage, "model": MODEL})
 
     def save(self):

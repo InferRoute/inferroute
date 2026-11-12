@@ -51,6 +51,7 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
 .warn{border:1px solid color-mix(in srgb,var(--amber) 60%,transparent);background:color-mix(in srgb,var(--amber) 10%,transparent);border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:15px}
 .pick{margin-top:8px;font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:center;cursor:pointer}
 .card.picked{border-color:var(--accent)}
+[hidden]{display:none!important}
 details.more{margin-top:12px;color:var(--mute)}details.more summary{cursor:pointer;margin-bottom:10px}
 .after{margin-top:26px;display:grid;gap:12px}
 .after .box h3{margin:0 0 8px;font-size:19px}
@@ -181,7 +182,7 @@ function handle(ev){
     const rest = (ev.rest||[]).filter(n => cards[n]);
     if (rest.length) { const d = document.createElement("details"); d.className = "more"; d.innerHTML = `<summary>${rest.length} more names we checked</summary><div class="grid"></div>`;
       for (const n of rest) { cards[n].classList.add("dim"); d.querySelector(".grid").appendChild(cards[n]); } g.after(d); }
-    $("end").innerHTML = (ev.winners.length ? `<h2>Green on trade mark, .com and language</h2><div class="win">${ev.winners.map(n=>`<span>${esc(n)}</span>`).join("")}</div>` : `<h2>No name is green on all three — see the cards above</h2>`)
+    $("end").innerHTML = (ev.winners.length ? `<h2>${ev.lang_ran===false ? "Green on trade mark and .com (language check unavailable)" : "Green on trade mark, .com and language"}</h2><div class="win">${ev.winners.map(n=>`<span>${esc(n)}</span>`).join("")}</div>` : `<h2>No name is green on all three — see the cards above</h2>`)
       + `<p class="close">Domains are checked against our own copy of the .com list, never at a registrar.</p>`;
     $("after").hidden = false; updateReport();
     return; }

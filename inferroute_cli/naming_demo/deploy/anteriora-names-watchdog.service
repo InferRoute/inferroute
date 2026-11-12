@@ -1,0 +1,6 @@
+[Unit]
+Description=Anteriora naming: keep this host's tunnel connector up only while the backend is healthy
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/anteriora-names/current/inferroute_cli/naming_demo/deploy/watchdog.sh

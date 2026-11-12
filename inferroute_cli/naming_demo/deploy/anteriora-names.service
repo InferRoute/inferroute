@@ -1,0 +1,22 @@
+[Unit]
+Description=Anteriora naming backend (local only; reached through the tunnel connector)
+After=network-online.target
+
+[Service]
+Type=simple
+# Installed copy only (never a workspace path): see install.sh.
+WorkingDirectory=%h/.local/share/anteriora-names/current
+# NAMES_SECRET (shared with the site proxy) and, when present, INFERROUTE_API_KEY for generation.
+EnvironmentFile=%h/.config/anteriora-names/env
+ExecStart=/usr/bin/python3 -m inferroute_cli.naming_demo.server \
+  --index %h/.local/share/anteriora-names/data/index.sqlite \
+  --domains %h/.local/share/anteriora-names/data \
+  --host 127.0.0.1 --port 8770 --workers 3 --daily 0 --secret-env NAMES_SECRET
+MemoryMax=2G
+ReadOnlyPaths=%h/.local/share/anteriora-names
+Restart=always
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target

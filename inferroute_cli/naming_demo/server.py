@@ -384,6 +384,11 @@ class App:
         except sqlite3.Error:
             meta = {}
         self.data = meta.get("data_date", "")
+        h = hashlib.sha256()
+        with open(index, "rb") as f:  # once at start (~3 s): /health names the exact index this host serves
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                h.update(chunk)
+        self.index_sha = h.hexdigest()
         con.close()
         self.domains = Domains(domains)
         self.pool = mp.get_context("fork").Pool(workers, initializer=_init_worker, initargs=(index,))
@@ -467,6 +472,18 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(body)
+        elif u.path == "/health":
+            # Used by the host watchdog: a hung pool or a missing zone must take this host out of the tunnel.
+            ok, why = True, []
+            try:
+                self.app.pool.apply_async(_tm, (("Healthcheck", ["9"], []),)).get(timeout=15)
+            except Exception as e:  # noqa: BLE001
+                ok = False
+                why.append("tm:" + type(e).__name__)
+            if self.app.domains.taken("google", "com") is not True:
+                ok = False
+                why.append("com")
+            self._json({"ok": ok, "why": why, "index": self.app.index_sha, "data": self.app.data}, 200 if ok else 503)
         elif u.path == "/config":
             self._json({"record": bool(self.record) and q.get("rec") == self.record})
         elif u.path == "/runs" and self.record and q.get("rec") == self.record:

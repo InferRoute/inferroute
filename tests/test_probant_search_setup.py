@@ -26,6 +26,23 @@ def signed_reference(key, *, policy=SHA, valid_to=None):
     return {**body, "sig": key.sign(R.canonical(body)).hex()}, pub
 
 
+AUTO = object()
+
+
+def _fake_proof(ref_bytes):
+    return b"test-proof " + hashlib.sha256(ref_bytes).hexdigest().encode()
+
+
+def _fake_log_check(ref_bytes, proof):
+    if proof is None:
+        raise SS.SetupError("the published reference has no proof that it is on InferRoute's public log, so it was "
+                            "not used. Nothing was changed.")
+    if proof != _fake_proof(ref_bytes):
+        raise SS.SetupError("the published reference is not proven to be on InferRoute's public log (test), so it "
+                            "was not used. Nothing was changed.")
+    return {"leaf_index": 0, "tree_size": 1}
+
+
 @pytest.fixture
 def site(tmp_path, monkeypatch):
     key = Ed25519PrivateKey.generate()
@@ -34,6 +51,7 @@ def site(tmp_path, monkeypatch):
              "/reference/current.json.ots": b"\x00OpenTimestamps\x00 synthetic proof",
              "/probant/search.json": json.dumps({"enclave": "http://203.0.113.9:8000"}).encode(),
              f"/policy/{SHA}.rego": REGO}
+    files["/reference/current.json.proof"] = AUTO      # the proof for whatever reference is served (a test may swap it)
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -41,6 +59,8 @@ def site(tmp_path, monkeypatch):
 
         def do_GET(self):
             body = files.get(self.path)
+            if body is AUTO:
+                body = _fake_proof(files["/reference/current.json"])
             if body is None:
                 self.send_error(404)
                 return
@@ -53,6 +73,10 @@ def site(tmp_path, monkeypatch):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setattr(SS, "SITE", f"http://127.0.0.1:{server.server_address[1]}")
     monkeypatch.setattr(SS, "pinned_key", lambda: pub)
+    # These references are signed by a throwaway key, so no real log proof can exist for them: the log check is
+    # replaced by one that accepts exactly _fake_proof(bytes) and refuses anything else the way the real one does.
+    # The real check is tested on the production reference and its real proof (test_reference_on_public_log.py).
+    monkeypatch.setattr(SS, "check_on_public_log", _fake_log_check)
     monkeypatch.setenv("INFERROUTE_HOME", str(tmp_path / "ir"))
     yield files, key, pub, tmp_path
     server.shutdown()
@@ -330,3 +354,25 @@ def test_a_newer_reference_replaces_the_held_one(site):
     files["/reference/current.json"] = newer
     SS.setup(now=NOW)
     assert (tmp / "ir/confidential/reference.json").read_bytes() == newer
+
+
+def test_a_reference_without_a_log_proof_is_not_used_and_nothing_changes(site):
+    files, key, pub, tmp_path = site
+    del files["/reference/current.json.proof"]
+    with pytest.raises(SS.SetupError, match="public log"):
+        SS.setup()
+    assert not (tmp_path / "ir/confidential/search.json").exists()
+
+
+def test_a_log_proof_for_other_bytes_is_not_used(site):
+    files, key, pub, tmp_path = site
+    files["/reference/current.json.proof"] = _fake_proof(b"another reference")
+    with pytest.raises(SS.SetupError, match="not proven"):
+        SS.setup()
+    assert not (tmp_path / "ir/confidential/search.json").exists()
+
+
+def test_the_proof_is_kept_beside_the_reference(site):
+    files, key, pub, tmp_path = site
+    SS.setup()
+    assert (tmp_path / "ir/confidential/reference.json.proof").read_bytes() == _fake_proof(files["/reference/current.json"])

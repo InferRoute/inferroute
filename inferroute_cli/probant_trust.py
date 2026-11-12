@@ -211,6 +211,9 @@ def search_is_inferroutes(search: Optional[dict]) -> bool:
 TDX_OUTSIDE_CHECK = ("An independent check is under way: InferRoute has asked outside security researchers to "
                      "rebuild the image and check the live machine. No one outside InferRoute has completed it yet.")
 TDX_CAVEAT = "All of this holds unless Intel's chip or Google's firmware were compromised."
+TDX_PUBLIC_LOG = ("InferRoute's signed list of the machines this computer accepts is on a public log that independent "
+                  "witnesses countersign, so it cannot have been shown to you alone; this computer refuses a list "
+                  "that is not there.")
 
 
 def search_is_tdx(search: Optional[dict]) -> bool:
@@ -285,6 +288,9 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
                 "encrypted to this computer alone. Not InferRoute, not Google, can read it on the way or inside.",
                 "The machine's software is written to keep no copy of your text; you can read that in the "
                 "published source.",
+                # 0.9.138: setup refuses a reference that is not on the log (probant_search_setup.check_on_public_log),
+                # so on this client every TDX search ran under a reference that was publicly logged.
+                TDX_PUBLIC_LOG,
                 TDX_OUTSIDE_CHECK,
                 TDX_CAVEAT]
     else:

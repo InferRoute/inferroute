@@ -327,3 +327,10 @@ def test_the_outside_check_is_said_to_be_requested_not_done():
 def test_an_azure_offer_keeps_the_azure_wording():
     t = _text(T.build(_receipt(), _search(reference={"ok": True}), ADDRESS))
     assert "SEV-SNP on Microsoft Azure" in t and "Intel TDX on Google Cloud" not in t
+
+
+def test_the_tdx_panel_says_the_reference_is_on_the_public_log():
+    t = _text(T.build(_receipt(), _tdx(reference={"ok": True}), ADDRESS))
+    assert T.TDX_PUBLIC_LOG in t
+    t = _text(T.build(_receipt(), _search(reference={"ok": True}), ADDRESS))
+    assert T.TDX_PUBLIC_LOG not in t

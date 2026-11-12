@@ -58,6 +58,36 @@ def pinned_key() -> str:
     raise SetupError("this copy of Anteriora does not carry InferRoute's publication key; reinstall it")
 
 
+def _trust_file(name: str) -> bytes:
+    """A file this program was released with (inferroute_cli/trust in a wheel, docs/trust in a checkout)."""
+    here = Path(__file__).resolve().parent
+    for p in (here / "trust" / name, here.parent / "docs" / "trust" / name):
+        try:
+            return p.read_bytes()
+        except OSError:
+            continue
+    raise SetupError(f"this copy of Anteriora does not carry its pinned {name}; reinstall it")
+
+
+def check_on_public_log(ref_bytes: bytes, proof: Optional[bytes]) -> Dict[str, Any]:
+    """The reference must be on the public Sigsum log, logged with InferRoute's transparency key and cosigned by
+    the pinned witness quorum. Checked offline against the proof served beside the reference: the client never
+    contacts the log. A reference that is not there could have been shown to this computer alone, so it is refused.
+    Returns what the proof established (log index, tree size, witness timestamps)."""
+    from . import transparency as tl
+    if proof is None:
+        raise SetupError("the published reference has no proof that it is on InferRoute's public log, so it was "
+                         "not used. Nothing was changed.")
+    try:
+        keys = tl.parse_ssh_ed25519_pubkeys(_trust_file("transparency-submitter.pub").decode())
+        policy = tl.parse_policy(_trust_file("sigsum-policy.txt").decode())
+        res = tl.verify_proof(ref_bytes, proof.decode("ascii", "strict"), keys, policy)
+    except (tl.SigsumError, UnicodeDecodeError) as exc:
+        raise SetupError("the published reference is not proven to be on InferRoute's public log "
+                         f"({exc}), so it was not used. Nothing was changed.") from None
+    return {"leaf_index": getattr(res, "leaf_index", None), "tree_size": getattr(res, "size", None)}
+
+
 def _get(url: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "probant-setup-search"})
     try:
@@ -150,6 +180,10 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     if not ok:
         raise SetupError("the published reference is not signed by InferRoute's publication key, so it was not used "
                          f"({why}). Nothing was changed.")
+    # ON THE PUBLIC LOG (0.9.138). A validly signed reference shown to this computer alone, and never to anyone
+    # else, is the attack a transparency log closes: every reference an Anteriora accepts is one anybody can see.
+    proof = _get_optional(f"{SITE}/reference/current.json.proof")
+    check_on_public_log(ref_bytes, proof)
     # NO ROLLBACK. An older reference is still validly signed, and it may still accept images a newer one retired.
     # Whoever serves the site (InferRoute included) could hand it back, so a reference older than the one already
     # kept here, which verifies under the same key, is refused and the kept one stays in force.
@@ -207,6 +241,7 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
     # a stale one beside a newer reference is removed (it would be ignored anyway: it names another base).
     ext = _get_optional(f"{SITE}/reference/current.json.index-extension.json")
     ext_path = Path(str(ref_path) + ".index-extension.json")
+    proof_path = Path(str(ref_path) + ".proof")      # kept beside the reference, so a record can show it later
     wanted = {"enclave": enclave, "reference": str(ref_path), "reference_key": key, "provisioned_by": MARK}
     if policy_path is not None:
         wanted["policy_file"] = str(policy_path)
@@ -218,8 +253,10 @@ def setup(*, force: bool = False, now: Optional[dt.datetime] = None) -> Tuple[st
         wanted["wake"] = wake
     unchanged = (existing == wanted and ref_path.is_file() and ref_path.read_bytes() == ref_bytes
                  and (ots_path.read_bytes() == ots if ots is not None and ots_path.is_file() else ots is None and not ots_path.exists())
-                 and (ext_path.read_bytes() == ext if ext is not None and ext_path.is_file() else ext is None and not ext_path.exists()))
+                 and (ext_path.read_bytes() == ext if ext is not None and ext_path.is_file() else ext is None and not ext_path.exists())
+                 and proof_path.is_file() and proof_path.read_bytes() == proof)
     _atomic(ref_path, ref_bytes)
+    _atomic(proof_path, proof)
     if ots is not None:
         _atomic(ots_path, ots)
     elif ots_path.exists():

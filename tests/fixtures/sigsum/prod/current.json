@@ -1,0 +1,291 @@
+{
+ "image_source": "https://inferroute.ai/build/REBUILD.md",
+ "index_delegates": [
+  {
+   "key": "38ac9cf8a2e4806488072e6d2616310a08f4ae7f1eaea87b00ed682ba1860f20",
+   "retired": true,
+   "retired_at": "2026-11-08T16:59:30Z",
+   "scope": "index_manifest_sha256",
+   "valid_from": "2026-11-08T09:39:39Z",
+   "valid_to": "2027-11-08T09:39:39Z"
+  },
+  {
+   "images": [
+    "b66410f27bf865bd0200fd9fdb30a3621c0cde77ffc26867595dafd01250c2811478e71e3f1895154d5aa28a752a923a"
+   ],
+   "key": "38ac9cf8a2e4806488072e6d2616310a08f4ae7f1eaea87b00ed682ba1860f20",
+   "retired": true,
+   "retired_at": "2026-11-09T20:53:51Z",
+   "scope": "index_manifest_sha256",
+   "valid_from": "2026-11-08T16:59:30Z",
+   "valid_to": "2027-11-08T16:59:30Z"
+  },
+  {
+   "images": [
+    "b66410f27bf865bd0200fd9fdb30a3621c0cde77ffc26867595dafd01250c2811478e71e3f1895154d5aa28a752a923a",
+    "6bf116b3aef2624285081317fe3a8ab108393f322b2b4295035e48359b82db009f84b0af12b3aa9de0fce87acf0cabfe"
+   ],
+   "key": "38ac9cf8a2e4806488072e6d2616310a08f4ae7f1eaea87b00ed682ba1860f20",
+   "retired": true,
+   "retired_at": "2026-11-10T17:15:23Z",
+   "scope": "index_manifest_sha256",
+   "valid_from": "2026-11-09T20:53:51Z",
+   "valid_to": "2027-11-09T20:53:51Z"
+  },
+  {
+   "images": [
+    "b66410f27bf865bd0200fd9fdb30a3621c0cde77ffc26867595dafd01250c2811478e71e3f1895154d5aa28a752a923a",
+    "6bf116b3aef2624285081317fe3a8ab108393f322b2b4295035e48359b82db009f84b0af12b3aa9de0fce87acf0cabfe",
+    "5dacc62b4872159bf130921ff22dd6761a29d640da4f792294eef4085ed3341823d9099c8e898f2c424331394630d0ca"
+   ],
+   "key": "38ac9cf8a2e4806488072e6d2616310a08f4ae7f1eaea87b00ed682ba1860f20",
+   "scope": "index_manifest_sha256",
+   "valid_from": "2026-11-10T17:15:23Z",
+   "valid_to": "2027-11-10T17:15:23Z"
+  }
+ ],
+ "index_manifest_sha256": [
+  {
+   "valid_to": "2026-09-28T00:00:28Z",
+   "value": "5404ee037c8b4bfbef5d0e3168828b4e42101e709b5cfa93c776083dd168c9ee"
+  },
+  {
+   "valid_from": "2026-09-28T00:00:28Z",
+   "valid_to": "2026-09-29T17:35:00Z",
+   "value": "5404ee037c8b4bfbef5d0e3168828b4e42101e709b5cfa93c776083dd168c9ee"
+  },
+  {
+   "valid_from": "2026-09-29T17:35:00Z",
+   "valid_to": "2026-10-01T11:02:25Z",
+   "value": "4d9c239b596946c5a41f502b259e944fcdf992e4ac3b511bdb4f2cbf71fde777"
+  },
+  {
+   "valid_from": "2026-10-01T11:02:25Z",
+   "valid_to": "2026-10-20T07:40:00Z",
+   "value": "4d9c239b596946c5a41f502b259e944fcdf992e4ac3b511bdb4f2cbf71fde777"
+  },
+  {
+   "valid_from": "2026-10-20T07:40:00Z",
+   "valid_to": "2026-11-01T08:17:26Z",
+   "value": "4d9c239b596946c5a41f502b259e944fcdf992e4ac3b511bdb4f2cbf71fde777"
+  },
+  {
+   "valid_from": "2026-11-01T08:17:26Z",
+   "valid_to": "2026-11-10T20:16:30Z",
+   "value": "313d27408964ebb8c05729b5c499c7b4e49612ea9a00e26c4d80d7b63ebc3078"
+  },
+  {
+   "valid_from": "2026-11-07T12:13:03Z",
+   "valid_to": null,
+   "value": "ecf31fe7fb16d9a54521a885fa59f18fab5dafedb78f6a7004ddde0bd9156cad"
+  }
+ ],
+ "min_tcb": [
+  {
+   "retired": false,
+   "valid_from": "2026-09-29T10:09:18Z",
+   "valid_to": null,
+   "value": {
+    "Genoa": {
+     "blSPL": 10,
+     "snpSPL": 23,
+     "ucodeSPL": 84
+    }
+   }
+  }
+ ],
+ "model_manifest_sha256": [
+  {
+   "valid_to": "2026-09-28T00:00:28Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-09-28T00:00:28Z",
+   "valid_to": "2026-09-29T17:35:00Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-09-29T17:35:00Z",
+   "valid_to": "2026-10-01T11:02:25Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-10-01T11:02:25Z",
+   "valid_to": "2026-10-20T07:40:00Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-10-20T07:40:00Z",
+   "valid_to": "2026-11-01T08:17:26Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-11-01T08:17:26Z",
+   "value": "7f31cb3ff91adaea83cad2511e2da943727b4e3314a05f56b40eaf7c3f60d8c1"
+  },
+  {
+   "valid_from": "2026-11-08T16:59:30Z",
+   "valid_to": null,
+   "value": "25662a8c27d8ae660697a3bf107e9020161b7b406aa6ed6514f522d00ca706a4"
+  }
+ ],
+ "policy_sha256": [
+  {
+   "valid_to": "2026-09-28T00:00:28Z",
+   "value": "80c5424db0241225be93f16c8a866f880c690722d29b7729d83d75e22cff899e"
+  },
+  {
+   "valid_from": "2026-09-28T00:00:28Z",
+   "valid_to": "2026-09-29T17:35:00Z",
+   "value": "011b8b1a0798342e65bb11476587b2b648626888e30ac55f1645ecf91d38598a"
+  },
+  {
+   "valid_from": "2026-09-29T17:35:00Z",
+   "valid_to": "2026-10-01T11:02:25Z",
+   "value": "0d6cc3602c85d26c9f5913458bf292d048e7a0138930478d281e6b3a288d98cb"
+  },
+  {
+   "valid_from": "2026-10-01T11:02:25Z",
+   "valid_to": "2026-10-20T07:40:00Z",
+   "value": "84d10c88aa81ff821e7bff29632d2c00d8dafdb1e05b9491e6fe9e08d4876b47"
+  },
+  {
+   "valid_from": "2026-10-20T07:40:00Z",
+   "valid_to": "2026-11-01T08:17:26Z",
+   "value": "76cbab3d5d939977da2c4a738166bf08a5bcd5e186c378a0c7161f231e1c5503"
+  },
+  {
+   "valid_from": "2026-11-01T08:17:26Z",
+   "value": "1d9226136966a17acdf170dfa732ab845f7fe1efe040c7e05775eba32b8991e6"
+  }
+ ],
+ "published_at": "2026-11-10T20:16:30Z",
+ "schema": "inferroute.enclave-reference/1",
+ "source": "InferRoute engagement letter and signed release notes",
+ "tdx_image_sha384": [
+  {
+   "loads": [
+    "aa5275d9ccb1cb3aae2bd3673ad2dbac2fb2fa1ec4683355fbe0e524773ca829cd9c88a6395724c9fc2483dbbfaef455"
+   ],
+   "retired": false,
+   "valid_from": "2026-10-31T18:39:19Z",
+   "valid_to": "2026-11-01T12:38:30Z",
+   "value": "62816ddd32567518aabae14d1b65597615ef3d348827da6888885d5613ebab124703cc0866776119e36a82abaad89839"
+  },
+  {
+   "loads": [
+    "aa5275d9ccb1cb3aae2bd3673ad2dbac2fb2fa1ec4683355fbe0e524773ca829cd9c88a6395724c9fc2483dbbfaef455"
+   ],
+   "retired": false,
+   "valid_from": "2026-11-01T12:38:30Z",
+   "valid_to": "2026-11-05T07:03:31Z",
+   "value": "d331910e9fd55e69cfbbe5c3b2f3f1bea975ef3b074ec379236affa34697e4bd2b5865a6f8f88de90470f91846fdbf5b"
+  },
+  {
+   "loads": [
+    "aa5275d9ccb1cb3aae2bd3673ad2dbac2fb2fa1ec4683355fbe0e524773ca829cd9c88a6395724c9fc2483dbbfaef455"
+   ],
+   "retired": false,
+   "valid_from": "2026-11-05T07:03:31Z",
+   "valid_to": "2026-11-05T13:53:53Z",
+   "value": "9af92645d255bfc34b2607b9bd3d17fb68559c6520669bd85d541329efbdfaee2e9268b41e2cc5cd1c933102d91638ed"
+  },
+  {
+   "loads": [
+    "aa5275d9ccb1cb3aae2bd3673ad2dbac2fb2fa1ec4683355fbe0e524773ca829cd9c88a6395724c9fc2483dbbfaef455"
+   ],
+   "retired": true,
+   "retired_at": "2026-11-10T20:16:30Z",
+   "valid_from": "2026-11-05T13:53:53Z",
+   "valid_to": null,
+   "value": "072b2c2a9624b104edfd2b4578f6fdf523e732a70e1f16e2d89a0a8ecea508bdcb7711ec165b63281e05be385a9635e6"
+  },
+  {
+   "loads": [
+    "6a1c6ea23c5bdb01d52ad01b0dd1d6032d01a02820ea7e7ef4208e6095565012a869f00baef089058cb93601d24b3eb5"
+   ],
+   "retired": true,
+   "retired_at": "2026-11-10T20:16:30Z",
+   "valid_from": "2026-11-07T12:13:03Z",
+   "valid_to": null,
+   "value": "85b03fe8b267fe40d3340eafc67bf8af85943733f781069a469722256af4ecb585c1a2089187f202320a9e7bdc6e8bb9"
+  },
+  {
+   "loads": [
+    "6a1c6ea23c5bdb01d52ad01b0dd1d6032d01a02820ea7e7ef4208e6095565012a869f00baef089058cb93601d24b3eb5"
+   ],
+   "models_tree": true,
+   "retired": true,
+   "retired_at": "2026-11-10T20:16:30Z",
+   "valid_from": "2026-11-08T16:59:30Z",
+   "valid_to": null,
+   "value": "b66410f27bf865bd0200fd9fdb30a3621c0cde77ffc26867595dafd01250c2811478e71e3f1895154d5aa28a752a923a"
+  },
+  {
+   "loads": [
+    "6a1c6ea23c5bdb01d52ad01b0dd1d6032d01a02820ea7e7ef4208e6095565012a869f00baef089058cb93601d24b3eb5"
+   ],
+   "models_tree": true,
+   "retired": false,
+   "valid_from": "2026-11-09T20:53:51Z",
+   "valid_to": null,
+   "value": "6bf116b3aef2624285081317fe3a8ab108393f322b2b4295035e48359b82db009f84b0af12b3aa9de0fce87acf0cabfe"
+  },
+  {
+   "loads": [
+    "6a1c6ea23c5bdb01d52ad01b0dd1d6032d01a02820ea7e7ef4208e6095565012a869f00baef089058cb93601d24b3eb5"
+   ],
+   "models_tree": true,
+   "retired": false,
+   "valid_from": "2026-11-10T17:15:23Z",
+   "valid_to": null,
+   "value": "5dacc62b4872159bf130921ff22dd6761a29d640da4f792294eef4085ed3341823d9099c8e898f2c424331394630d0ca"
+  }
+ ],
+ "tdx_rtmr0": [
+  {
+   "retired": false,
+   "shape": "c3-standard-22",
+   "valid_from": "2026-10-31T18:39:19Z",
+   "valid_to": null,
+   "value": "9712a4dc14072ba9b136a6025745c0dbf9b562c37a49df188953bbf681f413a2f2f9847231a790eb3049ceada11de819"
+  },
+  {
+   "retired": false,
+   "shape": "c3-standard-8-lssd",
+   "valid_from": "2026-10-31T18:39:19Z",
+   "valid_to": null,
+   "value": "ed17cf17256e8412dc30e2b5c5cba72340f70d7203cd975423343948e3e476b14540d6c0e9a5131fb92e883d0f888f59"
+  },
+  {
+   "retired": false,
+   "shape": "c3-standard-8",
+   "valid_from": "2026-11-01T07:17:59Z",
+   "valid_to": null,
+   "value": "9d8f479e900b215fe26743d9eaf51cd963d156a5d7678ef7ac1a55a8fed9ea4077c2c1e1e6a6e3a6f7b5ac09ba1ef49e"
+  },
+  {
+   "retired": false,
+   "shape": "c3-standard-22-nodisk",
+   "valid_from": "2026-11-01T12:38:30Z",
+   "valid_to": null,
+   "value": "2a9c656f4f2414cb13900bcd1d765935c0a29cef125cda259dc2cbd69605216dd605a81291195eba5939d53b5eef048f"
+  },
+  {
+   "retired": false,
+   "shape": "c3-standard-8-nodisk",
+   "valid_from": "2026-11-05T07:03:31Z",
+   "valid_to": null,
+   "value": "2377fd2a773a1b859e97c82736680ce66ffe56bd09702ce20e0180b0f8a3278a2d521236c53355dca644b6055bc8a626"
+  },
+  {
+   "retired": false,
+   "shape": "c3-standard-44-nodisk",
+   "valid_from": "2026-11-07T12:13:03Z",
+   "valid_to": null,
+   "value": "7725239a1df9e1c0d274ebd3f1955912816329d96839727101a6e69bdad8aeb9c10dd395e3a7f1dab991ff3e8012aa88"
+  }
+ ],
+ "publication_key": "748e4c8e4ca334c5f804ffcdbd85f2dca29713e71c1c7c9c0737e3b898e2e204",
+ "sig": "d313c9804ed8af51780b5fe6fe84267a3f69434a139b1a9146af31db1d4b34d170da1855bb1590254b3937498a9ce92f5b9ead5ccafa77b0bd77317b35cf1f04"
+}

@@ -249,7 +249,7 @@ def test_page_offices_unindexed(page):                                       # s
 
 def test_page_older_root_draws_nothing(page):                                # state (f)
     assert page["old_root"] == {"section": None, "note": None, "ranks": [], "marks": 0, "keyLinks": 0,
-                                "families": [], "barTitles": []}
+                                "families": [], "barTitles": [], "side": []}
 
 
 def test_page_unlabelled(page):
@@ -419,7 +419,9 @@ def test_a_deep_leg_with_only_an_asian_list_is_not_counted_as_finding_nothing():
     """A leg that ran no US/EP/WO ranking but whose separate list has rows is "asia_only": labelled so on the page and
     in the terminal, and in neither the "found nothing" count nor the next round's gaps."""
     ts, js = TS.read_text(), JS.read_text()
-    assert ('const asiaOnly = !r.sp.docs.length && Boolean(r.sp.mainNotRun) && Boolean(r.sp.asia?.docs.length);'
+    # (a leg whose only rows are in a side list, e.g. FR, is "asia_only" too: it ran no ranking and found something)
+    assert ('const asiaOnly = !r.sp.docs.length && Boolean(r.sp.mainNotRun)\n'
+            '\t\t\t\t\t&& (Boolean(r.sp.asia?.docs.length) || (r.sp.side ?? []).some((sl) => sl.docs.length > 0));'
             in ts)
     assert 'status: r.sp.docs.length ? "ok" : asiaOnly ? "asia_only" : "empty",' in ts
     assert 'const empty = results.filter((x) => x.status === "empty");' in ts      # asia_only is not in it

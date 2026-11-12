@@ -27,8 +27,8 @@ const plainRefusal = (s: string) => s;
 type Theme = any;
 `;
 fs.writeFileSync(mod, `${stubs}${src.slice(a, b)}\nconst isInferRoutes = (_v: any) => false;\n${src.slice(p0, p1)}\n${src.slice(t0, t1)}\n${src.slice(h0, h1)}\n`
-  + `export { asiaOf, asiaLines, searchProofOf, hitsText, renderSearchProof };\n`);
-const { asiaOf, asiaLines, searchProofOf, hitsText, renderSearchProof } = await import(`file://${mod}`);
+  + `export { asiaOf, asiaLines, sideLines, searchProofOf, hitsText, renderSearchProof };\n`);
+const { asiaOf, asiaLines, sideLines, searchProofOf, hitsText, renderSearchProof } = await import(`file://${mod}`);
 const theme = { fg: (_c: string, t: string) => t, bold: (t: string) => t, bg: (_c: string, t: string) => t };
 fs.unlinkSync(mod);
 
@@ -38,6 +38,12 @@ const hit = (i: number, extra: Record<string, unknown> = {}) => ({
 const asia = (offices: string[], hits: unknown[]) =>
   ({ kind: "dense_only", expanded: false, reranked: false, offices, k: 20, hits });
 const mainHit = { key: "US-1-A", score: 1, title: "Main" };
+const frHit = (i: number, extra: Record<string, unknown> = {}) => ({
+  key: `FR-200${i}-A1`, score: 0.7 - i / 100, scores: { dense: 0.7 }, legs: ["semantic"], source: "patent",
+  year: 1994, date_known: true, title: `Echangeur ${i}`, text: `Echangeur ${i}. An abstract.`, ...extra });
+const side = (offices: string[], hits: unknown[]) =>
+  ({ kind: "dense_only", exact: true, expanded: false, reranked: false, offices, k: 20, rows: 1000, hits });
+const IFR = "patent1m-asia-2611-fr-2611+epwo+usall@89000000";
 // Each case is (the sealed result, the office scope the REQUEST was sent with, the answering index id). mainNotRun is
 // derived from the request only; a result never carries a top-level `offices` the engine attested.
 const I2611 = "patent1m-asia-2611+epwo+usall@88844190";
@@ -59,6 +65,25 @@ const cases: Record<string, Case> = {
   unindexed: { r: { hits: [], offices_unindexed: ["DE"], asia: asia([], []) }, req: ["DE"] },
   old_root: { r: { hits: [mainHit] }, index: "patent1m-epwo+usall@30398469" },
   unlabelled: { r: { hits: [mainHit], asia: { kind: "dense_only", expanded: true, reranked: false, offices: ["CN"], k: 20, hits: [hit(1)] } } },
+  // side lists (FR first): the root asia-2611-fr-2611 carries both separate lists
+  fr_hits: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], [hit(1)]),
+             side_lists: { fr: side(["FR"], [frHit(1, { family_members: ["FR-2001-A1", "FR-2001-B1"], family_members_total: 2 }),
+                                              frHit(2, { family_members: ["FR-2002-A1"], family_members_total: 1 })]) } }, index: IFR },
+  fr_not_requested: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN"], []), side_lists: { fr: side([], []) } },
+                      req: ["US", "CN"], index: IFR },
+  fr_empty: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], []), side_lists: { fr: side(["FR"], []) } },
+              index: IFR },
+  fr_only: { r: { hits: [], offices_unindexed: [], asia: asia([], []), side_lists: { fr: side(["FR"], [frHit(1)]) } },
+             req: ["FR"], index: IFR },
+  // a root with a side list and no Asian layer: the FR list alone, nothing about Asia
+  fr_no_asia: { r: { hits: [mainHit], side_lists: { fr: side(["FR"], [frHit(1)]) } }, index: "patent1m-epwo+fr-2611+usall@30500000" },
+  side_unknown: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN"], [hit(1)]),
+                  side_lists: { de: side(["DE"], [{ ...frHit(1), key: "DE-1-A" }]) } }, index: IFR },
+  fr_no_exact: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN"], [hit(1)]),
+                 side_lists: { fr: { ...side(["FR"], [frHit(1)]), exact: undefined } } }, index: IFR },
+  // both unlabelled: the sentence is said once
+  both_unlabelled: { r: { hits: [mainHit], asia: { kind: "dense_only", expanded: true, reranked: false, offices: ["CN"], k: 20, hits: [hit(1)] },
+                     side_lists: { fr: { ...side(["FR"], [frHit(1)]), reranked: true } } }, index: IFR },
 };
 const out: Record<string, unknown> = {};
 for (const [name, c] of Object.entries(cases)) {
@@ -67,7 +92,8 @@ for (const [name, c] of Object.entries(cases)) {
   const { notes, rows } = asiaLines(p, undefined, index);
   const verdict = { ok: true, steps: [], enclave: { index_snapshot: index }, statement: { hits_n: (c.r.hits as unknown[]).length }, result: c.r };
   const sp = searchProofOf(verdict, "search", undefined, c.req);
-  out[name] = { part: p, notes, rows, docKeys: sp.docs.map((d: { key: string }) => d.key), spAsia: sp.asia ?? null,
+  out[name] = { part: p, notes, rows, side: sideLines(p), spSide: sp.side ?? null,
+                docKeys: sp.docs.map((d: { key: string }) => d.key), spAsia: sp.asia ?? null,
                 model: hitsText(verdict, "Search 1", new Map(), c.req),
                 terminal: renderSearchProof(sp, true, theme).lines, terminalFolded: renderSearchProof(sp, false, theme).lines };
 }

@@ -30,12 +30,13 @@ const el = (tag, cls, ...children) => {
   }
   return n;
 };
-const mk = new Function("el", `${src.slice(r0, r1)}\n${block}\n return { asiaSection, mainNotRunNote, familyOf };`)(el);
+const mk = new Function("el", `${src.slice(r0, r1)}\n${block}\n return { asiaSection, mainNotRunNote, familyOf, sideSections };`)(el);
 
 const text = (n) => !n ? "" : n.text !== undefined ? n.text : (n.children || []).map(text).join(" ");
 const find = (n, pred, acc = []) => { if (n && n.tag) { if (pred(n)) acc.push(n); for (const c of n.children) find(c, pred, acc); } return acc; };
 
 const hit = (i, extra = {}) => ({ key: `CN-10${i}-A`, year: 2019, title: `Cooling plate ${i}`, score: 0.9 - i / 100, ...extra });
+const frHit = (i, extra = {}) => ({ key: `FR-200${i}-A1`, year: 1994, title: `Echangeur ${i}`, score: 0.7 - i / 100, ...extra });
 const states = {
   with_hits: { asia: { offices: ["CN", "JP", "KR", "TW"], k: 20,
                        docs: [hit(1, { family: ["CN-101-A", "JP-2001-A", "KR-3-B"], familyTotal: 3 }),
@@ -50,6 +51,16 @@ const states = {
   unindexed_two: { asia: { offices: ["CN", "JP", "KR", "TW"], k: 20, docs: [hit(1)] }, officesUnindexed: ["DE", "FR"] },
   old_root: {},
   unlabelled: { asiaUnlabelled: true },
+  // side lists (FR first), as ir-attested.ts hands them over in `details.side`
+  fr_hits: { asia: { offices: ["CN"], k: 20, docs: [hit(1)] },
+             side: [{ name: "fr", offices: ["FR"], k: 20,
+                      docs: [frHit(1, { family: ["FR-2001-A1", "FR-2001-B1"], familyTotal: 4 }), frHit(2)] }] },
+  fr_not_requested: { asia: { offices: ["CN"], k: 20, docs: [] }, side: [{ name: "fr", offices: [], k: 20, docs: [] }] },
+  fr_empty: { side: [{ name: "fr", offices: ["FR"], k: 20, docs: [] }] },
+  fr_only: { asia: { offices: [], k: 20, docs: [] }, side: [{ name: "fr", offices: ["FR"], k: 20, docs: [frHit(1)] }], mainNotRun: ["FR"] },
+  side_unknown: { side: [{ name: "de", offices: ["DE"], k: 20, docs: [frHit(1)] }], sideUnlabelled: true },
+  side_unlabelled: { sideUnlabelled: true },
+  both_unlabelled: { asiaUnlabelled: true, sideUnlabelled: true },
 };
 const out = {};
 for (const [name, d] of Object.entries(states)) {
@@ -63,6 +74,13 @@ for (const [name, d] of Object.entries(states)) {
     keyLinks: sec ? find(sec, (n) => /key-link/.test(n.className)).length : 0,
     families: sec ? find(sec, (n) => n.className === "year" && /in this family/.test(text(n))).map((n) => [text(n), n.title]) : [],
     barTitles: sec ? find(sec, (n) => n.className === "relbar").map((n) => n.title) : [],
+    side: mk.sideSections(d).map((x) => ({
+      section: text(x).replace(/\s+/g, " ").trim(),
+      ranks: find(x, (n) => n.className === "rank").map(text),
+      marks: find(x, (n) => /\bmarks\b/.test(n.className)).length,
+      keyLinks: find(x, (n) => /key-link/.test(n.className)).length,
+      families: find(x, (n) => n.className === "year" && /in this family/.test(text(n))).map((n) => [text(n), n.title]),
+    })),
   };
 }
 console.log(JSON.stringify(out));

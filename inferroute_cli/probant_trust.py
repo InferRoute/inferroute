@@ -259,6 +259,15 @@ def search_item(search: Optional[dict], date_bound: str = "", mode: str = "matte
                          "it was not checked and nothing was sent. Searches can run again once it answers and "
                          "passes its checks; use \"Check the machines again\" to look."],
                 "technical": []}
+    if not search.get("ok") and isinstance(search.get("gate_refusal"), dict):
+        # REFUSED BY INFERROUTE'S SEARCH SERVICE (the gate in front of the machine): an account, permit or service
+        # answer, not a check of the machine. Never "could not be verified" (ir_search_gate).
+        return {"key": "search", "state": OFF, "title": "Patent search",
+                "summary": "Not available right now, nothing was sent to it.",
+                "points": [str(search.get("refusal") or "InferRoute's search service did not let the search through.")],
+                "more": ["This is InferRoute's search service answering, not a check of the search machine: the "
+                         "machine itself is checked before every search, and nothing is sent unless it passes."],
+                "technical": technical}
     if not search.get("ok"):
         return {"key": "search", "state": FAIL, "title": "Patent search",
                 "summary": "Could not be verified, so no search will be sent.",

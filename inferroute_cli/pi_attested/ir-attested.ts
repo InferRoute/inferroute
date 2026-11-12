@@ -213,6 +213,19 @@ interface SearchVerdict {
 	statement?: { hits_n?: number; outcome?: string; refusal?: string; search_seconds?: number; pipeline_version?: string };
 	result?: { hits?: { key: string; year?: number; title?: string; score?: number }[]; claim_boundary?: string; candidates?: number;
 		asia?: unknown; offices_unindexed?: unknown; offices?: unknown; side_lists?: unknown };
+	// Set by ir_search_gate when InferRoute's search service (the gate in front of the machine) refused: an account,
+	// permit or service answer, never a verification of the machine. `refusal` then holds the sentence to show.
+	gate_refusal?: { status?: number; code?: string; final?: boolean; path?: string };
+}
+
+// A refusal from InferRoute's search service, said as what it is. Never "did not verify": the machine was not
+// judged, and the person is told what to do (sign in, take a new unit, wait) rather than that something is unsafe.
+// search_unavailable on the offer is not here: the verdict calls that "nothing answered", and it reads as offline.
+function gateRefusalError(v: SearchVerdict): string | null {
+	if (!v.gate_refusal) return null;
+	const why = String(v.refusal ?? "").trim() || "InferRoute's search service did not let the search through.";
+	return `InferRoute's search service refused this search: ${why} This is about the account or the service, not `
+		+ "about the search machine's checks. Do not search again now: tell the user what it says.";
 }
 
 interface SearchProof {
@@ -484,7 +497,9 @@ function sideLines(p: AsiaPart, titleMax?: number, indexId?: string): { notes: s
 function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict, requestOffices?: string[]): SearchProof {
 	return {
 		ok: out.ok && phase !== "declined",
-		refusal: phase === "declined" ? "the user declined to send a sealed query" : String(out.refusal ?? ""),
+		refusal: phase === "declined" ? "the user declined to send a sealed query"
+			: out.gate_refusal ? `InferRoute's search service refused this search: ${String(out.refusal ?? "")}`
+			: String(out.refusal ?? ""),
 		testRoots: out.test_roots === true,
 		ours: isInferRoutes(out) || Boolean(checked && out.ok && isInferRoutes(checked)
 			&& out.enclave?.host_data === checked.enclave?.host_data && out.enclave?.lifetime_id === checked.enclave?.lifetime_id),
@@ -652,6 +667,7 @@ function searchIsOffline(refusal: string): boolean {
 
 function plainRefusal(refusal: string): string {
 	const r = refusal.toLowerCase();
+	if (r.startsWith("inferroute's search service")) return refusal;
 	if (["did not answer", "unreachable", "connection", "timed out", "timeout"].some((m) => r.includes(m))) {
 		return "the search machine isn't answering; nothing was sent";
 	}
@@ -1870,6 +1886,8 @@ export default function (pi: ExtensionAPI) {
 		if (!verified.ok) {
 			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
 			if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);
+			const gate = gateRefusalError(verified);
+			if (gate) throw new Error(gate);
 			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
 		}
 		const e = verified.enclave ?? {};
@@ -1890,6 +1908,8 @@ export default function (pi: ExtensionAPI) {
 		searchStatus(ctx, sp);
 		pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
 		if (!out.ok) {
+			const gate = gateRefusalError(out);
+			if (gate) throw new Error(gate);
 			const why = String(sp.refusal ?? "");
 			// The two refusals a professional will actually meet, said in their own terms rather than as codes.
 			if (why.includes("date_out_of_bound")) {
@@ -1925,6 +1945,8 @@ export default function (pi: ExtensionAPI) {
 		if (!verified.ok) {
 			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, vp);
 			if (searchOffline(verified)) throw new Error(SEARCH_OFFLINE_ERROR);
+			const gate = gateRefusalError(verified);
+			if (gate) throw new Error(gate);
 			throw new Error(`the search enclave did not verify (${vp.refusal}); nothing was sent`);
 		}
 		const e = verified.enclave ?? {};
@@ -1956,6 +1978,8 @@ export default function (pi: ExtensionAPI) {
 		disclosure.write();
 		if (!out.ok) {
 			pi.appendEntry<SearchProof>(SEARCH_PROOF_ENTRY, sp);
+			const gate = gateRefusalError(out);
+			if (gate) throw new Error(gate);
 			throw new Error(`the sealed search was refused (${sp.refusal})`);
 		}
 		searchNo += 1;

@@ -676,7 +676,10 @@ def cmd_proof(spec: str) -> int:
         t.add_row(Text("✓" if st.get("ok") else "✗", style="spring_green3" if st.get("ok") else "red"),
                   Text(str(st.get("step", "")), style="bold"), Text(str(st.get("detail", "")), style="grey58"))
     console.print(t)
-    if not live.get("ok"):
+    if not live.get("ok") and live.get("gate_refusal"):
+        # InferRoute's search service answered for the machine (ir_search_gate): not a check of the machine.
+        console.print(Text(f"  Not checked now: InferRoute's search service said: {live.get('refusal')}", style="bold"))
+    elif not live.get("ok"):
         console.print(Text(f"  Not verified: {live.get('refusal')}", style="bold red"))
     console.print(Text("\nEvery line above was computed on this computer. The record you export carries the same "
                        "evidence, and its verifier re-checks it without trusting InferRoute.\n", style="grey58"))

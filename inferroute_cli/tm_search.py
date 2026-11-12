@@ -24,6 +24,7 @@ registers are not in it).
 from __future__ import annotations
 
 import array
+import bisect
 import functools
 import math
 import datetime as dt
@@ -306,6 +307,8 @@ ATTRIBUTION = {
 }
 # Said beside the results wherever a register's data cannot show something a reader would assume (pi-attested, 11 Nov).
 CAUTION = {
+    # measured on release-bench-v1.1 (dev, 12 Nov): with AU on, FR top-10 -0.11 pt, EU -0.41 pt (CIs include 0)
+    "AU": "Searching Australian marks too can push a few French or EU earlier marks below the tenth place.",
     "IT": "UIBM's data does not show later cancellations or surrenders, so a mark shown as registered may no longer "
           "be in force.",
 }
@@ -415,6 +418,24 @@ class Index:
             conn = self._local.db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
         return conn
 
+    # A search that leaves optional registers out sees the index as if they were not in it: their ids are cut from
+    # every posting list (lists are in id order, and the build gives each register one span), and the totals that
+    # weigh rarity and scale the candidate caps count only the marks searched. So a French founder's results with
+    # Australian marks in the file are exactly those without them (pi-attested, 12 Nov).
+    def _view(self) -> Tuple[List[Tuple[int, int]], int]:
+        return getattr(self._local, "view", None) or ([], 0)
+
+    def _cut(self, a: array.array) -> array.array:
+        ranges, _ = self._view()
+        for first, last in ranges:
+            lo, hi = bisect.bisect_left(a, first), bisect.bisect_right(a, last)
+            if lo < hi:
+                a = a[:lo] + a[hi:]
+        return a
+
+    def _total(self) -> int:
+        return int(self.meta.get("marks", 0) or 0) - self._view()[1]
+
     def _ids(self, key: str) -> array.array:
         row = self.db.execute("SELECT ids FROM post WHERE key = ?", (key,)).fetchone()
         a = array.array("I")
@@ -422,7 +443,7 @@ class Index:
             a.frombytes(row[0])
             if self.meta.get("byteorder") != __import__("sys").byteorder:
                 a.byteswap()
-        return a
+        return self._cut(a)
 
     def _left_out(self, also: Sequence[str]) -> Tuple[set, List[Tuple[int, int]]]:
         """The optional registers not asked for, and the id ranges that hold only their marks (an index whose
@@ -454,10 +475,17 @@ class Index:
         flat, key, ws = compact(name), sound(name), [w for w in words(name) if len(w) >= 2]
         left_codes, left_ranges = self._left_out(also)
         outside = (lambda i: not any(a <= i <= b for a, b in left_ranges)) if left_ranges else None
+        self._local.view = (left_ranges, sum(b - a + 1 for a, b in left_ranges))
+        try:
+            return self._search(name, flat, key, ws, classes, limit, also, left_codes, outside)
+        finally:
+            self._local.view = None
+
+    def _search(self, name, flat, key, ws, classes, limit, also, left_codes, outside) -> Dict[str, Any]:
         if not flat:
             raise ValueError("type a name with at least one letter or digit")
         votes: Counter = Counter()
-        total = max(1, int(self.meta.get("marks", 1)))
+        total = max(1, self._total())
         for i in self._ids("c:" + flat):
             votes[i] += 100
         # A whole word of the name counts 40 when it is rare enough to say something ("quench" is in a few hundred
@@ -520,7 +548,7 @@ class Index:
         return {"name": name, "classes": sorted(wanted, key=int), "data_date": self.meta.get("data_date", ""),
                 "sources": "; ".join(s for s in (self.meta.get("sources") or "").split("; ")
                                      if not any(k in s for k, c, _ in OPTIONAL_REGISTERS if c in left_codes)),
-                "marks_searched": int(self.meta.get("marks", 0)) - self._count(left_codes),
+                "marks_searched": self._total() if not left_codes else int(self.meta.get("marks", 0)) - self._count(left_codes),
                 **coverage(self.meta.get("sources", ""), [c for c in also if c not in left_codes]),
                 "also": sorted(c for c in also if c not in left_codes),
                 "attribution": [_fill(ATTRIBUTION[c], self.meta.get("sources", ""), k) for k, c, _ in OPTIONAL_REGISTERS
@@ -540,16 +568,26 @@ class Index:
                 a.frombytes(blob)
                 if swap:
                     a.byteswap()
-                out.append((k, a))
+                a = self._cut(a)
+                if a:
+                    out.append((k, a))
         return out
 
     def _prefixed(self, prefix: str, max_keys: int = 200) -> List[Tuple[str, array.array]]:
         """The ids under every key starting with `prefix` ("w:magim" finds MAGIMIX), unless too many keys do."""
-        rows = self.db.execute("SELECT key FROM post WHERE key >= ? AND key < ? LIMIT ?",
-                               (prefix, prefix + "￿", max_keys + 1)).fetchall()
-        if len(rows) > max_keys:
-            return []
-        return self._keys(k for (k,) in rows)
+        if not self._view()[0]:
+            rows = self.db.execute("SELECT key FROM post WHERE key >= ? AND key < ? LIMIT ?",
+                                   (prefix, prefix + "￿", max_keys + 1)).fetchall()
+            if len(rows) > max_keys:
+                return []
+            return self._keys(k for (k,) in rows)
+        out: List[Tuple[str, array.array]] = []     # keys holding only left-out marks do not count toward max_keys
+        for (k,) in self.db.execute("SELECT key FROM post WHERE key >= ? AND key < ?", (prefix, prefix + "￿")):
+            got = self._keys([k])
+            out += got
+            if len(out) > max_keys:
+                return []
+        return out
 
     def _word_neighbours(self, flat: str, ws: List[str]) -> set:
         """Marks found word by word, which the fragment vote misses for a long name or a one-letter change:
@@ -595,19 +633,23 @@ class Index:
 
     def _word_vote(self, n: int) -> float:
         """40 for a word in up to 1,000 marks, falling with how common it is (about 19 at 100,000)."""
-        total = max(1, int(self.meta.get("marks", 1)))
+        total = max(1, self._total())
         return 40 * min(1.0, math.log(1 + total / max(1, n)) / math.log(1 + total / 1000))
 
     def _rarity(self, ws: Iterable[str]) -> Dict[str, float]:
         """How much each word says, from 0 (in every mark) to 1 (in one): log(marks / marks with the word), scaled.
         Remembered per index, since the same words come back search after search."""
-        cache = self.__dict__.setdefault("_rarity_cache", {})
+        caches = self.__dict__.setdefault("_rarity_caches", {})
+        cache = caches.setdefault(tuple(self._view()[0]), {})       # one per set of registers searched
         todo = [w for w in set(ws) if w not in cache]
-        total = max(2, int(self.meta.get("marks", 2)))
+        total = max(2, self._total())
         for chunk in range(0, len(todo), 900):
             part = todo[chunk:chunk + 900]
-            got = dict(self.db.execute(f"SELECT key, length(ids) / 4 FROM post WHERE key IN ({','.join('?' * len(part))})",
-                                       ["w:" + w for w in part]))
+            if self._view()[0]:
+                got = {k: len(a) for k, a in self._keys(["w:" + w for w in part])}
+            else:
+                got = dict(self.db.execute(f"SELECT key, length(ids) / 4 FROM post WHERE key IN ({','.join('?' * len(part))})",
+                                           ["w:" + w for w in part]))
             for w in part:
                 cache[w] = math.log(total / max(1, got.get("w:" + w, 1))) / math.log(total)
         # Read before the cache is trimmed: trimmed first, every word of the search that crossed the limit came back as
@@ -620,7 +662,7 @@ class Index:
 
     def _cap(self, n: int) -> int:
         """A candidate cap for this index: n on an index of up to CAPS_SIZED_ON marks, in proportion above it."""
-        return int(n * max(1.0, int(self.meta.get("marks", 0) or 0) / CAPS_SIZED_ON))
+        return int(n * max(1.0, self._total() / CAPS_SIZED_ON))
 
     def _shortlist(self, ids: List[int], votes: Counter, weight: float, n_grams: int) -> List[int]:
         """The candidates scored in full: those sharing the most of the name's sound fragments RELATIVE TO THEIR
@@ -806,6 +848,8 @@ def log_search(log_dir: Path, result: Dict[str, Any], session_id: Optional[str] 
              **{k: result.get(k) for k in ("name", "classes", "data_date", "sources", "marks_searched")},
              # Names and filings, so a page can count both; an entry without it predates grouping (one filing a hit).
              **({"filings": result["filings"]} if "filings" in result else {}),
+             # an optional register searched (AU, IT): what it costs the others, and its licence credit
+             **{k: result[k] for k in ("also", "cautions", "attribution") if result.get(k)},
              "hits": result.get("hits", [])[:LOGGED_HITS],
              "more": result.get("more", 0) + max(0, len(result.get("hits", [])) - LOGGED_HITS)}
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -828,7 +872,8 @@ def logged_searches(log_dir: Path) -> List[Dict[str, Any]]:
             e = _json.loads(line)
         except ValueError:
             continue
-        latest[(str(e.get("name") or "").strip(), tuple(e.get("classes") or []))] = e
+        # with and without an optional register (AU, IT) are two searches, not a repeat
+        latest[(str(e.get("name") or "").strip(), tuple(e.get("classes") or []), tuple(e.get("also") or []))] = e
     return list(latest.values())                       # file order is search order; a repeat keeps its first place
 
 

@@ -571,10 +571,13 @@ def test_like_accepts_a_document_an_earlier_session_returned():
           # 0.9.128: a key from a search's separate CN/JP/KR/TW list is refused with its own words (the real arrow)
           "const asiaKeys = new Set(['CN-5-A']);\n"
           + ts[ts.index("const asiaKeyRefusal = "):ts.index(";\n", ts.index("const asiaKeyRefusal = ")) + 2]
+          # 0.9.138: and a key from a side list (FR) by that list's name
+          + "const sideKeys = new Map([['FR-6-A1', 'French patent families']]);\n"
+          + ts[ts.index("const sideKeyRefusal = "):ts.index(";\n", ts.index("const sideKeyRefusal = ")) + 2]
           + "function resolve(params) {\n" + body + "\nreturn text; }\n"
           "const tryIt = (p) => { try { return resolve(p); } catch (e) { return 'ERR ' + e.message; } };\n"
           "console.log(JSON.stringify({ now: tryIt({ like: 'us-1-a1' }), before: tryIt({ like: 'EP-7-A1' }),"
-          " never: tryIt({ like: 'WO-9-A1' }), asia: tryIt({ like: 'cn-5-a' }) }));")
+          " never: tryIt({ like: 'WO-9-A1' }), asia: tryIt({ like: 'cn-5-a' }), fr: tryIt({ like: 'fr-6-a1' }) }));")
     r = subprocess.run([node, "--experimental-strip-types", "--input-type=module-typescript", "-e", js],
                        capture_output=True, text=True, timeout=60)
     if r.returncode != 0 and "input-type" in r.stderr:
@@ -588,6 +591,8 @@ def test_like_accepts_a_document_an_earlier_session_returned():
     assert "nothing was sent" in out["never"]
     assert out["asia"] == ("ERR CN-5-A is in a search's separate CN/JP/KR/TW list, not in a ranking. Those rows cannot "
                            "be opened or used as a 'like' seed here; nothing was sent. Tell the professional so.")
+    assert out["fr"] == ("ERR FR-6-A1 is in a search's separate list of French patent families, not in a ranking. Those "
+                         "rows cannot be opened or used as a 'like' seed here; nothing was sent. Tell the professional so.")
 
 
 def test_the_launcher_hands_the_matters_earlier_documents_to_the_extension(tmp_path, monkeypatch):

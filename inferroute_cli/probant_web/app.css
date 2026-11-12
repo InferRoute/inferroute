@@ -239,6 +239,8 @@ details.card:not([open]) > summary.card-head::before { content: "▸"; }
 .asia-list { border-top: 2px solid var(--line); margin-top: 4px; }
 .asia-list .asia-head { margin: 0; padding: 10px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .asia-doc { grid-template-columns: 32px 28px minmax(0, 1fr); }
+/* A side list (FR first): the same section shape, one per list, after the Asian one. */
+.side-list { margin-top: 0; }
 .card-head { flex-wrap: wrap; }
 .card-head .what { color: var(--accent); font-size: 13px; order: 3; flex-basis: 100%; }
 /* the head's third line: how the results overlap earlier searches, and your marking */

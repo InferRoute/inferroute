@@ -422,3 +422,119 @@ def test_the_relay_sends_the_permit_header_on_invoke_only_when_there_is_one_and_
     usage, invoke = seen
     assert "x-inferroute-permit" not in usage.headers and "permit" not in json.loads(usage.content)
     assert "x-inferroute-permit" not in invoke.headers
+
+
+# ───────────────────── cluster sessions (anteriora cluster) ─────────────────────
+# Henry's decision: a cluster session uses the reading's permit while that permit is live, otherwise one search unit.
+
+def _cluster(home):
+    from inferroute_cli import probant_cluster as P
+    src = home / "folder"
+    src.mkdir()
+    (src / "a.md").write_text("A jacket with coolant channels moulded between the cells. " * 5)
+    meta = P.stage(sorted(src.rglob("*.md")), "folder")
+    return meta["id"], P.path_of(meta["id"])
+
+
+def _round(d, monkeypatch, *, finds=0, seen=None):
+    """One cluster round through the real _cluster_round, with the launch faked to append `finds` findings."""
+    from inferroute_cli import probant_cluster as P
+
+    def fake_launch(args, agent="pi", probant=None):
+        if seen is not None:
+            seen.append(dict(probant))
+        doc = P.meta_of(d.name)["documents"][0]["name"]
+        n = len(P.candidates(d.name))
+        with (d / P.CANDIDATES).open("a") as fh:
+            for k in range(finds):
+                fh.write(json.dumps({"source": doc, "quote": "coolant channels moulded between the cells",
+                                     "title": f"finding {n + k}", "summary": "a jacket"}) + "\n")
+        return 0
+    monkeypatch.setattr("inferroute_cli.confidential.launch", fake_launch)
+    return S._cluster_round(d, "read", out={}, cwd=d, label="job")
+
+
+def test_a_cluster_session_carries_a_search_unit_when_the_run_holds_none(home, service, monkeypatch):
+    calls, state = service
+    ident, d = _cluster(home)
+    seen = []
+    _round(d, monkeypatch, finds=1, seen=seen)
+    permits = [b for p, b in calls if p == "/api/anteriora/permit"]
+    assert permits == [{"unit": "search", "sessionId": seen[0]["session_id"], "deviceId": B.device_id(),
+                        "kind": "reading", "intake_id": ident}]
+    rec = B.load_reading(ident, cluster=True)
+    assert seen[0]["permit"] == rec["permit"]["id"] and rec["permit"]["state"] == "delivered"
+    assert state["units"] == 0
+    # host-side, never in the cluster folder the sessions work in
+    assert not any("permit" in p.name for p in d.rglob("*"))
+
+
+def test_later_cluster_sessions_reuse_the_runs_live_permit(home, service, monkeypatch):
+    calls, _ = service
+    ident, d = _cluster(home)
+    seen = []
+    for _ in range(3):
+        _round(d, monkeypatch, finds=1, seen=seen)
+    assert [c[0] for c in calls].count("/api/anteriora/permit") == 1
+    assert len({s["permit"] for s in seen}) == 1 and len({s["session_id"] for s in seen}) == 3
+
+
+def test_a_cluster_round_that_found_nothing_gives_the_unit_back_and_the_next_takes_one(home, service, monkeypatch):
+    calls, state = service
+    ident, d = _cluster(home)
+    seen = []
+    _round(d, monkeypatch, finds=0, seen=seen)
+    assert state["units"] == 1 and "permit" not in B.load_reading(ident, cluster=True)
+    _round(d, monkeypatch, finds=1, seen=seen)
+    assert [c[0] for c in calls].count("/api/anteriora/permit") == 2 and seen[0]["permit"] != seen[1]["permit"]
+
+
+def test_a_cluster_run_past_its_permits_window_takes_a_new_unit(home, service, monkeypatch):
+    calls, _ = service
+    ident, d = _cluster(home)
+    old = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=B.ISSUED_HOURS + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    B.save_reading({"kind": "reading", "intake": ident, "cluster": True,
+                    "permit": {"id": "stale", "unit": "search", "state": "issued", "at": old}})
+    seen = []
+    _round(d, monkeypatch, finds=1, seen=seen)
+    assert seen[0]["permit"] != "stale" and [c[0] for c in calls].count("/api/anteriora/permit") == 1
+
+
+def test_cluster_workers_share_one_unit_taken_before_they_start(home, service, monkeypatch):
+    import subprocess
+    calls, state = service
+    ident, d = _cluster(home)
+    started = []
+
+    class FakeProc:
+        def __init__(self, argv, **kw):
+            started.append(B.load_reading(ident, cluster=True).get("permit"))
+
+        def wait(self):
+            return 0
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(S, "cmd_cluster", lambda *a, **k: 0)
+    assert S._cluster_workers(ident, home / "folder", 3, "", "", 0, total_jobs=5) == 0
+    assert len(started) == 3 and all(p and p["id"] == started[0]["id"] for p in started)
+    assert [c[0] for c in calls].count("/api/anteriora/permit") == 1
+    # No worker delivered (the fake ones did nothing): the unit taken for the run is given back.
+    assert state["units"] == 1 and "permit" not in B.load_reading(ident, cluster=True)
+
+
+def test_a_cluster_session_with_billing_off_carries_no_permit(home, monkeypatch):
+    monkeypatch.setenv("IR_ANTERIORA_BILLING", "0")
+    monkeypatch.setattr(B, "_post", lambda *a: (_ for _ in ()).throw(AssertionError("no call when off")))
+    ident, d = _cluster(home)
+    seen = []
+    _round(d, monkeypatch, finds=1, seen=seen)
+    assert "permit" not in seen[0]
+
+
+def test_a_cluster_on_an_empty_account_stops_before_launching(home, service, monkeypatch):
+    _, state = service
+    state["units"] = 0
+    ident, d = _cluster(home)
+    monkeypatch.setattr("inferroute_cli.confidential.launch",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not launch")))
+    with pytest.raises(S.ProbantError, match="No searches left"):
+        S._cluster_round(d, "read", out={}, cwd=d)

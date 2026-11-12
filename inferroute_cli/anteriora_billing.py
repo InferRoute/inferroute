@@ -17,8 +17,14 @@ A READING (a document or a repository read for proposals) has no matter: each re
 keyed by its intake id, and its permit is kept in the host-side intake record. It is delivered when the reading
 produced proposals or draft matters.
 
-The permit id also goes with the sealed session: a header on every request to the relay and a field in every
-usage report, so the gateway can see the session is covered by a unit and charge no AI credit for it.
+A CLUSTER run (`anteriora cluster`, many sealed sessions over one folder) is billed as one reading, keyed by its
+cluster id: every session of the run, workers and synthesis included, uses the run's permit while that permit is
+live (current_permit), and otherwise takes one search unit. Its record is kept host-side under
+confidential/cluster-permits/, never in the cluster folder, which the sessions work in.
+
+The permit id also goes with the sealed session: a header on the relay's gated routes (candidates, nonces,
+invoke) and nowhere else, so the gateway can see the session is covered by a unit and charge no AI credit for it.
+It is not in usage reports: the relay logs it on invoke rows only.
 
 What goes to the site: the unit type, the permit and the session id. Never the matter's name, title,
 disclosure or anything the founder wrote. The permit is kept in the host-side matter record, which the
@@ -239,15 +245,24 @@ def after_session(rec: Dict[str, Any], session_id: str, was_delivered: bool) -> 
 # A reading has no matter record, so its permit lives in the host-side intake record (outside the reading
 # session's write scope), one file per intake.
 
-def _reading_path(intake_id: str) -> Path:
+def _reading_path(intake_id: str, cluster: bool = False) -> Path:
+    if cluster:
+        import re
+        from . import probant as S
+        if not re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{6}", intake_id or ""):
+            raise S.ProbantError("no such cluster")
+        return S._irhome() / "confidential" / "cluster-permits" / f"{intake_id}.json"
     from . import probant_intake as I
     return I.authority_dir(intake_id) / "permit.json"
 
 
-def load_reading(intake_id: str) -> Dict[str, Any]:
+def load_reading(intake_id: str, cluster: bool = False) -> Dict[str, Any]:
+    """The reading's record: an intake's, or with `cluster` a cluster run's (one reading of a whole folder)."""
     rec: Dict[str, Any] = {"kind": "reading", "intake": intake_id}
+    if cluster:
+        rec["cluster"] = True
     try:
-        p = json.loads(_reading_path(intake_id).read_text(encoding="utf-8")).get("permit")
+        p = json.loads(_reading_path(intake_id, cluster).read_text(encoding="utf-8")).get("permit")
         if isinstance(p, dict):
             rec["permit"] = p
     except (OSError, ValueError, AttributeError):
@@ -256,7 +271,7 @@ def load_reading(intake_id: str) -> Dict[str, Any]:
 
 
 def save_reading(rec: Dict[str, Any]) -> None:
-    path = _reading_path(str(rec["intake"]))
+    path = _reading_path(str(rec["intake"]), bool(rec.get("cluster")))
     if "permit" not in rec:
         try:
             path.unlink()

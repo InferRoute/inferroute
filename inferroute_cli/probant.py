@@ -471,7 +471,7 @@ def _launch_with_permit(client: str, matter: str, rec: dict, ws: Path, probant: 
         raise ProbantError(str(e))
     if permit is not None:
         _write_record(client, matter, rec)
-        probant["permit"] = permit["id"]            # goes with the sealed session: header + usage reports
+        probant["permit"] = permit["id"]            # goes with the sealed session: the gated relay routes only
     probant["session_id"] = session_id
     rdir = records_dir(client, matter)
     before = {p.name for p in rdir.glob("*.searches.json")} if rdir.is_dir() else set()
@@ -1340,6 +1340,18 @@ def _cluster_workers(ident: str, src: Path, workers: int, reader: str, thinker: 
     import time
     n = max(1, min(workers, total_jobs))
     print(f"  {n} worker(s) over {total_jobs} job(s)", flush=True)
+    # ONE unit for the run, taken here before any worker starts: N workers starting together would each find no
+    # live permit and take a unit apiece. Each worker's sessions then reuse it (see _cluster_round).
+    from . import anteriora_billing as B
+    from .launch import _new_session_id
+    held_by = _new_session_id()
+    rec = B.load_reading(ident, cluster=True)
+    try:
+        permit = B.before_session(rec, held_by)
+    except B.BillingError as e:
+        raise ProbantError(str(e))
+    if permit is not None:
+        B.save_reading(rec)
     started = time.time()
     procs = []
     for i in range(n):
@@ -1353,6 +1365,11 @@ def _cluster_workers(ident: str, src: Path, workers: int, reader: str, thinker: 
                                       stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT))
     for p in procs:
         p.wait()
+    if permit is not None:
+        # Still issued under the id it was taken with: no worker delivered anything, so the unit goes back.
+        fresh = B.load_reading(ident, cluster=True)
+        if B.after_session(fresh, held_by, False):
+            B.save_reading(fresh)
     from . import probant_cluster as PF
     print(f"  workers finished in {time.time() - started:.0f}s; {len(PF.candidates(ident))} finding(s) kept, "
           f"{len(PF.unread(ident))} document(s) never read", flush=True)
@@ -1383,6 +1400,35 @@ def _cluster_round(cluster_dir: Path, instruction: str, out: dict, cwd: Path, mo
     # such check — nothing can verify that a theme is the right theme — so it gets the best judgement
     # available. Quality is spent where failure would be invisible.
     args = ["--model", model] if model else []
-    return confidential_mod.launch(args, agent="pi", probant={
-        "matter": f"cluster · {cluster_dir.name}", "mode": "intake", "web": True,
-        "oneshot": True, "instruction": instruction})
+    probant = {"matter": f"cluster · {cluster_dir.name}", "mode": "intake", "web": True,
+               "oneshot": True, "instruction": instruction}
+    # The permit (anteriora_billing): the run's own while it is live, otherwise one search unit. Without it a
+    # cluster session reached the relay with no permit at all, which the relay refuses (permit_missing).
+    import time
+    from . import anteriora_billing as B
+    from . import probant_cluster as PF
+    from .launch import _new_session_id
+    ident = cluster_dir.name
+    session_id = _new_session_id()
+    rec = B.load_reading(ident, cluster=True)
+    try:
+        permit = B.before_session(rec, session_id)
+    except B.BillingError as e:
+        raise ProbantError(str(e))
+    if permit is not None:
+        B.save_reading(rec)
+        probant["permit"] = permit["id"]
+    probant["session_id"] = session_id
+    started = time.time()
+    found_before = len(PF.candidates(ident)) if permit is not None else 0
+    rc = confidential_mod.launch(args, agent="pi", probant=probant)
+    if permit is not None:
+        # Delivered: the round added findings, or (synthesis) wrote the themes it was asked for.
+        written = Path(out.get("IR_CLUSTER_OUT") or "")
+        delivered = (len(PF.candidates(ident)) > found_before
+                     or (bool(out.get("IR_CLUSTER_OUT")) and written.is_file()
+                         and written.stat().st_mtime >= started))
+        fresh = B.load_reading(ident, cluster=True)
+        if B.after_session(fresh, session_id, delivered):
+            B.save_reading(fresh)
+    return rc

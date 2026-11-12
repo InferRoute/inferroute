@@ -189,7 +189,7 @@ def clean_names(xs) -> list[str]:
 # ---------------------------------------------------------------- a run
 class Run:
     def __init__(self, app, q: dict):
-        self.app, self.q = app, q
+        self.app, self.q = app, {k: v for k, v in q.items() if k not in ("device", "rec")}
         self.events, self.t0 = [], time.time()
         self.id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -210,7 +210,8 @@ class Run:
         countries = [c for c in q.get("countries", "EU,US").split(",") if c in COUNTRIES] or ["EU", "US"]
         registers = {r for c in countries for r in (COUNTRIES[c]["registers"] or [])}
         also = [COUNTRIES[c]["also"] for c in countries if COUNTRIES[c].get("also")]
-        unchecked = [COUNTRIES[c]["label"] for c in countries if COUNTRIES[c]["registers"] is None]
+        countries = [c for c in countries if COUNTRIES[c]["registers"] is not None] or ["EU", "US"]
+        unchecked = ["United Kingdom", "national marks in Germany, Spain, Italy and other countries"]
         given = [c for c in re.findall(r"\d+", q.get("classes", "")) if 1 <= int(c) <= 45][:5]
         yield self.emit({"t": "start", "run": self.id, "idea": idea, "own": own, "countries": countries,
                          "unchecked": unchecked})
@@ -250,7 +251,8 @@ class Run:
             names = cap_patterns(names)
         if not classes:
             classes = ["9", "42"]
-        yield self.emit({"t": "classes", "classes": classes, "why": why})
+        from .nice_classes import NICE
+        yield self.emit({"t": "classes", "classes": classes, "why": {c: NICE.get(int(c), "") for c in classes}})
         if not names:
             yield self.emit({"t": "error", "text": "No names came back. Try again."})
             return
@@ -299,7 +301,10 @@ class Run:
         top = ranked[:SHOW] if not own else ranked
         winners = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False
                    and results[n].get("lang_ok") is not False]
-        yield self.emit({"t": "final", "top": top, "winners": winners, "usage": self.usage, "model": MODEL})
+        both = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False]
+        rest = [n for n in ranked if n not in top]  # checked but not in the ten: shown folded, never silently dropped
+        yield self.emit({"t": "final", "top": top, "rest": rest, "winners": winners, "both": both,
+                         "usage": self.usage, "model": MODEL})
 
     def save(self):
         RUNS.mkdir(parents=True, exist_ok=True)
@@ -324,7 +329,7 @@ class App:
 
 class H(BaseHTTPRequestHandler):
     app: App = None
-    record = False
+    record = ""  # the recording token; empty = public build, no saving and no replay routes
 
     def log_message(self, *a):
         pass
@@ -360,6 +365,10 @@ class H(BaseHTTPRequestHandler):
         except (ValueError, AttributeError):
             self.send_error(400)
             return
+        ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or self.client_address[0]
+        if not DAILY.take(q.get("device", "")[:64] or ip, ip):
+            self._json({"error": "daily"}, 429)
+            return
         if not BUDGET.take():
             self._json({"error": "busy"}, 429)
             return
@@ -372,7 +381,7 @@ class H(BaseHTTPRequestHandler):
             pass
         finally:
             BUDGET.give()
-            if self.record:  # demo recording only; the web service is started without --record and keeps nothing
+            if self.record and q.get("rec") == self.record:  # only the recording session's own runs; public build: never
                 run.save()
             try:
                 self._send({"t": "done"})
@@ -383,21 +392,24 @@ class H(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         if u.path == "/":
-            body = (HERE / "page.html").read_bytes()
+            body = (HERE / "page.html").read_text()
+            if not (self.record and q.get("rec") == self.record):  # public build: the replay picker is not in the page at all
+                body = re.sub(r"<!--rec-->.*?<!--/rec-->", "", body, flags=re.S)
+            body = body.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(body)
         elif u.path == "/config":
-            self._json({"record": self.record})
-        elif u.path == "/runs" and self.record:
+            self._json({"record": bool(self.record) and q.get("rec") == self.record})
+        elif u.path == "/runs" and self.record and q.get("rec") == self.record:
             RUNS.mkdir(parents=True, exist_ok=True)
             rows = []
             for p in sorted(RUNS.glob("*.json"), reverse=True)[:30]:
                 d = json.loads(p.read_text())
                 rows.append({"id": d["id"], "idea": d["q"].get("idea", ""), "own": d["q"].get("own", "")})
             self._json(rows)
-        elif u.path == "/replay" and self.record:
+        elif u.path == "/replay" and self.record and q.get("rec") == self.record:
             rid = re.sub(r"[^0-9A-Z]", "", q.get("id", ""))
             p = RUNS / f"{rid}.json"
             if not rid or not p.exists():
@@ -444,6 +456,33 @@ class Budget:
 BUDGET = Budget()
 
 
+class Daily:
+    """Free tier: about `limit` runs a day per device, and 3x that per IP (a shared office or a cleared browser).
+    Kept in memory only, keyed by salted hashes, and forgotten at midnight UTC; no search text is involved."""
+
+    def __init__(self, limit: int = 3):
+        self.limit, self.lock, self.day, self.seen = limit, threading.Lock(), "", {}
+        self.salt = hashlib.sha256(str(time.time_ns()).encode()).hexdigest()
+
+    def take(self, device: str, ip: str) -> bool:
+        if self.limit <= 0:
+            return True
+        with self.lock:
+            day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if day != self.day:
+                self.day, self.seen = day, {}
+            keys = [("d", hashlib.sha256((self.salt + "d" + device).encode()).hexdigest(), self.limit),
+                    ("i", hashlib.sha256((self.salt + "i" + ip).encode()).hexdigest(), self.limit * 3)]
+            if any(self.seen.get(k, 0) >= lim for _, k, lim in keys):
+                return False
+            for _, k, _lim in keys:
+                self.seen[k] = self.seen.get(k, 0) + 1
+            return True
+
+
+DAILY = Daily()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--index", required=True)
@@ -454,12 +493,14 @@ def main():
     ap.add_argument("--record", action="store_true",
                     help="save every run for replay (demo recording only; never on the web service)")
     ap.add_argument("--per-hour", type=int, default=60)
+    ap.add_argument("--daily", type=int, default=3, help="free runs a day per device (0 = no cap)")
     a = ap.parse_args()
-    H.record = a.record
+    H.record = hashlib.sha256(str(time.time_ns()).encode()).hexdigest()[:16] if a.record else ""
     BUDGET.per_hour = a.per_hour
+    DAILY.limit = a.daily
     H.app = App(a.index, a.domains, a.workers)
     print(f"naming demo on http://{a.host}:{a.port}  ({H.app.marks:,} marks, zones: {sorted(H.app.domains.sets)}, "
-          f"record={a.record})",
+          f"record={'on: open /?rec=' + H.record if H.record else 'off'})",
           flush=True)
     ThreadingHTTPServer((a.host, a.port), H).serve_forever()
 

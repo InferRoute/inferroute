@@ -47,6 +47,17 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
 .close{color:var(--mute);margin-top:18px;font-size:15px}
 .badge{position:fixed;top:12px;right:12px;background:var(--amber);color:#111;font-weight:700;border-radius:10px;padding:8px 12px;font-size:14px;display:none;z-index:9}
 .note{font-size:13px;color:var(--mute);margin-top:10px}
+.warn a{color:inherit;text-decoration:underline;font-weight:600}
+.warn{border:1px solid color-mix(in srgb,var(--amber) 60%,transparent);background:color-mix(in srgb,var(--amber) 10%,transparent);border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:15px}
+.pick{margin-top:8px;font-size:13px;color:var(--mute);display:flex;gap:6px;align-items:center;cursor:pointer}
+.card.picked{border-color:var(--accent)}
+details.more{margin-top:12px;color:var(--mute)}details.more summary{cursor:pointer;margin-bottom:10px}
+.after{margin-top:26px;display:grid;gap:12px}
+.after .box h3{margin:0 0 8px;font-size:19px}
+.after label{display:flex;gap:8px;align-items:flex-start;margin:6px 0;cursor:pointer}
+.route{margin-top:10px;padding:12px;border-radius:10px;background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.btn{display:inline-block;margin-top:8px;background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 16px;font-weight:600;text-decoration:none;cursor:pointer}
+.btn[aria-disabled=true]{opacity:.55;cursor:default}
 .replays{margin-top:28px;font-size:13px;color:var(--mute)}
 .cta{margin-top:34px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
 .cta div{max-width:640px}
@@ -58,11 +69,13 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
 <main>
   <div class="brand">Anteriora</div>
   <h1>Name your startup in 60 seconds.</h1>
-  <p class="sub">Ten names, each checked against millions of trade marks and the .com registry.</p>
+  <p class="sub">Ten names, each screened against millions of trade marks, with a .com check.</p>
+  <div class="warn" role="note"><b>This page is not private.</b> Fine for a name — not for an invention. Describe what your product is for, not how it works. Inventors: search in the <a href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Anteriora app</a>, where your invention is searched on a sealed machine.</div>
   <div class="box">
     <textarea id="idea" placeholder="Describe your idea in a sentence or two…"></textarea>
     <div class="own"><input type="text" id="own" placeholder="…or check your own name(s), comma-separated"></div>
     <div class="row" id="countries"></div>
+    <div class="note">Not checked: United Kingdom, and national marks in Germany, Spain, Italy and other countries.</div>
     <div class="row">
       <span class="note">Tone</span>
       <select id="tone"><option>any</option><option>serious</option><option>playful</option><option>techy</option></select>
@@ -76,16 +89,31 @@ select{background:var(--panel);color:var(--text);border:1px solid var(--line);bo
   <div class="classes" id="cls"></div>
   <div class="grid" id="grid"></div>
   <div class="end" id="end"></div>
+  <div class="after" id="after" hidden>
+    <div class="box">
+      <h3>Full report on your shortlist</h3>
+      <div class="note" style="font-size:15px">For up to 5 names: every conflicting mark with its register, classes, status and why it is close, plus what to do next. <span id="picked">Tick "Add to my shortlist" on up to 5 cards.</span></div>
+      <a class="btn" id="buy" aria-disabled="true">Get the full report — €29</a>
+      <div class="note">Checkout is not switched on in this preview.</div>
+    </div>
+    <div class="box">
+      <h3>Is there an invention behind the name?</h3>
+      <label><input type="checkbox" id="q1"> It works in a way that is technically new (not just a new business idea)</label>
+      <label><input type="checkbox" id="q2"> It is a device, a process, a material or a method</label>
+      <label><input type="checkbox" id="q3"> I have already shown it publicly (online, at an event, to customers)</label>
+      <div class="route" id="route"></div>
+    </div>
+  </div>
 
   <div class="cta">
     <div><b>Inventing something?</b> Before you file, Anteriora searches the patents and papers that came before your invention.</div>
     <a class="ctab" href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Get the Anteriora app</a>
   </div>
-  <div class="replays" id="replays" style="display:none">Replay a saved run: <select id="runs"><option value="">—</option></select></div>
+  <!--rec--><div class="replays" id="replays" style="display:none">Replay a saved run: <select id="runs"><option value="">—</option></select></div><!--/rec-->
 </main>
 <script>
 const $ = id => document.getElementById(id);
-const C = {EU:"EU (incl. France)",US:"United States",AU:"Australia",UK:"United Kingdom",DE:"Germany (national)",ES:"Spain (national)",IT:"Italy (national)"};
+const C = {EU:"EU (incl. France)",US:"United States",AU:"Australia"};
 const on = new Set(["EU","US"]);
 for (const [k,v] of Object.entries(C)) {
   const c = document.createElement("span"); c.className = "chip" + (on.has(k) ? " on" : ""); c.textContent = v;
@@ -96,14 +124,16 @@ let es = null, t0 = 0, tick = null, cards = {}, unchecked = [], replayOf = null;
 function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
 function startTimer(){ t0 = performance.now(); clearInterval(tick); tick = setInterval(()=>{$("timer").textContent=((performance.now()-t0)/1000).toFixed(1)+"s"},100); }
 function stopTimer(ms){ clearInterval(tick); if (ms!=null) $("timer").textContent=(ms/1000).toFixed(1)+"s"; }
-function reset(){ $("grid").innerHTML=""; $("end").innerHTML=""; $("cls").textContent=""; $("phase").textContent=""; cards={}; }
+function reset(){ $("after").hidden = true; document.querySelectorAll("details.more").forEach(d=>d.remove()); $("grid").innerHTML=""; $("end").innerHTML=""; $("cls").textContent=""; $("phase").textContent=""; cards={}; }
 function light(cls, label){ return `<span class="l ${cls}"><i></i>${label}</span>`; }
 function shell(n){
   const el = document.createElement("div"); el.className = "card";
   const com = n.com===false ? light("green",".com probably free") : n.com===true ? light("red",".com taken") : light("",".com not checked");
   el.innerHTML = `<div class="nm">${esc(n.name)}</div>
     <div class="lights"><span class="l" data-tm><i></i>Trade mark: checking…</span>${com}<span class="l" data-lang><i></i>Quick language check…</span></div>
-    <div class="why"></div><div class="legal">Screening, not legal clearance.</div>`;
+    <div class="why"></div><div class="legal">Screening, not legal clearance.</div>
+    <label class="pick"><input type="checkbox" data-pick> Add to my shortlist</label>`;
+  el.querySelector("[data-pick]").onchange = e => { el.classList.toggle("picked", e.target.checked); updateReport(); };
   cards[n.name] = el; $("grid").appendChild(el);
 }
 function fill(ev){
@@ -114,9 +144,23 @@ function fill(ev){
   let why = "";
   for (const c of tm.conflicts) why += `<div>${esc(c.text)} · ${esc(c.register)} ${c.link?`<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.number)}</a>`:esc(c.number)} · ${esc(c.status)} · classes ${esc((c.classes||[]).join(", "))} — ${esc((c.reasons||[]).join("; "))}</div>`;
   if (tm.n_conflicts > tm.conflicts.length) why += `<div>+${tm.n_conflicts - tm.conflicts.length} more</div>`;
-  if (unchecked.length) why += `<div>${esc(unchecked.join(", "))}: not checked</div>`;
   el.querySelector(".why").innerHTML = why;
 }
+function updateReport(){
+  const picked = Object.entries(cards).filter(([n,el]) => el.querySelector("[data-pick]")?.checked).map(([n]) => n);
+  $("picked").textContent = picked.length ? `Shortlist: ${picked.slice(0,5).join(", ")}${picked.length>5?" (first 5 used)":""}.` : 'Tick "Add to my shortlist" on up to 5 cards.';
+}
+function updateRoute(){
+  const a = $("q1").checked, b = $("q2").checked, c = $("q3").checked;
+  let h;
+  if (a && b) h = `<b>This may be a patent matter.</b> Before you file anything, Anteriora's app searches the patents and papers that came before your invention.`
+     + (c ? ` Because you have already shown it publicly, speak to an IP adviser soon: in many countries, including in Europe, showing an invention before filing can stop a patent.` : ``)
+     + `<br><a class="btn" href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Get the Anteriora app</a>`;
+  else h = `<b>Probably not a patent matter: protect the name.</b> A trade mark protects the name; the full report shows what stands in its way.`;
+  $("route").innerHTML = h;
+}
+for (const id of ["q1","q2","q3"]) $(id).onchange = updateRoute;
+updateRoute();
 function handle(ev){
   if (ev.t==="replay"){ replayOf = ev.of; $("badge").textContent = "Replay of run " + ev.of.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/,"$1-$2-$3 $4:$5 UTC"); $("badge").style.display="block"; return; }
   if (ev.t==="start"){ unchecked = ev.unchecked||[]; startTimer(); $("phase").textContent="Starting…"; return; }
@@ -132,21 +176,25 @@ function handle(ev){
   if (ev.t==="final"){
     stopTimer(ev.ms); $("phase").textContent = "Done";
     const order = ev.top; const g = $("grid");
-    for (const n of Object.keys(cards)) if (!order.includes(n)) cards[n].remove();
     for (const n of order) { if (cards[n]) { g.appendChild(cards[n]); if (!ev.winners.includes(n)) cards[n].classList.add("dim"); } }
-    $("end").innerHTML = (ev.winners.length ? `<h2>Green on trade mark and .com</h2><div class="win">${ev.winners.map(n=>`<span>${esc(n)}</span>`).join("")}</div>` : `<h2>No name is green on both — see the cards above</h2>`)
-      + `<p class="close">Domains are checked against our own copy of the registry, never at a registrar.</p>`;
+    const rest = (ev.rest||[]).filter(n => cards[n]);
+    if (rest.length) { const d = document.createElement("details"); d.className = "more"; d.innerHTML = `<summary>${rest.length} more names we checked</summary><div class="grid"></div>`;
+      for (const n of rest) { cards[n].classList.add("dim"); d.querySelector(".grid").appendChild(cards[n]); } g.after(d); }
+    $("end").innerHTML = (ev.winners.length ? `<h2>Green on trade mark, .com and language</h2><div class="win">${ev.winners.map(n=>`<span>${esc(n)}</span>`).join("")}</div>` : `<h2>No name is green on all three — see the cards above</h2>`)
+      + `<p class="close">Domains are checked against our own copy of the .com list, never at a registrar.</p>`;
+    $("after").hidden = false; updateReport();
     return; }
   if (ev.t==="error"){ stopTimer(); $("phase").textContent = ev.text; return; }
   if (ev.t==="done"){ es && es.close(); $("go").disabled=false; loadRuns(); }
 }
 function open(url){ if (es) es.close(); reset(); $("go").disabled = true; es = new EventSource(url); es.onmessage = m => handle(JSON.parse(m.data)); es.onerror = () => { es.close(); $("go").disabled=false; stopTimer(); }; }
+function device(){ try { let d = localStorage.getItem("anteriora-names-device"); if (!d) { d = crypto.randomUUID(); localStorage.setItem("anteriora-names-device", d); } return d; } catch(e) { return ""; } }
 // A live run is a POST so the idea never sits in a URL (and so in no access log).
 async function post(body){
   if (es) es.close(); es = null; reset(); $("go").disabled = true;
   try {
     const r = await fetch("run", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
-    if (r.status === 429) { $("phase").textContent = "Busy right now — try again in a minute."; $("go").disabled=false; return; }
+    if (r.status === 429) { const j = await r.json().catch(()=>({})); $("phase").textContent = j.error === "daily" ? "That's today's 3 free searches. Come back tomorrow." : "Busy right now — try again in a minute."; $("go").disabled=false; return; }
     if (!r.ok || !r.body) throw new Error(r.status);
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) { const {value, done} = await rd.read(); if (done) break; buf += dec.decode(value, {stream:true});
@@ -158,12 +206,12 @@ async function post(body){
 $("go").onclick = () => {
   replayOf = null; $("badge").style.display="none";
   if (!$("idea").value.trim() && !$("own").value.trim()) { $("idea").focus(); return; }
-  post({idea:$("idea").value, own:$("own").value, tone:$("tone").value, classes:$("classes").value, countries:[...on].join(",")});
+  post({idea:$("idea").value, own:$("own").value, tone:$("tone").value, classes:$("classes").value, countries:[...on].join(","), device:device(), rec:REC});
 };
-$("runs").onchange = e => { if (e.target.value) open("replay?id=" + encodeURIComponent(e.target.value)); };
-let recording = false;
-async function loadRuns(){ if (!recording) return; try { const r = await (await fetch("runs")).json(); const s=$("runs"); s.innerHTML='<option value="">—</option>' + r.map(x=>`<option value="${esc(x.id)}">${esc(x.id)} · ${esc((x.own||x.idea).slice(0,50))}</option>`).join(""); } catch(e){} }
-fetch("config").then(r=>r.json()).then(c=>{ recording = !!c.record; $("replays").style.display = recording ? "" : "none"; loadRuns(); }).catch(()=>{});
+if ($("runs")) $("runs").onchange = e => { if (e.target.value) open("replay?rec=" + encodeURIComponent(REC) + "&id=" + encodeURIComponent(e.target.value)); };
+let recording = false; const REC = new URLSearchParams(location.search).get("rec") || "";
+async function loadRuns(){ if (!recording) return; try { const r = await (await fetch("runs?rec=" + encodeURIComponent(REC))).json(); const s=$("runs"); s.innerHTML='<option value="">—</option>' + r.map(x=>`<option value="${esc(x.id)}">${esc(x.id)} · ${esc((x.own||x.idea).slice(0,50))}</option>`).join(""); } catch(e){} }
+fetch("config?rec=" + encodeURIComponent(REC)).then(r=>r.json()).then(c=>{ recording = !!c.record && !!$("replays"); if ($("replays")) $("replays").style.display = recording ? "" : "none"; loadRuns(); }).catch(()=>{});
 </script>
 </body>
 </html>

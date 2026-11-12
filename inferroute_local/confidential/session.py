@@ -20,7 +20,8 @@ from typing import AsyncIterator, Callable
 
 import httpx
 
-from . import attest, builds, e2ee, translate
+from . import attest, billing_refusal as _billing, builds, e2ee, translate
+from .billing_refusal import BillingRefusal
 from .receipt import CLAIM_CONFIDENTIAL, CLAIM_OPENED, Receipt, _now, lane_preamble, receipts_dir
 from .transport import Transport
 
@@ -138,6 +139,10 @@ class ConfidentialSession:
         # Read by the continuity lane to decide whether another fleet would help; "" means no failure
         # since the last success.
         self.last_fault = ""
+        # A FINAL billing refusal from the relay (a 402 with a listed code): the account cannot use this session,
+        # and every later request would be refused the same way. Held so later requests are answered with the
+        # same sentence without being sent. Never evidence about an enclave (see billing_refusal).
+        self.billing_stop: BillingRefusal | None = None
 
     # ───────────────────────── open: verify + pin ─────────────────────────
 
@@ -155,6 +160,12 @@ class ConfidentialSession:
             await self._load_candidates()
         except attest.UnsupportedScheme as e:
             return self._refuse(str(e))
+        except BillingRefusal as e:
+            # The ACCOUNT was refused, not the fleet: raised so the caller stops, rather than returned as a refused
+            # receipt that would read as "this fleet could not be verified" and send it on to the next model.
+            self._billing_refused(e)
+            self._refuse(e.sentence)
+            raise
         except Exception as e:
             return self._refuse(f"could not obtain the enclave fleet's attestation evidence: {public_reason(e)}")
         e2 = self._last_e2
@@ -229,6 +240,17 @@ class ConfidentialSession:
         by_id = {str(i.get("instance_id")): i for i in (self._raw_evidence or [])}
         todo = [r for r in self.fleet.instances if r.verified and r.instance_id in keys and r.instance_id in by_id]
         await asyncio.gather(*(attest.verify_online(r, by_id[r.instance_id], self.fleet.nonce, self.http) for r in todo))
+
+    def _billing_refused(self, e: BillingRefusal) -> None:
+        """Record a billing refusal: its route, status and code only (the relay's words go to the person, not here).
+        A final one stops the session. Nothing is recorded against any instance or fleet."""
+        self.receipt.note("billing-refused", f"{e.route or '?'} {e.status} {e.code}")
+        if e.final:
+            self.billing_stop = e
+        try:
+            self.receipt.save()
+        except Exception:                         # noqa: BLE001 — bookkeeping never hides the refusal
+            pass
 
     def _refuse(self, why: str) -> Receipt:
         self.receipt.verdict, self.receipt.refusal = "refused", why
@@ -409,6 +431,8 @@ class ConfidentialSession:
                 self._absorb_pool(self._last_e2, fetched_at=fetched_at)
                 self.receipt.note("evidence-refetched", "no verified instance had nonces; fetched fresh evidence")
                 alt = self._choose_alt()
+            except BillingRefusal:
+                raise                              # the account's state, not a failed refetch: never read as one
             except Exception as e:
                 self.receipt.note("evidence-refetch-failed", public_reason(e))
         if alt is None:
@@ -452,19 +476,26 @@ class ConfidentialSession:
         verified on evidence hours old, and a lapse is discovered only by the next request, at the worst
         possible moment. Timer-driven rather than arrival-driven, deliberately.
         """
-        if self.receipt.verdict != "confidential":
+        if self.receipt.verdict != "confidential" or self.billing_stop is not None:
             return False
         if time.time() > self._verified_at + REVERIFY_EVERY_S:
             try:
                 await self._reverify()
             except Refused:
                 return False                      # _reverify has already written the verdict and reason
+            except BillingRefusal:
+                return False                      # recorded by _billing_refused; the evidence is not in question
         return self.receipt.is_confidential
 
     async def _reverify(self) -> None:
         try:
             await self._load_candidates()
             await self._online_pass(self._last_e2)
+        except BillingRefusal as e:
+            # Refused for billing, not unverifiable: it does NOT count towards the stale-evidence limit, and a
+            # final refusal stops the session with the relay's sentence (billing_stop).
+            self._billing_refused(e)
+            raise
         except Exception as e:
             # Failing open here was silent: the receipt got a note, the screen and the status line
             # kept showing the original verification time, and the session sealed on indefinitely.
@@ -537,9 +568,15 @@ class ConfidentialSession:
         returned as it is: a retry that loops would hide a real refusal."""
         c = self.receipt.counters
         for attempt in (1, 2):
+            if self.billing_stop is not None:
+                # Refused for good on this session's account: nothing is sent again, the same words are given.
+                return ("error", self.billing_stop.status, self.billing_stop.sentence, ACCOUNT_FAULT)
             try:
                 pinned, nonce = await self._take_nonce()
                 sealed = e2ee.seal_request(pinned.pubkey_b64, oai)
+            except BillingRefusal as e:            # a refused nonce listing or re-check: the account, not the fleet
+                self._billing_refused(e)
+                return ("error", e.status, e.sentence, ACCOUNT_FAULT)
             except Refused as e:
                 return ("error", 503, str(e), FLEET_FAULT)
             except Exception as e:
@@ -565,11 +602,24 @@ class ConfidentialSession:
                 return ("error", 502, f"the relay is unreachable: {public_reason(e)}", TRANSPORT_FAULT)
             if status == 200:
                 return ("ok", pinned, sealed, raw)
-            readable = True
+            readable, body = True, b""
             try:
-                detail = (await _drain(raw))[:400].decode("utf-8", "replace")
+                body = await _drain(raw)
+                detail = body[:400].decode("utf-8", "replace")
             except Exception as e:                       # the error body itself may be cut short
                 detail, readable = f"(body unreadable: {type(e).__name__})", False
+            # THE RELAY'S BILLING REFUSAL, read before any retry branch below: those blame and drop the instance
+            # (429/503) or retry on a relay code, and a billing refusal is evidence about no machine at all. The code
+            # comes from the header first (the drain above keeps 400 bytes for the log), then the body.
+            refusal = _billing.parse(status, headers, body[:4096], route="invoke")
+            if refusal is not None:
+                if attempt == 1 and refusal.retryable:
+                    self.receipt.note("billing-retry", f"the relay answered {status} {refusal.code}; waited "
+                                      "once and resent, on the same instance")
+                    await _billing.sleep(_billing.wait_for(refusal.retry_after))
+                    continue
+                self._billing_refused(refusal)
+                return ("error", refusal.status, refusal.sentence, ACCOUNT_FAULT)
             # SMOOTH RECOVERY: a transient provider failure gets one more go on a DIFFERENT verified
             # instance before the user is told anything. The failing instance is dropped from the pool
             # first, so the retry cannot land on the same machine that just failed — a retry to the same

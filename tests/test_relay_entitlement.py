@@ -250,3 +250,239 @@ def test_retry_after_reads_seconds_and_dates():
     import time
     d = BR.parse_retry_after(email.utils.formatdate(time.time() + 20, usegmt=True))
     assert 15 <= d <= 21
+
+
+# ───────────────────────── the session: refusals never blame an enclave ─────────────────────────
+
+from inferroute_local.confidential import session as S  # noqa: E402
+from tests.test_confidential_session import FakeCarrier, _session, world  # noqa: E402,F401
+
+_ONE = {"stream": False, "messages": [{"role": "user", "content": "x"}]}
+
+
+@pytest.fixture
+def blamed(monkeypatch):
+    """Every record_failure call — the cross-session blame list an instance must never land on for billing."""
+    calls = []
+    monkeypatch.setattr(S, "record_failure", lambda iid: calls.append(iid))
+    return calls
+
+
+def _refusing_invoke(carrier, answers):
+    """invoke answers from `answers` (status, headers, body) in turn, then the real enclave."""
+    real = carrier.invoke
+
+    async def invoke(**kw):
+        if not answers:
+            return await real(**kw)
+        carrier.calls.append((kw["instance_id"], kw["nonce"], kw["stream"]))
+        st, h, b = answers.pop(0)
+
+        async def one():
+            yield b
+        return st, h, one()
+    carrier.invoke = invoke
+
+
+def _billing_answer(status, code, message=None, *, header=True, body=True, retry_after=None):
+    h = {"content-type": "application/json"}
+    if header:
+        h[BR.HEADER] = code
+    if retry_after is not None:
+        h["Retry-After"] = str(retry_after)
+    err = {"type": "billing_error"}
+    if body:
+        err["code"] = code
+    if message is not None:
+        err["message"] = message
+    return status, h, json.dumps({"error": err}).encode()
+
+
+def _open(world):
+    carrier = FakeCarrier(world["enclaves"], nonces_per=5)
+    s = _session(carrier)
+    asyncio.run(s.open())
+    return carrier, s
+
+
+def _send(s, openai=False):
+    async def go():
+        st, _, it = await (s.chat_completions(_ONE) if openai else s.messages(_ONE))
+        return st, b"".join([c async for c in it]).decode()
+    return asyncio.run(go())
+
+
+def _no_blame(s, pinned_before, pool_before, blamed):
+    assert blamed == [], "an instance was blamed for a billing refusal"
+    assert s.pinned is not None and s.pinned.instance_id == pinned_before, "the pinned instance was dropped"
+    assert set(s._pool) == pool_before, "an instance was dropped from the pool"
+    assert not s.receipt.counters.get("errors_fleet")
+    assert s.last_fault == S.ACCOUNT_FAULT
+    assert not any(e["kind"] in ("upstream-402-unexpected", "upstream-retry") for e in s.receipt.events)
+
+
+@pytest.mark.parametrize("code", FINAL)
+def test_a_402_on_invoke_is_one_request_no_blame_and_the_relays_words(world, blamed, waits, code):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+    msg = f"Refused ({code}). Details at https://inferroute.ai/anteriora"
+    _refusing_invoke(carrier, [_billing_answer(402, code, msg)])
+    st, text = _send(s)
+    assert st == 402 and msg in text, text
+    assert len(carrier.calls) == 1 and waits == []
+    _no_blame(s, pinned, pool, blamed)
+    # Final: the session is stopped, and the next request is answered with the same words without being sent.
+    st2, text2 = _send(s, openai=True)
+    assert st2 == 402 and msg in text2 and len(carrier.calls) == 1
+
+
+@pytest.mark.parametrize("code", FINAL)
+def test_a_402_on_nonces_mid_session_stops_with_no_blame(world, blamed, code):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+    asked = []
+
+    async def refused(fleet_id):
+        asked.append(fleet_id)
+        raise BR.BillingRefusal(402, code, "No unit for this.", route="nonces")
+    carrier.nonces = refused
+    s._pool_expire = 0.0                               # force a nonce refresh on the next request
+    st, text = _send(s)
+    assert st == 402 and "No unit for this." in text
+    assert len(asked) == 1 and carrier.calls == []
+    _no_blame(s, pinned, pool, blamed)
+
+
+@pytest.mark.parametrize("code", FINAL)
+def test_a_402_on_candidates_at_open_raises_and_says_why(world, code):
+    carrier = FakeCarrier(world["enclaves"])
+    asked = []
+
+    async def refused(fleet_id, nonce):
+        asked.append(fleet_id)
+        raise BR.BillingRefusal(402, code, "", route="candidates")
+    carrier.candidates = refused
+    s = _session(carrier)
+    with pytest.raises(BR.BillingRefusal):
+        asyncio.run(s.open())
+    assert len(asked) == 1
+    assert s.receipt.verdict == "refused" and s.receipt.refusal == BR.FIXED[code]
+
+
+def test_a_refused_recheck_stops_the_session_and_is_not_stale_evidence(world, blamed):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+
+    async def refused(fleet_id, nonce):
+        raise BR.BillingRefusal(402, "permit_expired", "", route="candidates")
+    carrier.candidates = refused
+    s._verified_at = 0.0                               # the re-check is due
+    st, text = _send(s)
+    assert st == 402 and BR.FIXED["permit_expired"] in text
+    assert s._reverify_failures == 0, "a billing refusal was counted as a failed re-verification"
+    assert s.billing_stop is not None and s.receipt.verdict == "confidential"
+    _no_blame(s, pinned, pool, blamed)
+    assert asyncio.run(s.heartbeat()) is False
+
+
+def test_a_refused_evidence_refetch_is_not_noted_as_a_failed_refetch(world, blamed):
+    carrier, s = _open(world)
+
+    async def no_nonces(fleet_id):
+        return {"instances": [], "nonce_expires_in": 60}
+    carrier.nonces = no_nonces
+
+    async def refused(fleet_id, nonce):
+        raise BR.BillingRefusal(402, "out_of_credits", "", route="candidates")
+    carrier.candidates = refused
+    s._pool_expire, s._evidence_at = 0.0, 0.0
+    st, text = _send(s)
+    assert st == 402 and BR.FIXED["out_of_credits"] in text
+    assert not any(e["kind"] == "evidence-refetch-failed" for e in s.receipt.events)
+
+
+def test_rate_limited_on_invoke_waits_once_and_resends_to_the_same_instance(world, blamed, waits):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+    _refusing_invoke(carrier, [_billing_answer(429, "rate_limited", "Slow down.", retry_after=4)])
+    st, text = _send(s)
+    assert st == 200, text
+    assert waits == [4.0] and len(carrier.calls) == 2
+    assert carrier.calls[0][0] == carrier.calls[1][0] == pinned
+    assert blamed == [] and set(s._pool) == pool
+
+
+def test_rate_limited_twice_is_surfaced_without_blame(world, blamed, waits):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+    _refusing_invoke(carrier, [_billing_answer(429, "rate_limited", "Slow down.", retry_after=4)] * 2)
+    st, text = _send(s)
+    assert st == 429 and "Slow down." in text
+    assert waits == [4.0] and len(carrier.calls) == 2
+    _no_blame(s, pinned, pool, blamed)
+    assert s.billing_stop is None, "a busy refusal is not final"
+
+
+def test_billing_unavailable_drops_no_instance(world, blamed, waits):
+    carrier, s = _open(world)
+    pinned, pool = s.pinned.instance_id, set(s._pool)
+    _refusing_invoke(carrier, [_billing_answer(503, "billing_unavailable", retry_after=2)] * 2)
+    st, text = _send(s)
+    assert st == 503 and "Try again shortly" in text
+    assert waits == [2.0] and len(carrier.calls) == 2
+    _no_blame(s, pinned, pool, blamed)
+
+
+def test_on_invoke_a_code_in_the_header_alone_is_enough(world, blamed):
+    carrier, s = _open(world)
+    _refusing_invoke(carrier, [(402, {BR.HEADER: "permit_lane"}, b"refused")])
+    st, text = _send(s)
+    assert st == 402 and BR.FIXED["permit_lane"] in text and len(carrier.calls) == 1 and blamed == []
+
+
+def test_on_invoke_a_code_in_the_body_alone_is_classified_but_its_words_withheld(world, blamed):
+    carrier, s = _open(world)
+    _refusing_invoke(carrier, [_billing_answer(402, "out_of_credits", "Balance $0.0, send tao to 5FAKE", header=False)])
+    st, text = _send(s)
+    assert st == 402 and BR.FIXED["out_of_credits"] in text and "5FAKE" not in text
+    assert len(carrier.calls) == 1 and blamed == []
+
+
+@pytest.mark.parametrize("message", ["Pay at https://evil.example/now", "x" * 301])
+def test_an_inadmissible_message_on_invoke_becomes_our_sentence(world, message):
+    carrier, s = _open(world)
+    _refusing_invoke(carrier, [_billing_answer(402, "permit_used_up", message)])
+    st, text = _send(s)
+    assert st == 402 and BR.FIXED["permit_used_up"] in text and "evil.example" not in text and "x" * 301 not in text
+
+
+def test_an_unlisted_code_is_handled_as_any_other_upstream_answer(world):
+    carrier, s = _open(world)
+    _refusing_invoke(carrier, [_billing_answer(402, "permit_new_thing", "Hello from the relay")])
+    st, text = _send(s)
+    assert st == 402 and "Hello from the relay" not in text and "the provider answered 402" in text
+
+
+def test_a_legacy_402_with_a_bare_body_behaves_as_before(world, blamed):
+    """PR #99's shape: our own top-up notice as a bare string, no code. Unchanged: the generic status sentence, no
+    retry, no blame, and no tripwire note (it is ours)."""
+    carrier, s = _open(world)
+    body = b'"Wallet balance empty. Top up at /api/billing/wallet-topup"'
+    _refusing_invoke(carrier, [(402, {"content-type": "application/json"}, body)])
+    st, text = _send(s)
+    assert st == 402 and "the provider answered 402" in text and "Wallet" not in text
+    assert len(carrier.calls) == 1 and blamed == []
+    assert getattr(s, "billing_stop", None) is None
+    assert not any(e["kind"] == "upstream-402-unexpected" for e in s.receipt.events)
+    assert s.receipt.counters.get("fault_account") == 1
+
+
+def test_a_plain_429_without_a_code_still_moves_to_another_instance(world, blamed, waits):
+    """Regression guard for a session with no permit: a provider 429 is still the instance's, as before."""
+    carrier, s = _open(world)
+    first = s.pinned.instance_id
+    _refusing_invoke(carrier, [(429, {}, b'{"detail":"busy"}')])
+    st, _ = _send(s)
+    assert st == 200 and blamed == [first] and waits == [] and len(carrier.calls) == 2
+    assert any(e["kind"] == "upstream-retry" for e in s.receipt.events)
+

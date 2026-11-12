@@ -1113,7 +1113,8 @@ TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
 # 174 MB unpinned while the pin's own check passed: InferRoute's 9 Nov v16 diagnostic boot), so the pin clause is
 # printed only when facts["pin_sees_root"] holds: a TDX_PIN_SEES_ROOT_IMAGES image whose pin row PASSED under the
 # v16 rules. The row itself still counts for the level.
-TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17",
+                        "ir-sealed-search-tdx-v18")
 TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME,) + TDX_IDLE_POLL_IMAGES
 TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
                       "InferRoute publishes (image {version}). Established by the rows that passed:")
@@ -1315,12 +1316,12 @@ TDX_V17_RANKER_SEES = ("the ranking modules are published (open_rank) and the im
                        "outside InferRoute has read that source")
 
 
-TDX_FIXED_SHAPE_IMAGES = ("ir-sealed-search-tdx-v17",)
+TDX_FIXED_SHAPE_IMAGES = ("ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 _FIXED_SHAPE = "D7b. the engine's fixed-shape switch is on and its budgets are fixed in code"
-TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 # The images whose pin row the checker judges by the v16 rules (the pin sees the whole root). The checker marks a row
 # judged by the v15-era rules with TDX_V15_RULES_PREFIX; such a row never licenses the pin clause.
-TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 TDX_V15_RULES_PREFIX = "v15 rules: "
 _D4_PIN = "D4. pin unit properties"
 # A clause that needs a fact as well as its rows: printed only when every row PASSED and the fact is true.
@@ -2844,6 +2845,8 @@ TDX_QUOTE_BODY = (("tee_tcb_svn", 16), ("mrseam", 48), ("mrsignerseam", 48), ("s
                   ("td_attributes", 8), ("xfam", 8), ("mrtd", 48), ("mrconfigid", 48), ("mrowner", 48),
                   ("mrownerconfig", 48), ("rtmr0", 48), ("rtmr1", 48), ("rtmr2", 48), ("rtmr3", 48),
                   ("report_data", 64))
+TDX_TD_ATTRIBUTES = bytes.fromhex("0000001000000000")   # little-endian: bit 28 SEPT_VE_DISABLE only
+TDX_XFAM = bytes.fromhex("e702060000000000")
 OID_SGX = "1.2.840.113741.1.13.1"
 INTEL_QE_VENDOR_ID = bytes.fromhex("939a7233f79c4ca9940a0db3957f0607")
 EV_EFI_BOOT_SERVICES_APPLICATION = 0x80000003
@@ -3345,6 +3348,19 @@ def check_tdx(c: "Checks", offer: Dict[str, Any], rd_bytes: bytes, *, at_iso: Op
           if bound else "REPORTDATA does NOT equal SHA-256(runtime data) ‖ zeros (or no runtime data)")
     debug = b["td_attributes"][0] & 1
     c.add(not debug, "TD debug disabled", f"TD attributes {b['td_attributes'].hex()}: DEBUG bit " + ("clear" if not debug else "SET — the host can read this TD's memory"))
+    # v18 (machine review F6): the DEBUG bit alone left the rest of the host-chosen TD configuration unchecked. Every
+    # Google Cloud TDX boot we have recorded (v8 to v17, 10 quotes) carries exactly these values; anything else fails
+    # closed rather than being accepted. MROWNER is set per VM by the host and is not pinned: nothing in the TD reads it.
+    attrs_ok = b["td_attributes"] == TDX_TD_ATTRIBUTES
+    c.add(attrs_ok, "TD attributes as measured", f"TD attributes {b['td_attributes'].hex()}"
+          + (" == the configuration we measured (only SEPT_VE_DISABLE set: not migratable, no PKS/KL/PERFMON)" if attrs_ok
+             else f" differ from {TDX_TD_ATTRIBUTES.hex()}: the host started the TD in a configuration we have not measured"))
+    xfam_ok = b["xfam"] == TDX_XFAM
+    c.add(xfam_ok, "TD XFAM as measured", f"XFAM {b['xfam'].hex()}" + (" == the CPU-feature set we measured" if xfam_ok
+          else f" differs from {TDX_XFAM.hex()}: a CPU-feature set we have not measured"))
+    cfg_ok = b["mrconfigid"] == bytes(48) and b["mrownerconfig"] == bytes(48)
+    c.add(cfg_ok, "TD config IDs empty", "MRCONFIGID and MROWNERCONFIG are zero: no host-supplied configuration is bound"
+          if cfg_ok else "MRCONFIGID or MROWNERCONFIG is non-zero: the host bound a configuration we do not check")
     # A malformed document must read as a refusal, never as a traceback the caller might treat as "no answer".
     try:
         check_tdx_intel(c, q, ends.get("intel") or {}, at, pins["intel_root"])

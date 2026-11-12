@@ -47,7 +47,7 @@ CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet"
                     "accept_memory=eager", "systemd.import_credentials=no")
 # v13 is RETIRED: this checker accepts v14 only; a v13 image fails row B by name and reaches no level-1 sentence. The
 # verifier keeps v13's wording for reports a v13-era checker produced, never for an image this one checked.
-IMAGE_NAME = "ir-sealed-search-tdx-v17"          # the current release
+IMAGE_NAME = "ir-sealed-search-tdx-v18"          # the current release
 # v15 (8 Nov 2026) adds idle=poll: the guest never halts, which removes the halt exits that show the hypervisor when a
 # vCPU is idle (measured: Google's per-minute cpu/utilization of a v14 box reads idle 0.03 % vs searching 1.26 %; with
 # idle=poll a flat 99.8-99.97 %, shared/qa/2026-11-08/idle-poll-test). NOT removed: per-request bursts of
@@ -58,9 +58,13 @@ IMAGE_NAME = "ir-sealed-search-tdx-v17"          # the current release
 # allowlist, a root pin that sees the whole root, reproducible build). The rows decide; the name only selects the tokens.
 # v17 (10 Nov 2026) keeps v16's command line; inside the root the engine does a fixed amount of work per request
 # (open_rank/shape.py), checked by row "D7. the engine does a fixed amount of work per request".
-IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+# v18 (12 Nov 2026) keeps v17's command line; inside the root: the machine-review fixes F1 F2 F4 F5 (F4 adds OOM rules,
+# checked for every image after v17) and the exact side lists (FR first, open_rank/side_lists.py).
+IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17",
+               "ir-sealed-search-tdx-v18")
 CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",),
-                             "ir-sealed-search-tdx-v16": ("idle=poll",), "ir-sealed-search-tdx-v17": ("idle=poll",)}
+                             "ir-sealed-search-tdx-v16": ("idle=poll",), "ir-sealed-search-tdx-v17": ("idle=poll",),
+                             "ir-sealed-search-tdx-v18": ("idle=poll",)}
 CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"),
                     re.compile(r"inferroute\.image=(?:" + "|".join(re.escape(n) for n in IMAGE_NAMES) + r")"))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.
@@ -172,7 +176,8 @@ def rules_for(rep: "ImageReport") -> str:
 OOM_REQUIRED = {"ir-search.service": {"OOMScoreAdjust": "-1000"}, "ir-pin.service": {"OOMScoreAdjust": "-1000"},
                 "ir-fetch.service": {"OOMScoreAdjust": "-1000"},
                 "ir-engine.service": {"OOMScoreAdjust": "1000", "OOMPolicy": "continue"}}
-PRE_OOM_IMAGES = IMAGE_NAMES          # v14..v17 shipped without these keys; every later, unknown or absent name needs them
+PRE_OOM_IMAGES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16",
+                  "ir-sealed-search-tdx-v17")   # shipped without these keys; every later, unknown or absent name needs them
 
 
 def oom_rules(rep: "ImageReport") -> bool:
@@ -2900,8 +2905,22 @@ def check_per_request(rep: ImageReport, tree: str, paths: Dict[str, str], stext:
         sp.append("SearchService.handle does not sleep to exactly one slot after the request was taken up")
     # rc9, two slots: the slot is chosen from the opened payload's DECLARED kind, before the request is taken up, and
     # by nothing else (not the outcome, not the engine's time): survey -> the survey slot, anything else -> the reply slot.
-    if "slot = self._slot_for(plain)" not in hs or hs.index("slot = self._slot_for(plain)") > hs.index("taken_up = "):
-        sp.append("SearchService.handle does not choose the slot from the opened payload before the request is taken up")
+    # v18 (machine review F5): the kind is parsed only AFTER the slot clock starts, so the parse time sits inside the slot.
+    # Images up to v17 parse it just before take-up (their parse time sits outside the slot); both choose the slot from
+    # the declared kind alone, and the row says which order this image has. Anything else (no _slot_for, or chosen
+    # after the engine has run) fails.
+    slot_order = None
+    if "slot = self._slot_for(plain)" in hs and "taken_up = " in hs and "out = self._handle(" in hs:
+        i_slot, i_take, i_run = (hs.index("slot = self._slot_for(plain)"), hs.index("taken_up = "),
+                                 hs.index("out = self._handle("))
+        if i_take < i_slot < i_run:
+            slot_order = "inside"
+        elif i_slot < i_take:
+            slot_order = "before"
+    if slot_order is None:
+        sp.append("SearchService.handle does not choose the slot from the opened payload's declared kind before the "
+                  "request runs")
+    rep.values["slot_choice"] = slot_order
     slot_for = _method_src(stext, smod, "SearchService", "_slot_for")
     if ('return self._survey_slot if declared == SURVEY_KIND else self._slot' not in slot_for
             or 'declared = json.loads(plain).get("kind")' not in slot_for or 'SURVEY_KIND = "survey"' not in stext):
@@ -3004,7 +3023,10 @@ def check_per_request(rep: ImageReport, tree: str, paths: Dict[str, str], stext:
             f"every readable request is answered in exactly REPLY_BYTES of sealed plaintext (a larger result is a signed "
             f"result_oversize refusal of the same size) and leaves exactly one slot after it was taken up: "
             f"{ENV_SURVEY_SLOT}={_ss} s when its opened payload declares kind \"survey\", {ENV_SLOT}={_slot} s otherwise, "
-            f"chosen before take-up from the declared kind alone; the engine's budgets {ENV_BUDGET}={_fb} s and "
+            f"chosen from the declared kind alone, "
+            + ("after the slot clock starts (the parse is inside the slot)" if slot_order == "inside" else
+               "just before the slot clock starts (the parse time is outside the slot; fixed in v18)")
+            + f"; the engine's budgets {ENV_BUDGET}={_fb} s and "
             f"{ENV_SURVEY_BUDGET}={_sfb} s lie below their slots and are the engine unit's too, and the front spends the "
             f"request's as ONE deadline (channel wait and reply together); a plain refusal "
             f"(unreadable bytes, or a request arriving with MAX_WAITING={waiting} already waiting) is padded to a sealed "

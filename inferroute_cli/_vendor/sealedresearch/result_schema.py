@@ -147,6 +147,16 @@ ASIA = ("dict", {
     "hits": ("list", ASIA_HIT, MAX_ASIA_HITS),
 })
 
+# Side lists (FR first, 2026-11-11; sealed-research's proposal, pi-attested's to own): one exact dense-only list per
+# entry of the root's side_lists.json, keyed by the list's name. Same hit shape as the Asian list; exact is a constant.
+MAX_SIDE_LISTS = 8              # side_lists.SIDE_LISTS_MAX
+MAX_SIDE_HITS = 50              # side_lists.SIDE_K_MAX
+SIDE = ("dict", {
+    "kind": ("const", "dense_only"), "exact": ("const", True), "expanded": ("const", False), "reranked": ("const", False),
+    "offices": ("list", ("str", MAX_SHORT), MAX_OFFICES), "k": ("int",), "rows": ("int",),
+    "hits": ("list", ASIA_HIT, MAX_SIDE_HITS),
+})
+
 _FILTER_INTS = {"candidates_considered": ("int",)}
 SEARCH = ("dict", {
     "hits": ("list", HIT, MAX_HITS),
@@ -166,6 +176,7 @@ SEARCH = ("dict", {
     "marks_applied": ("opt", ("map", MAX_SHORT, ("int",), MAX_STAGES)),
     "marks_unresolved": ("opt", ("list", ("str", MAX_KEY), MAX_MARKS)),
     "asia": ("opt", ASIA),
+    "side_lists": ("opt", ("map", MAX_SHORT, SIDE, MAX_SIDE_LISTS)),
     "offices_unindexed": ("opt", ("list", ("str", MAX_SHORT), MAX_OFFICES)),   # requested, but no such rows here
 })
 

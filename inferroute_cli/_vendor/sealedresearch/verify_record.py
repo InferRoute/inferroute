@@ -1113,7 +1113,8 @@ TDX_V14_IMAGE_NAME = "ir-sealed-search-tdx-v14"
 # 174 MB unpinned while the pin's own check passed: InferRoute's 9 Nov v16 diagnostic boot), so the pin clause is
 # printed only when facts["pin_sees_root"] holds: a TDX_PIN_SEES_ROOT_IMAGES image whose pin row PASSED under the
 # v16 rules. The row itself still counts for the level.
-TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_IDLE_POLL_IMAGES = ("ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17",
+                        "ir-sealed-search-tdx-v18")
 TDX_V14_FAMILY = (TDX_V14_IMAGE_NAME,) + TDX_IDLE_POLL_IMAGES
 TDX_INTRO_TEMPLATE = ("For these searches, the Intel TDX boot image the quote names was also checked against the files "
                       "InferRoute publishes (image {version}). Established by the rows that passed:")
@@ -1315,12 +1316,12 @@ TDX_V17_RANKER_SEES = ("the ranking modules are published (open_rank) and the im
                        "outside InferRoute has read that source")
 
 
-TDX_FIXED_SHAPE_IMAGES = ("ir-sealed-search-tdx-v17",)
+TDX_FIXED_SHAPE_IMAGES = ("ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 _FIXED_SHAPE = "D7b. the engine's fixed-shape switch is on and its budgets are fixed in code"
-TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_OPEN_ENGINE_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 # The images whose pin row the checker judges by the v16 rules (the pin sees the whole root). The checker marks a row
 # judged by the v15-era rules with TDX_V15_RULES_PREFIX; such a row never licenses the pin clause.
-TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17")
+TDX_PIN_SEES_ROOT_IMAGES = ("ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17", "ir-sealed-search-tdx-v18")
 TDX_V15_RULES_PREFIX = "v15 rules: "
 _D4_PIN = "D4. pin unit properties"
 # A clause that needs a fact as well as its rows: printed only when every row PASSED and the fact is true.

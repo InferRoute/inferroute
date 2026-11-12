@@ -419,7 +419,8 @@ def test_a_session_on_the_gate_hands_the_key_and_permit_on_stdin_only(launch_rig
     assert PA.start_search_proxy(permit="5b0c8a3e-permit") == "http://127.0.0.1:4444"
     argv, env = got["argv"], got["kw"]["env"]
     assert argv[1:3] == ["-m", "ir_search_gate"] and "sealedresearch.search_verifier" not in argv
-    assert env["PYTHONPATH"].split(os.pathsep)[-1] == str(PA.GATE_DIR)  # appended: shadows nothing
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(PA.GATE_DIR)   # first: ir_search_gate is always ours
+    assert env["PYTHONSAFEPATH"] == "1" and got["kw"]["cwd"] == str(PA.VENDOR_DIR)  # nothing from the workspace
     sent = json.loads(got["stdin"])
     assert {k: sent[k] for k in ("key", "permit")} == {"key": "ak-secret", "permit": "5b0c8a3e-permit"}
     assert set(sent) <= {"key", "permit", "used_up_file"}
@@ -449,9 +450,10 @@ def test_a_development_config_keeps_its_own_verifier_and_gains_only_the_gate_mod
     configure(GATE, python="/repo/.venv/bin/python", cwd=str(tmp_path))
     PA.start_search_proxy(permit="p")
     assert got["argv"][0] == "/repo/.venv/bin/python" and got["kw"]["cwd"] == str(tmp_path)
-    assert got["kw"]["env"]["PYTHONPATH"].split(os.pathsep) == [str(PA.GATE_DIR)] or \
-        got["kw"]["env"]["PYTHONPATH"].endswith(os.pathsep + str(PA.GATE_DIR))
+    # the gate module first, then the checkout the config names (no longer reached through the current directory)
+    assert got["kw"]["env"]["PYTHONPATH"].split(os.pathsep)[:2] == [str(PA.GATE_DIR), str(tmp_path)]
     assert str(PA.VENDOR_DIR) not in got["kw"]["env"]["PYTHONPATH"]
+    assert got["kw"]["env"]["PYTHONSAFEPATH"] == "1"
 
 
 def test_the_wrapper_reads_its_credentials_and_installs_only_for_the_gate(SV, monkeypatch):

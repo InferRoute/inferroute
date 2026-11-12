@@ -130,7 +130,7 @@ class Gate:
 
     # ---- per-request state
     def begin(self) -> None:
-        self._tl.refused, self._tl.notes, self._tl.withheld = None, [], None
+        self._tl.refused, self._tl.notes, self._tl.withheld, self._tl.slot = None, [], None, False
 
     def _state(self):
         if not hasattr(self._tl, "notes"):
@@ -167,27 +167,40 @@ class Gate:
                 r = BR.parse_search(e.code, e.headers, raw)
                 if r is None:
                     raise                               # the machine's own answer, passed through: as if direct
-                if path == "/search" and _may_have_reached_the_machine(r.code):
+                # The gate says whether the machine answered: x-inferroute-forwarded 1 = it did and the reply is
+                # withheld (a search happened), 0 = refused before forwarding. A gate that predates the header is
+                # read by the code, as before (_may_have_reached_the_machine).
+                fwd = BR._headers_lower(e.headers).get("x-inferroute-forwarded", "").strip()
+                answered = path == "/search" and (fwd == "1" if fwd in ("0", "1")
+                                                  else _may_have_reached_the_machine(r.code))
+                if answered:
                     st.withheld = r.code
-                if attempt == 0 and r.retryable:
+                # Never replay a sealed request the machine already answered: forwarded=1 is final.
+                if attempt == 0 and r.retryable and fwd != "1":
                     self.sleep(self._wait(r, path, st))
                     continue
-                if r.code == "permit_used_up":
-                    self._signal_used_up()
+                if attempt == 1 and r.code == "rate_limited" and path == "/search" and getattr(st, "slot", False):
+                    r.fixed = BR.SEARCH_STILL_RUNNING   # "yours will start when it finishes" is no longer true
+                if r.final and r.code in BR.PERMIT_REFUSAL_CODES:
+                    self._signal_permit_refusal(r.code)
                 st.refused = GateRefused(r, path)
                 raise st.refused
         raise AssertionError("unreachable")            # pragma: no cover
 
-    def _signal_used_up(self) -> None:
+    def _signal_permit_refusal(self, code: str) -> None:
+        """Tell the launcher which permit the gate refused, and how (used up, or dead: invalid, expired, ...). The
+        permit is the one THIS process sent, so the launcher acts on that permit and on no other."""
         if not (self.used_up_file and self.permit):
             return
         try:
-            Path(self.used_up_file).write_text(self.permit, encoding="utf-8")
+            Path(self.used_up_file).write_text(json.dumps({"permit": self.permit, "code": code}), encoding="utf-8")
         except OSError:
             pass
 
     def _wait(self, r: Any, path: str, st: Any) -> float:
         slot = r.code == "rate_limited" and path == "/search"
+        st.slot = slot and ("another search" in r.server_message.lower()
+                            or (r.retry_after or 0) > BR.RETRY_AFTER_CAP_S)
         if r.retry_after is None:
             secs = BR.RETRY_AFTER_DEFAULT_S
         else:

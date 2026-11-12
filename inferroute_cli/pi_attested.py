@@ -571,14 +571,30 @@ def verifier_command(cfg: dict) -> tuple[str, dict, str | None]:
 GATE_DIR = Path(__file__).resolve().parent / "_searchgate"
 
 
+def isolated(env: dict, cwd: str | None) -> tuple[dict, str]:
+    """The search verifier never imports from where the assistant works. It is started from the matter folder's
+    process, and `python -m` puts the current directory first on sys.path: a planted ir_search_gate.py,
+    sealedresearch/ or json.py there would run, inside a process holding the user's key. So: PYTHONSAFEPATH=1 (no
+    current directory on sys.path), and a neutral working directory. A development config's own checkout (its `cwd`)
+    is kept, and named on PYTHONPATH explicitly, since it is no longer reached through the current directory."""
+    env = dict(env)
+    env["PYTHONSAFEPATH"] = "1"
+    if cwd:
+        existing = env.get("PYTHONPATH", "")
+        if str(cwd) not in existing.split(os.pathsep):
+            env["PYTHONPATH"] = str(cwd) + (os.pathsep + existing if existing else "")
+        return env, str(cwd)
+    return env, str(VENDOR_DIR)
+
+
 def through_gate(cfg: dict, argv: list[str], env: dict, permit: str = "") -> tuple[list[str], dict, dict | None]:
     """When the search address is InferRoute's search gate (and only then): run the verifier through
     `ir_search_gate`, and return the credentials it must be handed on stdin (the user's key, and the permit of the
     search unit this session took when billing is on). Otherwise argv and env unchanged and None: a direct address
     gets no key and no permit, so nothing about the account goes to whatever answers there.
 
-    The gate module's directory is APPENDED to PYTHONPATH and holds only that module, so it never shadows the
-    sealedresearch a development config names."""
+    The gate module's directory goes FIRST on PYTHONPATH, so ir_search_gate is always this one; it holds only that
+    module, so it shadows nothing else (the sealedresearch a development config names included)."""
     from ._searchgate.ir_search_gate import gate_base
     if not gate_base(cfg.get("enclave")):
         return argv, env, None
@@ -587,7 +603,7 @@ def through_gate(cfg: dict, argv: list[str], env: dict, permit: str = "") -> tup
     argv[i] = "ir_search_gate"
     env = dict(env)
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = (existing + os.pathsep if existing else "") + str(GATE_DIR)
+    env["PYTHONPATH"] = str(GATE_DIR) + (os.pathsep + existing if existing else "")
     from . import config
     return argv, env, {"key": config.load().api_key or "", "permit": str(permit or "")}
 
@@ -595,15 +611,20 @@ def through_gate(cfg: dict, argv: list[str], env: dict, permit: str = "") -> tup
 _USED_UP_SIGNAL: Path | None = None
 
 
-def used_up_signalled(permit_id: str) -> bool:
-    """Whether this launch's search verifier wrote that the gate answered 402 permit_used_up for permit_id."""
+def permit_refusal_signalled(permit_id: str) -> str | None:
+    """The code the search gate refused permit_id with in this launch (permit_used_up, permit_invalid, ...), as the
+    search verifier wrote it; None when it wrote nothing about THIS permit."""
     path = _USED_UP_SIGNAL
     if path is None or not permit_id:
-        return False
+        return None
     try:
-        return path.read_text(encoding="utf-8").strip() == permit_id
-    except OSError:
-        return False
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict) or doc.get("permit") != permit_id:
+        return None
+    code = doc.get("code")
+    return code if isinstance(code, str) and code else None
 
 
 def clear_used_up_signal() -> None:
@@ -673,6 +694,7 @@ def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None,
     argv += ["--confinement", confinement or confinement_label()]
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
+    venv_env, venv_cwd = isolated(venv_env, venv_cwd)
     argv, venv_env, creds = through_gate(cfg, argv, venv_env, permit)
     global _USED_UP_SIGNAL
     _USED_UP_SIGNAL = None
@@ -733,6 +755,7 @@ def verify_search_once(timeout: float = 120.0) -> dict | None:
     argv = [python, "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg)]
     # A verification reads /offer only, which the gate serves to anyone: no key, no permit.
+    venv_env, venv_cwd = isolated(venv_env, venv_cwd)
     argv, venv_env, creds = through_gate(cfg, argv, venv_env)
     try:
         out = subprocess.run(argv, cwd=venv_cwd, env=venv_env, capture_output=True, text=True,

@@ -906,8 +906,10 @@ def launch(args: list[str], agent: str = "claude", *, probant: dict | None = Non
                 # about a whole document in context can leave for a search machine.
                 search_endpoint = None if (os.environ.get("IR_INTAKE_DIR") or probant is None
                                            or probant.get("mode") == "names") else (
-                    pi_attested.start_search_proxy(confinement=mac_backend.label, trusted_vm=mac_backend.ready)
-                    if mac_backend is not None else pi_attested.start_search_proxy())
+                    pi_attested.start_search_proxy(confinement=mac_backend.label, trusted_vm=mac_backend.ready,
+                                                   permit=str(probant.get("permit") or ""))
+                    if mac_backend is not None else
+                    pi_attested.start_search_proxy(permit=str(probant.get("permit") or "")))
             if probant is not None and receipt.is_confidential:
                 from . import pi_attested, probant_trust
                 search_result = await asyncio.to_thread(pi_attested.search_verification, search_endpoint)

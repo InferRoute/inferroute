@@ -33,6 +33,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from . import pi_attested
+# The search gate's exact hosts (the search address once search.json names it): one list, kept with the code that
+# sends the key, which checks it again for itself.
+from ._searchgate.ir_search_gate import GATE_HOSTS, gate_base
 
 SITE = os.environ.get("IR_SITE_BASE", "https://inferroute.ai").rstrip("/")
 MARK = "ir probant setup-search"
@@ -132,12 +135,24 @@ def _get_optional(url: str) -> Optional[bytes]:
 
 
 def fixed_endpoint(value: Any) -> str:
-    """http(s)://host[:port] and nothing else: no path, credentials, query or fragment."""
+    """http(s)://host[:port] and nothing else: no path, credentials, query or fragment.
+
+    Two kinds of address are accepted while search moves behind InferRoute's search gate: the machine's own (the
+    rule above, unchanged), and the gate, which is recognised only as https://<one of GATE_HOSTS> exactly. Only
+    the gate is sent the user's key and permit (_searchgate/ir_search_gate.py); any other host, a lookalike or a
+    subdomain of the gate's included, is a direct address and gets neither. The gate's own name over http or on
+    another port is refused here rather than kept as a direct address that could never search."""
     from urllib.parse import urlsplit
     s = urlsplit(str(value or ""))
     if (s.scheme not in ("http", "https") or not s.hostname or s.username or s.password
             or s.path not in ("", "/") or s.query or s.fragment):
         raise SetupError("the published search address is not a plain host and port")
+    if (s.hostname or "").lower().rstrip(".") in GATE_HOSTS:
+        gate = gate_base(str(value))
+        if gate is None:
+            raise SetupError("the published search address names InferRoute's search service, but not as "
+                             "https://<its name> exactly, so it was not used")
+        return gate
     return f"{s.scheme}://{s.netloc}"
 
 

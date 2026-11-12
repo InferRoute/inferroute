@@ -568,8 +568,36 @@ def verifier_command(cfg: dict) -> tuple[str, dict, str | None]:
     return (python or _sys.executable), env, (str(cwd) if cwd else None)
 
 
-def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None, trusted_vm: bool = False) -> str | None:
-    """Start the verifier and return its loopback address, or None (the session then has no search tool)."""
+GATE_DIR = Path(__file__).resolve().parent / "_searchgate"
+
+
+def through_gate(cfg: dict, argv: list[str], env: dict, permit: str = "") -> tuple[list[str], dict, dict | None]:
+    """When the search address is InferRoute's search gate (and only then): run the verifier through
+    `ir_search_gate`, and return the credentials it must be handed on stdin (the user's key, and the permit of the
+    search unit this session took when billing is on). Otherwise argv and env unchanged and None: a direct address
+    gets no key and no permit, so nothing about the account goes to whatever answers there.
+
+    The gate module's directory is APPENDED to PYTHONPATH and holds only that module, so it never shadows the
+    sealedresearch a development config names."""
+    from ._searchgate.ir_search_gate import gate_base
+    if not gate_base(cfg.get("enclave")):
+        return argv, env, None
+    argv = list(argv)
+    i = argv.index("sealedresearch.search_verifier")
+    argv[i] = "ir_search_gate"
+    env = dict(env)
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (existing + os.pathsep if existing else "") + str(GATE_DIR)
+    from . import config
+    return argv, env, {"key": config.load().api_key or "", "permit": str(permit or "")}
+
+
+def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None, trusted_vm: bool = False,
+                       permit: str = "") -> str | None:
+    """Start the verifier and return its loopback address, or None (the session then has no search tool).
+
+    `permit`: the session's Anteriora permit (a search unit), sent with each search only when the search address
+    is the gate (through_gate)."""
     import select
     import subprocess
     import sys
@@ -626,9 +654,14 @@ def start_search_proxy(timeout: float = 30.0, *, confinement: str | None = None,
     argv += ["--confinement", confinement or confinement_label()]
     # This launch's session id, host-side source for who surfaced a document and who marked it (M1).
     argv += ["--session-id", sess_id]
+    argv, venv_env, creds = through_gate(cfg, argv, venv_env, permit)
     try:
         proc = subprocess.Popen(argv, cwd=venv_cwd, env=venv_env, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL, text=True, preexec_fn=_die_with_parent)
+                                stderr=subprocess.DEVNULL, text=True, preexec_fn=_die_with_parent,
+                                **({"stdin": subprocess.PIPE} if creds is not None else {}))
+        if creds is not None:                       # on stdin: in no command line and no environment
+            proc.stdin.write(json.dumps(creds) + "\n")
+            proc.stdin.close()
     except (OSError, KeyError):
         sys.stderr.write("\n  prior-art search is unavailable this session: the local search verifier did not start.\n\n")
         return None
@@ -673,9 +706,11 @@ def verify_search_once(timeout: float = 120.0) -> dict | None:
     python, venv_env, venv_cwd = verifier_command(cfg)
     argv = [python, "-m", "sealedresearch.search_verifier", "verify", "--enclave", cfg["enclave"],
             *_search_pin_args(cfg)]
+    # A verification reads /offer only, which the gate serves to anyone: no key, no permit.
+    argv, venv_env, creds = through_gate(cfg, argv, venv_env)
     try:
         out = subprocess.run(argv, cwd=venv_cwd, env=venv_env, capture_output=True, text=True,
-                             timeout=timeout).stdout
+                             timeout=timeout, input="{}\n" if creds is not None else None).stdout
         res = json.loads(out)
         return res if isinstance(res, dict) else {"ok": False, "refusal": "the search verifier answered nonsense", "steps": []}
     except (OSError, ValueError, KeyError, subprocess.TimeoutExpired):

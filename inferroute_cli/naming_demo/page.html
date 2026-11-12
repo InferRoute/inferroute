@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anteriora Names</title>
+<style>
+:root{--bg:#0d0f14;--panel:#161a22;--line:#262c38;--text:#eef1f6;--mute:#8b93a3;--green:#2fd27a;--amber:#f2b33d;--red:#ff5a5f;--grey:#4a5160;--accent:#7c9cff}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f6f7fa;--panel:#fff;--line:#e2e5ec;--text:#14171f;--mute:#5d6576;--grey:#c3c8d2;--accent:#3b5bdb}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:28px 16px 60px}
+h1{font-size:clamp(28px,4.4vw,44px);line-height:1.1;margin:0 0 6px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 22px}
+.brand{font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-size:13px;color:var(--accent);margin-bottom:10px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}
+textarea,input[type=text]{width:100%;background:transparent;border:0;color:var(--text);font:inherit;font-size:19px;resize:none;outline:none}
+textarea{min-height:64px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer;user-select:none;color:var(--mute)}
+.chip.on{border-color:var(--accent);color:var(--text);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.own{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+.own input{font-size:16px}
+button.go{margin-left:auto;background:var(--accent);color:#fff;border:0;border-radius:12px;padding:12px 22px;font-size:17px;font-weight:600;cursor:pointer}
+button.go:disabled{opacity:.5;cursor:default}
+select{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:6px}
+.status{display:flex;align-items:center;gap:18px;margin:22px 0 10px;min-height:56px}
+.timer{font:700 44px/1 ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;min-width:120px}
+.phase{color:var(--mute);font-size:17px}
+.classes{color:var(--mute);font-size:14px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;animation:in .35s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.card .nm{font-size:26px;font-weight:700;letter-spacing:-.01em;margin-bottom:8px}
+.lights{display:flex;flex-wrap:wrap;gap:6px}
+.l{display:inline-flex;align-items:center;gap:6px;font-size:13px;border-radius:999px;padding:4px 10px;background:color-mix(in srgb,var(--grey) 30%,transparent)}
+.l i{width:10px;height:10px;border-radius:50%;background:var(--grey);transition:background .4s}
+.l.green i{background:var(--green)}.l.amber i{background:var(--amber)}.l.red i{background:var(--red)}
+.why{font-size:13px;color:var(--mute);margin-top:8px}
+.why a{color:var(--accent)}
+.legal{font-size:11.5px;color:var(--mute);margin-top:8px;border-top:1px dashed var(--line);padding-top:6px}
+.card.dim{opacity:.55}
+.end{margin-top:26px;text-align:center}
+.end h2{font-size:30px;margin:0 0 10px}
+.win{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+.win span{font-size:24px;font-weight:700;border:2px solid var(--green);border-radius:12px;padding:8px 16px}
+.close{color:var(--mute);margin-top:18px;font-size:15px}
+.badge{position:fixed;top:12px;right:12px;background:var(--amber);color:#111;font-weight:700;border-radius:10px;padding:8px 12px;font-size:14px;display:none;z-index:9}
+.note{font-size:13px;color:var(--mute);margin-top:10px}
+.replays{margin-top:28px;font-size:13px;color:var(--mute)}
+.cta{margin-top:34px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}
+.cta div{max-width:640px}
+.ctab{background:var(--text);color:var(--bg);text-decoration:none;font-weight:600;border-radius:12px;padding:11px 18px;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="badge" id="badge"></div>
+<main>
+  <div class="brand">Anteriora</div>
+  <h1>Name your startup in 60 seconds.</h1>
+  <p class="sub">Ten names, each checked against millions of trade marks and the .com registry.</p>
+  <div class="box">
+    <textarea id="idea" placeholder="Describe your idea in a sentence or two…"></textarea>
+    <div class="own"><input type="text" id="own" placeholder="…or check your own name(s), comma-separated"></div>
+    <div class="row" id="countries"></div>
+    <div class="row">
+      <span class="note">Tone</span>
+      <select id="tone"><option>any</option><option>serious</option><option>playful</option><option>techy</option></select>
+      <span class="note">Nice classes</span>
+      <input type="text" id="classes" placeholder="auto" style="width:110px;font-size:15px;border:1px solid var(--line);border-radius:8px;padding:5px 8px">
+      <button class="go" id="go">Find names</button>
+    </div>
+  </div>
+
+  <div class="status"><div class="timer" id="timer">0.0s</div><div class="phase" id="phase"></div></div>
+  <div class="classes" id="cls"></div>
+  <div class="grid" id="grid"></div>
+  <div class="end" id="end"></div>
+
+  <div class="cta">
+    <div><b>Inventing something?</b> Before you file, Anteriora searches the patents and papers that came before your invention.</div>
+    <a class="ctab" href="https://inferroute.ai/anteriora" target="_blank" rel="noopener">Get the Anteriora app</a>
+  </div>
+  <div class="replays" id="replays" style="display:none">Replay a saved run: <select id="runs"><option value="">—</option></select></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const C = {EU:"EU (incl. France)",US:"United States",AU:"Australia",UK:"United Kingdom",DE:"Germany (national)",ES:"Spain (national)",IT:"Italy (national)"};
+const on = new Set(["EU","US"]);
+for (const [k,v] of Object.entries(C)) {
+  const c = document.createElement("span"); c.className = "chip" + (on.has(k) ? " on" : ""); c.textContent = v;
+  c.onclick = () => { on.has(k) ? on.delete(k) : on.add(k); c.classList.toggle("on"); };
+  $("countries").appendChild(c);
+}
+let es = null, t0 = 0, tick = null, cards = {}, unchecked = [], replayOf = null;
+function esc(s){return String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
+function startTimer(){ t0 = performance.now(); clearInterval(tick); tick = setInterval(()=>{$("timer").textContent=((performance.now()-t0)/1000).toFixed(1)+"s"},100); }
+function stopTimer(ms){ clearInterval(tick); if (ms!=null) $("timer").textContent=(ms/1000).toFixed(1)+"s"; }
+function reset(){ $("grid").innerHTML=""; $("end").innerHTML=""; $("cls").textContent=""; $("phase").textContent=""; cards={}; }
+function light(cls, label){ return `<span class="l ${cls}"><i></i>${label}</span>`; }
+function shell(n){
+  const el = document.createElement("div"); el.className = "card";
+  const com = n.com===false ? light("green",".com probably free") : n.com===true ? light("red",".com taken") : light("",".com not checked");
+  el.innerHTML = `<div class="nm">${esc(n.name)}</div>
+    <div class="lights"><span class="l" data-tm><i></i>Trade mark: checking…</span>${com}<span class="l" data-lang><i></i>Quick language check…</span></div>
+    <div class="why"></div><div class="legal">Screening, not legal clearance.</div>`;
+  cards[n.name] = el; $("grid").appendChild(el);
+}
+function fill(ev){
+  const el = cards[ev.name]; if (!el) { shell(ev); return fill(ev); }
+  const tm = ev.tm, s = el.querySelector("[data-tm]");
+  const tmLabel = {green:"Trade mark: no close mark found",amber:"Trade mark: similar mark",red:"Trade mark: same or very close mark"}[tm.light];
+  s.className = "l " + tm.light; s.innerHTML = "<i></i>" + tmLabel;
+  let why = "";
+  for (const c of tm.conflicts) why += `<div>${esc(c.text)} · ${esc(c.register)} ${c.link?`<a href="${esc(c.link)}" target="_blank" rel="noopener">${esc(c.number)}</a>`:esc(c.number)} · ${esc(c.status)} · classes ${esc((c.classes||[]).join(", "))} — ${esc((c.reasons||[]).join("; "))}</div>`;
+  if (tm.n_conflicts > tm.conflicts.length) why += `<div>+${tm.n_conflicts - tm.conflicts.length} more</div>`;
+  if (unchecked.length) why += `<div>${esc(unchecked.join(", "))}: not checked</div>`;
+  el.querySelector(".why").innerHTML = why;
+}
+function handle(ev){
+  if (ev.t==="replay"){ replayOf = ev.of; $("badge").textContent = "Replay of run " + ev.of.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/,"$1-$2-$3 $4:$5 UTC"); $("badge").style.display="block"; return; }
+  if (ev.t==="start"){ unchecked = ev.unchecked||[]; startTimer(); $("phase").textContent="Starting…"; return; }
+  if (ev.t==="phase"){ $("phase").textContent = ev.text + "…"; return; }
+  if (ev.t==="warn"){ $("phase").textContent = ev.text; return; }
+  if (ev.t==="classes"){ $("cls").textContent = "Nice classes: " + ev.classes.map(c=>c+(ev.why&&ev.why[c]?" ("+ev.why[c]+")":"")).join(" · "); if(!replayOf) $("classes").value = ev.classes.join(","); return; }
+  if (ev.t==="screened"){ $("phase").textContent = `${ev.n} names screened against ${ev.zone_names.toLocaleString()} .com names: ${ev.com_free} probably free`; return; }
+  if (ev.t==="shortlist"){ for (const n of ev.names) shell(n); return; }
+  if (ev.t==="name"){ fill(ev); return; }
+  if (ev.t==="lang"){ const el = cards[ev.name]; if(!el) return; const s = el.querySelector("[data-lang]");
+    s.className = "l " + (ev.ok===true?"green":ev.ok===false?"red":""); s.innerHTML = "<i></i>Quick language check: " + (ev.ok===true?"fine":ev.ok===false?esc(ev.note||"issue"):"not checked");
+    return; }
+  if (ev.t==="final"){
+    stopTimer(ev.ms); $("phase").textContent = "Done";
+    const order = ev.top; const g = $("grid");
+    for (const n of Object.keys(cards)) if (!order.includes(n)) cards[n].remove();
+    for (const n of order) { if (cards[n]) { g.appendChild(cards[n]); if (!ev.winners.includes(n)) cards[n].classList.add("dim"); } }
+    $("end").innerHTML = (ev.winners.length ? `<h2>Green on trade mark and .com</h2><div class="win">${ev.winners.map(n=>`<span>${esc(n)}</span>`).join("")}</div>` : `<h2>No name is green on both — see the cards above</h2>`)
+      + `<p class="close">Domains are checked against our own copy of the registry, never at a registrar.</p>`;
+    return; }
+  if (ev.t==="error"){ stopTimer(); $("phase").textContent = ev.text; return; }
+  if (ev.t==="done"){ es && es.close(); $("go").disabled=false; loadRuns(); }
+}
+function open(url){ if (es) es.close(); reset(); $("go").disabled = true; es = new EventSource(url); es.onmessage = m => handle(JSON.parse(m.data)); es.onerror = () => { es.close(); $("go").disabled=false; stopTimer(); }; }
+// A live run is a POST so the idea never sits in a URL (and so in no access log).
+async function post(body){
+  if (es) es.close(); es = null; reset(); $("go").disabled = true;
+  try {
+    const r = await fetch("run", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    if (r.status === 429) { $("phase").textContent = "Busy right now — try again in a minute."; $("go").disabled=false; return; }
+    if (!r.ok || !r.body) throw new Error(r.status);
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) { const {value, done} = await rd.read(); if (done) break; buf += dec.decode(value, {stream:true});
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) { const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6))); } }
+  } catch (e) { $("phase").textContent = "Something went wrong. Try again."; stopTimer(); }
+  $("go").disabled = false;
+}
+$("go").onclick = () => {
+  replayOf = null; $("badge").style.display="none";
+  if (!$("idea").value.trim() && !$("own").value.trim()) { $("idea").focus(); return; }
+  post({idea:$("idea").value, own:$("own").value, tone:$("tone").value, classes:$("classes").value, countries:[...on].join(",")});
+};
+$("runs").onchange = e => { if (e.target.value) open("replay?id=" + encodeURIComponent(e.target.value)); };
+let recording = false;
+async function loadRuns(){ if (!recording) return; try { const r = await (await fetch("runs")).json(); const s=$("runs"); s.innerHTML='<option value="">—</option>' + r.map(x=>`<option value="${esc(x.id)}">${esc(x.id)} · ${esc((x.own||x.idea).slice(0,50))}</option>`).join(""); } catch(e){} }
+fetch("config").then(r=>r.json()).then(c=>{ recording = !!c.record; $("replays").style.display = recording ? "" : "none"; loadRuns(); }).catch(()=>{});
+</script>
+</body>
+</html>

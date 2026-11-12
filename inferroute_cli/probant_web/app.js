@@ -130,12 +130,15 @@ function matterName(id) {
   // with the unlabelled sentence. An older search carries no `side` and nothing here says anything about France.
   const FR_HEADING = "Separate list: French patent families";
   const FR_SEPARATE = ASIA_SEPARATE;
-  const FR_CLASS = "It holds French patent families that have no US, EP or WO member, matched on the English title + abstract of a French publication. Most were first published between 1970 and 2019.";
+  const FR_CLASS = "It holds French patent families that have no US, EP or WO member, matched on the English title + abstract of a French publication.";
+  // A fact about index fr-2611 only: shown only when the answering index's identifier names it, like ASIA_DATES.
+  const FR_DATES = "Most were first published between 1970 and 2019, as of index fr-2611.";
+  const FR_DATES_INDEX = "fr-2611";
   const FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked.";
   const FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched.";
   const FR_NO_MARKS = ASIA_NO_MARKS;
   const SIDE_WORDS = {
-    fr: { heading: FR_HEADING, cls: FR_CLASS, rank: FR_RANK, notRequested: FR_NOT_REQUESTED, noMarks: FR_NO_MARKS,
+    fr: { heading: FR_HEADING, cls: FR_CLASS, dates: FR_DATES, datesIndex: FR_DATES_INDEX, rank: FR_RANK, notRequested: FR_NOT_REQUESTED, noMarks: FR_NO_MARKS,
           prefix: "F", badge: (n) => `${n} French publications in this family` },
   };
   const sideWordsOf = (name) => Object.prototype.hasOwnProperty.call(SIDE_WORDS, String(name)) ? SIDE_WORDS[String(name)] : null;
@@ -169,7 +172,8 @@ function matterName(id) {
         sec.append(el("div", "card-note", asiaEmpty(offices)));
       } else {
         const separate = asiaCodes(d.mainNotRun).length ? ASIA_SEPARATE_NO_MAIN : FR_SEPARATE;
-        sec.append(el("div", "card-note", `${separate} ${w.cls} ${w.rank} ${asiaSearched(offices)}`));
+        const dated = String(d.index || "").includes(w.datesIndex) ? ` ${w.dates}` : "";
+        sec.append(el("div", "card-note", `${separate} ${w.cls}${dated} ${w.rank} ${asiaSearched(offices)}`));
         const list = el("ol", "docs");
         const [lo, hi] = scoreRange(docs);
         docs.forEach((doc, idx) => {

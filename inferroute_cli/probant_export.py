@@ -344,7 +344,7 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
         return ""
     if result.get("asia") is None:
         # a root with side lists and no Asian layer: those lists only; an older root: nothing at all
-        return _side_html(result, statement, False)
+        return _side_html(result, statement, False, index_snapshot=index_snapshot)
     a = result["asia"]
     out = []
     stmt = statement if isinstance(statement, dict) else {}
@@ -383,7 +383,7 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
     un = _codes(result.get("offices_unindexed"))
     if un:
         out.append(f"<p class=note>{_e(_offices_unindexed(un))}</p>")
-    out.append(_side_html(result, statement, not labelled, main_not_run))
+    out.append(_side_html(result, statement, not labelled, main_not_run, index_snapshot=index_snapshot))
     return "".join(out)
 
 
@@ -395,12 +395,15 @@ def _asia_html(result: Any, statement: Any = None, index_snapshot: Any = None) -
 FR_HEADING = "Separate list: French patent families"
 FR_SEPARATE = ASIA_SEPARATE
 FR_CLASS = ("It holds French patent families that have no US, EP or WO member, matched on the English title + abstract "
-            "of a French publication. Most were first published between 1970 and 2019.")
+            "of a French publication.")
+# a fact about index fr-2611 only: printed only when the search's recorded index identifier names it (as ASIA_DATES)
+FR_DATES = "Most were first published between 1970 and 2019, as of index fr-2611."
+FR_DATES_INDEX = "fr-2611"
 FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked."
 FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched."
 FR_NO_MARKS = ASIA_NO_MARKS
 SIDE_WORDS = {
-    "fr": {"heading": FR_HEADING, "cls": FR_CLASS, "rank": FR_RANK, "not_requested": FR_NOT_REQUESTED,
+    "fr": {"heading": FR_HEADING, "cls": FR_CLASS, "dates": FR_DATES, "dates_index": FR_DATES_INDEX, "rank": FR_RANK, "not_requested": FR_NOT_REQUESTED,
            "no_marks": FR_NO_MARKS, "prefix": "F", "members": "French members",
            "badge": "{n} French publications in this family"},
 }
@@ -417,13 +420,15 @@ def _side_ran(result: Any) -> bool:
     return isinstance(sl, dict) and any(_side_labelled(n, b) and _codes(b.get("offices")) for n, b in sl.items())
 
 
-def _side_html(result: Any, statement: Any = None, unlabelled_said: bool = False, main_not_run: Any = None) -> str:
+def _side_html(result: Any, statement: Any = None, unlabelled_said: bool = False, main_not_run: Any = None,
+               index_snapshot: Any = None) -> str:
     """The side lists of one search result, as HTML after the Asian list; '' when the result carries none."""
     sl = result.get("side_lists") if isinstance(result, dict) else None
     if sl is None:
         return ""
+    stmt = statement if isinstance(statement, dict) else {}
+    index_id = str(index_snapshot or stmt.get("index_snapshot") or "")
     if main_not_run is None:
-        stmt = statement if isinstance(statement, dict) else {}
         asked = _codes(stmt.get("offices"))
         # mainNotRun is a fact of the Asian root (the main ranking is skipped there); without one, it ran
         main_not_run = False
@@ -445,7 +450,7 @@ def _side_html(result: Any, statement: Any = None, unlabelled_said: bool = False
             out.append(f"<p class=note>{_e(_asia_empty(offices))}</p>")
         else:
             out.append(f"<p class=note>{_e(ASIA_SEPARATE_NO_MAIN if main_not_run else FR_SEPARATE)} {_e(w['cls'])} "
-                       f"{_e(w['rank'])} {_e('Searched for this list: ' + _list_of(offices) + '.')}</p>")
+                       f"{_e(w['dates']) + ' ' if w['dates_index'] in index_id else ''}{_e(w['rank'])} {_e('Searched for this list: ' + _list_of(offices) + '.')}</p>")
             out.append(f"<table><tr><th>#</th><th>Publication</th><th>Year</th><th>Title</th><th>{_e(w['members'])}</th></tr>")
             for i, h in enumerate(hits, 1):
                 h = h if isinstance(h, dict) else {}

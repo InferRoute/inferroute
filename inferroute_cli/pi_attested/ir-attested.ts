@@ -418,14 +418,17 @@ interface SideShown {
 	k: number;
 	docs: AsiaDoc[];
 }
-interface SideWords { heading: string; cls: string; rank: string; notRequested: string; prefix: string; badge: (n: number) => string; list: string }
+interface SideWords { heading: string; cls: string; dates: string; datesIndex: string; rank: string; notRequested: string; prefix: string; badge: (n: number) => string; list: string }
 const FR_HEADING = "Separate list: French patent families";
 const FR_SEPARATE = ASIA_SEPARATE;
-const FR_CLASS = "It holds French patent families that have no US, EP or WO member, matched on the English title + abstract of a French publication. Most were first published between 1970 and 2019.";
+const FR_CLASS = "It holds French patent families that have no US, EP or WO member, matched on the English title + abstract of a French publication.";
+// A fact about index fr-2611 only: said only when the answering index's identifier names it, like ASIA_DATES.
+const FR_DATES = "Most were first published between 1970 and 2019, as of index fr-2611.";
+const FR_DATES_INDEX = "fr-2611";
 const FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked.";
 const FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched.";
 const SIDE_WORDS: Record<string, SideWords> = {
-	fr: { heading: FR_HEADING, cls: FR_CLASS, rank: FR_RANK, notRequested: FR_NOT_REQUESTED, prefix: "F",
+	fr: { heading: FR_HEADING, cls: FR_CLASS, dates: FR_DATES, datesIndex: FR_DATES_INDEX, rank: FR_RANK, notRequested: FR_NOT_REQUESTED, prefix: "F",
 	      badge: (n: number) => `${n} French publications in this family`, list: "French patent families" },
 };
 const sideWordsOf = (name: string): SideWords | undefined =>
@@ -451,7 +454,7 @@ function sideRan(p: AsiaPart): boolean {
 }
 // One section per list, in the order the result names them, each like the Asian list's: heading, then its state.
 // The unlabelled sentence is said once (not again when the Asian list already said it).
-function sideLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: string[] }[] {
+function sideLines(p: AsiaPart, titleMax?: number, indexId?: string): { notes: string[]; rows: string[] }[] {
 	const out: { notes: string[]; rows: string[] }[] = [];
 	if (p.sideUnlabelled && !p.asiaUnlabelled) out.push({ notes: [ASIA_UNLABELLED], rows: [] });
 	for (const s of p.side ?? []) {
@@ -464,7 +467,8 @@ function sideLines(p: AsiaPart, titleMax?: number): { notes: string[]; rows: str
 		} else if (!s.docs.length) {
 			notes.push(asiaEmpty(s.offices));
 		} else {
-			notes.push(p.mainNotRun ? ASIA_SEPARATE_NO_MAIN : FR_SEPARATE, w.cls, w.rank, asiaSearched(s.offices));
+			notes.push(p.mainNotRun ? ASIA_SEPARATE_NO_MAIN : FR_SEPARATE, w.cls,
+				...(String(indexId ?? "").includes(w.datesIndex) ? [w.dates] : []), w.rank, asiaSearched(s.offices));
 			s.docs.forEach((d, i) => {
 				const n = familySize(d);
 				const t = titleMax && d.title && d.title.length > titleMax ? `${d.title.slice(0, titleMax).trimEnd()}…` : d.title;
@@ -707,7 +711,7 @@ function renderSearchProof(p: SearchProof | undefined, expanded: boolean, theme:
 		if (asiaRows.length) line(theme.fg("dim", "  (these rows cannot be marked)"));
 	}
 	// The other separate lists (FR first), each its own section after the Asian one, the same way.
-	for (const { notes: sNotes, rows: sRows } of sideLines(p, 96)) {
+	for (const { notes: sNotes, rows: sRows } of sideLines(p, 96, p.index)) {
 		line("");
 		for (const n of sNotes) line(theme.fg("muted", `  ${n}`));
 		const shownS = expanded ? sRows : sRows.slice(0, 5);
@@ -798,7 +802,7 @@ function hitsText(out: SearchVerdict, label: string, earlier: Map<string, number
 		if (ap.asia) lines.push(ASIA_COUNT_NOTE);
 	}
 	// The other separate lists (FR first), each after the Asian one and in its own words; same rules.
-	for (const { notes: sNotes, rows: sRows } of sideLines(ap)) {
+	for (const { notes: sNotes, rows: sRows } of sideLines(ap, undefined, String(out.enclave?.index_snapshot ?? ""))) {
 		lines.push("");
 		lines.push(...sNotes, ...sRows);
 		if (sRows.length) {

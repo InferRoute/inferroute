@@ -54,7 +54,10 @@ const states = {
   // side lists (FR first), as ir-attested.ts hands them over in `details.side`
   fr_hits: { asia: { offices: ["CN"], k: 20, docs: [hit(1)] },
              side: [{ name: "fr", offices: ["FR"], k: 20,
-                      docs: [frHit(1, { family: ["FR-2001-A1", "FR-2001-B1"], familyTotal: 4 }), frHit(2)] }] },
+                      docs: [frHit(1, { family: ["FR-2001-A1", "FR-2001-B1"], familyTotal: 4 }), frHit(2)] }],
+             index: "patent1m-asia-2611-fr-2611+epwo+usall@89000000" },
+  fr_index_2612: { side: [{ name: "fr", offices: ["FR"], k: 20, docs: [frHit(1)] }],
+                   index: "patent1m-asia-2611-fr-2612+epwo+usall@89100000" },
   fr_not_requested: { asia: { offices: ["CN"], k: 20, docs: [] }, side: [{ name: "fr", offices: [], k: 20, docs: [] }] },
   fr_empty: { side: [{ name: "fr", offices: ["FR"], k: 20, docs: [] }] },
   fr_only: { asia: { offices: [], k: 20, docs: [] }, side: [{ name: "fr", offices: ["FR"], k: 20, docs: [frHit(1)] }], mainNotRun: ["FR"] },

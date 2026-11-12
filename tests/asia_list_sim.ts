@@ -69,6 +69,9 @@ const cases: Record<string, Case> = {
   fr_hits: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], [hit(1)]),
              side_lists: { fr: side(["FR"], [frHit(1, { family_members: ["FR-2001-A1", "FR-2001-B1"], family_members_total: 2 }),
                                               frHit(2, { family_members: ["FR-2002-A1"], family_members_total: 1 })]) } }, index: IFR },
+  // another index carrying an FR list: the fr-2611 dating sentence is not said under it
+  fr_index_2612: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN"], [hit(1)]), side_lists: { fr: side(["FR"], [frHit(1)]) } },
+                   index: "patent1m-asia-2611-fr-2612+epwo+usall@89100000" },
   fr_not_requested: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN"], []), side_lists: { fr: side([], []) } },
                       req: ["US", "CN"], index: IFR },
   fr_empty: { r: { hits: [mainHit], offices_unindexed: [], asia: asia(["CN", "JP", "KR", "TW"], []), side_lists: { fr: side(["FR"], []) } },
@@ -92,7 +95,7 @@ for (const [name, c] of Object.entries(cases)) {
   const { notes, rows } = asiaLines(p, undefined, index);
   const verdict = { ok: true, steps: [], enclave: { index_snapshot: index }, statement: { hits_n: (c.r.hits as unknown[]).length }, result: c.r };
   const sp = searchProofOf(verdict, "search", undefined, c.req);
-  out[name] = { part: p, notes, rows, side: sideLines(p), spSide: sp.side ?? null,
+  out[name] = { part: p, notes, rows, side: sideLines(p, undefined, index), spSide: sp.side ?? null,
                 docKeys: sp.docs.map((d: { key: string }) => d.key), spAsia: sp.asia ?? null,
                 model: hitsText(verdict, "Search 1", new Map(), c.req),
                 terminal: renderSearchProof(sp, true, theme).lines, terminalFolded: renderSearchProof(sp, false, theme).lines };

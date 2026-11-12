@@ -17,7 +17,8 @@ from tests.test_asia_list import JS, PY, TS, UNLABELLED, ext, page  # noqa: F401
 FR_HEADING = "Separate list: French patent families"
 FR_SEPARATE = "A separate list, not part of the ranking above, and never merged into it."
 FR_CLASS = ("It holds French patent families that have no US, EP or WO member, matched on the English title + abstract "
-            "of a French publication. Most were first published between 1970 and 2019.")
+            "of a French publication.")
+FR_DATES = "Most were first published between 1970 and 2019, as of index fr-2611."
 FR_RANK = "Ranked by dense similarity alone, with every family in the list scored: not citation-expanded and not reranked."
 FR_NOT_REQUESTED = "French families were not requested in this search, so this list was not searched."
 FR_EMPTY = ("This list is empty for this search: FR was searched and no family came back. That is not evidence that "
@@ -27,12 +28,12 @@ SEPARATE_NO_MAIN = "A separate list; no US, EP or WO ranking ran in this search.
 FRENCH = re.compile(r"French|\bFR\b|France|F\d+\.")
 
 
-@pytest.mark.parametrize("sentence", [FR_HEADING, FR_CLASS, FR_RANK, FR_NOT_REQUESTED])
+@pytest.mark.parametrize("sentence", [FR_HEADING, FR_CLASS, FR_DATES, FR_RANK, FR_NOT_REQUESTED])
 def test_the_three_surfaces_use_one_set_of_fr_sentences(sentence):
     from inferroute_cli import probant_export as E
     assert sentence in TS.read_text(), "ir-attested.ts"
     assert sentence in JS.read_text(), "app.js"
-    assert sentence in {E.FR_HEADING, E.FR_CLASS, E.FR_RANK, E.FR_NOT_REQUESTED}, "probant_export.py"
+    assert sentence in {E.FR_HEADING, E.FR_CLASS, E.FR_DATES, E.FR_RANK, E.FR_NOT_REQUESTED}, "probant_export.py"
 
 
 def test_the_shared_sentences_are_the_asian_lists_own():
@@ -57,7 +58,7 @@ def test_only_fr_has_words():
 
 def test_ext_fr_with_hits_is_its_own_section_after_the_asian_one(ext):
     s = ext["fr_hits"]
-    assert s["side"] == [{"notes": [FR_HEADING, FR_SEPARATE, FR_CLASS, FR_RANK, "Searched for this list: FR."],
+    assert s["side"] == [{"notes": [FR_HEADING, FR_SEPARATE, FR_CLASS, FR_DATES, FR_RANK, "Searched for this list: FR."],
                           "rows": ["F1. FR-2001-A1 (1994) Echangeur 1 [2 French publications in this family]",
                                    "F2. FR-2002-A1 (1994) Echangeur 2"]}]
     assert [x["name"] for x in s["spSide"]] == ["fr"]
@@ -149,7 +150,7 @@ def test_the_tool_description_says_french_only_conditionally():
 def test_page_fr_with_hits(page):
     s = page["fr_hits"]["side"]
     assert len(s) == 1
-    assert s[0]["section"].startswith(f"{FR_HEADING} {FR_SEPARATE} {FR_CLASS} {FR_RANK} Searched for this list: FR.")
+    assert s[0]["section"].startswith(f"{FR_HEADING} {FR_SEPARATE} {FR_CLASS} {FR_DATES} {FR_RANK} Searched for this list: FR.")
     assert s[0]["section"].endswith(FR_NO_MARKS)
     assert s[0]["ranks"] == ["F1", "F2"] and s[0]["marks"] == 0 and s[0]["keyLinks"] == 0
     assert s[0]["families"] == [["4 French publications in this family", "FR-2001-A1, FR-2001-B1 and 2 more"]]
@@ -208,7 +209,7 @@ def test_export_fr_states():
     a = _export({"hits": [], "asia": ASIA, "side_lists": {"fr": _side(["FR"], [
         _fr(1, family_members=["FR-2001-A1", "FR-2001-B1"], family_members_total=3), _fr(2)])}})
     assert a.index("CN, JP, KR and TW") < a.index(FR_HEADING)
-    assert FR_SEPARATE in a and FR_CLASS in a and FR_RANK in a and "Searched for this list: FR." in a
+    assert FR_SEPARATE in a and FR_CLASS in a and FR_DATES in a and FR_RANK in a and "Searched for this list: FR." in a
     assert "<td>F1</td>" in a and "<td>F2</td>" in a and "<td>A1</td>" not in a
     assert "3 French publications in this family" in a and a.count(FR_NO_MARKS) == 1
     b = _export({"hits": [], "asia": ASIA, "side_lists": {"fr": _side([], [])}}, ["US", "CN"])
@@ -250,3 +251,26 @@ def test_export_older_result_says_nothing_about_france():
 def test_export_escapes_side_list_text():
     a = _export({"hits": [], "side_lists": {"fr": _side(["FR"], [_fr(1, title="<script>x</script>")])}})
     assert "<script>" not in a and "&lt;script&gt;" in a
+
+
+# ── the fr-2611 dating sentence is about that index only ──────────────────────────────────────────────────────────
+
+def test_fr_dates_is_said_only_under_an_index_naming_fr_2611(ext, page):
+    """FR_DATES is a fact about index fr-2611 (as ASIA_DATES is about asia-2611): absent under any other identifier,
+    on the extension (assistant and terminal), the page and the export."""
+    assert FR_DATES in ext["fr_hits"]["model"] and FR_DATES in "\n".join(ext["fr_hits"]["terminal"])
+    assert FR_DATES in ext["fr_no_asia"]["side"][0]["notes"]
+    s = ext["fr_index_2612"]
+    assert s["side"][0]["notes"] == [FR_HEADING, FR_SEPARATE, FR_CLASS, FR_RANK, "Searched for this list: FR."]
+    assert FR_DATES not in s["model"] and FR_DATES not in "\n".join(s["terminal"])
+    assert "1970" not in s["model"]
+    assert page["fr_index_2612"]["side"][0]["section"].startswith(
+        f"{FR_HEADING} {FR_SEPARATE} {FR_CLASS} {FR_RANK} Searched for this list: FR.")
+    assert FR_DATES not in page["fr_only"]["side"][0]["section"], "no identifier at all: not said"
+    from inferroute_cli import probant_export as E
+    r = {"hits": [], "side_lists": {"fr": _side(["FR"], [_fr(1)])}}
+    other = "patent1m-asia-2611-fr-2612+epwo+usall@89100000"
+    a = E._asia_html(r, {"index_snapshot": other}, other)
+    assert FR_CLASS in a and FR_DATES not in a and "1970" not in a
+    assert FR_DATES in E._asia_html(r, {"index_snapshot": IFR}, IFR)
+    assert FR_DATES not in E._asia_html(r, {}, None)

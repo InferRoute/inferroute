@@ -65,3 +65,24 @@ def test_country_endings_mapping():
     assert {r["tld"]: r["taken"] for r in rs} == {"io": True, "ai": False, "co": False, "fr": False, "de": None}
     assert len(seen) == 5 and all("quillora." in u for u in seen)
     assert country_endings("a.b") is None and country_endings("-x") is None and country_endings("") is None
+
+
+def test_lang_check_batches(monkeypatch):
+    from inferroute_cli.naming_demo import server as S
+
+    calls = []
+
+    def fake(prompt, max_tokens, hedge_after, deadline):
+        names = prompt.split("Names: ")[1].split("\n")[0].split(", ")
+        calls.append(names)
+        if "Bad" in names:
+            raise TimeoutError()
+        return '{' + ",".join(f'"{n}": {{"ok": true, "note": ""}}' for n in names) + '}', {"completion_tokens": 1}
+
+    monkeypatch.setattr(S, "llm", fake)
+    names = [f"N{i}" for i in range(7)] + ["Bad"]
+    out = S.lang_check(names, lambda u: None, deadline=2)
+    assert sorted(len(c) for c in calls) == [4, 4]
+    assert set(out) == {"N0", "N1", "N2", "N3"}  # the batch with "Bad" failed: its names stay unchecked
+    monkeypatch.setattr(S, "llm", lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
+    assert S.lang_check(["A"], lambda u: None, deadline=1) == {"__error__": "TimeoutError"}

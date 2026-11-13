@@ -201,7 +201,7 @@ def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
 # ---------------------------------------------------------------- AI lane
 BACKUP = "kimi-k3"
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
-_HEDGE = cf.ThreadPoolExecutor(8)
+_HEDGE = cf.ThreadPoolExecutor(16)  # the language check alone can hold 8 (4 batches x 2 models)
 
 
 def _call(model: str, prompt: str, max_tokens: int, timeout: float) -> tuple[str, dict]:
@@ -263,6 +263,34 @@ LANG = """For each brand name below, check English, French, German and Spanish: 
 contain something rude, negative, embarrassing or confusing for a customer? Be strict but not paranoid.
 Names: {names}
 Answer with JSON only: {{"<name>": {{"ok": true|false, "note": "<at most 12 words, say which language if not ok>"}}}}"""
+
+
+LANG_BATCH = 4
+_LANG_POOL = cf.ThreadPoolExecutor(8)
+
+
+def lang_check(names: list[str], add_usage, deadline: float = 25.0) -> dict:
+    """{name: {ok, note}} from LANG, in batches of LANG_BATCH run in parallel, each sent to both models at once.
+    13 Nov 12:2xZ: one 16-name prompt took kimi 28 s and deepseek 37 s+ (then 400s and timeouts), past the run's
+    20 s; 4-name prompts answer in ~7 s. A failed batch leaves its names "not checked"; the first error is kept
+    under "__error__" (with the HTTP status) for the log line, but only when no batch answered."""
+    def one(batch):
+        text, u = llm(LANG.format(names=", ".join(batch)), 800, hedge_after=0.0, deadline=deadline)
+        add_usage(u)
+        return _json_in(text) or {}
+    batches = [names[i:i + LANG_BATCH] for i in range(0, len(names), LANG_BATCH)]
+    out, errs = {}, []
+    for f in [_LANG_POOL.submit(one, b) for b in batches]:
+        try:
+            r = f.result(timeout=deadline + 1)
+            out.update(r if isinstance(r, dict) else {})
+        except Exception as e:  # noqa: BLE001
+            errs.append(type(e).__name__ + (f" {e.code}" if isinstance(e, urllib.error.HTTPError) else ""))
+    if errs:
+        print(f"language check: {len(errs)} of {len(batches)} batches failed ({errs[0]})", flush=True)
+        if not out:
+            out["__error__"] = errs[0]
+    return out
 
 
 CLICHE = re.compile(r"(ly|ify|io|oo|sy|zy|hub|go|ster)$", re.I)
@@ -395,14 +423,7 @@ class Run:
         lang_box: dict = {}
 
         def lang():
-            try:
-                # both models at once: the check has 20 s, and MODEL alone timed out on every run at 12:2xZ on 13 Nov
-                # (deepseek 30 s+, kimi ~7 s); hedging at 7 s left the backup too little time. Cost: one more small call.
-                text, u = llm(LANG.format(names=", ".join(short)), 3000, hedge_after=0.0, deadline=19.0)
-                self._add_usage(u)
-                lang_box.update(_json_in(text) or {})
-            except Exception as e:  # noqa: BLE001
-                lang_box["__error__"] = type(e).__name__ + (f" {e.code}" if isinstance(e, urllib.error.HTTPError) else "")
+            lang_box.update(lang_check(short, self._add_usage, deadline=19.0))
         th = threading.Thread(target=lang)
         lang_t0 = time.time()
         th.start()
@@ -474,12 +495,7 @@ class Report(Run):
         lang_box: dict = {}
 
         def lang():
-            try:
-                text, u = llm(LANG.format(names=", ".join(names)), 2000, hedge_after=0.0)  # as the run's check
-                self._add_usage(u)
-                lang_box.update(_json_in(text) or {})
-            except Exception as e:  # noqa: BLE001
-                lang_box["__error__"] = type(e).__name__ + (f" {e.code}" if isinstance(e, urllib.error.HTTPError) else "")
+            lang_box.update(lang_check(names, self._add_usage))
         th = threading.Thread(target=lang)
         th.start()
         rows = {}

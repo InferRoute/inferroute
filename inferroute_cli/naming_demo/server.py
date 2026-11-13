@@ -200,9 +200,7 @@ def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
 
 
 # ---------------------------------------------------------------- AI lane
-BACKUP = "kimi-k3"  # a second kimi request while deepseek-v4-flash answers 400 (13 Nov); first answer wins.
-# Same model both legs, so the backup only helps a slow draw: it waits (14 s generation, 8 s language) instead of
-# always firing, which doubled every run's calls (12 per run, measured by the director 13 Nov 20:24Z).
+BACKUP = "kimi-k3"  # a second kimi request while deepseek-v4-flash answers 400 (13 Nov); first answer wins
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
 _HEDGE = cf.ThreadPoolExecutor(16)  # the language check alone can hold 8 (4 batches x 2 models)
 
@@ -286,7 +284,7 @@ def lang_check(names: list[str], add_usage, deadline: float = 25.0) -> dict:
         for attempt in (0, 1):
             left = deadline - (time.time() - t0)
             try:
-                text, u = llm(LANG.format(names=", ".join(batch)), 800, hedge_after=8.0, deadline=left)
+                text, u = llm(LANG.format(names=", ".join(batch)), 800, hedge_after=0.0, deadline=left)
                 add_usage(u)
                 r = _json_in(text)
                 if not isinstance(r, dict) or not r:
@@ -394,7 +392,7 @@ class Run:
             styles = STYLES if not own else STYLES[:1]
             with cf.ThreadPoolExecutor(2) as ex:
                 futs = [ex.submit(llm, GEN.format(rules=RULES, idea=idea or ", ".join(own), tone=tone, n=n, style=s,
-                                                  classes_rule=rule), hedge_after=14.0, deadline=35.0) for s in styles]
+                                                  classes_rule=rule), deadline=35.0) for s in styles]
                 for f in futs:
                     try:
                         text, u = f.result()

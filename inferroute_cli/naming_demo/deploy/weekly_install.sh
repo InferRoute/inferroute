@@ -14,7 +14,8 @@ B=.local/share/anteriora-names
 INST=$HOME/$B/current/inferroute_cli/naming_demo/deploy/install.sh
 health() {  # $1: ssh prefix or empty
   for i in $(seq 1 30); do
-    if $1 curl -fsS -m 20 http://127.0.0.1:8770/health 2>/dev/null | grep -q "\"index\": \"$WANT\""; then return 0; fi
+    # serving the new index, and healthy apart from (at most) having no model key, which ft never has
+    if $1 curl -sS -m 20 http://127.0.0.1:8770/health 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('index')=='$WANT' and set(d.get('why',[]))<={'model-key'} else 1)"; then return 0; fi
     sleep 4
   done
   return 1

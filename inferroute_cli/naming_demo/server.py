@@ -506,6 +506,16 @@ class H(BaseHTTPRequestHandler):
             if self.app.domains.taken("google", "com") is not True:
                 ok = False
                 why.append("com")
+            # No model key (ft holds none): this host cannot make names, so it must not take /run traffic either.
+            # The weekly rollout tolerates exactly this reason (it checks the index, not the key).
+            try:
+                from inferroute_cli import config
+                if not config.load().api_key:
+                    ok = False
+                    why.append("model-key")
+            except Exception:  # noqa: BLE001
+                ok = False
+                why.append("model-key")
             self._json({"ok": ok, "why": why, "index": self.app.index_sha, "data": self.app.data}, 200 if ok else 503)
         elif u.path == "/config":
             self._json({"record": bool(self.record) and q.get("rec") == self.record})

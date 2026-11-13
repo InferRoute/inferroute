@@ -32,7 +32,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from . import aci_evidence, cose, envelope, search, statement, verify_record
 from .amd_chain import Steps
-from .search_contract import HEX16, HEX32, KIND, PRIVACY_CONTRACT, salted
+from .search_contract import HEX16, HEX32, KIND, PRIVACY_CONTRACT, known_contract, salted
 
 
 def _now_iso() -> str:
@@ -172,7 +172,7 @@ class Verifier:
         steps.add(shape, "runtime data commits to a search",
                   f"index {rd.get('index_snapshot')!r}, manifest {str(rd.get('index_manifest_sha256'))[:12]}…, "
                   f"encoders {str(rd.get('model_manifest_sha256'))[:12]}…" if shape else "the runtime data is not a sealed-search commitment")
-        contract_ok = rd.get("privacy_contract") == PRIVACY_CONTRACT
+        contract_ok = known_contract(rd.get("privacy_contract"))     # any known wording: no flag day on a change
         steps.add(contract_ok, "plaintext-handling contract is present",
                   "the runtime commits to the service's handling boundary and its explicit limits"
                   if contract_ok else "missing or unrecognized plaintext-handling contract; refusing to seal")
@@ -378,6 +378,23 @@ class Verifier:
         return self._verdict(steps, enclave, statement=st, result=result if bound else None,
                              _evidence={"offer": offer, "checks": list(steps)} if bound else None,
                              _reply_to=reply_pub.hex())
+
+
+def approval_key(enclave: Dict[str, Any]) -> Optional[str]:
+    """What a human's approval of this enclave is keyed on, and what a record row names as its measurement.
+
+    SEV-SNP: the report's launch MEASUREMENT. Intel TDX has none (the SNP field is empty), so the key is
+    "tdx:" + the image's Authenticode SHA-384 (check_tdx's image_sha384, the value the signed reference was
+    matched against). Not MRTD or RTMR0: those are Google's firmware and its per-shape configuration, and would
+    lapse or carry over with changes that are not the image. The prefix keeps the two families apart.
+    None when neither is present: an approval keyed on nothing is never honoured (is_approved refuses empty).
+    The client's approvalKey() (ir-attested.ts) computes the same string.
+    """
+    meas = enclave.get("measurement")
+    if meas:
+        return str(meas)
+    img = enclave.get("image_sha384")
+    return "tdx:" + str(img).lower() if img else None
 
 
 class MatterState:
@@ -687,7 +704,7 @@ class SearchArchive:
             doc_key = result.get("key")
         row = {"at": _utcnow(), "statement": statement, "result": result if isinstance(result, dict) else None,
                "signer_pub": signer or enclave.get("statement_signer_pub"),
-               "measurement": enclave.get("measurement"), "host_data": enclave.get("host_data"),
+               "measurement": approval_key(enclave), "host_data": enclave.get("host_data"),
                "index_snapshot": enclave.get("index_snapshot"), "cutoff_date": cutoff}
         if doc_key is not None:
             row["key"] = doc_key

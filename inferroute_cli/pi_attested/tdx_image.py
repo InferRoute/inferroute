@@ -47,7 +47,7 @@ CMDLINE_REQUIRED = ("systemd.volatile=overlay", "systemd.show_status=0", "quiet"
                     "accept_memory=eager", "systemd.import_credentials=no")
 # v13 is RETIRED: this checker accepts v14 only; a v13 image fails row B by name and reaches no level-1 sentence. The
 # verifier keeps v13's wording for reports a v13-era checker produced, never for an image this one checked.
-IMAGE_NAME = "ir-sealed-search-tdx-v18"          # the current release
+IMAGE_NAME = "ir-sealed-search-tdx-v19"          # the current release
 # v15 (8 Nov 2026) adds idle=poll: the guest never halts, which removes the halt exits that show the hypervisor when a
 # vCPU is idle (measured: Google's per-minute cpu/utilization of a v14 box reads idle 0.03 % vs searching 1.26 %; with
 # idle=poll a flat 99.8-99.97 %, shared/qa/2026-11-08/idle-poll-test). NOT removed: per-request bursts of
@@ -60,11 +60,13 @@ IMAGE_NAME = "ir-sealed-search-tdx-v18"          # the current release
 # (open_rank/shape.py), checked by row "D7. the engine does a fixed amount of work per request".
 # v18 (12 Nov 2026) keeps v17's command line; inside the root: the machine-review fixes F1 F2 F4 F5 (F4 adds OOM rules,
 # checked for every image after v17) and the exact side lists (FR first, open_rank/side_lists.py).
+# v19 (12 Nov 2026) keeps v18's command line; the offer carries privacy contract /3 (TDX-true wording) and the build
+# normalises the staged tree's modes and owners.
 IMAGE_NAMES = ("ir-sealed-search-tdx-v14", "ir-sealed-search-tdx-v15", "ir-sealed-search-tdx-v16", "ir-sealed-search-tdx-v17",
-               "ir-sealed-search-tdx-v18")
+               "ir-sealed-search-tdx-v18", "ir-sealed-search-tdx-v19")
 CMDLINE_REQUIRED_BY_IMAGE = {"ir-sealed-search-tdx-v14": (), "ir-sealed-search-tdx-v15": ("idle=poll",),
                              "ir-sealed-search-tdx-v16": ("idle=poll",), "ir-sealed-search-tdx-v17": ("idle=poll",),
-                             "ir-sealed-search-tdx-v18": ("idle=poll",)}
+                             "ir-sealed-search-tdx-v18": ("idle=poll",), "ir-sealed-search-tdx-v19": ("idle=poll",)}
 CMDLINE_PATTERNS = (re.compile(r"roothash=[0-9a-f]{64}"),
                     re.compile(r"inferroute\.image=(?:" + "|".join(re.escape(n) for n in IMAGE_NAMES) + r")"))
 # Said explicitly so a reader sees what a refusal is about; the allowlist above refuses them anyway.

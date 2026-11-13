@@ -608,6 +608,7 @@ class ConfidentialSession:
             except httpx.HTTPError as e:
                 return ("error", 502, f"the relay is unreachable: {public_reason(e)}", TRANSPORT_FAULT)
             if status == 200:
+                sealed.relay_request_id = relay_request_id(headers)
                 return ("ok", pinned, sealed, raw)
             readable, body = True, b""
             try:
@@ -836,7 +837,7 @@ class ConfidentialSession:
             yield ends(("data: " + json.dumps(translate.openai_error(
                 "the enclave's reply ended part-way through, without finishing the answer; please retry")) + "\n\n").encode())
             yield DONE
-        self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
+        self._account(usage, int((time.monotonic() - t0) * 1000) if t0 else 0, sealed.relay_request_id)
 
     def _relabel(self, line: bytes) -> bytes:
         """An SSE `data:` line, decrypted here, with its `model` field set to the lane name. The enclave answers
@@ -871,7 +872,7 @@ class ConfidentialSession:
             yield json.dumps(translate.openai_error(f"could not open the enclave's reply: {e}")).encode()
             return
         c["response_bytes_opened_here"] += len(data)
-        self._account(translate._usage(resp.get("usage")), int((time.monotonic() - t0) * 1000) if t0 else 0)
+        self._account(translate._usage(resp.get("usage")), int((time.monotonic() - t0) * 1000) if t0 else 0, sealed.relay_request_id)
         if isinstance(resp, dict) and "model" in resp:
             resp["model"] = self.model_short           # the operator's model string never reaches the agent
         yield json.dumps(resp).encode()
@@ -919,7 +920,7 @@ class ConfidentialSession:
             c["ciphertext_frames_received"] += opener.frames
         for ev in tr.finish_events():
             yield ev.encode()
-        self._account(tr.usage, int((time.monotonic() - t0) * 1000) if t0 else 0)
+        self._account(tr.usage, int((time.monotonic() - t0) * 1000) if t0 else 0, sealed.relay_request_id)
 
     async def _open_json(self, raw: AsyncIterator[bytes], sealed: e2ee.SealedRequest, t0: float = 0.0) -> AsyncIterator[bytes]:
         c = self.receipt.counters
@@ -944,10 +945,10 @@ class ConfidentialSession:
             return
         c["response_bytes_opened_here"] += len(data)
         out = translate.from_openai(resp, self.model_short)
-        self._account(out.get("usage") or {}, int((time.monotonic() - t0) * 1000) if t0 else 0)
+        self._account(out.get("usage") or {}, int((time.monotonic() - t0) * 1000) if t0 else 0, sealed.relay_request_id)
         yield json.dumps(out).encode()
 
-    def _account(self, usage: dict, latency_ms: int = 0) -> None:
+    def _account(self, usage: dict, latency_ms: int = 0, request_id: str = "") -> None:
         c = self.receipt.counters
         self._last_prompt_tokens = int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
         self._last_prompt_bytes = self._sending_bytes
@@ -963,7 +964,10 @@ class ConfidentialSession:
             "session_id": self.session_id, "fleet_id": self.fleet_id, "model": self.model_short,
             "model_short": self.model_short, "economy": self.economy,
             "instance_id": self.pinned.instance_id if self.pinned else "",
-            "usage": {**usage, "latency_ms": int(latency_ms)}, "self_reported": True}))
+            "usage": {**usage, "latency_ms": int(latency_ms)}, "self_reported": True,
+            # The relay matches a report to its invoke by this id (x-inferroute-request-id on the reply); without it
+            # it falls back to (session, instance) within 60 s, which parallel turns and late reports defeat.
+            **({"request_id": request_id} if request_id else {})}))
 
     def _error(self, streaming: bool, status: int, message: str, openai: bool = False) -> tuple[int, dict, AsyncIterator[bytes]]:
         body = translate.openai_error(message) if openai else translate.error_body(message)
@@ -1095,6 +1099,16 @@ UPSTREAM_PUBLIC = {
 _SUPPORT_CODE = re.compile(r"^IR-[A-Z][0-9]{4}$")
 _SUPPORT_REQ = re.compile(r"^req_[A-Za-z0-9]{1,48}$")
 SUPPORT_CONTACT = "support@inferroute.ai"
+
+
+_RELAY_REQ_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def relay_request_id(headers: dict | None) -> str:
+    """The relay's request id for an invoke (x-inferroute-request-id), or "" unless it is 1-64 of [A-Za-z0-9_-]."""
+    h = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
+    req = h.get("x-inferroute-request-id", "").strip()
+    return req if _RELAY_REQ_ID.match(req) else ""
 
 
 def relay_support_ref(headers: dict | None) -> tuple[str, str]:

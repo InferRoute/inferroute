@@ -1413,3 +1413,25 @@ def test_a_400_just_under_the_window_by_this_devices_estimate_is_not_called_an_o
     _turn(s, True, "x" * 4000)
     st, text = _turn(s, True, "x" * 4000)          # same size: 165,000 + 32,768 = 197,768 <= 202,752
     assert st == 400 and "/compact" not in text and "malformed" in text
+
+
+def test_a_usage_report_carries_the_relays_request_id(world):
+    """The relay matches a usage report to its invoke by x-inferroute-request-id (inferroute-44, 13 Nov); without it,
+    parallel turns or a late report give "matches no served invoke"."""
+    carrier = FakeCarrier(world["enclaves"])
+    real_invoke = carrier.invoke
+
+    async def invoke(**kw):
+        st, h, raw = await real_invoke(**kw)
+        return st, {**h, "x-inferroute-request-id": "req_ABC123"}, raw
+    carrier.invoke = invoke
+    s = _session(carrier)
+    asyncio.run(s.open())
+    st, _h, _body = asyncio.run(_msg(s, {"model": "fake", "stream": True, "messages": [{"role": "user", "content": "go"}]}))
+    assert st == 200
+    asyncio.run(asyncio.sleep(0))
+    assert carrier.usage_reports and carrier.usage_reports[-1].get("request_id") == "req_ABC123"
+    assert carrier.usage_reports[-1].get("session_id") and "instance_id" in carrier.usage_reports[-1]
+    # A malformed id is not echoed.
+    from inferroute_local.confidential.session import relay_request_id
+    assert relay_request_id({"X-InferRoute-Request-Id": "bad id; drop"}) == ""

@@ -156,6 +156,7 @@ class SealedRequest:
     response_sk: Any       # our per-request ML-KEM private key; never serialised
     plaintext_size: int    # bytes of JSON before gzip — for the receipt's "encrypted here" counter
     mlkem_ct: bytes        # kept so a receipt can name the exchange without revealing anything
+    relay_request_id: str = ""  # the relay's x-inferroute-request-id for this invoke, echoed in the usage report
 
 
 def seal_request(instance_pubkey_b64: str, payload: dict) -> SealedRequest:

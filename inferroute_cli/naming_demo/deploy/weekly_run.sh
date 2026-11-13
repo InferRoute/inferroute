@@ -14,4 +14,7 @@ bash "$R/inferroute_cli/naming_demo/deploy/weekly_install.sh" "$NEW"
 mkdir -p "$HOME/anteriora-tmdata/watch"
 python3 tools/tm_watch.py diff "$OLD" "$NEW" "$HOME/anteriora-tmdata/watch/delta-${TODAY//-/}.sqlite"
 rm -f "$OLD"
+# Name watch: export from the site, match, post alerts. Skips itself until NAMES_WATCH_*_URL are set in the env file.
+set -a; . "$HOME/.config/anteriora-names/env"; set +a
+python3 tools/watch_sync.py "$HOME/anteriora-tmdata/watch/delta-${TODAY//-/}.sqlite"
 ls -1t "$W"/index-*.sqlite | tail -n +4 | while read -r f; do rm -f "$f" "$f.sha256" "${f%.sqlite}.report.json"; done

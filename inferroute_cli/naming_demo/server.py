@@ -164,6 +164,40 @@ class Domains:
         return bool(i < len(a) and a[i] == h)
 
 
+# ---------------------------------------------------------------- country endings (opt-in, live)
+# .io .ai .co .fr .de publish no list, so they are checked live, ONLY on the visitor's click, for that one name, from
+# this server straight to each registry's own RDAP (pi-attested 13 Nov: our server end to end, no third party, no
+# registrar, nothing logged). 200 taken, 404 probably free, anything else not checked. Checked 13 Nov on all five.
+COUNTRY_RDAP = {
+    "io": "https://rdap.identitydigital.services/rdap/domain/",  # Identity Digital, the .io registry operator
+    "ai": "https://rdap.identitydigital.services/rdap/domain/",  # same operator; IANA's RDAP list names it for .ai
+    "co": "https://rdap.registry.co/co/domain/",                 # the .CO registry (records name whois.nic.co)
+    "fr": "https://rdap.nic.fr/domain/",                         # AFNIC (IANA list)
+    "de": "https://rdap.denic.de/domain/",                       # DENIC
+}
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+_COUNTRY_POOL = cf.ThreadPoolExecutor(10)
+
+
+def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
+    """[{tld, taken}] for the five, or None when raw is not a brand label. Never logs the name or the URLs."""
+    label = (raw or "").strip().lower()
+    if not _LABEL.fullmatch(label):
+        return None
+
+    def one(tld):
+        req = urllib.request.Request(f"{COUNTRY_RDAP[tld]}{label}.{tld}", headers={"Accept": "application/rdap+json",
+                                     "User-Agent": "anteriora-names/1.0"})  # Identity Digital 403s Python-urllib
+        try:
+            with opener(req, timeout=6) as r:
+                return {"tld": tld, "taken": True if r.status == 200 else None}
+        except urllib.error.HTTPError as e:
+            return {"tld": tld, "taken": False if e.code == 404 else None}
+        except Exception:  # noqa: BLE001 - timeout or outage: "not checked", and nothing about it is logged
+            return {"tld": tld, "taken": None}
+    return list(_COUNTRY_POOL.map(one, COUNTRY_RDAP))
+
+
 # ---------------------------------------------------------------- AI lane
 BACKUP = "kimi-k3"
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
@@ -515,7 +549,7 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         # The idea and names travel in the POST body, never in the URL, so no access log can hold them.
         path = urllib.parse.urlparse(self.path).path
-        if path not in ("/run", "/report"):
+        if path not in ("/run", "/report", "/country-endings"):
             self.send_error(404)
             return
         if self.secret and not hmac.compare_digest(self.headers.get("x-anteriora-names-secret", ""), self.secret):
@@ -529,6 +563,10 @@ class H(BaseHTTPRequestHandler):
             q = {k: str(v) for k, v in json.loads(self.rfile.read(n)).items()}
         except (ValueError, AttributeError):
             self.send_error(400)
+            return
+        if path == "/country-endings":  # the site counts these per IP; the name never appears in a URL we receive
+            rs = country_endings(q.get("name", ""))
+            self._json({"results": rs} if rs is not None else {"error": "name"}, 200 if rs is not None else 400)
             return
         ip = self.headers.get("X-Forwarded-For", "").split(",")[0].strip() or self.client_address[0]
         if path == "/run" and not DAILY.take(q.get("device", "")[:64] or ip, ip):

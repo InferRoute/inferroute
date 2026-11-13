@@ -31,7 +31,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 RUNS = Path.home() / ".local/share/naming-demo/runs"
-MODEL = "kimi-k3"  # 13 Nov 18:00Z: deepseek-v4-flash answered 400 after ~38 s, a real first run got no names; kimi 6-7 s
+MODEL = "kimi-k2.6"  # 13 Nov 21:00Z: kimi-k3 slowed (both legs past 45 s in 2 of 4 runs); k2.6 7-11 s, ~5x cheaper
+NO_EFFORT_FIELD = {"kimi-k2.6"}
 SHORTLIST = 16
 SHOW = 10
 
@@ -200,7 +201,7 @@ def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
 
 
 # ---------------------------------------------------------------- AI lane
-BACKUP = "kimi-k3"  # a second kimi request while deepseek-v4-flash answers 400 (13 Nov); first answer wins
+BACKUP = "kimi-k3"  # a different model and pool, so the backup is real diversity (deepseek-v4-flash: provider at capacity)
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
 _HEDGE = cf.ThreadPoolExecutor(16)  # the language check alone can hold 8 (4 batches x 2 models)
 
@@ -213,6 +214,10 @@ def _call(model: str, prompt: str, max_tokens: int, timeout: float) -> tuple[str
     body = {"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens,
             "reasoning": {"enabled": False}, "reasoning_effort": "none",
             "chat_template_kwargs": {"thinking": False, "enable_thinking": False}}
+    if model in NO_EFFORT_FIELD:
+        # its server rejects reasoning_effort "none" (only low/medium/high; relay fix #146 not live); thinking stays
+        # off through chat_template_kwargs alone, measured 13 Nov: 7-11 s, 45 names
+        body.pop("reasoning_effort"); body.pop("reasoning")
     req = urllib.request.Request(c.api_url + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + c.api_key, "Content-Type": "application/json",
                                           # names this caller in the relay's index (director, 13 Nov: per-caller failure rates)

@@ -319,6 +319,9 @@ class Run:
             yield self.emit({"t": "name", "name": name, "com": dom[name]["com"], "net": dom[name]["net"],
                              "tm": j, "secs": round(secs, 1)})
         th.join(timeout=max(0.0, 20 - (time.time() - lang_t0)))  # the language check never holds the run past 20 s
+        if th.is_alive() or "__error__" in lang_box or not lang_box:  # measured: ~1 run in 8 (13 Nov); log the cause
+            why = "timeout" if th.is_alive() else lang_box.get("__error__", "unparsed reply")
+            print(f"language check missing: {why} after {time.time() - lang_t0:.1f} s", flush=True)
         for n in short:
             v = lang_box.get(n) or next((v for k, v in lang_box.items() if k.lower() == n.lower()), None)
             yield self.emit({"t": "lang", "name": n,

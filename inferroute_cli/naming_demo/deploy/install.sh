@@ -3,8 +3,9 @@
 # data files read-only, user units in place. Usage: install.sh <repo> <ref> <index.sqlite> <com.npy> <net.npy> <index_sha256>
 # The data step refuses an index whose sha256 is not the one given, so no host serves an index the others don't have.
 # REF "keep" leaves the installed code as it is and replaces only the data (the weekly index).
+# Optional 7th argument: a directory whose *.npy (more zone endings) and prices.json are installed too.
 set -euo pipefail
-REPO=$1 REF=$2 IDX=$3 COM=$4 NET=$5 WANT=$6
+REPO=$1 REF=$2 IDX=$3 COM=$4 NET=$5 WANT=$6 EXTRA=${7:-}
 B=$HOME/.local/share/anteriora-names
 mkdir -p "$B/data" "$HOME/.config/anteriora-names" "$HOME/.config/systemd/user"
 if [ "$REF" = keep ]; then
@@ -21,6 +22,14 @@ for f in "$IDX:index.sqlite" "$COM:com.npy" "$NET:net.npy"; do
   if [ ! -e "$dst" ] || ! cmp -s "$src" "$dst"; then chmod u+w "$dst" 2>/dev/null || true; cp "$src" "$dst.tmp" && mv "$dst.tmp" "$dst"; fi
   chmod 444 "$dst"
 done
+if [ -n "$EXTRA" ]; then
+  for src in "$EXTRA"/*.npy "$EXTRA"/prices.json; do
+    [ -e "$src" ] || continue
+    dst=$B/data/$(basename "$src")
+    if [ ! -e "$dst" ] || ! cmp -s "$src" "$dst"; then chmod u+w "$dst" 2>/dev/null || true; cp "$src" "$dst.tmp" && mv "$dst.tmp" "$dst"; fi
+    chmod 444 "$dst"
+  done
+fi
 ln -sfn "releases/$SHA" "$B/current"
 D=$B/current/inferroute_cli/naming_demo/deploy
 cp "$D"/anteriora-names.service "$D"/anteriora-names-watchdog.service "$D"/anteriora-names-watchdog.timer \

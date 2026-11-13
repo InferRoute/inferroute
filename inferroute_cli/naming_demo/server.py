@@ -104,12 +104,41 @@ def judge(result: dict, registers: set, keep: int = 3, amber_at: float = 0.80) -
 
 # ---------------------------------------------------------------- domains (local zone copy only)
 class Domains:
+    EXTRA = ("app", "dev", "net", "org")  # shown after .com, in this order, when free for the name (pricing strategy, 13 Nov)
+    PRICE_MAX_AGE_DAYS = 35               # older than this: no prices at all (no price beats an old one)
+
     def __init__(self, d: Path):
         self.sets = {}
-        for tld in ("com", "net"):
-            p = d / f"{tld}.npy"
-            if p.exists():
-                self.sets[tld] = np.load(p, mmap_mode="r")
+        for p in sorted(d.glob("*.npy")):
+            if re.fullmatch(r"[a-z0-9]+", p.stem):
+                self.sets[p.stem] = np.load(p, mmap_mode="r")
+        self.prices, self.checked = {}, ""
+        pp = d / "prices.json"
+        if pp.exists():
+            try:
+                doc = json.loads(pp.read_text())
+                age = (datetime.now(timezone.utc).date() - datetime.fromisoformat(doc["checked"]).date()).days
+                if doc.get("gate") == "pass" and age <= self.PRICE_MAX_AGE_DAYS:
+                    self.prices, self.checked = doc["tlds"], doc["checked"]
+            except Exception:  # noqa: BLE001 - a bad price file means no prices, never a broken page
+                self.prices, self.checked = {}, ""
+
+    def endings(self, label: str) -> list:
+        """.com always, then up to 3 free endings from EXTRA. Each: tld, taken (True/False/None), yearly renewal range
+        in EUR excl. VAT (or None) and whether registry-premium names exist on that ending."""
+        def one(t, taken):
+            p = self.prices.get(t)
+            return {"tld": t, "taken": taken, "premium": bool(p and p.get("premium")),
+                    "eur": round(p["renew_min"]) if p and p.get("renew_min") else None,       # cheapest renewal we know
+                    "registrar": p.get("cheapest") if p else None,                             # where that price is
+                    "spaceship_eur": (p.get("sources", {}).get("spaceship") or {}).get("renew") if p else None}
+        out = [one("com", self.taken(label, "com"))]
+        for t in self.EXTRA:
+            if len(out) >= 4:
+                break
+            if t in self.sets and self.taken(label, t) is False:
+                out.append(one(t, False))
+        return out
 
     def taken(self, label: str, tld: str):
         a = self.sets.get(tld)
@@ -297,8 +326,9 @@ class Run:
         short = own or (free + [n for n in names if n not in free])[:SHORTLIST]
 
         # 3. trade marks (parallel processes) and the language check (thread), at the same time
-        yield self.emit({"t": "shortlist", "names": [{"name": n, "com": dom[n]["com"], "net": dom[n]["net"]}
-                                                     for n in short]})
+        yield self.emit({"t": "shortlist", "names": [{"name": n, "com": dom[n]["com"], "net": dom[n]["net"],
+                                                      "endings": self.app.domains.endings(n)} for n in short],
+                         "prices_checked": self.app.domains.checked})
         yield self.emit({"t": "phase", "text": f"Searching {self.app.marks if also else self.app.marks_default:,} trade marks"})
         lang_box: dict = {}
 
@@ -317,6 +347,7 @@ class Run:
             j = judge(r, registers)
             results[name] = j
             yield self.emit({"t": "name", "name": name, "com": dom[name]["com"], "net": dom[name]["net"],
+                             "endings": self.app.domains.endings(name),
                              "tm": j, "secs": round(secs, 1)})
         th.join(timeout=max(0.0, 20 - (time.time() - lang_t0)))  # the language check never holds the run past 20 s
         if th.is_alive() or "__error__" in lang_box or not lang_box:  # measured: ~1 run in 8 (13 Nov); log the cause

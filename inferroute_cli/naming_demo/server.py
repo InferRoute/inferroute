@@ -633,6 +633,8 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(body)
+        elif u.path == "/meta":  # cheap (no search): the served index's register data dates, for the page's coverage line
+            self._json({"data": self.app.data, "index": self.app.index_sha})
         elif u.path == "/health":
             # Used by the host watchdog: a hung pool or a missing zone must take this host out of the tunnel.
             ok, why = True, []

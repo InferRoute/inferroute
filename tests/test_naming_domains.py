@@ -86,3 +86,18 @@ def test_lang_check_batches(monkeypatch):
     assert set(out) == {"N0", "N1", "N2", "N3"}  # the batch with "Bad" failed: its names stay unchecked
     monkeypatch.setattr(S, "llm", lambda *a, **k: (_ for _ in ()).throw(TimeoutError()))
     assert S.lang_check(["A"], lambda u: None, deadline=1) == {"__error__": "TimeoutError"}
+
+
+def test_lang_check_retries_a_failed_batch(monkeypatch):
+    from inferroute_cli.naming_demo import server as S
+    n = {"calls": 0}
+
+    def flaky(prompt, max_tokens, hedge_after, deadline):
+        n["calls"] += 1
+        if n["calls"] == 1:
+            return "not json", {}
+        return '{"A": {"ok": true, "note": ""}}', {}
+
+    monkeypatch.setattr(S, "llm", flaky)
+    assert S.lang_check(["A"], lambda u: None, deadline=19) == {"A": {"ok": True, "note": ""}}
+    assert n["calls"] == 2

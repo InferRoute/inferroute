@@ -274,10 +274,22 @@ def lang_check(names: list[str], add_usage, deadline: float = 25.0) -> dict:
     13 Nov 12:2xZ: one 16-name prompt took kimi 28 s and deepseek 37 s+ (then 400s and timeouts), past the run's
     20 s; 4-name prompts answer in ~7 s. A failed batch leaves its names "not checked"; the first error is kept
     under "__error__" (with the HTTP status) for the log line, but only when no batch answered."""
+    t0 = time.time()
+
     def one(batch):
-        text, u = llm(LANG.format(names=", ".join(batch)), 800, hedge_after=0.0, deadline=deadline)
-        add_usage(u)
-        return _json_in(text) or {}
+        # one retry while there is time for it: the lane gives the odd 502 or a reply that isn't JSON (13 Nov)
+        for attempt in (0, 1):
+            left = deadline - (time.time() - t0)
+            try:
+                text, u = llm(LANG.format(names=", ".join(batch)), 800, hedge_after=0.0, deadline=left)
+                add_usage(u)
+                r = _json_in(text)
+                if not isinstance(r, dict) or not r:
+                    raise ValueError("unparsed reply")
+                return r
+            except Exception:  # noqa: BLE001
+                if attempt or deadline - (time.time() - t0) < 6:
+                    raise
     batches = [names[i:i + LANG_BATCH] for i in range(0, len(names), LANG_BATCH)]
     out, errs = {}, []
     for f in [_LANG_POOL.submit(one, b) for b in batches]:

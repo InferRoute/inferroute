@@ -1,0 +1,9 @@
+[Unit]
+Description=Check the name page's daily free-run count every 10 minutes (mgld only)
+
+[Timer]
+OnCalendar=*:0/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target

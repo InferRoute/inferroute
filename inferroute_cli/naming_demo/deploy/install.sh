@@ -23,7 +23,8 @@ for f in "$IDX:index.sqlite" "$COM:com.npy" "$NET:net.npy"; do
 done
 ln -sfn "releases/$SHA" "$B/current"
 D=$B/current/inferroute_cli/naming_demo/deploy
-cp "$D"/anteriora-names.service "$D"/anteriora-names-watchdog.service "$D"/anteriora-names-watchdog.timer "$HOME/.config/systemd/user/"
+cp "$D"/anteriora-names.service "$D"/anteriora-names-watchdog.service "$D"/anteriora-names-watchdog.timer \
+   "$D"/anteriora-names-weekly.service "$D"/anteriora-names-weekly.timer "$HOME/.config/systemd/user/"  # weekly: enabled on mgld only
 E=$HOME/.config/anteriora-names/env
 [ -f "$E" ] || { umask 077; printf 'NAMES_SECRET=%s\n' "$(head -c 24 /dev/urandom | base64 | tr -d '/+=')" > "$E"; }
 chmod 600 "$E"

@@ -200,7 +200,7 @@ def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
 
 
 # ---------------------------------------------------------------- AI lane
-BACKUP = "deepseek-v4-flash"
+BACKUP = "kimi-k3"  # a second kimi request while deepseek-v4-flash answers 400 (13 Nov); first answer wins
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
 _HEDGE = cf.ThreadPoolExecutor(16)  # the language check alone can hold 8 (4 batches x 2 models)
 
@@ -390,7 +390,7 @@ class Run:
             styles = STYLES if not own else STYLES[:1]
             with cf.ThreadPoolExecutor(2) as ex:
                 futs = [ex.submit(llm, GEN.format(rules=RULES, idea=idea or ", ".join(own), tone=tone, n=n, style=s,
-                                                  classes_rule=rule)) for s in styles]
+                                                  classes_rule=rule), deadline=35.0) for s in styles]
                 for f in futs:
                     try:
                         text, u = f.result()

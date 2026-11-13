@@ -392,7 +392,7 @@ class Run:
             styles = STYLES if not own else STYLES[:1]
             with cf.ThreadPoolExecutor(2) as ex:
                 futs = [ex.submit(llm, GEN.format(rules=RULES, idea=idea or ", ".join(own), tone=tone, n=n, style=s,
-                                                  classes_rule=rule), deadline=35.0) for s in styles]
+                                                  classes_rule=rule), deadline=45.0) for s in styles]
                 for f in futs:
                     try:
                         text, u = f.result()

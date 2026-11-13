@@ -396,11 +396,13 @@ class Run:
 
         def lang():
             try:
-                text, u = llm(LANG.format(names=", ".join(short)), 3000)
+                # both models at once: the check has 20 s, and MODEL alone timed out on every run at 12:2xZ on 13 Nov
+                # (deepseek 30 s+, kimi ~7 s); hedging at 7 s left the backup too little time. Cost: one more small call.
+                text, u = llm(LANG.format(names=", ".join(short)), 3000, hedge_after=0.0, deadline=19.0)
                 self._add_usage(u)
                 lang_box.update(_json_in(text) or {})
             except Exception as e:  # noqa: BLE001
-                lang_box["__error__"] = type(e).__name__
+                lang_box["__error__"] = type(e).__name__ + (f" {e.code}" if isinstance(e, urllib.error.HTTPError) else "")
         th = threading.Thread(target=lang)
         lang_t0 = time.time()
         th.start()
@@ -473,11 +475,11 @@ class Report(Run):
 
         def lang():
             try:
-                text, u = llm(LANG.format(names=", ".join(names)), 2000)
+                text, u = llm(LANG.format(names=", ".join(names)), 2000, hedge_after=0.0)  # as the run's check
                 self._add_usage(u)
                 lang_box.update(_json_in(text) or {})
             except Exception as e:  # noqa: BLE001
-                lang_box["__error__"] = type(e).__name__
+                lang_box["__error__"] = type(e).__name__ + (f" {e.code}" if isinstance(e, urllib.error.HTTPError) else "")
         th = threading.Thread(target=lang)
         th.start()
         rows = {}

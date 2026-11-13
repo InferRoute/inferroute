@@ -1,0 +1,665 @@
+{
+ "n": {
+  "real": 2000,
+  "real_near": 1878,
+  "synthetic": 2342,
+  "noise_watches": 1000,
+  "delta_marks": 92055,
+  "delta_weeks_equiv": 5.09
+ },
+ "thresholds": {
+  "0.60": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.4483,
+   "real_near_with_classes": 0.3389,
+   "real_near_text_only": 0.5059,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.176,
+   "noise_alert_rate_per_watch_week": 0.0346
+  },
+  "0.60+words": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.5186,
+   "real_near_with_classes": 0.3838,
+   "real_near_text_only": 0.5841,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.289,
+   "noise_alert_rate_per_watch_week": 0.0568
+  },
+  "0.65": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.4446,
+   "real_near_with_classes": 0.3347,
+   "real_near_text_only": 0.5011,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.168,
+   "noise_alert_rate_per_watch_week": 0.033
+  },
+  "0.65+words": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.5,
+   "real_near_with_classes": 0.3739,
+   "real_near_text_only": 0.5639,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.252,
+   "noise_alert_rate_per_watch_week": 0.0495
+  },
+  "0.70": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.4398,
+   "real_near_with_classes": 0.3291,
+   "real_near_text_only": 0.4947,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.144,
+   "noise_alert_rate_per_watch_week": 0.0283
+  },
+  "0.70+words": {
+   "real_identical": 0.8443,
+   "real_identical_text_only": 0.9918,
+   "real_near": 0.4814,
+   "real_near_with_classes": 0.3599,
+   "real_near_text_only": 0.5437,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.6338,
+   "noise_watch_alerting_in_delta": 0.188,
+   "noise_alert_rate_per_watch_week": 0.037
+  },
+  "0.72": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.386,
+   "real_near_with_classes": 0.2927,
+   "real_near_text_only": 0.4318,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.4442,
+   "noise_watch_alerting_in_delta": 0.094,
+   "noise_alert_rate_per_watch_week": 0.0185
+  },
+  "0.72+words": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.4249,
+   "real_near_with_classes": 0.3207,
+   "real_near_text_only": 0.4776,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.4442,
+   "noise_watch_alerting_in_delta": 0.13,
+   "noise_alert_rate_per_watch_week": 0.0256
+  },
+  "0.74": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.3376,
+   "real_near_with_classes": 0.2535,
+   "real_near_text_only": 0.3807,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.3247,
+   "noise_watch_alerting_in_delta": 0.076,
+   "noise_alert_rate_per_watch_week": 0.0149
+  },
+  "0.74+words": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.3749,
+   "real_near_with_classes": 0.2801,
+   "real_near_text_only": 0.4239,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.3247,
+   "noise_watch_alerting_in_delta": 0.106,
+   "noise_alert_rate_per_watch_week": 0.0208
+  },
+  "0.76": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.3285,
+   "real_near_with_classes": 0.2437,
+   "real_near_text_only": 0.3706,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.3013,
+   "noise_watch_alerting_in_delta": 0.062,
+   "noise_alert_rate_per_watch_week": 0.0122
+  },
+  "0.76+words": {
+   "real_identical": 0.8361,
+   "real_identical_text_only": 0.9836,
+   "real_near": 0.3642,
+   "real_near_with_classes": 0.2703,
+   "real_near_text_only": 0.4121,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 1.0,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.3013,
+   "noise_watch_alerting_in_delta": 0.082,
+   "noise_alert_rate_per_watch_week": 0.0161
+  },
+  "0.78": {
+   "real_identical": 0.8279,
+   "real_identical_text_only": 0.9754,
+   "real_near": 0.303,
+   "real_near_with_classes": 0.2241,
+   "real_near_text_only": 0.344,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 0.9972,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.1974,
+   "noise_watch_alerting_in_delta": 0.046,
+   "noise_alert_rate_per_watch_week": 0.009
+  },
+  "0.78+words": {
+   "real_identical": 0.8279,
+   "real_identical_text_only": 0.9754,
+   "real_near": 0.3349,
+   "real_near_with_classes": 0.2493,
+   "real_near_text_only": 0.3807,
+   "syn_addword": 1.0,
+   "syn_del1": 1.0,
+   "syn_ins1": 1.0,
+   "syn_sound": 0.9972,
+   "syn_sub1": 1.0,
+   "syn_swap": 0.1974,
+   "noise_watch_alerting_in_delta": 0.063,
+   "noise_alert_rate_per_watch_week": 0.0124
+  },
+  "0.80": {
+   "real_identical": 0.8197,
+   "real_identical_text_only": 0.9672,
+   "real_near": 0.2854,
+   "real_near_with_classes": 0.2087,
+   "real_near_text_only": 0.3216,
+   "syn_addword": 1.0,
+   "syn_del1": 0.8105,
+   "syn_ins1": 1.0,
+   "syn_sound": 0.9773,
+   "syn_sub1": 0.793,
+   "syn_swap": 0.1481,
+   "noise_watch_alerting_in_delta": 0.031,
+   "noise_alert_rate_per_watch_week": 0.0061
+  },
+  "0.80+words": {
+   "real_identical": 0.8197,
+   "real_identical_text_only": 0.9672,
+   "real_near": 0.3142,
+   "real_near_with_classes": 0.2311,
+   "real_near_text_only": 0.3552,
+   "syn_addword": 1.0,
+   "syn_del1": 0.8105,
+   "syn_ins1": 1.0,
+   "syn_sound": 0.9773,
+   "syn_sub1": 0.793,
+   "syn_swap": 0.1481,
+   "noise_watch_alerting_in_delta": 0.042,
+   "noise_alert_rate_per_watch_week": 0.0083
+  },
+  "0.82": {
+   "real_identical": 0.8115,
+   "real_identical_text_only": 0.959,
+   "real_near": 0.2492,
+   "real_near_with_classes": 0.1877,
+   "real_near_text_only": 0.278,
+   "syn_addword": 1.0,
+   "syn_del1": 0.5661,
+   "syn_ins1": 0.8354,
+   "syn_sound": 0.9547,
+   "syn_sub1": 0.5337,
+   "syn_swap": 0.1195,
+   "noise_watch_alerting_in_delta": 0.024,
+   "noise_alert_rate_per_watch_week": 0.0047
+  },
+  "0.82+words": {
+   "real_identical": 0.8115,
+   "real_identical_text_only": 0.959,
+   "real_near": 0.2742,
+   "real_near_with_classes": 0.2059,
+   "real_near_text_only": 0.3078,
+   "syn_addword": 1.0,
+   "syn_del1": 0.5661,
+   "syn_ins1": 0.8354,
+   "syn_sound": 0.9547,
+   "syn_sub1": 0.5337,
+   "syn_swap": 0.1195,
+   "noise_watch_alerting_in_delta": 0.034,
+   "noise_alert_rate_per_watch_week": 0.0067
+  },
+  "0.85": {
+   "real_identical": 0.8115,
+   "real_identical_text_only": 0.959,
+   "real_near": 0.2039,
+   "real_near_with_classes": 0.1485,
+   "real_near_text_only": 0.2274,
+   "syn_addword": 1.0,
+   "syn_del1": 0.2294,
+   "syn_ins1": 0.4165,
+   "syn_sound": 0.915,
+   "syn_sub1": 0.1571,
+   "syn_swap": 0.0416,
+   "noise_watch_alerting_in_delta": 0.023,
+   "noise_alert_rate_per_watch_week": 0.0045
+  },
+  "0.85+words": {
+   "real_identical": 0.8115,
+   "real_identical_text_only": 0.959,
+   "real_near": 0.2236,
+   "real_near_with_classes": 0.1639,
+   "real_near_text_only": 0.2513,
+   "syn_addword": 1.0,
+   "syn_del1": 0.2294,
+   "syn_ins1": 0.4165,
+   "syn_sound": 0.915,
+   "syn_sub1": 0.1571,
+   "syn_swap": 0.0416,
+   "noise_watch_alerting_in_delta": 0.032,
+   "noise_alert_rate_per_watch_week": 0.0063
+  }
+ },
+ "real_near_target_found_any_rank": 0.7961,
+ "real_near_score_quartiles": [
+  0.655,
+  0.76,
+  0.877
+ ],
+ "misses_sample": [
+  {
+   "watched": "GAN",
+   "new": "GANOVA"
+  },
+  {
+   "watched": "GO",
+   "new": "GO SHOES"
+  },
+  {
+   "watched": "ROSICED",
+   "new": "ROSACAD"
+  },
+  {
+   "watched": "SNAPCHAT",
+   "new": "SNAPSCRATCH"
+  },
+  {
+   "watched": "ISG",
+   "new": "ISGL\u00d6"
+  },
+  {
+   "watched": "UP!",
+   "new": "WHEEL'UP"
+  },
+  {
+   "watched": "DOLE",
+   "new": "DOLWEN"
+  },
+  {
+   "watched": "PHYTEA",
+   "new": "PHISIEA"
+  },
+  {
+   "watched": "AMP+",
+   "new": "AMPGO"
+  },
+  {
+   "watched": "MAGIMIX",
+   "new": "TOUCH BY MAGIIC"
+  },
+  {
+   "watched": "- KIWI CUVEE -",
+   "new": "KIWIBUL"
+  },
+  {
+   "watched": "Mesolis",
+   "new": "MESO - C"
+  },
+  {
+   "watched": "ALCATEL",
+   "new": "ARCOTEL"
+  },
+  {
+   "watched": "MILLE MIGLIA",
+   "new": "\"\"LES 1000 MILES BRITTANY FERRIES\"\""
+  },
+  {
+   "watched": "CASITALIA",
+   "new": "GASTRONOMIA DI QUALITA CASA ITALIA"
+  },
+  {
+   "watched": "AA",
+   "new": "AA.COM"
+  },
+  {
+   "watched": "IP WINE",
+   "new": "IP SPIRIT"
+  },
+  {
+   "watched": "MONSIEUR PISCINE",
+   "new": "ENERGY TEAM FRANCE"
+  },
+  {
+   "watched": "KA",
+   "new": "BABYKA PUERICULTURE D'AUJOURD'HUI"
+  },
+  {
+   "watched": "XV",
+   "new": "XV BARBAR"
+  },
+  {
+   "watched": "AGILENT",
+   "new": "AGIL'I.T."
+  },
+  {
+   "watched": "DOMPLUS",
+   "new": "ADOM PLUS ADOM+"
+  },
+  {
+   "watched": "ALTERIS",
+   "new": "ATEIS"
+  },
+  {
+   "watched": "SELSUN BLUE",
+   "new": "SULSEN"
+  },
+  {
+   "watched": "G",
+   "new": "(mf)"
+  }
+ ],
+ "syn_misses_at_0.80": [
+  {
+   "watched": "SNOWJADE",
+   "new": "SNOWJDAE",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.713
+   }
+  },
+  {
+   "watched": "dimlux",
+   "new": "DMILUX",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "JOINFANXIN",
+   "new": "JIONFANXIN",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.776
+   }
+  },
+  {
+   "watched": "DUCORE",
+   "new": "DUEORE",
+   "kind": "sub1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "DUCORE",
+   "new": "DUORE",
+   "kind": "del1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "DUCORE",
+   "new": "DUOCRE",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "GYNAVER",
+   "new": "GYNAEVR",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "EVERGREEN",
+   "new": "EEVRGREEN",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.739
+   }
+  },
+  {
+   "watched": "ATMOSCLEAR",
+   "new": "AMTOSCLEAR",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.76
+   }
+  },
+  {
+   "watched": "MOBILITY",
+   "new": "MOIBLITY",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.713
+   }
+  },
+  {
+   "watched": "STORMAX",
+   "new": "STROMAX",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "sounds close",
+     "a word spelled closely (\u201cstormax\u201d / \u201cstromax\u201d)"
+    ],
+    "score": 0.711
+   }
+  },
+  {
+   "watched": "DREAMSPARK",
+   "new": "DREAMSPRAK",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.76
+   }
+  },
+  {
+   "watched": "NOBEYSTON",
+   "new": "NOBESYTON",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.739
+   }
+  },
+  {
+   "watched": "TISANO",
+   "new": "TILANO",
+   "kind": "sub1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "TISANO",
+   "new": "TIANO",
+   "kind": "del1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "TISANO",
+   "new": "TSIANO",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "Zorblix",
+   "new": "ZOBRLIX",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "sounds close",
+     "a word spelled closely (\u201czorblix\u201d / \u201czobrlix\u201d)"
+    ],
+    "score": 0.711
+   }
+  },
+  {
+   "watched": "POMALCA",
+   "new": "POMLACA",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "GREENSTICKS",
+   "new": "GREESNTICKS",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.777
+   }
+  },
+  {
+   "watched": "Orsibox",
+   "new": "ORSBIOX",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "sounds close",
+     "a word spelled closely (\u201corsibox\u201d / \u201corsbiox\u201d)"
+    ],
+    "score": 0.711
+   }
+  },
+  {
+   "watched": "adstark",
+   "new": "ADSTRAK",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "ATORUS",
+   "new": "ATORIS",
+   "kind": "sub1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "ATORUS",
+   "new": "ATORS",
+   "kind": "del1",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.792
+   }
+  },
+  {
+   "watched": "ATORUS",
+   "new": "ATOURS",
+   "kind": "swap",
+   "evidence": null
+  },
+  {
+   "watched": "AMERFIST",
+   "new": "AMEFRIST",
+   "kind": "swap",
+   "evidence": {
+    "reasons": [
+     "spelled closely"
+    ],
+    "score": 0.713
+   }
+  }
+ ]
+}

@@ -80,7 +80,7 @@ def _tm(args):
     return name, r, time.time() - t
 
 
-def judge(result: dict, registers: set, keep: int = 3) -> dict:
+def judge(result: dict, registers: set, keep: int = 3, amber_at: float = 0.80) -> dict:
     """Light from the search result, counting only marks in the chosen registers with an overlapping class."""
     red, amber = [], []
     for h in result.get("hits", []):
@@ -95,7 +95,7 @@ def judge(result: dict, registers: set, keep: int = 3) -> dict:
                "reasons": h.get("reasons", []), "link": register_link(m.get("register"), m.get("number"))}
         if reasons & RED:
             red.append(row)
-        elif reasons & AMBER and h.get("score", 0) >= 0.80:  # below 0.80 the resemblance is loose (seen 12 Nov)
+        elif reasons & AMBER and h.get("score", 0) >= amber_at:  # page: 0.80; the watch passes its own (watch_bench)
             amber.append(row)
     light = "red" if red else "amber" if amber else "green"
     return {"light": light, "conflicts": (red + amber)[:keep], "n_conflicts": len(red) + len(amber)}

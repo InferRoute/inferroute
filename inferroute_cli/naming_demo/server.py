@@ -237,6 +237,19 @@ def cap_patterns(names: list[str], share: float = 0.25) -> list[str]:
     return out
 
 
+# Rude roots the AI language check has let through (13 Nov: "Shagplan" passed as "fine"). Applied to GENERATED names
+# only (a visitor's own names are always checked as typed). Unambiguous roots only; "ass", "cock", "con", "anal" sit
+# inside ordinary words (class, peacock, icon, analytics) and stay with the AI check.
+RUDE = ("shag", "fuck", "shit", "cunt", "piss", "twat", "wank", "bitch", "slut", "whore", "nazi", "porn",
+        "dick", "merde", "salope", "couille", "arsch", "scheis", "nutte", "mierda",
+        "polla", "joder", "pendej", "cabron")
+
+
+def rude(name: str) -> bool:
+    n = name.lower()
+    return any(r in n for r in RUDE)
+
+
 def clean_names(xs) -> list[str]:
     out, seen = [], set()
     for x in xs or []:
@@ -297,7 +310,7 @@ class Run:
                         yield self.emit({"t": "warn", "text": f"one name source failed: {type(e).__name__}"})
                         continue
                     if not own:
-                        names += clean_names(d.get("names"))
+                        names += [n for n in clean_names(d.get("names")) if not rude(n)]
                     if not given:
                         for c in d.get("classes", []):
                             try:

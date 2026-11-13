@@ -1915,3 +1915,13 @@ def test_a_tdx_approval_is_held_under_the_image_so_it_is_asked_once():
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "one yes covers the matter" in r.stdout
+
+
+def test_the_tdx_card_says_search_timing_is_padded_as_the_image_does():
+    """The image sets IR_REPLY_SLOT_SECONDS=12 / IR_SURVEY_SLOT_SECONDS=150 (v18 unit file); the card said "Timing is
+    not padded" — an understatement that contradicted the machine (found 13 Nov)."""
+    from inferroute_cli import probant_trust
+    lines = probant_trust.limits(probant_trust.OK, search_is_ours=True, search_tdx=True)
+    text = " ".join(lines)
+    assert "Timing is not padded" not in text
+    assert "12 s for a search" in text and "150 s for a survey" in text

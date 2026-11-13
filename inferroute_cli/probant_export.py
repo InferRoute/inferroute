@@ -1671,7 +1671,7 @@ def write_bundle(client: str, matter: str, out_dir: Optional[str], *, anchor: bo
           "--reference-key <its key>")
     print("                        (in that folder; needs Python's cryptography 42 or newer. Without those "
           "two it can only show a genuine")
-    print("                        Azure confidential machine, not that it was InferRoute's — every identity "
+    print("                        confidential machine (Intel TDX, or AMD SEV-SNP), not that it was InferRoute's — every identity "
           "line FAILs and it exits 1.)")
     print("  contains the disclosure in plain text — store it accordingly")
     if anchor:

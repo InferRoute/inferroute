@@ -17,6 +17,7 @@ import json
 import os
 import multiprocessing as mp
 import re
+import sys
 import threading
 import time
 import urllib.error
@@ -30,7 +31,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 RUNS = Path.home() / ".local/share/naming-demo/runs"
-MODEL = "deepseek-v4-flash"
+MODEL = "kimi-k3"  # 13 Nov 18:00Z: deepseek-v4-flash answered 400 after ~38 s, a real first run got no names; kimi 6-7 s
 SHORTLIST = 16
 SHOW = 10
 
@@ -199,7 +200,7 @@ def country_endings(raw: str, opener=urllib.request.urlopen) -> list | None:
 
 
 # ---------------------------------------------------------------- AI lane
-BACKUP = "kimi-k3"
+BACKUP = "deepseek-v4-flash"
 CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
 _HEDGE = cf.ThreadPoolExecutor(16)  # the language check alone can hold 8 (4 batches x 2 models)
 
@@ -396,6 +397,7 @@ class Run:
                         self._add_usage(u)
                         d = _json_in(text) or {}
                     except Exception as e:  # noqa: BLE001 - a failed leg is reported, the other may carry the run
+                        print(f"name source failed: {type(e).__name__}", file=sys.stderr, flush=True)  # the type only, never the idea
                         yield self.emit({"t": "warn", "text": f"one name source failed: {type(e).__name__}"})
                         continue
                     if not own:
@@ -417,6 +419,7 @@ class Run:
         from .nice_classes import NICE
         yield self.emit({"t": "classes", "classes": classes, "why": {c: NICE.get(int(c), "") for c in classes}})
         if not names:
+            print("run failed: no names came back", file=sys.stderr, flush=True)
             yield self.emit({"t": "error", "text": "No names came back. Try again."})
             return
 

@@ -431,6 +431,8 @@ def limits(search_state: str, search_is_ours: bool = False, surface: str = "term
         out.append("Each search reply is padded to one size and leaves at a fixed time (12 s for a search, "
                    "150 s for a survey), so its size and timing show only which of the two it was. When "
                    "searches are made, and how many, stay visible.")
+        out.append("InferRoute's search gate records your account and the time of each search, to count it "
+                   "against what you bought. It never sees what you searched.")
         out.append("A search finds related documents. It doesn't prove novelty, or that nothing else exists.")
     elif search_state in (OK, WARN):
         out.append("The search deployment fingerprint "

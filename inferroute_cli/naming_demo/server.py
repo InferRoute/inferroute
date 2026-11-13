@@ -19,6 +19,7 @@ import multiprocessing as mp
 import re
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -121,6 +122,7 @@ class Domains:
 
 # ---------------------------------------------------------------- AI lane
 BACKUP = "kimi-k3"
+CREDIT = {"out_since": 0.0}  # set by a 402 from the proxy, cleared by the next successful call; shown on /health
 _HEDGE = cf.ThreadPoolExecutor(8)
 
 
@@ -134,7 +136,13 @@ def _call(model: str, prompt: str, max_tokens: int, timeout: float) -> tuple[str
             "chat_template_kwargs": {"thinking": False, "enable_thinking": False}}
     req = urllib.request.Request(c.api_url + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Authorization": "Bearer " + c.api_key, "Content-Type": "application/json"})
-    d = json.load(urllib.request.urlopen(req, timeout=timeout))
+    try:
+        d = json.load(urllib.request.urlopen(req, timeout=timeout))
+    except urllib.error.HTTPError as e:
+        if e.code == 402:  # the key's account is out of credit: every run will fail until it is topped up
+            CREDIT["out_since"] = CREDIT["out_since"] or time.time()
+        raise
+    CREDIT["out_since"] = 0.0
     return d["choices"][0]["message"]["content"], d.get("usage") or {}
 
 
@@ -516,7 +524,11 @@ class H(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001
                 ok = False
                 why.append("model-key")
-            self._json({"ok": ok, "why": why, "index": self.app.index_sha, "data": self.app.data}, 200 if ok else 503)
+            # Credit is reported, not gated: an empty account is the same on every host, so taking hosts out of the
+            # tunnel would not help; the watchdog on mgld alerts Henry instead.
+            credit = "out" if CREDIT["out_since"] else "ok"
+            self._json({"ok": ok, "why": why, "index": self.app.index_sha, "data": self.app.data, "model_credit": credit},
+                       200 if ok else 503)
         elif u.path == "/config":
             self._json({"record": bool(self.record) and q.get("rec") == self.record})
         elif u.path == "/runs" and self.record and q.get("rec") == self.record:

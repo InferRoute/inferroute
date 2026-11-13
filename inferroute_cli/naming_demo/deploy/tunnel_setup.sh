@@ -14,7 +14,10 @@ cat > "$C/tunnel.yml" <<YML
 tunnel: $ID
 credentials-file: $C/tunnel-credentials.json
 ingress:
+  # Only what the site's proxy calls is public; /health (runs a real search), / and the replay routes stay on the
+  # host itself (watchdog and weekly_install use 127.0.0.1). tmp confirmed 13 Nov: no site calls anything else.
   - hostname: $HOST
+    path: ^/(run|report|country-endings|meta)\$
     service: http://127.0.0.1:8770
   - service: http_status:404
 YML

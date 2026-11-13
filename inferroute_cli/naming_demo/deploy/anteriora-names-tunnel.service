@@ -1,0 +1,9 @@
+[Unit]
+Description=Anteriora naming: Cloudflare Tunnel connector (anteriora-names.inferroute.ai -> 127.0.0.1:8770); started/stopped by the watchdog
+ConditionPathExists=%h/.config/anteriora-names/tunnel.yml
+After=network-online.target anteriora-names.service
+
+[Service]
+ExecStart=%h/.local/bin/cloudflared --no-autoupdate --config %h/.config/anteriora-names/tunnel.yml tunnel run
+Restart=on-failure
+RestartSec=5

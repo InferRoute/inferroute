@@ -105,7 +105,7 @@ def judge(result: dict, registers: set, keep: int = 3, amber_at: float = 0.80) -
 # ---------------------------------------------------------------- domains (local zone copy only)
 class Domains:
     EXTRA = ("app", "dev", "net", "org")  # shown after .com, in this order, when free for the name (pricing strategy, 13 Nov)
-    PRICE_MAX_AGE_DAYS = 35               # older than this: no prices at all (no price beats an old one)
+    PRICE_MAX_AGE_DAYS = 14               # older than this: no prices at all (pi-attested 13 Nov: hide, never stale)
 
     def __init__(self, d: Path):
         self.sets = {}

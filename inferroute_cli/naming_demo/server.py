@@ -214,7 +214,9 @@ def _call(model: str, prompt: str, max_tokens: int, timeout: float) -> tuple[str
             "reasoning": {"enabled": False}, "reasoning_effort": "none",
             "chat_template_kwargs": {"thinking": False, "enable_thinking": False}}
     req = urllib.request.Request(c.api_url + "/v1/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Authorization": "Bearer " + c.api_key, "Content-Type": "application/json"})
+                                 headers={"Authorization": "Bearer " + c.api_key, "Content-Type": "application/json",
+                                          # names this caller in the relay's index (director, 13 Nov: per-caller failure rates)
+                                          "X-IR-Client": "anteriora-names", "User-Agent": "anteriora-names/1.0"})
     try:
         d = json.load(urllib.request.urlopen(req, timeout=timeout))
     except urllib.error.HTTPError as e:

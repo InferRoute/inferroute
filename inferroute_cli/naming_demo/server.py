@@ -602,7 +602,12 @@ class H(BaseHTTPRequestHandler):
         if path == "/run" and not DAILY.take(q.get("device", "")[:64] or ip, ip):
             self._json({"error": "daily"}, 429)
             return
+        net = q.get("net", "")[:64] if path == "/run" else ""
+        if not LIVE.take(net):
+            self._json({"error": "busy"}, 429)
+            return
         if not BUDGET.take():
+            LIVE.give(net)
             self._json({"error": "busy"}, 429)
             return
         self._sse_head()
@@ -614,6 +619,7 @@ class H(BaseHTTPRequestHandler):
             pass
         finally:
             BUDGET.give()
+            LIVE.give(net)
             if self.record and q.get("rec") == self.record and path == "/run":  # only the recording session's own runs; public build: never
                 run.save()
             try:
@@ -742,6 +748,30 @@ class Daily:
 
 
 DAILY = Daily()
+
+
+class OneAtATime:
+    """One run at a time per network (Henry, 13 Nov "go 1 2"). The site sends `net`, a keyed hash of the visitor's IP
+    (this service never sees the IP: behind the tunnel every request comes from the site). In memory, per host."""
+
+    def __init__(self):
+        self.lock, self.live = threading.Lock(), set()
+
+    def take(self, key: str) -> bool:
+        if not key:
+            return True
+        with self.lock:
+            if key in self.live:
+                return False
+            self.live.add(key)
+            return True
+
+    def give(self, key: str) -> None:
+        with self.lock:
+            self.live.discard(key)
+
+
+LIVE = OneAtATime()
 
 
 def main():

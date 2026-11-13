@@ -435,7 +435,7 @@ class Run:
         lang_box: dict = {}
 
         def lang():
-            lang_box.update(lang_check(short, self._add_usage, deadline=19.0))
+            lang_box.update(lang_check(short, self._add_usage, deadline=28.0))
         th = threading.Thread(target=lang)
         lang_t0 = time.time()
         th.start()
@@ -446,7 +446,7 @@ class Run:
             yield self.emit({"t": "name", "name": name, "com": dom[name]["com"], "net": dom[name]["net"],
                              "endings": self.app.domains.endings(name), "more_endings": self.app.domains.more(name),
                              "tm": j, "secs": round(secs, 1)})
-        th.join(timeout=max(0.0, 20 - (time.time() - lang_t0)))  # the language check never holds the run past 20 s
+        th.join(timeout=max(0.0, 30 - (time.time() - lang_t0)))  # never holds the run past 30 s (was 20; lane slow 13 Nov)
         if th.is_alive() or "__error__" in lang_box or not lang_box:  # measured: ~1 run in 8 (13 Nov); log the cause
             why = "timeout" if th.is_alive() else lang_box.get("__error__", "unparsed reply")
             print(f"language check missing: {why} after {time.time() - lang_t0:.1f} s", flush=True)

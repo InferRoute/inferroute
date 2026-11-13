@@ -203,6 +203,7 @@ interface SearchVerdict {
 	steps: SearchStep[];
 	enclave?: {
 		measurement?: string;
+		image_sha384?: string;
 		host_data?: string;
 		uvm_svn?: number;
 		index_snapshot?: string;
@@ -493,6 +494,14 @@ function sideLines(p: AsiaPart, titleMax?: number, indexId?: string): { notes: s
 	return out;
 }
 // ── end Asian list ──
+
+/** The key an approval is held under: the SNP measurement, else "tdx:" + the verified TDX image SHA-384, else "". */
+export function approvalKey(e: { measurement?: string; image_sha384?: string } | undefined): string {
+	const m = String(e?.measurement ?? "").trim();
+	if (m) return m;
+	const img = String(e?.image_sha384 ?? "").trim().toLowerCase();
+	return /^[0-9a-f]{96}$/.test(img) ? `tdx:${img}` : "";
+}
 
 function searchProofOf(out: SearchVerdict, phase: SearchProof["phase"], checked?: SearchVerdict, requestOffices?: string[]): SearchProof {
 	return {
@@ -1805,7 +1814,13 @@ export default function (pi: ExtensionAPI) {
 		} catch {
 			matter = {};
 		}
-		const measurement = String(e.measurement ?? "");
+		// What a "yes" approves: THIS sealed image. On AMD SEV-SNP that is the launch measurement; on Intel TDX the
+		// verifier reports no such field (measurement is empty), so it is the image the signed reference matched —
+		// the UKI's SHA-384, which covers the kernel command line and so the root hash and image name — under its
+		// own "tdx:" namespace so it can never collide with an SNP measurement. Keyed on the empty string, every
+		// search re-asked the "only time you will be asked" question (bench, 13 Nov). Still never empty-keyed: an
+		// empty key is never approved, so a verdict with neither field asks again rather than approving blindly.
+		const measurement = approvalKey(e);
 		if (!(matter.approved ?? []).includes(measurement)) {
 			o.phase("approval");
 			let pending = approvals.get(measurement);

@@ -1900,3 +1900,18 @@ def test_a_search_outage_reads_neutrally_in_the_status_bar():
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "an outage is neutral" in r.stdout
+
+
+def test_a_tdx_approval_is_held_under_the_image_so_it_is_asked_once():
+    """13 Nov /search bench: keyed on the empty SNP `measurement`, every search on TDX re-asked "the only time you
+    will be asked". tests/approval_key_sim.ts runs the real approvalKey."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "approval_key_sim.ts")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "one yes covers the matter" in r.stdout

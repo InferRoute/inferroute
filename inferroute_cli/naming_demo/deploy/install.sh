@@ -26,7 +26,8 @@ if [ -n "$EXTRA" ]; then
   for src in "$EXTRA"/*.npy "$EXTRA"/prices.json; do
     [ -e "$src" ] || continue
     dst=$B/data/$(basename "$src")
-    if [ ! -e "$dst" ] || ! cmp -s "$src" "$dst"; then chmod u+w "$dst" 2>/dev/null || true; cp "$src" "$dst.tmp" && mv "$dst.tmp" "$dst"; fi
+    # -p keeps the zone list's own date, which the server uses to hide endings whose list is older than 14 days
+    if [ ! -e "$dst" ] || ! cmp -s "$src" "$dst"; then chmod u+w "$dst" 2>/dev/null || true; cp -p "$src" "$dst.tmp" && mv "$dst.tmp" "$dst"; else touch -r "$src" "$dst"; fi
     chmod 444 "$dst"
   done
 fi

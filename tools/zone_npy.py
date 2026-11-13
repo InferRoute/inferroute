@@ -7,6 +7,7 @@ Only hashes are kept, so the served file holds no readable domain names.
 """
 import argparse
 import hashlib
+import os
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,8 @@ def build(tld: str, src: Path, out: Path) -> int:
     tmp = out / f".{tld}.npy.part"
     with open(tmp, "wb") as fh:
         np.save(fh, a)
+    st = (src / f"names_{tld}.parquet").stat()
+    os.utime(tmp, (st.st_atime, st.st_mtime))  # the set is as old as the registry list it came from (server freshness)
     tmp.rename(out / f"{tld}.npy")
     return len(a)
 

@@ -105,13 +105,20 @@ def judge(result: dict, registers: set, keep: int = 3, amber_at: float = 0.80) -
 # ---------------------------------------------------------------- domains (local zone copy only)
 class Domains:
     EXTRA = ("app", "dev", "net", "org")  # shown after .com, in this order, when free for the name (pricing strategy, 13 Nov)
+    # More endings from the registry lists we hold (Henry 13 Nov: ".com only is a bit weak"). Free ones are listed under
+    # "more"; they also fill the top slots when EXTRA has fewer than 3 free. .web is not here: it is not a live ending.
+    MORE = ("tech", "xyz", "store", "shop", "online", "site", "cloud", "info", "biz", "page", "blog", "name")
     PRICE_MAX_AGE_DAYS = 14               # older than this: no prices at all (pi-attested 13 Nov: hide, never stale)
+    ZONE_MAX_AGE_DAYS = 14                # an extra ending whose list is older than this is not shown (weekly refresh)
 
     def __init__(self, d: Path):
-        self.sets = {}
+        self.sets, self.fresh = {}, set()
+        now = time.time()
         for p in sorted(d.glob("*.npy")):
             if re.fullmatch(r"[a-z0-9]+", p.stem):
                 self.sets[p.stem] = np.load(p, mmap_mode="r")
+                if now - p.stat().st_mtime <= self.ZONE_MAX_AGE_DAYS * 86400:
+                    self.fresh.add(p.stem)
         self.prices, self.checked = {}, ""
         pp = d / "prices.json"
         if pp.exists():
@@ -133,12 +140,20 @@ class Domains:
                     "registrar": p.get("cheapest") if p else None,                             # where that price is
                     "spaceship_eur": (p.get("sources", {}).get("spaceship") or {}).get("renew") if p else None}
         out = [one("com", self.taken(label, "com"))]
-        for t in self.EXTRA:
+        for t in self.EXTRA + self.MORE:
             if len(out) >= 4:
                 break
-            if t in self.sets and self.taken(label, t) is False:
+            if t in self.fresh and self.taken(label, t) is False:
                 out.append(one(t, False))
         return out
+
+    def more(self, label: str) -> list:
+        """The other free endings from MORE (not already in endings()), cheapest first; unpriced ones last."""
+        shown = {e["tld"] for e in self.endings(label)}
+        free = [t for t in self.MORE if t not in shown and t in self.fresh and self.taken(label, t) is False]
+        rows = [{"tld": t, "eur": round(p["renew_min"]) if (p := self.prices.get(t)) and p.get("renew_min") else None,
+                 "registrar": p.get("cheapest") if p else None} for t in free]
+        return sorted(rows, key=lambda r: (r["eur"] is None, r["eur"] or 0, r["tld"]))
 
     def taken(self, label: str, tld: str):
         a = self.sets.get(tld)
@@ -340,7 +355,7 @@ class Run:
 
         # 3. trade marks (parallel processes) and the language check (thread), at the same time
         yield self.emit({"t": "shortlist", "names": [{"name": n, "com": dom[n]["com"], "net": dom[n]["net"],
-                                                      "endings": self.app.domains.endings(n)} for n in short],
+                                                      "endings": self.app.domains.endings(n), "more_endings": self.app.domains.more(n)} for n in short],
                          "prices_checked": self.app.domains.checked})
         yield self.emit({"t": "phase", "text": f"Searching {self.app.marks if also else self.app.marks_default:,} trade marks"})
         lang_box: dict = {}
@@ -360,7 +375,7 @@ class Run:
             j = judge(r, registers)
             results[name] = j
             yield self.emit({"t": "name", "name": name, "com": dom[name]["com"], "net": dom[name]["net"],
-                             "endings": self.app.domains.endings(name),
+                             "endings": self.app.domains.endings(name), "more_endings": self.app.domains.more(name),
                              "tm": j, "secs": round(secs, 1)})
         th.join(timeout=max(0.0, 20 - (time.time() - lang_t0)))  # the language check never holds the run past 20 s
         if th.is_alive() or "__error__" in lang_box or not lang_box:  # measured: ~1 run in 8 (13 Nov); log the cause

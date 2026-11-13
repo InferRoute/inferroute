@@ -10,7 +10,7 @@ cd "$R"
 flock /home/henry/.cache/locks/mgld-heavy.lock nice -n 10 python3 tools/weekly_tm_build.py --out-dir "$W" --prev "$PREV" --today "$TODAY"
 # Zone endings (hashes only, from the CZDS copies czds-daily keeps) and the per-ending price table (3 GETs, no names).
 X=$W/extra; mkdir -p "$X"
-flock /home/henry/.cache/locks/mgld-heavy.lock nice -n 10 python3 tools/zone_npy.py "$X" com net app dev org
+flock /home/henry/.cache/locks/mgld-heavy.lock nice -n 10 python3 tools/zone_npy.py "$X" com net app dev org tech xyz store shop online site cloud info biz page blog name
 python3 tools/domain_prices.py "$X" --prev "$HOME/.local/share/anteriora-names/data/prices.json" || \
   echo "price table gate failed: the served prices.json stays (cards drop prices after 14 days)"
 # keep a copy of the outgoing index for the watch diff before the installer replaces it

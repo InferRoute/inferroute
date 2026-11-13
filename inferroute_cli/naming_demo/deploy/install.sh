@@ -12,7 +12,7 @@ if [ "$REF" = keep ]; then
 else
   SHA=$(git -C "$REPO" rev-parse --short=12 "$REF")
   mkdir -p "$B/releases/$SHA"
-  git -C "$REPO" archive "$REF" inferroute_cli | tar -x -C "$B/releases/$SHA"
+  git -C "$REPO" archive "$REF" inferroute_cli tools | tar -x -C "$B/releases/$SHA"
 fi
 GOT=$(sha256sum "$IDX" | cut -d' ' -f1)
 [ "$GOT" = "$WANT" ] || { echo "index sha mismatch: $GOT != $WANT" >&2; exit 1; }

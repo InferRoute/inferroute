@@ -1,0 +1,9 @@
+[Unit]
+Description=Anteriora naming weekly index (Sundays 04:00 UTC, after inpi-marks-weekly on Saturday night)
+
+[Timer]
+OnCalendar=Sun 04:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

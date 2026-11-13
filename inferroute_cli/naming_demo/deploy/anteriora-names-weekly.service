@@ -1,0 +1,7 @@
+[Unit]
+Description=Anteriora naming: weekly TM index build (fail-closed), rollout to ft+mgld, watch delta
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/anteriora-names/current/inferroute_cli/naming_demo/deploy/weekly_run.sh
+TimeoutStartSec=6h

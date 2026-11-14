@@ -321,3 +321,30 @@ def test_hosted_page_session_uses_hosted_words_and_the_agent_flow_is_unchanged()
     mixed = X._glance([hosted, _sess()], 1, {}, {"date_bound": "2020-01-01"})
     assert "No AI assistant took part" not in mixed
     assert X._is_hosted(None) is False and X._is_hosted({"surface": "cli"}) is False
+
+
+def test_a_tdx_record_names_intel_and_google_not_azure(matter):
+    """Since 13 Nov the patent search runs on Intel TDX on Google Cloud. A TDX record must say so, and must not
+    describe Microsoft's utility VM (the AMD/Azure text every record carried before 0.9.140)."""
+    _full_session()
+    rdir = S.records_dir("AcmeCorp", "battery-cooling")
+    p = rdir / "sess-1.searches.jsonl"
+    rows = [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
+    for r in rows:
+        r["evidence"] = {"offer": {"runtime_data": "b64rd", "evidence": {"tee": "intel-tdx", "quote": "tdx-quote-b64"}}}
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    out = matter / "bundle-tdx"
+    assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
+    html = (out / "record.html").read_text()
+    assert "Intel TDX quote" in html
+    assert "utility VM" not in html
+    assert "Azure" not in html
+
+
+def test_an_snp_record_keeps_its_amd_microsoft_text(matter):
+    _full_session()
+    out = matter / "bundle-snp"
+    assert S.cmd_export("AcmeCorp/battery-cooling", str(out)) == 0
+    html = (out / "record.html").read_text()
+    assert "AMD SEV-SNP" in html and "utility VM" in html
+    assert "Intel TDX quote" not in html

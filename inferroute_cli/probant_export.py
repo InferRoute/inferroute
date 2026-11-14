@@ -584,6 +584,14 @@ NAME_RECORD = "name-check-record"
 PATENT_RECORD = "prior-art-record"
 
 
+def _x_is_tdx(x: dict) -> bool:
+    """A recorded search ran on Intel TDX (the same test as verify_record.is_tdx_offer)."""
+    e = x.get("evidence") if isinstance(x, dict) else None
+    o = e.get("offer") if isinstance(e, dict) else None
+    ev = o.get("evidence") if isinstance(o, dict) else None
+    return isinstance(ev, dict) and ev.get("tee") == "intel-tdx"
+
+
 def record_folder_kind(rec: dict) -> str:
     """The word an exported record's folder carries: what the record IS. A name check exported as a
     "prior-art-record" read as a patent record with nothing in it (23 Oct)."""
@@ -806,8 +814,10 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
                              "host_data": x.get("host_data"), "evidence_file": ev_file, "evidence_sha256": ev_sha})
             A(f"<h3>Search {n} — session <span class=mono>{_e(s['session_id'])}</span>, {_e(x.get('at'))}</h3>")
             A(f"<p class=note>Index <span class=mono>{_e(x.get('index_snapshot'))}</span> · date bound {_e(stmt.get('cutoff_date'))} · "
-              f"{_e(stmt.get('hits_n'))} hits · utility VM <span class=mono>{_e((x.get('measurement') or '')[:24])}…</span> · "
-              f"policy <span class=mono>{_e((x.get('host_data') or '')[:24])}…</span></p>")
+              f"{_e(stmt.get('hits_n'))} hits · "
+              + ("Intel TDX quote (Google Cloud)</p>" if _x_is_tdx(x) else
+                 f"utility VM <span class=mono>{_e((x.get('measurement') or '')[:24])}…</span> · "
+                 f"policy <span class=mono>{_e((x.get('host_data') or '')[:24])}…</span></p>"))
             if x.get("query_text") is not None:
                 A("<p class=note>The text this search received (bound into the signed statement as "
                   f"<code>query_sha256</code> = SHA-256(request_id ‖ canonical(text))):</p><pre>{_e(x.get('query_text'))}</pre>")
@@ -2670,8 +2680,9 @@ it is exhausted: do not pad a short answer, and do not cut a long one short.
 
 ## False alarms to avoid
    - **Certificates in this folder differ, and "self-signed" is a per-certificate fact.** The AMD ROOT (ARK) is self-signed; that is correct for a root and is not a finding. A session receipt's attestation certificate may be self-signed or may chain to a CA, AND TWO RECEIPTS IN ONE RECORD CAN DIFFER — measured 2 Oct on a two-session record: one had subject and issuer both `CN=attestation-service`, the other chained to the enclave operator's own root CA. Check each certificate you look at and report what you find; neither answer is a finding on its own. An earlier revision of this line said the receipt's certificate "is simply a different CA", which generalised across receipts exactly as the sentence it was correcting generalised across certificates. All roots are. What matters is that it's AMD's.
-- The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The container is
-  identified by HOST_DATA, checked against the reference.
+- (AMD SEV-SNP records only) The MEASUREMENT field describes Microsoft's utility VM, not InferRoute's container. The
+  container is identified by HOST_DATA, checked against the reference. Intel TDX records have no utility VM: the machine
+  is identified by its measured boot image, checked against the reference.
 - A SKIP for "configured firmware TCB floor" means no floor was in force AT THE SEARCH'S TIME —
   either none was pinned, or the reference's floor carries no validity window covering it. It
   does not mean the firmware was old. A PASS establishes only that the observed TCB is not

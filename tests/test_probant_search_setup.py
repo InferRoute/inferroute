@@ -3,6 +3,7 @@ import base64
 import datetime as dt
 import hashlib
 import json
+import re
 import stat
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -376,3 +377,113 @@ def test_the_proof_is_kept_beside_the_reference(site):
     files, key, pub, tmp_path = site
     SS.setup()
     assert (tmp_path / "ir/confidential/reference.json.proof").read_bytes() == _fake_proof(files["/reference/current.json"])
+
+
+# ── what the installer says about the on-request search machine (0.9.141) ──
+
+@pytest.fixture
+def wake_site(monkeypatch):
+    """A wake service and a machine address on loopback. Records every request the installer line makes."""
+    from inferroute_cli import probant_home as PH
+    seen, answer = [], {"status": {"state": "off"}, "offer": 503}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _rec(self):
+            n = int(self.headers.get("content-length") or 0)
+            seen.append({"method": self.command, "path": self.path, "headers": {k.lower() for k in self.headers.keys()},
+                         "ua": self.headers.get("user-agent") or "",
+                         "body": self.rfile.read(n) if n else b""})
+
+        def do_GET(self):
+            self._rec()
+            if self.path == "/status" and answer["status"] is not None:
+                body = json.dumps(answer["status"]).encode()
+                self.send_response(200); self.send_header("content-length", str(len(body))); self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/offer" and answer["offer"] == 200:
+                self.send_response(200); self.send_header("content-length", "2"); self.end_headers(); self.wfile.write(b"{}")
+            else:
+                self.send_response(503 if self.path == "/status" else answer["offer"]); self.send_header("content-length", "0"); self.end_headers()
+
+        do_POST = do_GET
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    monkeypatch.setattr(PH, "_wake", {"at": 0.0, "status": None, "requested_at": 0.0})
+    monkeypatch.setattr(PH, "_search_probe", {"at": -1e9, "state": "unreachable"})
+    monkeypatch.setattr(PH, "SEARCH_PROBE_TTL", 0.0)
+    yield base, seen, answer
+    srv.shutdown()
+
+
+def test_the_installer_reads_the_state_and_never_starts_the_machine_or_sends_the_key(wake_site, monkeypatch):
+    """An install is not a request for a search, and a wake request carries the user's InferRoute key. So the line
+    may only READ: GET /status and GET /offer, no body, no key header, never POST /wake. Asserted in every state."""
+    from inferroute_cli import probant_home as PH
+    base, seen, answer = wake_site
+    for status in ({"state": "off"}, {"state": "starting", "ready_by": "2026-11-14 21:05:00Z"},
+                   {"state": "ready"}, {"state": "unknown"}, None):
+        answer["status"] = status
+        PH._wake.update(at=0.0, status=None)
+        SS.install_search_line(base, base)
+    assert seen, "the line read nothing"
+    assert all(r["method"] == "GET" for r in seen), seen
+    assert {r["path"] for r in seen} <= {"/status", "/offer"}, seen          # exact paths: no query string, no /wake
+    assert any(r["path"] == "/status" for r in seen)
+    assert not any(r["body"] for r in seen)
+    # privacy's conditions (14 Nov): no identifier of any kind. No key, no cookie, no install or machine id; the
+    # User-Agent says no more than the library and its version.
+    assert not any(r["headers"] & {"x-api-key", "authorization", "cookie"} for r in seen), seen
+    assert all(re.fullmatch(r"Python-urllib/[0-9.]+|anteriora-installer/[0-9.]+", r["ua"]) for r in seen), seen
+    assert {h for r in seen for h in r["headers"]} <= {"host", "user-agent", "accept-encoding", "connection"}, seen
+
+
+def test_off_says_off_and_how_to_start_it(wake_site):
+    base, _, answer = wake_site
+    answer["status"] = {"state": "off"}
+    line = SS.install_search_line(base, base)
+    assert "it is off right now" in line and "start it from the Anteriora home page" in line
+    assert "15 to 20 minutes" in line and "Name checks and readings work without it." in line
+    assert "offline" not in line and "not answering" not in line
+
+
+@pytest.mark.parametrize("status", [None, {"state": "unknown"}, {"state": "ready"}, {"state": "bogus"}])
+def test_an_unread_state_never_claims_off(wake_site, status):
+    """No answer, "unknown", or "ready" while the machine itself did not answer: we do not know, so we say so."""
+    base, _, answer = wake_site
+    answer["status"] = status
+    line = SS.install_search_line(base, base)
+    assert line.startswith("  We couldn't check whether patent search is on right now.")
+    assert "off right now" not in line and "answering right now" not in line
+
+
+def test_starting_names_the_ready_time_in_local_time(wake_site, monkeypatch):
+    base, _, answer = wake_site
+    monkeypatch.setenv("TZ", "Europe/Paris")
+    import time as _t
+    _t.tzset()
+    try:
+        answer["status"] = {"state": "starting", "ready_by": "2026-11-14 21:05:00Z"}
+        assert SS.install_search_line(base, base).startswith(
+            "  Patent search is starting: usually ready by 22:05, 15 to 20 minutes after it was asked for.")
+        from inferroute_cli import probant_home as PH
+        PH._wake.update(at=0.0, status=None)
+        answer["status"] = {"state": "starting"}
+        assert SS.install_search_line(base, base).startswith(
+            "  Patent search is starting: usually ready 15 to 20 minutes after it was asked for.")
+    finally:
+        monkeypatch.delenv("TZ"); _t.tzset()
+
+
+def test_an_answering_machine_and_the_old_setup_keep_their_lines(wake_site):
+    base, _, answer = wake_site
+    answer["offer"] = 200
+    assert SS.install_search_line(base, base) == "  The search machine is answering right now."
+    answer["offer"] = 503
+    from inferroute_cli import probant_home as PH
+    PH._search_probe.update(at=-1e9)
+    assert SS.install_search_line(base, "").startswith("  The search machine is not answering right now")

@@ -348,6 +348,50 @@ def ensure_quietly() -> None:
         pass
 
 
+STILL_WORKS_LINE = "  Name checks and readings work without it."
+
+
+def _local_hhmm(iso: str) -> Optional[str]:
+    """"2026-11-14T21:05:00Z" -> "22:05" in this computer's own time zone; None if it is not that shape."""
+    try:
+        t = dt.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError):
+        return None
+    return t.astimezone().strftime("%H:%M")
+
+
+def install_search_line(enclave: str, wake: str) -> Optional[str]:
+    """What the installer says about the search machine, in the words the home page already uses.
+
+    READ ONLY. It reads the wake service's public /status (no key, no body) and the machine's /offer, exactly as the
+    home page does. It never asks for the machine to be started: an install is not a request for a search, and a
+    wake request carries the user's InferRoute key. Until 0.9.140 this said "not answering ... offline" whenever the
+    on-request machine was simply switched off, which is its normal state (14 Nov)."""
+    from .probant_home import _wake_status
+    if enclave and reachable(enclave) == "up":
+        return "  The search machine is answering right now."
+    if not wake:
+        if not enclave:
+            return None
+        return ("  The search machine is not answering right now, so patent search is offline for the moment.\n"
+                + STILL_WORKS_LINE)
+    st = _wake_status(wake)
+    state = st.get("state")
+    if state == "off":
+        return ("  Patent search runs on a machine that is switched on only when someone asks for it, and it is off "
+                "right now.\n  When you need a search, start it from the Anteriora home page: it is usually ready 15 to "
+                "20 minutes later, and you can keep working meanwhile.\n" + STILL_WORKS_LINE)
+    if state == "starting":
+        at = _local_hhmm(st.get("ready_by") or "")
+        when = (f"usually ready by {at}, 15 to 20 minutes after it was asked for" if at
+                else "usually ready 15 to 20 minutes after it was asked for")
+        return f"  Patent search is starting: {when}.\n" + STILL_WORKS_LINE
+    # "unknown", no answer, or "ready" while /offer did not answer: we do not know, so we do not say "off".
+    return ("  We couldn't check whether patent search is on right now. If it is off, start it from the Anteriora home "
+            "page:\n  it is usually ready 15 to 20 minutes later, and you can keep working meanwhile.\n"
+            + STILL_WORKS_LINE)
+
+
 def main_setup(force: bool = False) -> int:
     import sys
     try:
@@ -358,14 +402,11 @@ def main_setup(force: bool = False) -> int:
     print(f"\n  {words}")
     if state != "kept":
         try:
-            enclave = str(json.loads(pi_attested.search_config_path().read_text()).get("enclave") or "")
-            up = reachable(enclave) == "up" if enclave else None
+            cfg = json.loads(pi_attested.search_config_path().read_text())
+            line = install_search_line(str(cfg.get("enclave") or ""), str(cfg.get("wake") or ""))
         except Exception:                                   # noqa: BLE001
-            up = None
-        if up is True:
-            print("  The search machine is answering right now.")
-        elif up is False:
-            print("  The search machine is not answering right now, so patent search is offline for the moment.\n"
-                  "  Name checks and readings work without it.")
+            line = None
+        if line:
+            print(line)
     print("")
     return 0

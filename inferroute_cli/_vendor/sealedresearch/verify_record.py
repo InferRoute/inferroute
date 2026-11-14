@@ -4631,7 +4631,7 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
               "(consistency with an unsigned value — the signed number is the fact)")
     else:
         c.add(None, "date bound the enclave was given", f"signed statement cutoff_date {st.get('cutoff_date')}; the record states no matter date bound")
-    check_filters_applied(c, st)
+    check_filters_applied(c, st, row.get("result") if isinstance(row, dict) else None)
     return c
 
 
@@ -4640,12 +4640,15 @@ def verify_search(row: Dict[str, Any], evidence: Dict[str, Any], *, pins: Dict[s
 # "date bound" as an enforcement claim when nothing enforced was attested, and on 2026-09-20 a jurisdiction
 # filter was found to match nothing while a statement would have said the search was restricted to it. Same
 # class, so one rule rather than a privileged case for the date.
+# The main list's built-in office scope on a root with the Asian layer (open_rank.searcher.MAIN_OFFICES, sorted).
+MAIN_LIST_SCOPE = ("EP", "US", "WO")
+
 FILTERS = (("cutoff_date", "cutoff_applied", "removed_by_cutoff", "date bound"),
            ("from_date", "from_date_applied", "removed_by_from_date", "from-date bound"),
            ("offices", "offices_applied", "removed_by_offices", "offices"))
 
 
-def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
+def check_filters_applied(c: Checks, st: Dict[str, Any], result: Any = None) -> None:
     """The enclave's own signed account of what each filter DID, checked for consistency with what it was
     given. This is not proof of enforcement — enforcement is behaviour, and no attestation of what ran can
     establish it. It is the difference between a filter that reports its work and one that is silent.
@@ -4667,6 +4670,30 @@ def check_filters_applied(c: Checks, st: Dict[str, Any]) -> None:
             continue
         reported = applied.get(given_key)
         if given in (None, "", [], "None"):
+            # The ONE scope an enclave applies unasked, and says so: on a root carrying the Asian layer, the main
+            # ranking always runs on US/EP/WO, and the CN/JP/KR/TW families and any national side list are served
+            # as their OWN lists (open_rank.searcher MAIN_OFFICES / split_offices, every TDX image since the Asian
+            # layer). Reporting that built-in scope is the enclave being honest, not overriding the request: until
+            # 14 Nov this row failed every such TDX record (a false negative, found on real v18 records). Exactly
+            # that set is accepted; any other unrequested office set still FAILS.
+            # Accepted ONLY where the rows really went somewhere: the opened result (bound to this statement by
+            # result_sha256, checked above) carries the separate Asian list, which a root without that layer never
+            # has. Without the layer, US/EP/WO applied unasked is an unrequested filter and FAILS; without the
+            # result in the bundle (an evidence-only pack) the layer cannot be seen, so the row is not a pass.
+            if given_key == "offices" and isinstance(reported, list) and sorted(map(str, reported)) == list(MAIN_LIST_SCOPE):
+                has_layer = isinstance(result, dict) and isinstance(result.get("asia"), dict)
+                if has_layer:
+                    c.add(True, f"{label} was applied",
+                          f"no office filter was requested; the main list ran on its built-in scope {list(MAIN_LIST_SCOPE)} "
+                          f"(this root's Asian families and national side lists are served as their own lists); "
+                          f"{applied.get(removed_key)} of {applied.get('candidates_considered')} candidate(s) were outside it")
+                    continue
+                if result is None:
+                    c.add(None, f"{label} was applied",
+                          f"the enclave reports the main list's built-in scope {list(MAIN_LIST_SCOPE)} with no filter requested; "
+                          "whether this root serves the other offices as their own lists is shown by the result, which is "
+                          "not in this bundle")
+                    continue
             c.add(False, f"{label} was applied",
                   f"the enclave reports applying {label} {reported!r} that this statement never asked for")
             continue

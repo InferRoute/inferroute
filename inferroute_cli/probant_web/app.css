@@ -480,6 +480,11 @@ button.link { border: 0; background: none; color: var(--action-text); padding: 0
 .session-row:hover { background: var(--user); }
 .session-row .matter-of { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .session-row, .session-row:not(:has(.matter-of)), .record-row { grid-template-columns: 1fr 1fr; } }
+/* A record's folder is one long word (…/exports/<matter>-prior-art-record-<UTC stamp>): a plain 1fr column grows to fit it,
+   pushing "Check this record" off a phone screen (0.9.140, 390 px). Let the path break anywhere and the columns shrink. */
+.record-row > * { min-width: 0; }
+.record-row .mono { overflow-wrap: anywhere; }
+@media (max-width: 760px) { .record-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 /* What a record licenses us to say, above the audit button. Quiet rather than promotional: it is a claim we
    are inviting someone to falsify, and a box that looks like a badge would read as the opposite. */
 .licensed { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; margin: 0 0 16px; }

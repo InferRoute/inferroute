@@ -2705,18 +2705,19 @@ def check_fixed_shape(rep: ImageReport, tree: str) -> None:
             f = os.path.join(dp, name)
             rel = os.path.relpath(f, app)
             m = _ast_parse(_text(f))
-            aliases = _imports_shape(m) | ({"shape"} if rel != SHAPE_FILE else set())
+            bound = _imports_shape(m)          # once per module: calling it per assignment target was O(nodes^2)
+            aliases = bound | ({"shape"} if rel != SHAPE_FILE else set())
             for n in ast.walk(m):
                 tgts = n.targets if isinstance(n, ast.Assign) else [n.target] if isinstance(n, (ast.AugAssign, ast.AnnAssign)) else []
                 for tg in tgts:
                     if isinstance(tg, ast.Attribute) and tg.attr == "ENABLED":
                         pr.append(f"{rel} assigns .ENABLED")
-                    if isinstance(tg, ast.Name) and tg.id in _imports_shape(m):
+                    if isinstance(tg, ast.Name) and tg.id in bound:
                         pr.append(f"{rel} rebinds its shape module name {tg.id}")
                 if isinstance(n, ast.Call) and _call_name(n) in ("setattr", "delattr", "vars") and n.args and \
                         isinstance(n.args[0], ast.Name) and n.args[0].id in aliases:
                     pr.append(f"{rel} calls {_call_name(n)} on the shape module")
-            if rel in SHAPE_USERS and _imports_shape(m):
+            if rel in SHAPE_USERS and bound:
                 users += 1
     missing = [u for u in SHAPE_USERS if not os.path.isfile(os.path.join(app, u))]
     if users < len(SHAPE_USERS) or missing:

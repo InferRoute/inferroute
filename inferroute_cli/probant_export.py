@@ -1789,7 +1789,8 @@ def verify_bundle(bundle_dir: str, extra_args: Optional[List[str]] = None) -> in
     the point of the bundled verifier is that it needs no `ir` at all.
 
     IT SUPPLIES THIS COMPUTER'S REFERENCE unless the caller passed one. Without a reference the verifier
-    answers a different and much weaker question: measured 1 Oct on a 32-search pack, a bare run exits 1 with
+    answers a different and much weaker question: measured 1 Oct on a 32-search pack (Azure-era: an AMD SEV-SNP
+    record; a TDX record prints its own no-reference line), a bare run exits 1 with
     32 FAIL "NO REFERENCE SUPPLIED — this bundle proves a genuine Azure confidential container, NOT
     InferRoute's", and with the reference and its key it exits 0 with 1150 PASS. Both numbers describe the
     same record. The command this client prints for its own user should not be the one that produces the

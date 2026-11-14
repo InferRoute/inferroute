@@ -71,9 +71,16 @@ honest. The seal is the enclave-signed statement inside each search. If `MANIFES
 
 proves the manifest existed no later than the Bitcoin block it is anchored in (OpenTimestamps, open source).
 
-## 3. IDENTITY — the step that separates InferRoute's enclave from anyone's Azure container
+## 3. IDENTITY — the step that separates InferRoute's machine from anyone's confidential machine
 
-A SEV-SNP report and Microsoft's endorsement prove that SOME confidential container ran on a genuine AMD
+**Intel TDX searches (the patent search since 13 Nov 2026).** An Intel TDX quote and Google's endorsement of the
+firmware prove that SOME confidential machine ran on genuine Intel hardware on Google Cloud. Anyone with a Google
+Cloud account can start one and sign their own statements. What identifies InferRoute's machine is the measured boot
+image (its Authenticode SHA-384, the first boot application in the event log) and the index / encoder manifest
+hashes, and they mean nothing unless compared against InferRoute's published reference, obtained INDEPENDENTLY of
+this bundle (`--reference`, below).
+
+**AMD SEV-SNP searches (records made before 13 Nov 2026).** A SEV-SNP report and Microsoft's endorsement prove that SOME confidential container ran on a genuine AMD
 chip inside Microsoft's utility VM. Anyone with an Azure account can produce such a bundle with their own
 key, their own statement over any text, and their own policy. The MEASUREMENT endorses Microsoft's utility
 VM, not our container. What identifies InferRoute's enclave is the container-policy hash (HOST_DATA) and the
@@ -831,18 +838,43 @@ def build_bundle(client: str, matter: str) -> Dict[str, Any]:
 
     A("<h2>What this record does and does not prove</h2>")
     any_policy = any(x.get("evidence", {}).get("policy_b64") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict))
-    A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): that each search "
-      "result was signed by a key bound into an AMD SEV-SNP hardware report; that the report chains to AMD's published "
-      "root and the utility VM to Microsoft's"
-      + ("; that the archived container policy agrees with the report's HOST_DATA" if any_policy else "")
-      + "; that each signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
-    A("<p class=note><b>What that does NOT establish on its own</b>: that the container was InferRoute's. A SEV-SNP "
-      "report and Microsoft's endorsement prove a genuine confidential container inside Microsoft's utility VM — the "
-      "MEASUREMENT endorses that utility VM, not our container. Only comparing the policy hash and the index / encoder "
-      "manifest hashes against values obtained from InferRoute <i>independently of this bundle</i> shows our code and our "
-      "index ran (<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on two root pins plus "
+    # Name the hardware each search actually ran on (anteriora-privacy, 14 Nov): since the 13 Nov cut-over the patent
+    # search runs on Intel TDX on Google Cloud; older records ran on AMD SEV-SNP on Microsoft Azure. The text used to
+    # describe only the second, on every record.
+    _evs = [x.get("evidence") for s in sessions for x in s["searches"] if isinstance(x.get("evidence"), dict)]
+    def _tee(e):
+        o = e.get("offer")
+        ev = o.get("evidence") if isinstance(o, dict) else None
+        return isinstance(ev, dict) and ev.get("tee") == "intel-tdx"     # verify_record.is_tdx_offer, same test
+    _tdx = [_tee(e) for e in _evs]
+    any_tdx, any_snp = any(_tdx), (not all(_tdx)) if _tdx else False
+    proves, notalone = [], []
+    if any_tdx:
+        proves.append("for each Intel TDX search: that its result was signed by a key bound into an Intel TDX quote; "
+                      "that the quote chains to Intel's published root, and the machine's firmware to Google's "
+                      "endorsement")
+        notalone.append("An Intel quote and Google's endorsement prove a genuine confidential machine on Google Cloud, "
+                        "not whose software it ran. Only comparing the measured boot image and the index / encoder "
+                        "manifest hashes against InferRoute's published reference, obtained <i>independently of this "
+                        "bundle</i>, shows our software and our index ran")
+    if any_snp:
+        proves.append("for each AMD SEV-SNP search: that its result was signed by a key bound into an AMD SEV-SNP "
+                      "hardware report; that the report chains to AMD's published root and the utility VM to Microsoft's"
+                      + ("; that the archived container policy agrees with the report's HOST_DATA" if any_policy else ""))
+        notalone.append("A SEV-SNP report and Microsoft's endorsement prove a genuine confidential container inside "
+                        "Microsoft's utility VM — the MEASUREMENT endorses that utility VM, not our container. Only "
+                        "comparing the policy hash and the index / encoder manifest hashes against values obtained from "
+                        "InferRoute <i>independently of this bundle</i> shows our code and our index ran")
+    A("<p class=note><b>Re-derivable by anyone from this bundle</b> (run <code>verify_record.py</code>): "
+      + "; ".join(proves)
+      + ("; " if proves else "")
+      + "that each signed statement is about exactly the query text and result shown, on the index and date bound shown.</p>")
+    A("<p class=note><b>What that does NOT establish on its own</b>: that the machine was InferRoute's. "
+      + ". ".join(notalone)
+      + (" " if notalone else "")
+      + "(<code>verify_record.py --reference</code>; see VERIFY.md §3). Trust rests on root pins plus "
       "signature links: no revocation checking, no certificate-path constraints. The MANIFEST is an unsigned index; the "
-      "enclave-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
+      "machine-signed statements are the seal. The record proves what it shows, never that it shows every search.</p>")
     if sessions and all(_is_hosted(s.get("record")) for s in sessions):     # HOSTED
         A("<p class=note><b>What only the page reports</b>: that no AI assistant took part, which text each search was "
           "given before it was sealed, and the date bound it gave each search (the search machine signs the bound it was "
@@ -1772,8 +1804,8 @@ def verify_bundle(bundle_dir: str, extra_args: Optional[List[str]] = None) -> in
             print(f"  using this computer's own reference ({ref}) — corroboration, not an independent check: "
                   "an auditor must obtain it from InferRoute out of band and rerun.")
         else:
-            print("  NO REFERENCE on this computer: the run below can only show a genuine Azure confidential "
-                  "container, not that it was InferRoute's. Every identity line will FAIL for that reason.")
+            print("  NO REFERENCE on this computer: the run below can only show a genuine confidential machine "
+                  "(Intel TDX, or AMD SEV-SNP), not that it was InferRoute's. Every identity line will FAIL for that reason.")
     import sys
     r = subprocess.run([sys.executable, str(script), str(d), *args])
     return r.returncode

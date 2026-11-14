@@ -90,7 +90,7 @@ VERDICTS: Dict[int, Tuple[str, str, str]] = {
         "The verifier refused to start — usually a missing file or an option it would not accept. Nothing "
         "about the record itself is claimed either way."),
     3: ("test", "This was a test run, not a verification.",
-        "Test roots were used, so this says nothing about whether a real Azure machine was involved. Run it "
+        "Test roots were used, so this says nothing about whether a real sealed machine was involved. Run it "
         "again without the test options."),
     4: ("unauthenticated", "Everything passed, but the reference was not authenticated.",
         "The checks passed against a reference file nobody's signature vouched for. Pass the publication key "

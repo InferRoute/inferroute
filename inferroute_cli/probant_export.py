@@ -257,6 +257,12 @@ COSE_Sign1), `offer.runtime_data` (base64 JSON), and `policy_b64` (a sibling of 
 * **Query / result** — `query_sha256` == SHA-256(request_id ‖ canonical(query_text)); `result_sha256` ==
   SHA-256(request_id ‖ canonical(result)); `hits_n` == number of hits; the signed `cutoff_date` is the date
   bound the enclave was given (the manifest's value is the record's unsigned claim about the matter).
+* **Filters applied** — where a statement reports what a filter did (`offices_applied` and the like), what it
+  reports must match what the enclave was given. One exception, and only one: when no office filter was
+  requested, a TDX enclave whose opened `result` carries the separate Asian list (`result.asia`) reports its main
+  list's built-in scope, US/EP/WO, and that passes, because the CN/JP/KR/TW families and any national side list
+  are served as their own lists. Any other unrequested office set fails, and with no `result` in the bundle the
+  row is a skip, not a pass.
 
 ## 5. Independent tools
 

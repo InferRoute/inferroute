@@ -30,19 +30,27 @@ GROUPS: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
      "Every file is present and matches the hashes written when the record was made.",
      ("manifest", "bundle integrity", "searches.json", "evidence file", "malformed")),
     ("machine", "Was this really a sealed machine?",
-     "The hardware signed its own report, under AMD's and Microsoft's roots, with debugging off.",
+     # Lane-neutral (anteriora-privacy, 14 Nov): searches since the 13 Nov cut-over run on Intel TDX under Google's
+     # endorsement, older records on AMD SEV-SNP under Microsoft's. The answer must be true for both.
+     "The hardware signed its own report, under the chip maker's and the cloud provider's published roots, with "
+     "debugging off.",
      ("amd", "vcek", "snp report", "hardware report", "debug", "chip key", "vmpl", "report signature",
       "certificates parse", "chain present", "product line", "firmware tcb", "uvm", "measurement",
-      "report_data", "runtime data", "ark self-signed", "signed by ark")),
+      "report_data", "runtime data", "ark self-signed", "signed by ark",
+      "intel", "tdx quote", "td quote", "mrtd", "rtmr", "google launch", "reportdata", "td attributes", "td xfam",
+      "boot event log")),
     ("identity", "Was it InferRoute's machine, and not merely someone's?",
      "The sealed machine ran the software named in InferRoute's published reference.",
-     ("enclave identity", "reference", "archived policy")),
+     ("enclave identity", "reference", "archived policy", "boot application measured", "nothing measured after")),
     ("truthful", "Does the record tell the truth about your search?",
      "The query, the results, the recorded recipient key and the date bound match what the machine signed.",
      ("query text", "signed recipient matches recorded key", "result is the signed result", "hit count", "statement",
       "sealing key", "signer key", "document", "date bound", "predates")),
     ("complete", "Could a search have been taken out of it?",
-     "The searches are numbered without a gap, so none was removed.",
+     # Privacy-lane wording (anteriora-privacy, 14 Nov): the check finds a search missing from the middle or the start of a
+     # session, never one dropped from the very end or a whole session left out, so it must not say "none was removed".
+     "The searches are numbered in order, so a missing search shows, except one taken from the very end or a whole "
+     "session left out.",
      ("completeness",)),
 )
 

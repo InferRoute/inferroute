@@ -301,12 +301,14 @@ def test_a_group_with_unchecked_lines_reads_passed_with_limits():
     from inferroute_cli import probant_check as C
     text = ("  PASS manifest: every file matches\n"
             "  PASS something else: fine\n"
+            "  PASS completeness (per-session sequence): every search shown, in order\n"
             "  SKIP enclave-wide counter (observation): 3 of them (9, 10, 11) are not in this record\n"
             "RESULT: no failing record checks\n")
     out = C.parse(text, 0)
-    other = next(g for g in out["groups"] if g["key"] == "other")
-    assert other["status"] == "limited" and other["answer"] == "Passed, with limits noted below."
-    assert other["answer"] != "Everything else passed." and out["headline"] == "Checked out, with limits noted below."
+    # the enclave-wide counter is named since 14 Nov (it is a completeness check); the rule under test is unchanged
+    grp = next(g for g in out["groups"] if g["key"] == "complete")
+    assert grp["status"] == "limited" and grp["answer"] == "Passed, with limits noted below."
+    assert out["headline"] == "Checked out, with limits noted below."
     css = (STATIC / "app.css").read_text()
     assert ".check-group.limited .check-q::before" in css
 

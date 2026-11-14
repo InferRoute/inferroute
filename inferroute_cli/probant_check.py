@@ -38,20 +38,24 @@ GROUPS: Tuple[Tuple[str, str, str, Tuple[str, ...]], ...] = (
       "certificates parse", "chain present", "product line", "firmware tcb", "uvm", "measurement",
       "report_data", "runtime data", "ark self-signed", "signed by ark",
       "intel", "tdx quote", "td quote", "mrtd", "rtmr", "google launch", "reportdata", "td attributes", "td xfam",
-      "boot event log")),
+      "boot event log", "quoting enclave", "td config", "attestation key bound", "revocation",
+      "firmware boot entries", "machine clock", "firmware floor")),
     ("identity", "Was it InferRoute's machine, and not merely someone's?",
      "The sealed machine ran the software named in InferRoute's published reference.",
-     ("enclave identity", "reference", "archived policy", "boot application measured", "nothing measured after")),
+     ("enclave identity", "reference", "archived policy", "boot application measured", "nothing measured after",
+      "image:", "policy is self-contained", "policy lists", "policy permissions", "policy denies",
+      "external dependency", "publication key", "index additions", "time of the check")),
     ("truthful", "Does the record tell the truth about your search?",
      "The query, the results, the recorded recipient key and the date bound match what the machine signed.",
      ("query text", "signed recipient matches recorded key", "result is the signed result", "hit count", "statement",
-      "sealing key", "signer key", "document", "date bound", "predates")),
+      "sealing key", "signer key", "document", "date bound", "predates", " was applied", "at most k results",
+      "content bindings")),
     ("complete", "Could a search have been taken out of it?",
      # Privacy-lane wording (anteriora-privacy, 14 Nov): the check finds a search missing from the middle or the start of a
      # session, never one dropped from the very end or a whole session left out, so it must not say "none was removed".
      "The searches are numbered in order, so a missing search shows, except one taken from the very end or a whole "
      "session left out.",
-     ("completeness",)),
+     ("completeness", "enclave-wide counter")),
 )
 
 # What a failure in each group costs the person holding the record, and what to do next. Never a diagnosis
@@ -185,6 +189,12 @@ def parse(text: str, code: int) -> Dict[str, Any]:
             entry["answer"] = means
             entry["todo"] = todo
             entry["failed"] = [r["name"] for r in failed]
+            if key == "other":
+                # Never an unnamed failure (anteriora-lead, 14 Nov): a check this summary has no group for still
+                # says which check it was, in the verifier's own words.
+                names = list(dict.fromkeys(r["name"] for r in failed))
+                entry["answer"] = ("This check did not pass: " if len(names) == 1 else "These checks did not pass: ") \
+                    + "; ".join(names) + "."
         elif skipped:
             # One line per distinct skip, not one per search: a 68-search record said the same sentence 68
             # times and buried the answer (19 Sep). The count keeps how often it applied.

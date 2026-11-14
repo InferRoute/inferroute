@@ -2930,7 +2930,9 @@ def check_per_request(rep: ImageReport, tree: str, paths: Dict[str, str], stext:
     init = _method_src(stext, smod, "SearchService", "__init__")
     if "budget" not in init or "< self._slot" not in init:
         sp.append("SearchService.__init__ does not check the engine budget below the slot")
-    if "< self._survey_slot" not in init or "self._slot <= self._survey_slot <= 300" not in init:
+    # The survey-slot bound is 300 s since v17 and was 60 s up to v16: either bound is accepted (60 is the tighter),
+    # so a v15/v16 image keeps row D7b under the v17+ checker (the exact-text test above v17 dropped it).
+    if "< self._survey_slot" not in init or not any(f"self._slot <= self._survey_slot <= {b}" in init for b in (60, 300)):
         sp.append("SearchService.__init__ does not check the survey budget below the survey slot, and that slot against the reply slot")
     # Plain refusals (unreadable bytes, a full queue): padded to a sealed reply's wire length, measured once at init.
     if "self.wire_bytes" not in init or "envelope.seal(probe_pub, b\"0\" * REPLY_BYTES" not in init:

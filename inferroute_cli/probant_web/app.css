@@ -886,3 +886,8 @@ button.link.small { font-size: 12px; color: var(--faint); margin: 2px 0 6px; }
 .cut-reply { margin: 6px 0; color: var(--muted); }
 .cut-reply > summary { cursor: pointer; font-size: 0.9em; }
 .cut-reply > .msg { opacity: 0.7; }
+
+/* No lone word on a last line (Henry reviews frames for it; anteriora-videos, 14 Nov). Headings and short titles
+   balance their lines; running text avoids an orphan. Browsers without text-wrap ignore it. */
+h1, h2, h3, h4, summary, .card-head .title, .check-group .check-q, .result-row { text-wrap: balance; }
+p, li, dd, .note { text-wrap: pretty; }

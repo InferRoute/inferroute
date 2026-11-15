@@ -449,7 +449,9 @@ class Run:
         yield self.emit({"t": "screened", "n": len(names), "com_free": sum(dom[n]["com"] is False for n in names),
                          "fit_free": len(free),
                          "zone_names": int(len(self.app.domains.sets.get("com", [])))})
-        short = own or (free + [n for n in names if n not in free])[:SHORTLIST]
+        # .com free first, then another fitting ending free, then the rest: nearly every name has some new ending
+        # free (91 of 91 on 15 Nov), so "fit free" alone stopped preferring .com.
+        short = own or sorted(names, key=lambda n: (dom[n]["com"] is not False, not fits[n]))[:SHORTLIST]
 
         # 3. trade marks (parallel processes) and the language check (thread), at the same time
         yield self.emit({"t": "shortlist", "names": [{"name": n, "com": dom[n]["com"], "net": dom[n]["net"],

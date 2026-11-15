@@ -122,8 +122,16 @@ class Domains:
             except Exception:  # noqa: BLE001 - a bad price file means no prices, never a broken page
                 self.prices, self.checked = {}, ""
 
-    def endings(self, label: str) -> list:
-        """.com always, then up to 3 free endings from EXTRA. Each: tld, taken (True/False/None), yearly renewal range
+    def checkable(self) -> list:
+        """Endings whose list we hold and is fresh, besides .com: the only ones a run can call free."""
+        return [t for t in self.EXTRA + self.MORE if t in self.fresh]
+
+    def fit_free(self, label: str, fit) -> list:
+        """The endings in `fit` (the idea's fitting endings, .com first) that are free for this name."""
+        return [t for t in fit if (t == "com" or t in self.fresh) and self.taken(label, t) is False]
+
+    def endings(self, label: str, prefer=()) -> list:
+        """.com always, then up to 3 free endings: the idea's fitting ones (`prefer`) first, then EXTRA. Each: tld, taken (True/False/None), yearly renewal range
         in EUR excl. VAT (or None) and whether registry-premium names exist on that ending."""
         def one(t, taken):
             p = self.prices.get(t)
@@ -132,16 +140,18 @@ class Domains:
                     "registrar": p.get("cheapest") if p else None,                             # where that price is
                     "spaceship_eur": (p.get("sources", {}).get("spaceship") or {}).get("renew") if p else None}
         out = [one("com", self.taken(label, "com"))]
-        for t in self.EXTRA + self.MORE:
+        for t in dict.fromkeys([*prefer, *self.EXTRA, *self.MORE]):
+            if t == "com" or t not in self.EXTRA + self.MORE:
+                continue
             if len(out) >= 4:
                 break
             if t in self.fresh and self.taken(label, t) is False:
                 out.append(one(t, False))
         return out
 
-    def more(self, label: str) -> list:
+    def more(self, label: str, prefer=()) -> list:
         """The other free endings from MORE (not already in endings()), cheapest first; unpriced ones last."""
-        shown = {e["tld"] for e in self.endings(label)}
+        shown = {e["tld"] for e in self.endings(label, prefer)}
         free = [t for t in self.MORE if t not in shown and t in self.fresh and self.taken(label, t) is False]
         rows = [{"tld": t, "eur": round(p["renew_min"]) if (p := self.prices.get(t)) and p.get("renew_min") else None,
                  "registrar": p.get("cheapest") if p else None} for t in free]
@@ -252,8 +262,9 @@ Idea: "{idea}". Tone: {tone}.
 Give {n} brand name candidates, mostly in this style: {style}.
 Each name: one word, 4 to 11 letters, A-Z only.
 Also give the Nice classes (1-45) a trade mark for this product would be filed in, at most 4, most important first.
-{classes_rule}Write in English. Answer with JSON only:
-{{"classes": [{{"n": <class number>, "why": "<at most 5 English words>"}}], "names": ["..."]}}"""
+{classes_rule}Also give 2 or 3 domain endings that fit this business, best fit first, chosen ONLY from: {endings}.
+Write in English. Answer with JSON only:
+{{"classes": [{{"n": <class number>, "why": "<at most 5 English words>"}}], "endings": ["..."], "names": ["..."]}}"""
 STYLES = ["invented words that sound natural (like Spotify, Zalando, Kodak)",
           "two short real words or roots fused together (like Facebook, Airbnb, Mailchimp)"]
 
@@ -380,6 +391,10 @@ class Run:
         # 1. names (and classes) from the AI lane; own names skip generation
         classes, why = given, {}
         names = list(own)
+        # Henry 15 Nov: .com taken is not a dead end; a free ending that fits the business counts. The model picks
+        # 2-3 fitting endings from those we can check; .com always counts as one of them.
+        checkable = self.app.domains.checkable()
+        fit_more: list = []
         if not own or not given:
             yield self.emit({"t": "phase", "text": "Inventing names" if not own else "Reading your idea"})
             rule = "" if not given else f"Use these Nice classes: {', '.join(given)}. "
@@ -387,7 +402,8 @@ class Run:
             styles = STYLES if not own else STYLES[:1]
             with cf.ThreadPoolExecutor(2) as ex:
                 futs = [ex.submit(llm, GEN.format(rules=RULES, idea=idea or ", ".join(own), tone=tone, n=n, style=s,
-                                                  classes_rule=rule), deadline=45.0) for s in styles]
+                                                  classes_rule=rule, endings=", ".join(checkable)),
+                                  deadline=45.0) for s in styles]
                 for f in futs:
                     try:
                         text, u = f.result()
@@ -399,6 +415,10 @@ class Run:
                         continue
                     if not own:
                         names += [n for n in clean_names(d.get("names")) if not rude(n)]
+                    for t in d.get("endings") or []:
+                        t = str(t).lower().lstrip(".").strip()
+                        if t in checkable and t not in fit_more and len(fit_more) < 3:
+                            fit_more.append(t)
                     if not given:
                         for c in d.get("classes", []):
                             try:
@@ -415,6 +435,8 @@ class Run:
             classes = ["9", "42"]
         from .nice_classes import NICE
         yield self.emit({"t": "classes", "classes": classes, "why": {c: NICE.get(int(c), "") for c in classes}})
+        fit = ["com", *fit_more]
+        yield self.emit({"t": "fit_endings", "fit": fit})
         if not names:
             print("run failed: no names came back", file=sys.stderr, flush=True)
             yield self.emit({"t": "error", "text": "No names came back. Try again."})
@@ -422,14 +444,17 @@ class Run:
 
         # 2. domains, all candidates, our own zone copy
         dom = {n: {"com": self.app.domains.taken(n, "com"), "net": self.app.domains.taken(n, "net")} for n in names}
-        free = [n for n in names if dom[n]["com"] is False]
-        yield self.emit({"t": "screened", "n": len(names), "com_free": len(free),
+        fits = {n: self.app.domains.fit_free(n, fit) for n in names}
+        free = [n for n in names if fits[n]]
+        yield self.emit({"t": "screened", "n": len(names), "com_free": sum(dom[n]["com"] is False for n in names),
+                         "fit_free": len(free),
                          "zone_names": int(len(self.app.domains.sets.get("com", [])))})
         short = own or (free + [n for n in names if n not in free])[:SHORTLIST]
 
         # 3. trade marks (parallel processes) and the language check (thread), at the same time
         yield self.emit({"t": "shortlist", "names": [{"name": n, "com": dom[n]["com"], "net": dom[n]["net"],
-                                                      "endings": self.app.domains.endings(n), "more_endings": self.app.domains.more(n)} for n in short],
+                                                      "fit_free": fits[n], "endings": self.app.domains.endings(n, fit),
+                                                      "more_endings": self.app.domains.more(n, fit)} for n in short],
                          "prices_checked": self.app.domains.checked})
         yield self.emit({"t": "phase", "text": f"Searching {self.app.marks if also else self.app.marks_default:,} trade marks"})
         lang_box: dict = {}
@@ -444,7 +469,8 @@ class Run:
             j = judge(r, registers)
             results[name] = j
             yield self.emit({"t": "name", "name": name, "com": dom[name]["com"], "net": dom[name]["net"],
-                             "endings": self.app.domains.endings(name), "more_endings": self.app.domains.more(name),
+                             "fit_free": fits[name], "endings": self.app.domains.endings(name, fit),
+                             "more_endings": self.app.domains.more(name, fit),
                              "tm": j, "secs": round(secs, 1)})
         th.join(timeout=max(0.0, 30 - (time.time() - lang_t0)))  # never holds the run past 30 s (was 20; lane slow 13 Nov)
         if th.is_alive() or "__error__" in lang_box or not lang_box:  # measured: ~1 run in 8 (13 Nov); log the cause
@@ -459,15 +485,16 @@ class Run:
 
         # 4. the ten to show, best first
         order = {"green": 0, "amber": 1, "red": 2}
-        ranked = sorted(short, key=lambda n: (order[results[n]["light"]], dom[n]["com"] is not False,
+        ranked = sorted(short, key=lambda n: (order[results[n]["light"]], not fits[n], dom[n]["com"] is not False,
                                               results[n].get("lang_ok") is False, short.index(n)))
         top = ranked[:SHOW] if not own else ranked
         lang_ran = any(results[n].get("lang_ok") is not None for n in short)
-        winners = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False
+        winners = [n for n in top if results[n]["light"] == "green" and fits[n]
                    and (results[n].get("lang_ok") is True or not lang_ran)]
-        both = [n for n in top if results[n]["light"] == "green" and dom[n]["com"] is False]
+        both = [n for n in top if results[n]["light"] == "green" and fits[n]]
         rest = [n for n in ranked if n not in top]  # checked but not in the ten: shown folded, never silently dropped
         yield self.emit({"t": "final", "top": top, "rest": rest, "winners": winners, "both": both, "lang_ran": lang_ran,
+                         "fit": fit,
                          "usage": self.usage, "model": MODEL})
 
     def save(self):

@@ -101,3 +101,17 @@ def test_lang_check_retries_a_failed_batch(monkeypatch):
     monkeypatch.setattr(S, "llm", flaky)
     assert S.lang_check(["A"], lambda u: None, deadline=19) == {"A": {"ok": True, "note": ""}}
     assert n["calls"] == 2
+
+
+def test_fitting_endings_take_the_top_slots_and_count_as_free(tmp_path):
+    """Henry 15 Nov: .com taken is not a dead end; a free ending that fits the business counts (Isladesk card)."""
+    for t in ("com", "app", "dev", "net", "org", "tech", "xyz"):
+        _zone(tmp_path, t, ["isladesk"] if t == "com" else [])
+    _zone(tmp_path, "shop", [], age_days=30)  # stale: never checkable, never counted
+    d = Domains(tmp_path)
+    assert "shop" not in d.checkable() and "com" not in d.checkable()
+    fit = ["com", "xyz", "shop"]
+    assert d.fit_free("isladesk", fit) == ["xyz"]                 # com taken, xyz free, shop not checkable
+    assert d.fit_free("isladesk", ["com"]) == []                  # with only .com it stays not free
+    assert [e["tld"] for e in d.endings("isladesk", fit)] == ["com", "xyz", "app", "dev"]
+    assert "xyz" not in [m["tld"] for m in d.more("isladesk", fit)]

@@ -753,8 +753,24 @@ class Index:
                  0.5 + 0.15 * len(mflat) / len(flat) if holds else 0]
         score = round(max(tiers) + 0.05 * spell, 3)
         return {"register": register, "number": number, "text": text, "status": status, "classes": mclasses,
-                "filed": filed, "reasons": reasons, "score": score,
+                "filed": filed, "link": register_link(register, number), "reasons": reasons, "score": score,
                 "class_overlap": 1 if overlap else 0, "overlapping_classes": overlap}
+
+
+def register_link(reg: str, number: str) -> str:
+    """The register's own public page for a mark, from its register and number ("" where none is known)."""
+    n = str(number)
+    if reg == "US":
+        return f"https://tsdr.uspto.gov/#caseNumber={n}&caseType=SERIAL_NO&searchType=statusSearch"
+    if reg == "EU":
+        return f"https://euipo.europa.eu/eSearch/#details/trademarks/{n.zfill(9)}"
+    if reg == "FR":
+        return f"https://data.inpi.fr/marques/FR{n}"
+    if reg == "WO":
+        return f"https://www3.wipo.int/madrid/monitor/en/showData.jsp?ID=ROM.{n}"
+    if reg == "AU":
+        return f"https://search.ipaustralia.gov.au/trademarks/search/view/{n}"
+    return ""
 
 
 def group_same_name(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -776,7 +792,8 @@ def group_same_name(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         first = out[at[name]]
         first.setdefault("also", []).append(
-            {k: h[k] for k in ("register", "number", "text", "status", "classes", "filed", "overlapping_classes")})
+            {k: h.get(k, "") for k in ("register", "number", "text", "status", "classes", "filed", "link",
+                                     "overlapping_classes")})
         if h["overlapping_classes"]:
             merged = sorted(set(first["overlapping_classes"]) | set(h["overlapping_classes"]), key=int)
             first["overlapping_classes"], first["class_overlap"] = merged, 1

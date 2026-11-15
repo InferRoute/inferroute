@@ -50,19 +50,9 @@ RED = {"same spelling", "sounds alike"}
 AMBER = {"spelled closely", "sounds close", "has your whole name inside it", "is part of your name"}
 
 
-def register_link(reg: str, number: str) -> str:
-    n = str(number)
-    if reg == "US":
-        return f"https://tsdr.uspto.gov/#caseNumber={n}&caseType=SERIAL_NO&searchType=statusSearch"
-    if reg == "EU":
-        return f"https://euipo.europa.eu/eSearch/#details/trademarks/{n.zfill(9)}"
-    if reg == "FR":
-        return f"https://data.inpi.fr/marques/FR{n}"
-    if reg == "WO":
-        return f"https://www3.wipo.int/madrid/monitor/en/showData.jsp?ID=ROM.{n}"
-    if reg == "AU":
-        return f"https://search.ipaustralia.gov.au/trademarks/search/view/{n}"
-    return ""
+# register_link lives in tm_search so every hit carries its link (the app and the box read it there);
+# re-exported here for tools/tm_watch.py.
+from inferroute_cli.tm_search import register_link  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------- trade mark workers (one Index per process)

@@ -2304,6 +2304,77 @@ function matterName(id) {
 
   // Write the invention without leaving the session: the file lives in the matter's folder on this computer,
   // and being told a path to go and edit is not an answer when the assistant is waiting for it.
+  // ── a name check without "what the product is" ─────────────────────────────────────────────────────────
+  // The notes are written by the home page in three headed blocks (home.js composeNameNotes); these heads are the
+  // same strings. Notes written some other way are left alone: the page cannot tell what is missing from them.
+  const NOTE_HEADS = { product: "The product, in one or two sentences:", markets: "Where you will sell it (for example France, the EU, the US):" };
+  const ASKS_CLASSES = /\b(which|what)\s+(nice\s+|trade ?mark\s+)?class/i;
+  let productMissing = false;
+  function productBlock(text) {
+    const t = String(text || "");
+    const a = t.indexOf(NOTE_HEADS.product);
+    if (a < 0) return null;
+    const b = t.indexOf(NOTE_HEADS.markets, a);
+    return { start: a + NOTE_HEADS.product.length, end: b < 0 ? t.length : b, value: t.slice(a + NOTE_HEADS.product.length, b < 0 ? undefined : b).trim() };
+  }
+  async function readProductMissing() {
+    try { const blk = productBlock((await api("/api/disclosure")).text); return Boolean(blk && !blk.value); }
+    catch (_) { return false; }
+  }
+  // Starting words, not answers: each puts the beginning of a sentence in the box for the person to finish.
+  const PRODUCT_STARTS = [["An app", "An app that "], ["Online software or a website", "Online software that "],
+    ["A physical product", "A physical product: "], ["A service", "A service that "]];
+  async function productDialog(thenSend) {
+    let current = "";
+    try { current = (await api("/api/disclosure")).text; } catch (e) { toast(e.message, "error"); return; }
+    const box = document.createElement("textarea");
+    box.rows = 3;
+    box.placeholder = "A reusable water bottle with a built-in filter and a hydration-tracking app.";
+    const starts = el("div", "row product-starts");
+    for (const [label, words] of PRODUCT_STARTS) {
+      const b = el("button", "ghost small", label);
+      b.type = "button";
+      b.addEventListener("click", () => {
+        if (!box.value.trim() || PRODUCT_STARTS.some(([, w]) => box.value === w)) box.value = words;
+        box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+      });
+      starts.append(b);
+    }
+    const err = el("p", "form-error");
+    const save = el("button", "primary", thenSend ? "Save and ask" : "Save");
+    const cancel = el("button", "ghost", "Cancel");
+    save.type = cancel.type = "button";
+    cancel.addEventListener("click", () => { $("dialog").hidden = true; showNextDialog(); });
+    save.addEventListener("click", async () => {
+      const v = box.value.trim();
+      if (!v || PRODUCT_STARTS.some(([, w]) => v === w.trim())) { err.textContent = "Say in a sentence what the product is or does."; box.focus(); return; }
+      const blk = productBlock(current);
+      const text = blk ? `${current.slice(0, blk.start)}\n${v}\n\n${current.slice(blk.end)}`
+        : `${current.replace(/\s*$/, "")}\n\n${NOTE_HEADS.product}\n${v}\n`;
+      try {
+        await api("/api/disclosure", { text });
+        productMissing = false;
+        $("dialog").hidden = true;
+        showNextDialog();
+        const line = $("disclosure-line");
+        line.classList.remove("warn");
+        line.textContent = "The assistant reads your names and what the product is, then searches each name on this computer and writes your report.";
+        for (const n of Array.from(document.querySelectorAll(".disclosure-actions"))) n.remove();
+        if (thenSend) send(thenSend); else toast("Saved to your notes. Ask which classes it falls in when you are ready.", "info");
+      } catch (e) { err.textContent = e.message; }
+    });
+    $("dialog-title").textContent = "What the product is";
+    const body = $("dialog-body");
+    clear(body);
+    body.append(el("p", "", "Trademark classes follow what the product is and what it does, so this is needed to choose them. One or two sentences; it is saved in your notes on this computer."),
+      starts, box, err);
+    const actions = $("dialog-actions");
+    clear(actions);
+    actions.append(cancel, save);
+    $("dialog").hidden = false;
+    setTimeout(() => box.focus(), 0);
+  }
+
   async function disclosureDialog() {
     let current = "";
     try { current = (await api("/api/disclosure")).text; } catch (e) { toast(e.message, "error"); return; }
@@ -2651,6 +2722,10 @@ function matterName(id) {
     const t = String(text || "").trim();
     if (!t || ended) return;
     if (searchIsOffline && !nameSession && !readingSession && asksForSearch(t) && !(await offlineChoice())) return;
+    // Which classes cannot be answered without the product, and that needs no AI to say (Henry, 15 Nov: the assistant
+    // spent a turn asking for the line the notes left blank). The page asks for it here, then sends the question.
+    // Re-read first: the assistant may have saved the founder's answer into the notes since the page loaded.
+    if (nameSession && productMissing && ASKS_CLASSES.test(t) && (productMissing = await readProductMissing())) { productDialog(t); return; }
     // ASK ONCE. Henry, 2026-10-01, with nine queued questions of which seven were identical: clicking a
     // patent that is not yet read queues "Open <key>…", and nothing visibly happens until the assistant
     // gets to it — so the natural response is to click again. Each click was a real sealed request and a
@@ -2754,6 +2829,15 @@ function matterName(id) {
       window.addEventListener("pagehide", () => clearInterval(draftRefreshTimer));
     } else if (nameSession && d.disclosure_words > 0) {
       line.textContent = "The assistant reads your names and what the product is, then searches each name on this computer and writes your report.";
+      productMissing = await readProductMissing();
+      if (productMissing) {
+        line.classList.add("warn");
+        line.textContent = "Your notes don't say what the product is, so the trademark classes can't be chosen yet. The names are still searched, in all classes.";
+        const add = el("button", "primary", "Add what the product is");
+        add.type = "button";
+        add.addEventListener("click", () => productDialog(""));
+        $("empty").insertBefore(el("div", "row disclosure-actions", add), $("suggestions"));
+      }
       $("empty").querySelector(".hint").textContent = "Everything you type is sealed on this computer to the AI's verified machine before it is sent. "
         + "The search runs on this computer; the assistant searches straight away and asks you to confirm the classes afterwards.";
       foldTrust();

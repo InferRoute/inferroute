@@ -244,3 +244,22 @@ def test_the_search_tool_shows_a_name_s_other_filings_and_lets_the_report_cite_t
                        capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
     assert "every filing citable" in r.stdout
+
+
+def test_the_assistant_may_fill_the_notes_but_never_rewrite_them():
+    """Henry, 15 Nov: what the founder tells the assistant (what the product is, the markets) is saved into
+    disclosure.md so the next session does not ask again. The notes are read back by their headings, so the
+    assistant may fill a block but not rewrite the file or drop a heading. tests/notes_guard_sim.ts runs the
+    real hook from ir-attested.ts."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not on PATH here")
+    root = Path(__file__).resolve().parent.parent
+    r = subprocess.run([node, "--experimental-strip-types", str(root / "tests" / "notes_guard_sim.ts")], cwd=root,
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "fill allowed, rewrite and lost heading refused" in r.stdout
+    names = (root / "inferroute_cli" / "pi_attested" / "names.md").read_text()
+    assert "save the answer into disclosure.md" in names

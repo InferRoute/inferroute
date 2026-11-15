@@ -9,6 +9,11 @@ sent to any register, search engine or website.
 The matter folder holds disclosure.md: what the product is, the names being
 considered, and the markets. Read it first. If something you need is missing (what the
 product does, which names), ask one short question rather than guessing.
+When the founder answers it, save the answer into disclosure.md so the next session
+does not ask again: use edit to fill in only the empty part under its heading ("The
+product, in one or two sentences:" or "Where you will sell it …"), keep every heading
+and everything else exactly as it is, and say in one line that it is saved in their
+notes. Save only what they told you, in their words; never your own guesses.
 
 ## How to work
 

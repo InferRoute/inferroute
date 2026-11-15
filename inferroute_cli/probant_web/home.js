@@ -256,19 +256,39 @@
     const names = block(iN, NAME_HEADS.names, iP).split("\n").map((x) => x.replace(/^\s*[-*•]\s*/, "").trim()).filter(Boolean);
     return { names: names.join("\n"), product: block(iP, NAME_HEADS.product, iM), markets: block(iM, NAME_HEADS.markets, -1) };
   }
+  // Where it will be sold: the markets this copy of the registers covers are ticked, not typed (Henry, 15 Nov).
+  // The notes keep the same plain line ("France, the EU, the US"), so notes written before still open, and anything
+  // that is not one of the three lands in "Elsewhere" rather than being dropped.
+  const MARKETS = [["France", "France", /^(in )?france$/i], ["the EU", "European Union", /^(the )?(eu|european union|europe)$/i],
+    ["the US", "United States", /^(the )?(us|usa|u\.s\.|united states)$/i]];
+  function marketChoices(text) {
+    const parts = String(text || "").split(/,|\band\b|\n/).map((x) => x.trim()).filter(Boolean);
+    const boxes = MARKETS.map(([word, label, re]) => {
+      const box = input("checkbox");
+      box.checked = parts.some((x) => re.test(x));
+      return { word, box, node: el("label", "market-choice", box, el("span", "", label)) };
+    });
+    const other = input("text", "For example the United Kingdom, Canada");
+    other.value = parts.filter((x) => !MARKETS.some(([, , re]) => re.test(x))).join(", ");
+    const node = el("div", "field",
+      el("span", "field-label", "Where you will sell it"),
+      el("div", "market-choices", ...boxes.map((b) => b.node)),
+      el("label", "market-other", el("span", "sub", "Elsewhere"), other),
+      el("span", "field-hint", "Optional. Other countries' own registers are not in this copy, so they are not searched."));
+    return { node, value: () => [...boxes.filter((b) => b.box.checked).map((b) => b.word), other.value.trim()].filter(Boolean).join(", ") };
+  }
   function nameFields(values) {
     const v = values || {};
     const names = input("textarea", "Kwench\nAquelia");
     names.rows = 4; names.value = v.names || "";
     const product = input("textarea", "A reusable water bottle with a built-in filter and a hydration-tracking app.");
     product.rows = 3; product.value = v.product || "";
-    const markets = input("text", "France and the US");
-    markets.value = v.markets || "";
+    const markets = marketChoices(v.markets || "");
     return { names, product, markets,
       nodes: [field("Names to check", names, "One per line. Each is searched with its close spellings and sound-alikes."),
         field("What the product is", product, "One or two sentences. The assistant uses it to choose the trademark classes."),
-        field("Where you will sell it", markets, "Optional. For example France, the EU, the US.")],
-      value: () => composeNameNotes(names.value, product.value, markets.value),
+        markets.node],
+      value: () => composeNameNotes(names.value, product.value, markets.value()),
       count: () => names.value.split(/\n|,/).map((x) => x.trim()).filter(Boolean).length };
   }
 

@@ -1430,6 +1430,30 @@ export default function (pi: ExtensionAPI) {
 				"draft or any correction to the founder; your answer describes only the report as written." };
 		});
 		// ── end report check ──
+		// ── notes guard ── (tests/notes_guard_sim.ts runs this block)
+		// names.md asks the assistant to save into disclosure.md what the founder answers in the conversation (what the
+		// product is, the markets), so the next session does not ask again (Henry, 15 Nov). The home page writes those
+		// notes in three headed blocks and reads them back by the headings (home.js composeNameNotes / parseNameNotes,
+		// app.js productBlock), so a change may fill a block but never rewrite the file or take a heading away.
+		const NOTE_HEADINGS = ["Names being considered (one per line):", "The product, in one or two sentences:",
+			"Where you will sell it (for example France, the EU, the US):"];
+		pi.on("tool_call", async (event) => {
+			if (event.toolName !== "write" && event.toolName !== "edit") return;
+			const input = (event.input ?? {}) as { path?: unknown; edits?: unknown; oldText?: unknown; newText?: unknown };
+			if (!/(^|[\\/])disclosure\.md$/.test(String(input.path ?? ""))) return;
+			if (event.toolName === "write") {
+				return { block: true, reason: "Not written: disclosure.md holds the founder's notes and is never rewritten whole. " +
+					"Use edit to fill in only the block that was empty (for example the line under \"The product, in one or two " +
+					"sentences:\"), keeping every heading and everything else exactly as it is." };
+			}
+			const edits = [...(Array.isArray(input.edits) ? input.edits as { oldText?: unknown; newText?: unknown }[] : []),
+				...(input.oldText !== undefined ? [{ oldText: input.oldText, newText: input.newText }] : [])];
+			const lost = NOTE_HEADINGS.filter((h) => edits.some((e) => String(e?.oldText ?? "").includes(h) && !String(e?.newText ?? "").includes(h)));
+			if (!lost.length) return;
+			return { block: true, reason: `Not saved: this change would remove the heading "${lost[0]}" from the founder's notes. ` +
+				"Keep every heading as it is and change only the text under it." };
+		});
+		// ── end notes guard ──
 
 		const TM_REMIND = "(Anteriora) The searches are done but name-check.md has not been written yet. Please write it " +
 			"now in the matter folder, from the searches you ran, with the structure your instructions give; then " +

@@ -486,9 +486,15 @@ def test_a_probe_that_fails_is_unknown_not_empty():
     assert asyncio.run(C.probe_fleet(_Boom(), "f")) == -1
 
 
-def test_health_ordering_keeps_the_preferred_model_when_it_is_healthy_and_moves_on_when_it_is_not():
+def test_health_ordering_keeps_the_preferred_model_when_it_is_healthy_and_moves_on_when_it_is_not(monkeypatch):
     import asyncio
     from inferroute_cli import confidential as C
+    # The device's own history is read from ~/.inferroute (receipts). This test is about the ordering, so the
+    # history is fixed here: on 15 Nov a morning of real use on this machine flipped it (kimi-k3 had failed a few
+    # times), which says nothing about the code.
+    monkeypatch.setattr(C, "fleet_yield", lambda short: (0.9, 20))
+    monkeypatch.setattr(C, "fleet_yield_interval", lambda short, **kw: (0.8, 0.95))
+    monkeypatch.setattr(C, "fleet_success", lambda short: (1.0, 20))
 
     catalog = [{"name": m, "fleet_id": f"fleet-{m}", "sealed_model": m} for m in ("kimi-k3", "kimi-k2.6", "glm-5.2")]
 

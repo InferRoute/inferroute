@@ -16,12 +16,12 @@ const $ = () => ({ get value() { return inputValue; }, set value(v) { inputValue
 const api = async (path, body) => { posted.push(body.text); return { ok: true }; };
 
 const mk = () => new Function(
-  "api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout", "searchIsOffline",
+  "api", "ended", "$", "autosize", "clearNext", "toast", "waiting", "flashWaitingSpy", "setTimeout", "searchIsOffline", "nameSession",
   `${src.slice(a, b)}
    flashWaiting = flashWaitingSpy;
    return { send, outstanding };`
 )(api, false, $, () => {}, () => {}, (m, k) => toasts.push(m), waiting,
-  (t) => flashed.push(t), (f) => f, false);   // search is up: the offline choice is a separate sim
+  (t) => flashed.push(t), (f) => f, false, false);   // a patent session; search is up: the offline choice is a separate sim
 
 let bad = 0; const fail = (m) => { console.error("FAIL: " + m); bad++; };
 const Q = "Open US-2018146899-A1: read that document and show me what it discloses";

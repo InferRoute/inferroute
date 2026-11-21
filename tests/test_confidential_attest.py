@@ -566,6 +566,21 @@ def test_the_health_statistic_prefers_the_server_and_survives_its_absence():
     assert "0.0 <= ratio <= 1.0" in src
 
 
+def _stamp(i: int, total: int) -> str:
+    """A `started_at` these fixtures used to omit, oldest-first and all INSIDE the health window.
+
+    Added 2026-11-21 with `_observation_is_current`: the per-model window now ages in TIME as
+    well as in count, because a count window cannot age out observations for a model it has
+    stopped choosing (kimi-k2.6, 17-20 Nov, served as glm-5.2 at ~3x price for three days).
+    An undated receipt is deliberately NOT current, and these fixtures were the only receipts in
+    existence without the field -- all 4,238 real ones on this device carry it. So the field is
+    added rather than the rule weakened, and each row keeps its oldest-first ordering.
+    """
+    from datetime import datetime, timedelta, timezone
+    t = datetime.now(timezone.utc) - timedelta(minutes=(total - i))
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _receipts(tmp_path, monkeypatch, rows):
     """rows: list of (model_short, instances, eligible) oldest-first. Returns nothing; points
     fleet_yield at a synthetic receipts dir."""
@@ -574,7 +589,8 @@ def _receipts(tmp_path, monkeypatch, rows):
     d.mkdir(parents=True)
     for i, (m, inst, elig) in enumerate(rows):
         (d / f"{i:05d}.json").write_text(json.dumps(
-            {"model_short": m, "fleet": {"instances": inst, "eligible": elig}}))
+            {"model_short": m, "started_at": _stamp(i, len(rows)),
+             "fleet": {"instances": inst, "eligible": elig}}))
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
 
 
@@ -729,7 +745,8 @@ def _receipts_c(tmp_path, monkeypatch, rows):
     d.mkdir(parents=True, exist_ok=True)
     for i, (m, inst, elig, req, err) in enumerate(rows):
         (d / f"{i:05d}.json").write_text(json.dumps({
-            "model_short": m, "fleet": {"instances": inst, "eligible": elig},
+            "model_short": m, "started_at": _stamp(i, len(rows)),
+            "fleet": {"instances": inst, "eligible": elig},
             "counters": {"requests": req, "errors": err}}))
     monkeypatch.setattr(pathlib.Path, "home", staticmethod(lambda: tmp_path))
 

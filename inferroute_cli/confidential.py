@@ -139,6 +139,46 @@ def force_provider_route_falsy(status_args: list[str], passthrough: list[str]) -
 # Henry asked "measures 0.11 at what?", which is the question that found it.
 _YIELD_PER_MODEL = 10          # observations of THIS model, newest first
 _YIELD_SCAN = 400              # receipts to walk looking for them; enough to reach a rare model
+# ...AND THE WINDOW MUST AGE IN TIME, NOT ONLY IN COUNT.
+_YIELD_MAX_AGE_S = 24 * 3600   # an observation older than this says nothing about a fleet NOW
+
+
+def _observation_is_current(receipt: dict, now: float | None = None) -> bool:
+    """True if this receipt is recent enough to say anything about a fleet's CURRENT state.
+
+    A COUNT WINDOW CANNOT AGE ON ITS OWN. `_YIELD_PER_MODEL` keeps the 10 newest observations
+    OF THIS MODEL, and a model that stops being selected earns no new ones -- so its 10 stay
+    the same 10 for ever, and the score that excluded it is kept alive by its own exclusion.
+
+    MEASURED: a Chutes fault on kimi-k2.6 on 2026-11-17 05:25-07:18Z left 9 failed receipts.
+    From about 09:02Z that day every request for kimi-k2.6 was ranked below glm-5.2 and served
+    by it -- at roughly 3x the list price -- for three days, while each run's own summary still
+    named kimi. `x-inferroute-no-model-fallback` could not prevent it, because the choice is
+    made HERE, on this device, before any request leaves.
+
+    The comment at `fleet_success` says older receipts "age out of the window". They age out by
+    COUNT, which is precisely what a model excluded from selection cannot do. That sentence was
+    true of the mechanism it described and false of the case that mattered.
+
+    A receipt with no readable `started_at` is NOT current: we cannot say that it is. That fails
+    OPEN -- a model with no current evidence takes the `1.0` paths below and keeps its declared
+    preference order -- which is the right direction for a signal whose false negative is "stop
+    using a healthy fleet for ever". It also means a renamed timestamp field degrades to
+    capability-first preference, not to a frozen ranking.
+    """
+    from datetime import datetime, timezone
+    import time as _time
+    started = receipt.get("started_at")
+    if not isinstance(started, str) or not started:
+        return False
+    try:
+        t = datetime.fromisoformat(started.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    age = (_time.time() if now is None else now) - t.timestamp()
+    return -300.0 <= age <= _YIELD_MAX_AGE_S     # a little clock skew ahead of us is still current
 # Shrinkage toward "fine" so a thin history cannot condemn a fleet. Expressed as pseudo-instances that
 # all verified: with one bad observation of 2/18 a fleet scores 0.27 rather than 0.11, and with a long
 # history the prior washes out. A fleet is demoted on evidence, not on having been used rarely.
@@ -168,6 +208,8 @@ def fleet_yield(model_short: str) -> tuple[float, int]:
             continue
         if r.get("model_short") != model_short:
             continue
+        if not _observation_is_current(r):
+            continue                                # stale evidence is not evidence about now
         fl = r.get("fleet") or {}
         i, e = fl.get("instances"), fl.get("eligible")
         if isinstance(i, int) and i > 0 and isinstance(e, int):
@@ -197,6 +239,8 @@ def _yield_counts(model_short: str) -> tuple[float, float]:
             continue
         if r.get("model_short") != model_short:
             continue
+        if not _observation_is_current(r):
+            continue                                # stale evidence is not evidence about now
         fl = r.get("fleet") or {}
         i, e = fl.get("instances"), fl.get("eligible")
         if isinstance(i, int) and i > 0 and isinstance(e, int):
@@ -246,12 +290,16 @@ def fleet_success(model_short: str) -> tuple[float, int]:
             continue
         if r.get("model_short") != model_short:
             continue
+        if not _observation_is_current(r):
+            continue                                # stale evidence is not evidence about now
         c = r.get("counters") or {}
         # errors_fleet counts ONLY failures attributable to this fleet. `errors` also holds our own bugs
         # (a malformed request, a seal failure), the account's billing state (402), and relay outages —
         # each of which would demote whichever fleet happened to be selected. Older receipts predate the
         # split and carry only the total; using it for them is wrong in the safe direction (it can only
-        # understate a fleet), and they age out of the window.
+        # understate a fleet), and they age out of the window -- by COUNT, and since 2026-11-21
+        # by TIME as well: see _observation_is_current, because a model that stops being selected
+        # earns no new receipts and so can never age anything out by count alone.
         q = c.get("requests")
         e = c.get("errors_fleet", c.get("errors"))
         if isinstance(q, int) and q > 0 and isinstance(e, int):

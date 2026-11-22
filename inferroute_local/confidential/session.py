@@ -1075,8 +1075,33 @@ def _err(c: dict, kind: str, fault: str = UPSTREAM_UNKNOWN) -> None:
     c["fault_" + fault] = c.get("fault_" + fault, 0) + 1
     # The only total the availability model may read. `errors` includes our own bugs and the account's
     # billing state; demoting a fleet for those is noise dressed as evidence.
-    if fault in COUNTS_AGAINST_FLEET:
-        c["errors_fleet"] = c.get("errors_fleet", 0) + 1
+    #
+    # WRITTEN EAGERLY, AND A ZERO IS THE POINT (2026-11-22). This was `if fault in COUNTS_AGAINST_FLEET:`
+    # around the increment, so a session whose every failure was correctly classified as NOT the fleet's
+    # wrote no `errors_fleet` key at all. The reader cannot tell that apart from a receipt written before
+    # the split existed -- `fleet_success` does `c.get("errors_fleet", c.get("errors"))` -- so it falls
+    # back to the legacy total, which this comment itself calls noise, and DEMOTES THE FLEET IT WAS NEVER
+    # THE FAULT OF. The default on the ambiguity was to blame.
+    #
+    # MEASURED over 4,293 local receipts: 811 carry errors>0, and 214 of those are exactly this case --
+    # the key absent with every fault non-fleet (operator, account) -- 179 of them in November alone.
+    # Live specimen: ten kimi-k2.6 receipts, requests=11 errors=11, events {pinned:1, upstream-retry:11},
+    # all eleven reading "relay answered 503 with code IR-C1001" and counters fault_operator=11. That is
+    # OPERATOR_FAULT -- InferRoute's own side, an unfunded lane -- and kimi still scored fleet_success
+    # 0.068 against glm-5.2's 0.250, which for unpinned callers routes kimi traffic to glm at roughly 3x
+    # list price. The classification was right all along; only its absence was read as guilt.
+    #
+    # FALSIFIER RUN BEFORE THIS CHANGE, not after: "an errors_fleet=0 in any receipt whose faults are all
+    # non-fleet" would mean the key was already initialised somewhere unread. Across all 4,293 receipts:
+    # ZERO such receipts. The key is never written as 0 today, so ABSENT and MEASURED-NONE are genuinely
+    # indistinguishable, and the row stands.
+    #
+    # So: absent => pre-split (or no error at all), 0 => measured and none were the fleet's, N => N were.
+    # That is the distinction the split exists to carry, and it costs one key per erroring session.
+    # RESIDUAL, STATED: receipts already on disk keep the ambiguity until they leave the reader's window
+    # (`_YIELD_PER_MODEL` = 10 newest per model, plus `_observation_is_current`). This fixes what is
+    # written from now on; it does not rewrite history, and nothing here backfills.
+    c["errors_fleet"] = c.get("errors_fleet", 0) + (1 if fault in COUNTS_AGAINST_FLEET else 0)
 
 
 UPSTREAM_PUBLIC = {
